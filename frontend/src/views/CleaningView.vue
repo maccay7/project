@@ -1,14 +1,10 @@
-```vue
 <template>
-  <app-layout>
+  <fixed-layout>
     <div class="cleaning-view">
-
-      <!-- HEADER -->
-      <div class="page-header">
+      <!-- Header Section -->
+      <div class="dashboard-header">
         <h1 class="page-title">Data Cleaning</h1>
-        <p class="page-subtitle">
-          Configure and apply data cleaning operations to prepare your dataset
-        </p>
+        <p class="page-subtitle">Configure and apply data cleaning operations to prepare your dataset</p>
       </div>
 
       <!-- ACTION BUTTONS -->
@@ -30,40 +26,32 @@
       </div>
 
       <!-- DATA OVERVIEW -->
-      <v-card class="overview-card" elevation="2">
+      <v-card class="stats-card" elevation="2">
         <v-card-title class="card-title">
           <v-icon class="title-icon">mdi-database</v-icon>
           Dataset Overview
         </v-card-title>
 
         <v-card-text>
-          <v-row>
-            <v-col cols="12" sm="3">
-              <div class="stat-item">
-                <div class="stat-value">{{ uploadedData?.data.length || 0 }}</div>
-                <div class="stat-label">Rows</div>
-              </div>
-            </v-col>
-
-            <v-col cols="12" sm="3">
-              <div class="stat-item">
-                <div class="stat-value">{{ getColumnCount() }}</div>
-                <div class="stat-label">Columns</div>
-              </div>
-            </v-col>
-
-            <v-col cols="12" sm="3">
-              <div class="stat-item">
-                <div class="stat-value">{{ uploadedData?.instrumentType || 'N/A' }}</div>
-                <div class="stat-label">Instrument</div>
-              </div>
-            </v-col>
-
-            <v-col cols="12" sm="3">
-              <div class="stat-item">
-                <div class="stat-value">{{ uploadedData?.name || 'N/A' }}</div>
-                <div class="stat-label">File</div>
-              </div>
+          <v-row class="kpi-row">
+            <v-col cols="12" sm="6" md="3" v-for="kpi in cleaningKpiData" :key="kpi.title">
+              <v-card class="kpi-card" elevation="2">
+                <v-card-text>
+                  <div class="kpi-content">
+                    <div class="kpi-icon" :style="{ backgroundColor: kpi.color }">
+                      <v-icon :color="kpi.iconColor">{{ kpi.icon }}</v-icon>
+                    </div>
+                    <div class="kpi-info">
+                      <div class="kpi-value">{{ kpi.value }}</div>
+                      <div class="kpi-title">{{ kpi.title }}</div>
+                      <div class="kpi-change" :class="kpi.changeClass">
+                        <v-icon size="16">{{ kpi.changeIcon }}</v-icon>
+                        {{ kpi.change }}
+                      </div>
+                    </div>
+                  </div>
+                </v-card-text>
+              </v-card>
             </v-col>
           </v-row>
         </v-card-text>
@@ -72,7 +60,7 @@
       <!-- CLEANING OPTIONS -->
       <v-row>
         <v-col cols="12" md="6">
-          <v-card elevation="2">
+          <v-card class="stats-card" elevation="2">
 
             <v-card-title class="card-title">
               <v-icon class="title-icon">mdi-broom</v-icon>
@@ -80,19 +68,21 @@
             </v-card-title>
 
             <v-card-text>
-              <v-checkbox
-                v-for="option in cleaningOptions"
-                :key="option.key"
-                v-model="option.value"
-                color="primary"
-              >
-                <template v-slot:label>
-                  <div>
-                    <strong>{{ option.label }}</strong>
-                    <div class="desc">{{ option.description }}</div>
-                  </div>
-                </template>
-              </v-checkbox>
+              <div class="cleaning-options-container">
+                <v-checkbox
+                  v-for="option in cleaningOptions"
+                  :key="option.key"
+                  v-model="option.value"
+                  color="primary"
+                >
+                  <template v-slot:label>
+                    <div>
+                      <strong>{{ option.label }}</strong>
+                      <div class="desc">{{ option.description }}</div>
+                    </div>
+                  </template>
+                </v-checkbox>
+              </div>
 
               <v-progress-linear
                 v-if="cleaning"
@@ -117,7 +107,7 @@
 
         <!-- RESULTS -->
         <v-col cols="12" md="6">
-          <v-card elevation="2">
+          <v-card class="stats-card" elevation="2">
 
             <v-card-title class="card-title">
               <v-icon class="title-icon">mdi-chart-line</v-icon>
@@ -133,32 +123,140 @@
               <div v-if="cleaningResults">
 
                 <v-alert type="success" class="mb-3">
-                  Cleaning completed
+                  Cleaning completed successfully!
                 </v-alert>
 
-                <div class="result-item">
-                  <span>Original:</span>
-                  <span>{{ cleaningResults.originalRows }}</span>
+                <!-- Summary Stats -->
+                <div class="result-summary">
+                  <div class="result-item">
+                    <span>Original Rows:</span>
+                    <span>{{ cleaningResults.originalRows }}</span>
+                  </div>
+
+                  <div class="result-item">
+                    <span>Cleaned Rows:</span>
+                    <span>{{ cleaningResults.cleanedRows }}</span>
+                  </div>
+
+                  <div class="result-item">
+                    <span>Total Operations Applied:</span>
+                    <span>{{ cleaningResults.totalOperationsApplied }}</span>
+                  </div>
                 </div>
 
-                <div class="result-item">
-                  <span>Cleaned:</span>
-                  <span>{{ cleaningResults.cleanedRows }}</span>
-                </div>
-
-                <div class="result-item">
-                  <span>Duplicates removed:</span>
+                <!-- Data Quality Results -->
+                <v-divider class="my-3"></v-divider>
+                <h4 class="result-category">Data Quality</h4>
+                <div class="result-item" v-if="cleaningResults.duplicatesRemoved > 0">
+                  <span>Duplicates Removed:</span>
                   <span>{{ cleaningResults.duplicatesRemoved }}</span>
                 </div>
 
-                <div class="result-item">
-                  <span>Missing filled:</span>
+                <div class="result-item" v-if="cleaningResults.missingValuesFilled > 0">
+                  <span>Missing Values Filled:</span>
                   <span>{{ cleaningResults.missingValuesFilled }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.outliersRemoved > 0">
+                  <span>Outliers Removed:</span>
+                  <span>{{ cleaningResults.outliersRemoved }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.emptyRowsRemoved > 0">
+                  <span>Empty Rows Removed:</span>
+                  <span>{{ cleaningResults.emptyRowsRemoved }}</span>
+                </div>
+
+                <!-- Formatting Results -->
+                <v-divider class="my-3" v-if="cleaningResults.textStandardized > 0 || cleaningResults.whitespaceTrimmed > 0 || cleaningResults.numbersNormalized > 0"></v-divider>
+                <h4 class="result-category" v-if="cleaningResults.textStandardized > 0 || cleaningResults.whitespaceTrimmed > 0 || cleaningResults.numbersNormalized > 0">Formatting</h4>
+                <div class="result-item" v-if="cleaningResults.textStandardized > 0">
+                  <span>Text Standardized:</span>
+                  <span>{{ cleaningResults.textStandardized }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.whitespaceTrimmed > 0">
+                  <span>Whitespace Trimmed:</span>
+                  <span>{{ cleaningResults.whitespaceTrimmed }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.numbersNormalized > 0">
+                  <span>Numbers Normalized:</span>
+                  <span>{{ cleaningResults.numbersNormalized }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.datesFormatted > 0">
+                  <span>Dates Formatted:</span>
+                  <span>{{ cleaningResults.datesFormatted }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.emailsValidated > 0">
+                  <span>Emails Validated:</span>
+                  <span>{{ cleaningResults.emailsValidated }}</span>
+                </div>
+
+                <!-- Data Type Results -->
+                <v-divider class="my-3" v-if="cleaningResults.dataTypesConverted > 0 || cleaningResults.currencyStandardized > 0 || cleaningResults.percentagesNormalized > 0"></v-divider>
+                <h4 class="result-category" v-if="cleaningResults.dataTypesConverted > 0 || cleaningResults.currencyStandardized > 0 || cleaningResults.percentagesNormalized > 0">Data Types</h4>
+                <div class="result-item" v-if="cleaningResults.dataTypesConverted > 0">
+                  <span>Data Types Converted:</span>
+                  <span>{{ cleaningResults.dataTypesConverted }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.currencyStandardized > 0">
+                  <span>Currency Standardized:</span>
+                  <span>{{ cleaningResults.currencyStandardized }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.percentagesNormalized > 0">
+                  <span>Percentages Normalized:</span>
+                  <span>{{ cleaningResults.percentagesNormalized }}</span>
+                </div>
+
+                <!-- Validation Results -->
+                <v-divider class="my-3" v-if="cleaningResults.rangesValidated > 0 || cleaningResults.consistencyChecked > 0 || cleaningResults.patternsValidated > 0"></v-divider>
+                <h4 class="result-category" v-if="cleaningResults.rangesValidated > 0 || cleaningResults.consistencyChecked > 0 || cleaningResults.patternsValidated > 0">Validation</h4>
+                <div class="result-item" v-if="cleaningResults.rangesValidated > 0">
+                  <span>Ranges Validated:</span>
+                  <span>{{ cleaningResults.rangesValidated }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.consistencyChecked > 0">
+                  <span>Consistency Checked:</span>
+                  <span>{{ cleaningResults.consistencyChecked }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.patternsValidated > 0">
+                  <span>Patterns Validated:</span>
+                  <span>{{ cleaningResults.patternsValidated }}</span>
+                </div>
+
+                <!-- Advanced Results -->
+                <v-divider class="my-3" v-if="cleaningResults.specialCharsRemoved > 0 || cleaningResults.phonesStandardized > 0 || cleaningResults.addressesNormalized > 0 || cleaningResults.postalCodesCleaned > 0"></v-divider>
+                <h4 class="result-category" v-if="cleaningResults.specialCharsRemoved > 0 || cleaningResults.phonesStandardized > 0 || cleaningResults.addressesNormalized > 0 || cleaningResults.postalCodesCleaned > 0">Advanced Cleaning</h4>
+                <div class="result-item" v-if="cleaningResults.specialCharsRemoved > 0">
+                  <span>Special Characters Removed:</span>
+                  <span>{{ cleaningResults.specialCharsRemoved }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.phonesStandardized > 0">
+                  <span>Phone Numbers Standardized:</span>
+                  <span>{{ cleaningResults.phonesStandardized }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.addressesNormalized > 0">
+                  <span>Addresses Normalized:</span>
+                  <span>{{ cleaningResults.addressesNormalized }}</span>
+                </div>
+
+                <div class="result-item" v-if="cleaningResults.postalCodesCleaned > 0">
+                  <span>Postal Codes Cleaned:</span>
+                  <span>{{ cleaningResults.postalCodesCleaned }}</span>
                 </div>
 
                 <div class="result-actions">
                   <v-btn color="primary" @click="proceedToCalculations">
-                    Proceed
+                    Proceed to Calculations
                   </v-btn>
 
                   <v-btn variant="outlined" @click="clearResults">
@@ -175,7 +273,7 @@
       </v-row>
 
       <!-- PREVIEW -->
-      <v-card v-if="cleaningResults" class="preview-card">
+      <v-card v-if="cleaningResults" class="stats-card">
         <v-card-title>Preview</v-card-title>
 
         <v-data-table
@@ -186,13 +284,13 @@
       </v-card>
 
     </div>
-  </app-layout>
+  </fixed-layout>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import AppLayout from '../components/AppLayout.vue'
+import FixedLayout from '../components/FixedLayout.vue'
 
 const router = useRouter()
 
@@ -200,10 +298,83 @@ const uploadedData = ref(null)
 const cleaning = ref(false)
 const cleaningResults = ref(null)
 
+const rowsValue = computed(() => uploadedData.value?.data?.length || 0)
+const columnsValue = computed(() => getColumnCount())
+const instrumentValue = computed(() => uploadedData.value?.instrumentType || 'N/A')
+const fileValue = computed(() => uploadedData.value?.name || 'N/A')
+
+const cleaningKpiData = ref([
+  {
+    title: 'Rows',
+    value: rowsValue,
+    icon: 'mdi-table-row',
+    color: 'rgba(11, 42, 68, 0.1)',
+    iconColor: '#0B2A44',
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
+  },
+  {
+    title: 'Columns',
+    value: columnsValue,
+    icon: 'mdi-column',
+    color: 'rgba(30, 136, 229, 0.1)',
+    iconColor: '#1E88E5',
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
+  },
+  {
+    title: 'Instrument',
+    value: instrumentValue,
+    icon: 'mdi-chart-line',
+    color: 'rgba(76, 175, 80, 0.1)',
+    iconColor: '#4CAF50',
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
+  },
+  {
+    title: 'File',
+    value: fileValue,
+    icon: 'mdi-file-document',
+    color: 'rgba(255, 193, 7, 0.1)',
+    iconColor: '#FFC107',
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
+  }
+])
+
 const cleaningOptions = ref([
-  { key:'removeDuplicates', label:'Remove duplicates', description:'Delete duplicate rows', value:true },
-  { key:'fillMissingValues', label:'Fill missing', description:'Replace empty values', value:true },
-  { key:'removeOutliers', label:'Remove outliers', description:'Remove extreme values', value:false }
+  // Data Quality Options
+  { key:'removeDuplicates', label:'Remove Duplicates', description:'Delete duplicate rows based on all columns', value:true },
+  { key:'fillMissingValues', label:'Fill Missing Values', description:'Replace empty/null values with appropriate defaults', value:true },
+  { key:'removeOutliers', label:'Remove Outliers', description:'Identify and remove extreme statistical values', value:false },
+  { key:'removeEmptyRows', label:'Remove Empty Rows', description:'Delete rows with no data or all null values', value:true },
+  
+  // Data Formatting Options
+  { key:'standardizeText', label:'Standardize Text', description:'Convert text to consistent case and format', value:false },
+  { key:'trimWhitespace', label:'Trim Whitespace', description:'Remove leading/trailing spaces from text fields', value:true },
+  { key:'normalizeNumbers', label:'Normalize Numbers', description:'Standardize number formatting and decimal places', value:false },
+  { key:'formatDates', label:'Format Dates', description:'Convert all dates to consistent format (YYYY-MM-DD)', value:false },
+  { key:'validateEmails', label:'Validate Email Formats', description:'Check and fix email address formats', value:false },
+  
+  // Data Type Options
+  { key:'convertDataTypes', label:'Convert Data Types', description:'Auto-detect and convert column data types', value:false },
+  { key:'standardizeCurrency', label:'Standardize Currency', description:'Format all currency values consistently', value:false },
+  { key:'normalizePercentages', label:'Normalize Percentages', description:'Convert percentage values to decimal format', value:false },
+  
+  // Data Validation Options
+  { key:'validateRanges', label:'Validate Value Ranges', description:'Check if values fall within expected ranges', value:false },
+  { key:'checkConsistency', label:'Check Consistency', description:'Verify data consistency across related fields', value:false },
+  { key:'validatePatterns', label:'Validate Patterns', description:'Check text fields against expected patterns', value:false },
+  
+  // Advanced Cleaning Options
+  { key:'removeSpecialChars', label:'Remove Special Characters', description:'Clean text by removing unwanted special characters', value:false },
+  { key:'standardizePhoneNumbers', label:'Standardize Phone Numbers', description:'Format phone numbers to consistent pattern', value:false },
+  { key:'normalizeAddresses', label:'Normalize Addresses', description:'Standardize address formatting and components', value:false },
+  { key:'cleanPostalCodes', label:'Clean Postal Codes', description:'Format postal/zip codes consistently', value:false }
 ])
 
 onMounted(() => {
@@ -235,11 +406,32 @@ const performCleaning = () => {
   cleaning.value = true
 
   setTimeout(()=>{
+    const originalRows = uploadedData.value?.data.length || 0
+    const selectedOptions = cleaningOptions.value.filter(o => o.value)
+    
     cleaningResults.value = {
-      originalRows: uploadedData.value?.data.length || 0,
-      cleanedRows: 10,
-      duplicatesRemoved: 2,
-      missingValuesFilled: 3
+      originalRows: originalRows,
+      cleanedRows: Math.max(0, originalRows - selectedOptions.length * 2),
+      duplicatesRemoved: selectedOptions.find(o => o.key === 'removeDuplicates') ? 2 : 0,
+      missingValuesFilled: selectedOptions.find(o => o.key === 'fillMissingValues') ? 3 : 0,
+      outliersRemoved: selectedOptions.find(o => o.key === 'removeOutliers') ? 1 : 0,
+      emptyRowsRemoved: selectedOptions.find(o => o.key === 'removeEmptyRows') ? 1 : 0,
+      textStandardized: selectedOptions.find(o => o.key === 'standardizeText') ? 5 : 0,
+      whitespaceTrimmed: selectedOptions.find(o => o.key === 'trimWhitespace') ? 8 : 0,
+      numbersNormalized: selectedOptions.find(o => o.key === 'normalizeNumbers') ? 4 : 0,
+      datesFormatted: selectedOptions.find(o => o.key === 'formatDates') ? 2 : 0,
+      emailsValidated: selectedOptions.find(o => o.key === 'validateEmails') ? 1 : 0,
+      dataTypesConverted: selectedOptions.find(o => o.key === 'convertDataTypes') ? 3 : 0,
+      currencyStandardized: selectedOptions.find(o => o.key === 'standardizeCurrency') ? 2 : 0,
+      percentagesNormalized: selectedOptions.find(o => o.key === 'normalizePercentages') ? 1 : 0,
+      rangesValidated: selectedOptions.find(o => o.key === 'validateRanges') ? 2 : 0,
+      consistencyChecked: selectedOptions.find(o => o.key === 'checkConsistency') ? 1 : 0,
+      patternsValidated: selectedOptions.find(o => o.key === 'validatePatterns') ? 1 : 0,
+      specialCharsRemoved: selectedOptions.find(o => o.key === 'removeSpecialChars') ? 3 : 0,
+      phonesStandardized: selectedOptions.find(o => o.key === 'standardizePhoneNumbers') ? 1 : 0,
+      addressesNormalized: selectedOptions.find(o => o.key === 'normalizeAddresses') ? 1 : 0,
+      postalCodesCleaned: selectedOptions.find(o => o.key === 'cleanPostalCodes') ? 1 : 0,
+      totalOperationsApplied: selectedOptions.length
     }
     cleaning.value = false
   },1500)
@@ -268,29 +460,296 @@ const proceedToCalculations = () => {
 </script>
 
 <style scoped>
-.cleaning-view { max-width:1200px; margin:auto; }
+.cleaning-view {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  margin-bottom: 32px;
+}
+
+.page-title {
+  color: #0B2A44;
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.page-subtitle {
+  color: #666;
+  font-size: 16px;
+  margin: 0;
+}
 
 .action-buttons {
-  display:flex;
-  gap:10px;
-  margin-bottom:20px;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.stats-card {
+  border-radius: 12px;
+  margin-bottom: 32px;
+  background: white;
+  border: 1px solid rgba(11, 42, 68, 0.08);
+  position: relative;
+}
+
+.stats-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5);
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  color: #0B2A44;
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.title-icon {
+  margin-right: 8px;
+  color: #0B2A44;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 16px;
+  background: rgba(11, 42, 68, 0.03);
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+}
+
+.stat-item:hover {
+  transform: translateY(-2px);
+}
+
+/* KPI Styles - Matching DashboardView and ReportsView */
+.kpi-row {
+  margin-bottom: 32px;
+}
+
+.kpi-card {
+  height: 120px;
+  border-radius: 12px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: white;
+  border: 1px solid rgba(11, 42, 68, 0.08);
+  position: relative;
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50);
+}
+
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+.kpi-card:hover::before {
+  height: 4px;
+}
+
+.kpi-content {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.kpi-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 16px;
+}
+
+.kpi-info {
+  flex: 1;
+}
+
+.kpi-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #0B2A44;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.kpi-title {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.kpi-change {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kpi-change.positive {
+  color: #4CAF50;
+}
+
+.kpi-change.neutral {
+  color: #FFC107;
+}
+
+.kpi-change.negative {
+  color: #F44336;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0B2A44;
+  margin-bottom: 4px;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
 }
 
 .result-item {
-  display:flex;
-  justify-content:space-between;
-  margin-bottom:8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(11, 42, 68, 0.03);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  transition: transform 0.2s ease;
+}
+
+.result-item:hover {
+  transform: translateX(4px);
+}
+
+.result-item span:first-child {
+  color: #666;
+  font-weight: 500;
+}
+
+.result-item span:last-child {
+  color: #0B2A44;
+  font-weight: 700;
 }
 
 .result-actions {
-  display:flex;
-  justify-content:space-between;
-  margin-top:15px;
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
 }
 
 .desc {
-  font-size:12px;
-  color:#666;
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.result-summary {
+  margin-bottom: 16px;
+}
+
+.result-category {
+  color: #0B2A44;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 12px 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Enhanced checkbox styling for better organization */
+.v-checkbox {
+  margin-bottom: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  transition: background-color 0.2s ease;
+}
+
+.v-checkbox:hover {
+  background-color: rgba(11, 42, 68, 0.03);
+}
+
+.v-checkbox :deep(.v-label) {
+  color: #333;
+  font-size: 14px;
+}
+
+/* Scrollable options container */
+.cleaning-options-container {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.cleaning-options-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cleaning-options-container::-webkit-scrollbar-track {
+  background: rgba(11, 42, 68, 0.05);
+  border-radius: 3px;
+}
+
+.cleaning-options-container::-webkit-scrollbar-thumb {
+  background: rgba(11, 42, 68, 0.3);
+  border-radius: 3px;
+}
+
+.cleaning-options-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(11, 42, 68, 0.5);
+}
+
+/* Enhanced checkbox styling */
+.v-checkbox {
+  margin-bottom: 16px;
+}
+
+.v-checkbox :deep(.v-label) {
+  color: #333;
+}
+
+/* Responsive Design */
+@media (max-width: 600px) {
+  .cleaning-view {
+    padding: 0 16px;
+  }
+  
+  .action-buttons {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .result-actions {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .stat-value {
+    font-size: 20px;
+  }
 }
 </style>
 ```

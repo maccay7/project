@@ -1,50 +1,40 @@
 <template>
-  <app-layout>
+  <fixed-layout>
     <div class="reports-view">
 
-      <!-- HEADER -->
-      <div class="page-header">
+      <!-- Header Section -->
+      <div class="dashboard-header">
         <h1 class="page-title">Report Generation</h1>
-        <p class="page-subtitle">
-          Generate comprehensive reports in PDF or Excel format with your financial analysis results
-        </p>
+        <p class="page-subtitle">Generate comprehensive reports in multiple formats</p>
       </div>
 
       <!-- DATA OVERVIEW -->
-      <v-card class="overview-card" elevation="2">
+      <v-card class="stats-card" elevation="2">
         <v-card-title class="card-title">
           <v-icon class="title-icon">mdi-file-document</v-icon>
           Report Data Overview
         </v-card-title>
 
         <v-card-text>
-          <v-row>
-            <v-col cols="12" sm="3">
-              <div class="stat-item">
-                <div class="stat-value">{{ visualizationData?.calculations?.length || 0 }}</div>
-                <div class="stat-label">Records</div>
-              </div>
-            </v-col>
-
-            <v-col cols="12" sm="3">
-              <div class="stat-item">
-                <div class="stat-value">{{ visualizationData?.instrumentType || 'N/A' }}</div>
-                <div class="stat-label">Instrument Type</div>
-              </div>
-            </v-col>
-
-            <v-col cols="12" sm="3">
-              <div class="stat-item">
-                <div class="stat-value">{{ selectedFormat.toUpperCase() }}</div>
-                <div class="stat-label">Export Format</div>
-              </div>
-            </v-col>
-
-            <v-col cols="12" sm="3">
-              <div class="stat-item">
-                <div class="stat-value">{{ getSelectedSections().length }}</div>
-                <div class="stat-label">Sections</div>
-              </div>
+          <v-row class="kpi-row">
+            <v-col cols="12" sm="6" md="3" v-for="kpi in reportKpiData" :key="kpi.title">
+              <v-card class="kpi-card" elevation="2">
+                <v-card-text>
+                  <div class="kpi-content">
+                    <div class="kpi-icon" :style="{ backgroundColor: kpi.color }">
+                      <v-icon :color="kpi.iconColor">{{ kpi.icon }}</v-icon>
+                    </div>
+                    <div class="kpi-info">
+                      <div class="kpi-value">{{ kpi.value }}</div>
+                      <div class="kpi-title">{{ kpi.title }}</div>
+                      <div class="kpi-change" :class="kpi.changeClass">
+                        <v-icon size="16">{{ kpi.changeIcon }}</v-icon>
+                        {{ kpi.change }}
+                      </div>
+                    </div>
+                  </div>
+                </v-card-text>
+              </v-card>
             </v-col>
           </v-row>
         </v-card-text>
@@ -59,27 +49,7 @@
 
         <v-card-text>
 
-          <!-- FORMAT SELECT -->
-          <v-row>
-            <v-col cols="12" sm="6">
-              <v-select
-                v-model="selectedFormat"
-                :items="formatOptions"
-                label="Export Format"
-                variant="outlined"
-                item-title="label"
-                item-value="value"
-              >
-                <template v-slot:selection="{ item }">
-                  <v-icon class="mr-2" :color="item.raw.color">
-                    {{ item.raw.icon }}
-                  </v-icon>
-                  {{ item.raw.label }}
-                </template>
-              </v-select>
-            </v-col>
-          </v-row>
-
+          
           <!-- ACTION BUTTONS -->
           <div class="action-buttons">
             <v-btn
@@ -147,19 +117,7 @@
             </v-row>
           </div>
 
-          <!-- GENERATE BUTTON -->
-          <v-btn
-            color="primary"
-            size="large"
-            class="generate-btn"
-            :loading="generating"
-            :disabled="getSelectedSections().length === 0"
-            @click="generateReport"
-          >
-            <v-icon left>mdi-download</v-icon>
-            Generate {{ selectedFormat.toUpperCase() }} Report
-          </v-btn>
-
+          
         </v-card-text>
       </v-card>
 
@@ -199,24 +157,108 @@
         </v-card-text>
       </v-card>
 
+      <!-- FORMAT FILTER -->
+      <v-card class="stats-card" elevation="2">
+        <v-card-title class="card-title">
+          <v-icon class="title-icon">mdi-filter</v-icon>
+          Export Format
+        </v-card-title>
+
+        <v-card-text>
+          <v-row>
+            <v-col cols="12" sm="6">
+              <v-select
+                v-model="selectedFormat"
+                :items="formatOptions"
+                label="Export Format"
+                variant="outlined"
+                item-title="label"
+                item-value="value"
+              >
+                <template v-slot:selection="{ item }">
+                  <v-icon class="mr-2" :color="item.raw.color">
+                    {{ item.raw.icon }}
+                  </v-icon>
+                  {{ item.raw.label }}
+                </template>
+              </v-select>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
+
     </div>
-  </app-layout>
+  </fixed-layout>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import AppLayout from '../components/AppLayout.vue'
+import FixedLayout from '../components/FixedLayout.vue'
 
 const router = useRouter()
 
 const visualizationData = ref<any>(null)
 const selectedFormat = ref('pdf')
-const generating = ref(false)
+
+const recordsValue = computed(() => visualizationData.value?.calculations?.length || 0)
+const instrumentTypeValue = computed(() => visualizationData.value?.instrumentType || 'N/A')
+const exportFormatValue = computed(() => selectedFormat.value.toUpperCase())
+const sectionsValue = computed(() => getSelectedSections().length)
+
+const reportKpiData = ref([
+  {
+    title: 'Records',
+    value: recordsValue,
+    icon: 'mdi-database',
+    color: 'rgba(11, 42, 68, 0.1)',
+    iconColor: '#0B2A44',
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
+  },
+  {
+    title: 'Instrument Type',
+    value: instrumentTypeValue,
+    icon: 'mdi-chart-line',
+    color: 'rgba(30, 136, 229, 0.1)',
+    iconColor: '#1E88E5',
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
+  },
+  {
+    title: 'Export Format',
+    value: exportFormatValue,
+    icon: 'mdi-file-export',
+    color: 'rgba(76, 175, 80, 0.1)',
+    iconColor: '#4CAF50',
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
+  },
+  {
+    title: 'Sections',
+    value: sectionsValue,
+    icon: 'mdi-view-list',
+    color: 'rgba(255, 193, 7, 0.1)',
+    iconColor: '#FFC107',
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
+  }
+])
 
 const formatOptions = ref([
   { value: 'pdf', label: 'PDF Document', icon: 'mdi-file-pdf', color: '#0B2A44' },
-  { value: 'excel', label: 'Excel Spreadsheet', icon: 'mdi-table', color: '#1E88E5' }
+  { value: 'excel', label: 'Excel Spreadsheet', icon: 'mdi-file-excel', color: '#1E88E5' },
+  { value: 'csv', label: 'CSV File', icon: 'mdi-file-delimited', color: '#4CAF50' },
+  { value: 'json', label: 'JSON Data', icon: 'mdi-code-json', color: '#FF9800' },
+  { value: 'word', label: 'Word Document', icon: 'mdi-file-word', color: '#2196F3' },
+  { value: 'powerpoint', label: 'PowerPoint', icon: 'mdi-file-powerpoint', color: '#F44336' },
+  { value: 'xml', label: 'XML File', icon: 'mdi-code-tags', color: '#9C27B0' },
+  { value: 'html', label: 'HTML Report', icon: 'mdi-language-html5', color: '#E91E63' },
+  { value: 'txt', label: 'Text File', icon: 'mdi-file-document', color: '#607D8B' }
 ])
 
 const reportSections = ref([
@@ -245,19 +287,11 @@ const goBack = () => {
   router.push('/visualizations')
 }
 
-const generateReport = () => {
-  generating.value = true
-
-  setTimeout(() => {
-    generating.value = false
-    alert('Report generated successfully!')
-  }, 2000)
-}
 </script>
 
 <style scoped>
 .reports-view {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
 }
 
@@ -271,14 +305,161 @@ const generateReport = () => {
   color: #666;
 }
 
-.stat-item {
-  text-align: center;
+/* KPI Styles - Matching DashboardView */
+.kpi-row {
+  margin-bottom: 32px;
 }
 
-.stat-value {
-  font-size: 24px;
+.kpi-card {
+  height: 120px;
+  border-radius: 12px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: white;
+  border: 1px solid rgba(11, 42, 68, 0.08);
+  position: relative;
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50);
+}
+
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+.kpi-card:hover::before {
+  height: 4px;
+}
+
+.kpi-content {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.kpi-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 16px;
+}
+
+.kpi-info {
+  flex: 1;
+}
+
+.kpi-value {
+  font-size: 28px;
   font-weight: 700;
   color: #0B2A44;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.kpi-title {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.kpi-change {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kpi-change.positive {
+  color: #4CAF50;
+}
+
+.kpi-change.neutral {
+  color: #FFC107;
+}
+
+.kpi-change.negative {
+  color: #F44336;
+}
+
+/* Card Title Styles */
+.card-title {
+  display: flex;
+  align-items: center;
+  color: #0B2A44;
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.title-icon {
+  margin-right: 8px;
+  color: #0B2A44;
+}
+
+/* Stats Card Styles */
+.stats-card {
+  border-radius: 12px;
+  margin-bottom: 32px;
+  background: white;
+  border: 1px solid rgba(11, 42, 68, 0.08);
+  position: relative;
+}
+
+/* Config Card Styles */
+.config-card {
+  border-radius: 12px;
+  margin-bottom: 32px;
+  background: white;
+  border: 1px solid rgba(11, 42, 68, 0.08);
+  position: relative;
+}
+
+.config-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5);
+}
+
+/* Preview Card Styles */
+.preview-card {
+  border-radius: 12px;
+  margin-bottom: 32px;
+  background: white;
+  border: 1px solid rgba(11, 42, 68, 0.08);
+  position: relative;
+}
+
+.preview-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5);
+}
+
+.stats-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5);
 }
 
 .action-buttons {
@@ -303,10 +484,4 @@ const generateReport = () => {
   background: rgba(11, 42, 68, 0.05);
 }
 
-.generate-btn {
-  margin-top: 20px;
-  width: 100%;
-  height: 50px;
-  font-weight: bold;
-}
 </style>

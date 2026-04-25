@@ -1,5 +1,5 @@
 <template>
-  <app-layout>
+  <fixed-layout>
     <div class="dashboard-view">
       <!-- Header Section -->
       <div class="dashboard-header">
@@ -40,8 +40,27 @@
               Quick Actions
             </v-card-title>
             <v-card-text>
+              <!-- Top Row - 3 Actions -->
+              <v-row class="mb-4">
+                <v-col cols="12" sm="4" v-for="action in quickActions.slice(0, 3)" :key="action.title">
+                  <v-card 
+                    class="action-item" 
+                    hover 
+                    @click="navigateTo(action.route)"
+                    elevation="1"
+                  >
+                    <v-card-text class="text-center pa-4">
+                      <v-icon :color="action.color" size="32" class="mb-2">{{ action.icon }}</v-icon>
+                      <div class="action-title">{{ action.title }}</div>
+                      <div class="action-desc">{{ action.description }}</div>
+                    </v-card-text>
+                  </v-card>
+                </v-col>
+              </v-row>
+              
+              <!-- Bottom Row - 3 Actions -->
               <v-row>
-                <v-col cols="12" sm="6" v-for="action in quickActions" :key="action.title">
+                <v-col cols="12" sm="4" v-for="action in quickActions.slice(3, 6)" :key="action.title">
                   <v-card 
                     class="action-item" 
                     hover 
@@ -82,7 +101,7 @@
         </v-col>
       </v-row>
 
-      <!-- Charts Section -->
+      <!-- Charts Section - Backend Data Required -->
       <v-row class="charts-section">
         <v-col cols="12" md="8">
           <v-card class="chart-card" elevation="2">
@@ -91,8 +110,14 @@
               Monthly Activity Trends
             </v-card-title>
             <v-card-text>
-              <div class="chart-container">
-                <canvas ref="monthlyChart" width="400" height="200"></canvas>
+              <v-alert type="info" variant="tonal" class="mb-4">
+                <v-icon left>mdi-database</v-icon>
+                Chart requires backend data connection
+              </v-alert>
+              <div class="chart-placeholder">
+                <v-icon size="64" color="#0B2A44">mdi-chart-line</v-icon>
+                <p class="placeholder-text">Monthly activity trends will display here when connected to backend</p>
+                <p class="placeholder-subtitle">Expected data: Monthly datasets, calculations, and reports</p>
               </div>
             </v-card-text>
           </v-card>
@@ -104,16 +129,22 @@
               Instrument Distribution
             </v-card-title>
             <v-card-text>
-              <div class="chart-container">
-                <canvas ref="pieChart" width="200" height="200"></canvas>
+              <v-alert type="info" variant="tonal" class="mb-4">
+                <v-icon left>mdi-database</v-icon>
+                Chart requires backend data connection
+              </v-alert>
+              <div class="chart-placeholder">
+                <v-icon size="48" color="#1E88E5">mdi-chart-pie</v-icon>
+                <p class="placeholder-text">Instrument distribution will display here when connected to backend</p>
+                <p class="placeholder-subtitle">Expected data: Treasury Bills, Bonds, Money Market</p>
               </div>
             </v-card-text>
           </v-card>
         </v-col>
       </v-row>
 
-      <!-- Yield Rate Chart -->
-      <v-row>
+      <!-- Yield Rate Chart - Backend Data Required -->
+      <v-row class="mb-8">
         <v-col cols="12">
           <v-card class="chart-card" elevation="2">
             <v-card-title class="card-title">
@@ -121,8 +152,14 @@
               Yield Rate Trends (2024)
             </v-card-title>
             <v-card-text>
-              <div class="chart-container large">
-                <canvas ref="yieldChart" width="800" height="300"></canvas>
+              <v-alert type="info" variant="tonal" class="mb-4">
+                <v-icon left>mdi-database</v-icon>
+                Chart requires backend data connection
+              </v-alert>
+              <div class="chart-placeholder large">
+                <v-icon size="80" color="#4CAF50">mdi-trending-up</v-icon>
+                <p class="placeholder-text">Yield rate trends will display here when connected to backend</p>
+                <p class="placeholder-subtitle">Expected data: Monthly yield rates for all instruments</p>
               </div>
             </v-card-text>
           </v-card>
@@ -130,7 +167,7 @@
       </v-row>
 
       <!-- Financial Instruments Overview -->
-      <v-row>
+      <v-row class="mb-8">
         <v-col cols="12">
           <v-card class="instruments-card" elevation="2">
             <v-card-title class="card-title">
@@ -214,199 +251,84 @@
         <v-col cols="12">
           <v-card class="quick-stats-card" elevation="2">
             <v-card-text class="pa-4">
-              <div class="quick-stats-grid">
-                <div class="quick-stat" v-for="stat in quickStats" :key="stat.label">
-                  <div class="quick-stat-icon" :style="{ backgroundColor: stat.bgColor }">
-                    <v-icon :color="stat.color" size="20">{{ stat.icon }}</v-icon>
+              <!-- Top Row - 3 Stats -->
+              <v-row class="mb-3">
+                <v-col cols="12" sm="4" v-for="stat in quickStats.slice(0, 3)" :key="stat.label">
+                  <div class="quick-stat">
+                    <div class="quick-stat-icon" :style="{ backgroundColor: stat.bgColor }">
+                      <v-icon :color="stat.color" size="20">{{ stat.icon }}</v-icon>
+                    </div>
+                    <div class="quick-stat-content">
+                      <div class="quick-stat-label">{{ stat.label }}</div>
+                      <div class="quick-stat-value">{{ stat.value }}</div>
+                    </div>
                   </div>
-                  <div class="quick-stat-content">
-                    <div class="quick-stat-label">{{ stat.label }}</div>
-                    <div class="quick-stat-value">{{ stat.value }}</div>
+                </v-col>
+              </v-row>
+              
+              <!-- Bottom Row - 3 Stats -->
+              <v-row>
+                <v-col cols="12" sm="4" v-for="stat in quickStats.slice(3, 6)" :key="stat.label">
+                  <div class="quick-stat">
+                    <div class="quick-stat-icon" :style="{ backgroundColor: stat.bgColor }">
+                      <v-icon :color="stat.color" size="20">{{ stat.icon }}</v-icon>
+                    </div>
+                    <div class="quick-stat-content">
+                      <div class="quick-stat-label">{{ stat.label }}</div>
+                      <div class="quick-stat-value">{{ stat.value }}</div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                </v-col>
+              </v-row>
             </v-card-text>
           </v-card>
         </v-col>
       </v-row>
     </div>
-  </app-layout>
+  </fixed-layout>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import AppLayout from '../components/AppLayout.vue'
-import Chart from 'chart.js/auto'
+import FixedLayout from '../components/FixedLayout.vue'
 
 const router = useRouter()
-
-const monthlyChart = ref()
-const pieChart = ref()
-const yieldChart = ref()
-
-onMounted(() => {
-  nextTick(() => {
-    initializeCharts()
-  })
-})
-
-const initializeCharts = () => {
-  // Monthly Activity Chart
-  if (monthlyChart.value) {
-    const ctx = monthlyChart.value.getContext('2d')
-    if (ctx) {
-      new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: chartData.value.monthlyData.map(d => d.month),
-          datasets: [
-            {
-              label: 'Datasets',
-              data: chartData.value.monthlyData.map(d => d.datasets),
-              borderColor: '#0B2A44',
-              backgroundColor: 'rgba(11, 42, 68, 0.1)',
-              borderWidth: 3,
-              fill: true,
-              tension: 0.4
-            },
-            {
-              label: 'Calculations',
-              data: chartData.value.monthlyData.map(d => d.calculations),
-              borderColor: '#1E88E5',
-              backgroundColor: 'rgba(30, 136, 229, 0.1)',
-              borderWidth: 3,
-              fill: true,
-              tension: 0.4
-            },
-            {
-              label: 'Reports',
-              data: chartData.value.monthlyData.map(d => d.reports),
-              borderColor: '#4CAF50',
-              backgroundColor: 'rgba(76, 175, 80, 0.1)',
-              borderWidth: 3,
-              fill: true,
-              tension: 0.4
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'top'
-            }
-          }
-        }
-      })
-    }
-  }
-
-  // Pie Chart
-  if (pieChart.value) {
-    const ctx = pieChart.value.getContext('2d')
-    if (ctx) {
-      new Chart(ctx, {
-        type: 'pie',
-        data: {
-          labels: chartData.value.instrumentDistribution.map(d => d.name),
-          datasets: [{
-            data: chartData.value.instrumentDistribution.map(d => d.value),
-            backgroundColor: chartData.value.instrumentDistribution.map(d => d.color),
-            borderWidth: 2,
-            borderColor: '#fff'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'bottom'
-            }
-          }
-        }
-      })
-    }
-  }
-
-  // Yield Rate Chart
-  if (yieldChart.value) {
-    const ctx = yieldChart.value.getContext('2d')
-    if (ctx) {
-      new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: chartData.value.yieldRates.map(d => d.date),
-          datasets: [{
-            label: 'Yield Rate (%)',
-            data: chartData.value.yieldRates.map(d => d.rate),
-            borderColor: '#0B2A44',
-            backgroundColor: 'rgba(11, 42, 68, 0.1)',
-            borderWidth: 3,
-            fill: true,
-            tension: 0.4
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'top'
-            }
-          },
-          scales: {
-            y: {
-              beginAtZero: false,
-              ticks: {
-                callback: function(value) {
-                  return value + '%'
-                }
-              }
-            }
-          }
-        }
-      })
-    }
-  }
-}
 
 const kpiData = ref([
   {
     title: 'Total Datasets',
-    value: '24',
+    value: '0',
     icon: 'mdi-database',
     color: 'rgba(11, 42, 68, 0.1)',
     iconColor: '#0B2A44',
-    change: '+12%',
-    changeIcon: 'mdi-trending-up',
-    changeClass: 'positive'
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
   },
   {
     title: 'Calculations',
-    value: '156',
+    value: '0',
     icon: 'mdi-calculator',
     color: 'rgba(30, 136, 229, 0.1)',
     iconColor: '#1E88E5',
-    change: '+8%',
-    changeIcon: 'mdi-trending-up',
-    changeClass: 'positive'
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
   },
   {
     title: 'Reports Generated',
-    value: '48',
+    value: '0',
     icon: 'mdi-file-document',
     color: 'rgba(76, 175, 80, 0.1)',
     iconColor: '#4CAF50',
-    change: '+15%',
-    changeIcon: 'mdi-trending-up',
-    changeClass: 'positive'
+    change: '0%',
+    changeIcon: 'mdi-minus',
+    changeClass: 'neutral'
   },
   {
     title: 'Active Instruments',
-    value: '3',
+    value: '0',
     icon: 'mdi-chart-line',
     color: 'rgba(255, 193, 7, 0.1)',
     iconColor: '#FFC107',
@@ -416,30 +338,23 @@ const kpiData = ref([
   }
 ])
 
-// Add sample chart data for dashboard
-const chartData = ref({
-  monthlyData: [
-    { month: 'Jan', datasets: 12, calculations: 45, reports: 8 },
-    { month: 'Feb', datasets: 15, calculations: 52, reports: 12 },
-    { month: 'Mar', datasets: 18, calculations: 68, reports: 15 },
-    { month: 'Apr', datasets: 24, calculations: 89, reports: 18 },
-    { month: 'May', datasets: 28, calculations: 102, reports: 22 },
-    { month: 'Jun', datasets: 32, calculations: 125, reports: 28 }
-  ],
-  instrumentDistribution: [
-    { name: 'Treasury Bills', value: 8, color: '#0B2A44' },
-    { name: 'Bonds', value: 12, color: '#1E88E5' },
-    { name: 'Money Market', value: 4, color: '#4CAF50' }
-  ],
-  yieldRates: [
-    { date: '2024-01', rate: 4.2 },
-    { date: '2024-02', rate: 4.5 },
-    { date: '2024-03', rate: 4.8 },
-    { date: '2024-04', rate: 5.1 },
-    { date: '2024-05', rate: 5.3 },
-    { date: '2024-06', rate: 5.0 }
-  ]
-})
+// Chart data will be fetched from backend when connected
+// Expected data structure for backend:
+// const chartData = ref({
+//   monthlyData: [
+//     { month: 'Jan', datasets: number, calculations: number, reports: number },
+//     // ... more months
+//   ],
+//   instrumentDistribution: [
+//     { name: 'Treasury Bills', value: number, color: '#0B2A44' },
+//     { name: 'Bonds', value: number, color: '#1E88E5' },
+//     { name: 'Money Market', value: number, color: '#4CAF50' }
+//   ],
+//   yieldRates: [
+//     { date: '2024-01', rate: number },
+//     // ... more dates
+//   ]
+// })
 
 const quickActions = ref([
   {
@@ -469,6 +384,20 @@ const quickActions = ref([
     icon: 'mdi-chart-line',
     color: '#FFC107',
     route: '/visualizations'
+  },
+  {
+    title: 'Data Cleaning',
+    description: 'Clean and prepare datasets',
+    icon: 'mdi-broom',
+    color: '#9C27B0',
+    route: '/cleaning'
+  },
+  {
+    title: 'System Settings',
+    description: 'Configure system preferences',
+    icon: 'mdi-cog',
+    color: '#F44336',
+    route: '/settings'
   }
 ])
 
@@ -505,21 +434,21 @@ const instruments = ref([
     description: 'Short-term government securities with maturities of one year or less',
     icon: 'mdi-bank',
     color: '#0B2A44',
-    count: 8
+    count: 0
   },
   {
     name: 'Bonds',
     description: 'Long-term debt instruments with fixed interest payments',
     icon: 'mdi-chart-line',
     color: '#1E88E5',
-    count: 12
+    count: 0
   },
   {
     name: 'Money Market',
     description: 'Short-term borrowing and lending with maturities of one year or less',
     icon: 'mdi-cash',
     color: '#4CAF50',
-    count: 4
+    count: 0
   }
 ])
 
@@ -527,27 +456,27 @@ const instruments = ref([
 const performanceMetrics = ref([
   {
     name: 'Processing Speed',
-    value: '98.5%',
+    value: '0%',
     color: '#4CAF50',
-    progress: 98
+    progress: 0
   },
   {
     name: 'Data Accuracy',
-    value: '99.2%',
+    value: '0%',
     color: '#0B2A44',
-    progress: 99
+    progress: 0
   },
   {
     name: 'System Uptime',
-    value: '99.8%',
+    value: '0%',
     color: '#1E88E5',
-    progress: 100
+    progress: 0
   },
   {
     name: 'User Satisfaction',
-    value: '94.7%',
+    value: '0%',
     color: '#FFC107',
-    progress: 95
+    progress: 0
   }
 ])
 
@@ -579,42 +508,42 @@ const systemStatus = ref([
 const quickStats = ref([
   {
     label: 'Daily Users',
-    value: '1,247',
+    value: '0',
     icon: 'mdi-account',
     color: '#0B2A44',
     bgColor: 'rgba(11, 42, 68, 0.1)'
   },
   {
     label: 'Transactions',
-    value: '8,923',
+    value: '0',
     icon: 'mdi-swap-horizontal',
     color: '#1E88E5',
     bgColor: 'rgba(30, 136, 229, 0.1)'
   },
   {
     label: 'Data Points',
-    value: '45.2K',
+    value: '0',
     icon: 'mdi-database',
     color: '#4CAF50',
     bgColor: 'rgba(76, 175, 80, 0.1)'
   },
   {
     label: 'Success Rate',
-    value: '99.8%',
+    value: '0%',
     icon: 'mdi-check-circle',
     color: '#FFC107',
     bgColor: 'rgba(255, 193, 7, 0.1)'
   },
   {
     label: 'Avg Response',
-    value: '0.8s',
+    value: '0s',
     icon: 'mdi-speedometer',
     color: '#F44336',
     bgColor: 'rgba(244, 67, 54, 0.1)'
   },
   {
     label: 'Storage Used',
-    value: '2.3GB',
+    value: '0GB',
     icon: 'mdi-harddisk',
     color: '#9C27B0',
     bgColor: 'rgba(156, 39, 176, 0.1)'
@@ -650,6 +579,24 @@ const navigateTo = (route: string) => {
 }
 
 .kpi-row {
+  margin-bottom: 32px;
+}
+
+/* Ensure consistent spacing for all major sections */
+.content-row {
+  margin-bottom: 32px;
+}
+
+.charts-section {
+  margin-bottom: 32px;
+}
+
+.stats-row {
+  margin-bottom: 32px;
+}
+
+/* Quick Stats Bar - Final Section */
+.quick-stats-card {
   margin-bottom: 32px;
 }
 
@@ -735,6 +682,7 @@ const navigateTo = (route: string) => {
 .instruments-card {
   border-radius: 12px;
   height: 100%;
+  margin-bottom: 32px;
 }
 
 .action-item {
@@ -824,14 +772,34 @@ const navigateTo = (route: string) => {
   height: 100%;
 }
 
-.chart-container {
+.chart-placeholder {
   height: 300px;
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  background: rgba(11, 42, 68, 0.02);
+  border-radius: 8px;
+  border: 2px dashed rgba(11, 42, 68, 0.1);
 }
 
-.chart-container.large {
+.chart-placeholder.large {
   height: 400px;
-  position: relative;
+}
+
+.placeholder-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: #0B2A44;
+  margin: 16px 0 8px 0;
+}
+
+.placeholder-subtitle {
+  font-size: 14px;
+  color: #666;
+  margin: 0;
 }
 
 /* Additional Styles for Enhanced Components */

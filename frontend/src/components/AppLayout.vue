@@ -1,17 +1,17 @@
 <template>
   <v-app>
     <v-navigation-drawer v-model="drawer" :rail="rail" permanent class="nav-drawer">
-      <v-list-item class="nav-header">
-        <template v-slot:prepend>
-          <v-avatar color="primary" class="logo-avatar">
-            <span class="logo-text">D</span>
-          </v-avatar>
-        </template>
-        <v-list-item-title class="nav-title">DuraCapital</v-list-item-title>
-        <template v-slot:append>
-          <v-btn variant="text" icon="mdi-chevron-left" @click.stop="rail = !rail"></v-btn>
-        </template>
-      </v-list-item>
+      <!-- LOGO SECTION -->
+      <div class="logo-section">
+        <div class="logo-container">
+          <div class="logo-d">D</div>
+          <div class="logo-text">
+            <span class="dura">Dura</span>
+            <span class="capital">Capital</span>
+          </div>
+        </div>
+        <div class="tagline">mathematics matters</div>
+      </div>
 
       <v-divider></v-divider>
 
@@ -149,21 +149,57 @@ const handleLogout = () => {
   border-right: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.nav-header {
-  background: rgba(255, 255, 255, 0.05);
-  margin: 16px;
-  border-radius: 8px;
+/* Logo Section Styles */
+.logo-section {
+  padding: 24px 16px !important;
+  text-align: center !important;
+  background: none !important;
+  border: none !important;
 }
 
-.logo-avatar {
-  font-weight: bold;
-  font-size: 20px;
+.logo-container {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  margin-bottom: 8px !important;
 }
 
-.nav-title {
-  color: white;
-  font-weight: 600;
-  font-size: 18px;
+.logo-d {
+  font-size: 32px !important;
+  font-weight: bold !important;
+  color: white !important;
+  margin-right: 8px !important;
+  position: relative !important;
+  line-height: 1 !important;
+}
+
+.logo-d::after {
+  content: '' !important;
+  position: absolute !important;
+  right: -4px !important;
+  top: 50% !important;
+  width: 10px !important;
+  height: 20px !important;
+  background: #1E88E5 !important;
+  border-radius: 6px !important;
+  transform: translateY(-50%) !important;
+}
+
+.dura, .capital {
+  font-size: 16px !important;
+  font-weight: bold !important;
+  line-height: 1 !important;
+}
+
+.dura { color: white !important; }
+.capital { color: #1E88E5 !important; }
+
+.tagline {
+  font-size: 10px !important;
+  color: #1E88E5 !important;
+  text-transform: lowercase !important;
+  opacity: 0.8 !important;
+  margin-top: 4px !important;
 }
 
 .nav-list :deep(.v-list-item) {
