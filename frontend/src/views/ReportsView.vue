@@ -484,4 +484,39 @@ const goBack = () => {
   background: rgba(11, 42, 68, 0.05);
 }
 
+.section-name {
+  font-weight: 600;
+  color: #0B2A44;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.section-desc {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.sample-section {
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+  border: 1px solid rgba(11, 42, 68, 0.08);
+}
+
+.sample-section:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.sample-section.selected {
+  border: 2px solid #0B2A44;
+  background: rgba(11, 42, 68, 0.05);
+}
+
+.sample-title {
+  font-weight: 600;
+  color: #0B2A44;
+  margin-top: 8px;
+}
+
 </style>

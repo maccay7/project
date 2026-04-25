@@ -84,6 +84,73 @@
         </v-card-text>
       </v-card>
 
+      <!-- Data Preview -->
+      <v-card class="stats-card" elevation="2" v-if="previewData.length > 0">
+        <v-card-title class="card-title">
+          <v-icon class="title-icon">mdi-eye</v-icon>
+          Data Preview
+        </v-card-title>
+        <v-card-text>
+          <v-alert type="info" variant="tonal" class="mb-4">
+            <v-icon left>mdi-information</v-icon>
+            Showing first 10 rows of uploaded data. Full dataset will be processed in calculations.
+          </v-alert>
+          
+          <v-data-table
+            :headers="previewHeaders"
+            :items="previewData"
+            :loading="previewLoading"
+            density="compact"
+            class="preview-table"
+            items-per-page="10"
+            hide-default-footer
+          >
+            <template v-slot:bottom>
+              <div class="text-center pa-4">
+                <v-btn
+                  variant="outlined"
+                  color="primary"
+                  @click="loadFullPreview"
+                  :loading="previewLoading"
+                >
+                  <v-icon left>mdi-refresh</v-icon>
+                  Load More Data
+                </v-btn>
+              </div>
+            </template>
+          </v-data-table>
+
+          <div class="preview-stats" v-if="previewData.length > 0">
+            <v-row>
+              <v-col cols="12" sm="6" md="3">
+                <div class="stat-item">
+                  <div class="stat-value">{{ totalRows }}</div>
+                  <div class="stat-label">Total Rows</div>
+                </div>
+              </v-col>
+              <v-col cols="12" sm="6" md="3">
+                <div class="stat-item">
+                  <div class="stat-value">{{ totalColumns }}</div>
+                  <div class="stat-label">Total Columns</div>
+                </div>
+              </v-col>
+              <v-col cols="12" sm="6" md="3">
+                <div class="stat-item">
+                  <div class="stat-value">{{ fileTypes.length }}</div>
+                  <div class="stat-label">File Types</div>
+                </div>
+              </v-col>
+              <v-col cols="12" sm="6" md="3">
+                <div class="stat-item">
+                  <div class="stat-value">{{ formatFileSize(totalSize) }}</div>
+                  <div class="stat-label">Total Size</div>
+                </div>
+              </v-col>
+            </v-row>
+          </div>
+        </v-card-text>
+      </v-card>
+
       <!-- Quick Actions -->
       <v-card class="stats-card" elevation="2">
         <v-card-title class="card-title">
@@ -137,13 +204,24 @@
 
 <script setup lang="ts">
 import FixedLayout from '../components/FixedLayout.vue'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const fileInput = ref()
 const isDragOver = ref(false)
 const uploadedFiles = ref<File[]>([])
+
+// Preview data state
+const previewData = ref<any[]>([])
+const previewHeaders = ref<any[]>([])
+const previewLoading = ref(false)
+
+// Computed properties for stats
+const totalRows = computed(() => previewData.value.length)
+const totalColumns = computed(() => previewHeaders.value.length)
+const fileTypes = computed(() => [...new Set(uploadedFiles.value.map(f => getFileIcon(f.type).icon))])
+const totalSize = computed(() => uploadedFiles.value.reduce((acc, file) => acc + file.size, 0))
 
 const triggerFileInput = () => {
   fileInput.value?.click()
@@ -163,8 +241,8 @@ const handleDrop = (event: DragEvent) => {
   }
 }
 
-const addFiles = (files: File[]) => {
-  uploadedFiles.value.push(...files.filter(file => 
+const addFiles = async (files: File[]) => {
+  const validFiles = files.filter(file => 
     file.type.includes('csv') || 
     file.type.includes('sheet') || 
     file.type.includes('json') ||
@@ -172,7 +250,14 @@ const addFiles = (files: File[]) => {
     file.name.endsWith('.xlsx') ||
     file.name.endsWith('.xls') ||
     file.name.endsWith('.json')
-  ))
+  )
+  
+  uploadedFiles.value.push(...validFiles)
+  
+  // Auto-generate preview for first valid file
+  if (validFiles.length > 0 && previewData.value.length === 0) {
+    await loadFullPreview()
+  }
 }
 
 const removeFile = (index: number) => {
@@ -198,6 +283,74 @@ const formatFileSize = (bytes: number) => {
   const sizes = ['Bytes', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+// File parsing functions
+const parseCSV = (text: string) => {
+  const lines = text.split('\n').filter(line => line.trim())
+  if (lines.length === 0) return { headers: [], data: [] }
+  
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
+  const data = lines.slice(1, 11).map(line => {
+    const values = line.split(',').map(v => v.trim().replace(/"/g, ''))
+    const row: any = {}
+    headers.forEach((header, index) => {
+      row[header] = values[index] || ''
+    })
+    return row
+  })
+  
+  return { headers, data }
+}
+
+const parseJSON = (text: string) => {
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const headers = Object.keys(parsed[0])
+      const data = parsed.slice(0, 10)
+      return { headers, data }
+    }
+  } catch {
+    return { headers: [], data: [] }
+  }
+  return { headers: [], data: [] }
+}
+
+const processFile = async (file: File) => {
+  const text = await file.text()
+  
+  if (file.name.endsWith('.csv')) {
+    return parseCSV(text)
+  } else if (file.name.endsWith('.json')) {
+    return parseJSON(text)
+  } else {
+    // For Excel files, show basic info
+    return {
+      headers: ['File Name', 'Size', 'Type', 'Last Modified'],
+      data: [{
+        'File Name': file.name,
+        'Size': formatFileSize(file.size),
+        'Type': file.type || 'Unknown',
+        'Last Modified': new Date(file.lastModified).toLocaleDateString()
+      }]
+    }
+  }
+}
+
+const loadFullPreview = async () => {
+  previewLoading.value = true
+  try {
+    if (uploadedFiles.value.length > 0) {
+      const result = await processFile(uploadedFiles.value[0])
+      previewData.value = result.data
+      previewHeaders.value = result.headers.map(h => ({ title: h, key: h, sortable: true }))
+    }
+  } catch (error) {
+    console.error('Error loading preview:', error)
+  } finally {
+    previewLoading.value = false
+  }
 }
 
 const navigateTo = (route: string) => {
@@ -325,6 +478,44 @@ const navigateTo = (route: string) => {
 .action-desc {
   font-size: 12px;
   color: #666;
+}
+
+/* Preview Table Styles */
+.preview-table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.preview-stats {
+  margin-top: 24px;
+  padding: 16px;
+  background: rgba(11, 42, 68, 0.03);
+  border-radius: 8px;
+}
+
+.preview-stats .stat-item {
+  text-align: center;
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+}
+
+.preview-stats .stat-item:hover {
+  transform: translateY(-2px);
+}
+
+.preview-stats .stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0B2A44;
+  margin-bottom: 4px;
+}
+
+.preview-stats .stat-label {
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
 }
 
 /* Responsive Design */

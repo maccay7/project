@@ -47,6 +47,18 @@
 
       <v-spacer></v-spacer>
 
+      <!-- Logout Button -->
+      <v-btn
+        variant="elevated"
+        color="error"
+        class="logout-btn mr-3"
+        @click="handleLogout"
+        prepend-icon="mdi-logout"
+        size="large"
+      >
+        Logout
+      </v-btn>
+
       <v-menu>
         <template v-slot:activator="{ props }">
           <v-btn
@@ -118,19 +130,19 @@ const navItems = [
     icon: 'mdi-broom'
   },
   {
-    title: 'Calculations',
+    title: 'Calculate Metrics',
     value: 'calculations',
     to: '/calculations',
     icon: 'mdi-calculator'
   },
   {
-    title: 'Visualizations',
+    title: 'Visualize Results',
     value: 'visualizations',
     to: '/visualizations',
     icon: 'mdi-chart-line'
   },
   {
-    title: 'Reports',
+    title: 'Generate Reports',
     value: 'reports',
     to: '/reports',
     icon: 'mdi-file-document'
@@ -244,6 +256,21 @@ const handleLogout = () => {
 
 .user-name {
   font-weight: 500;
+}
+
+.logout-btn {
+  background: #F44336 !important;
+  color: white !important;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 8px rgba(244, 67, 54, 0.3);
+  border: none !important;
+}
+
+.logout-btn:hover {
+  background: #D32F2F !important;
+  box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
 }
 
 .main-content {
