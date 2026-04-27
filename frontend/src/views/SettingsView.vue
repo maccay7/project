@@ -350,6 +350,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { userAPI, systemAPI } from '../services/api'
 import FixedLayout from '../components/FixedLayout.vue'
 
 const authStore = useAuthStore()
@@ -395,6 +396,46 @@ const dateFormats = ['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD', 'DD-MM-YYYY']
 const currencies = ['USD', 'EUR', 'GBP', 'ZAR', 'AUD', 'CAD']
 
 const lastUpdated = ref(new Date().toLocaleDateString())
+
+// Load settings data from backend
+const loadSettingsData = async () => {
+  try {
+    // Load user profile
+    const profileResponse = await userAPI.getProfile()
+    if (profileResponse.success) {
+      user.value = profileResponse.data
+      accountSettings.value.firstName = profileResponse.data.name.split(' ')[0] || ''
+      accountSettings.value.lastName = profileResponse.data.name.split(' ')[1] || ''
+      accountSettings.value.email = profileResponse.data.email
+    }
+
+    // Load user preferences
+    const preferencesResponse = await userAPI.getPreferences()
+    if (preferencesResponse.success) {
+      preferences.value.language = preferencesResponse.data.language
+      preferences.value.timezone = preferencesResponse.data.timezone
+      preferences.value.dateFormat = preferencesResponse.data.date_format
+      preferences.value.currency = preferencesResponse.data.currency
+    }
+
+    // Load notification settings
+    const notificationsResponse = await userAPI.getNotificationSettings()
+    if (notificationsResponse.success) {
+      notifications.value.emailNotifications = notificationsResponse.data.emailNotifications
+      notifications.value.pushNotifications = notificationsResponse.data.pushNotifications
+      notifications.value.weeklyReports = notificationsResponse.data.weeklyReports
+      notifications.value.systemAlerts = notificationsResponse.data.systemAlerts
+    }
+
+    // Load system information
+    const systemResponse = await systemAPI.getInfo()
+    if (systemResponse.success) {
+      lastUpdated.value = new Date(systemResponse.data.last_updated).toLocaleDateString()
+    }
+  } catch (error) {
+    console.error('Error loading settings data:', error)
+  }
+}
 
 // Methods
 const editAvatar = () => {
@@ -455,7 +496,7 @@ const manageSessions = () => {
 }
 
 onMounted(() => {
-  // Initialize user data from auth store
+  loadSettingsData()
   if (authStore.user) {
     user.value = authStore.user
   }

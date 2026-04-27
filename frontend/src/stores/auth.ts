@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
+import { authAPI } from '../services/api'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<any>(null)
@@ -8,18 +9,19 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!token.value)
 
   const login = async (email: string, password: string) => {
-    // Mock authentication - replace with actual API call
-    if (email === 'makanakakanyai@gmail.com' && password === 'Business7mogul') {
-      token.value = 'mock-token-' + Date.now()
-      localStorage.setItem('token', token.value)
-      user.value = {
-        email: email,
-        name: 'Makanaka Kanyai',
-        role: 'admin'
+    try {
+      const response = await authAPI.login(email, password)
+      if (response.success) {
+        token.value = response.token
+        localStorage.setItem('token', response.token || '')
+        user.value = response.user
+        return true
       }
-      return true
+      return false
+    } catch (error) {
+      console.error('Login error:', error)
+      return false
     }
-    return false
   }
 
   const logout = () => {

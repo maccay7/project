@@ -289,8 +289,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { dashboardAPI, calculationsAPI } from '../services/api'
 import FixedLayout from '../components/FixedLayout.vue'
 
 const router = useRouter()
@@ -401,32 +402,51 @@ const quickActions = ref([
   }
 ])
 
-const recentActivities = ref([
-  {
-    id: 1,
-    text: 'Treasury Bills dataset uploaded',
-    time: '2 hours ago',
-    color: '#0B2A44'
-  },
-  {
-    id: 2,
-    text: 'Bond calculations completed',
-    time: '4 hours ago',
-    color: '#1E88E5'
-  },
-  {
-    id: 3,
-    text: 'Money market analysis generated',
-    time: '6 hours ago',
-    color: '#4CAF50'
-  },
-  {
-    id: 4,
-    text: 'Monthly report exported to PDF',
-    time: '1 day ago',
-    color: '#FFC107'
+const recentActivities = ref<any[]>([])
+const yieldCurveData = ref<any>(null)
+
+// Load data from backend
+const loadDashboardData = async () => {
+  try {
+    // Load KPI data
+    const kpiResponse = await dashboardAPI.getKPI()
+    if (kpiResponse.success) {
+      // Update KPI data with real values
+      kpiData.value[0].value = kpiResponse.data.total_investments
+      kpiData.value[1].value = kpiResponse.data.active_calculations
+      kpiData.value[2].value = kpiResponse.data.reports_generated
+      kpiData.value[3].value = kpiResponse.data.system_health
+    }
+
+    // Load recent activity
+    const activityResponse = await dashboardAPI.getRecentActivity()
+    if (activityResponse.success) {
+      recentActivities.value = activityResponse.data
+    }
+
+    // Load yield curve data
+    const yieldCurveResponse = await dashboardAPI.getYieldCurve()
+    if (yieldCurveResponse.success) {
+      yieldCurveData.value = yieldCurveResponse.data
+    }
+  } catch (error) {
+    console.error('Error loading dashboard data:', error)
   }
-])
+}
+
+// Execute yield curve calculation
+const executeYieldCurveCalculation = async () => {
+  try {
+    const response = await calculationsAPI.execute('yield_curve')
+    if (response.success) {
+      console.log('Yield curve calculation completed:', response.data)
+      // Reload dashboard data to show updated activity
+      await loadDashboardData()
+    }
+  } catch (error) {
+    console.error('Error executing yield curve calculation:', error)
+  }
+}
 
 const instruments = ref([
   {
@@ -553,6 +573,11 @@ const quickStats = ref([
 const navigateTo = (route: string) => {
   router.push(route)
 }
+
+// Load data when component mounts
+onMounted(() => {
+  loadDashboardData()
+})
 </script>
 
 <style scoped>
