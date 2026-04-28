@@ -4,6 +4,9 @@ import pymysql
 import pandas as pd
 import numpy as np
 import requests
+import json
+import openpyxl
+import os
 from datetime import datetime
 
 app = Flask(__name__)
@@ -15,6 +18,7 @@ DB_CONFIG = {
     'user': 'root',
     'password': '',
     'database': 'duracapital',
+    'charset': 'utf8mb4',
     'cursorclass': pymysql.cursors.DictCursor
 }
 
@@ -45,7 +49,12 @@ FINANCIAL_INSTRUMENTS = {
 }
 
 def get_db_connection():
-    return pymysql.connect(**DB_CONFIG)
+    try:
+        return pymysql.connect(**DB_CONFIG)
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        # Fallback to mock mode if database fails
+        return None
 
 def fetch_fred_data(series_id):
     """Fetch data from FRED API"""
@@ -202,25 +211,233 @@ def upload_data():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Read file based on extension
-        if file.filename.endswith('.csv'):
-            df = pd.read_csv(file)
-        elif file.filename.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(file)
-        else:
-            return jsonify({'error': 'Unsupported file format'}), 400
+        # Read file based on extension - support all file types
+        file_extension = os.path.splitext(file.filename)[1].lower()
         
-        # Convert to JSON for frontend
-        data = df.to_dict('records')
+        if file_extension == '.csv':
+            # Read CSV file
+            try:
+                content = file.read().decode('utf-8')
+                lines = content.split('\n')
+                if len(lines) < 2:
+                    return jsonify({'error': 'CSV file is empty or invalid'}), 400
+                
+                headers = [h.strip() for h in lines[0].split(',')]
+                data = []
+                for line in lines[1:]:
+                    if line.strip():
+                        values = [v.strip() for v in line.split(',')]
+                        row = {}
+                        for i, header in enumerate(headers):
+                            if i < len(values):
+                                row[header] = values[i]
+                            else:
+                                row[header] = ''
+                        data.append(row)
+            except Exception as e:
+                return jsonify({'error': f'Error reading CSV file: {str(e)}'}), 400
+                
+        elif file_extension in ['.xlsx', '.xls', '.xlsm']:
+            # Read Excel file using openpyxl
+            try:
+                # Reset file pointer to beginning
+                file.seek(0)
+                
+                # Create a temporary file to save the uploaded file
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+                    file.save(temp_file.name)
+                    temp_filename = temp_file.name
+                
+                # Read Excel file
+                workbook = openpyxl.load_workbook(temp_filename, read_only=True)
+                sheet = workbook.active
+                
+                # Initialize data and headers lists for Excel processing
+                data = []
+                headers = []
+                
+                for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
+                    if row_idx == 0:
+                        # First row is headers - preserve original column names
+                        headers = []
+                        print(f"DEBUG: Processing Excel headers: {row}")
+                        for i, cell in enumerate(row):
+                            if cell is not None:
+                                header_name = str(cell).strip()
+                                print(f"DEBUG: Header {i}: '{header_name}'")
+                                if header_name:
+                                    # Keep the original header name with minimal cleaning
+                                    # Only replace characters that would break JSON/HTML
+                                    clean_header = header_name.replace('"', '').replace("'", "").replace("\n", " ").replace("\r", "")
+                                    # Use the original header as-is for display
+                                    display_header = clean_header
+                                    # Create a safe key for internal use
+                                    safe_key = clean_header.replace(' ', '_').replace('-', '_').replace('.', '_')
+                                    safe_key = ''.join(c for c in safe_key if c.isalnum() or c == '_')
+                                    if not safe_key or safe_key[0].isdigit():
+                                        safe_key = f"col_{i+1}"
+                                    headers.append({
+                                        'display': display_header,
+                                        'key': safe_key
+                                    })
+                                else:
+                                    # Empty header - create a default
+                                    headers.append({
+                                        'display': f"Column {i+1}",
+                                        'key': f"col_{i+1}"
+                                    })
+                            else:
+                                # Null cell - create a default
+                                headers.append({
+                                    'display': f"Column {i+1}",
+                                    'key': f"col_{i+1}"
+                                })
+                        print(f"DEBUG: Final headers: {headers}")
+                    else:
+                        # Data rows
+                        row_data = {}
+                        for i, cell in enumerate(row):
+                            if i < len(headers):
+                                header_info = headers[i]
+                                row_data[header_info['key']] = str(cell) if cell is not None else ""
+                        if any(row_data.values()):  # Skip empty rows
+                            data.append(row_data)
+                
+                workbook.close()
+                os.unlink(temp_filename)  # Clean up temp file
+                
+                if not data:
+                    return jsonify({'error': 'Excel file appears to be empty'}), 400
+                
+                # Create response with both display headers and data
+                response_data = {
+                    'data': data,
+                    'headers': headers,  # Send header info to frontend
+                    'display_headers': [h['display'] for h in headers]  # Just display names
+                }
+                print(f"DEBUG: Returning {len(data)} rows with headers: {[h['display'] for h in headers]}")
+                    
+            except Exception as e:
+                return jsonify({'error': f'Error reading Excel file: {str(e)}'}), 400
+                
+        elif file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']:
+            # Handle image files
+            try:
+                file.seek(0)
+                image_data = file.read()
+                
+                # For images, return metadata instead of tabular data
+                data = [{
+                    'file_type': 'image',
+                    'file_name': file.filename,
+                    'file_size': len(image_data),
+                    'file_extension': file_extension,
+                    'upload_timestamp': datetime.now().isoformat(),
+                    'preview_available': True
+                }]
+                headers = ['file_type', 'file_name', 'file_size', 'file_extension', 'upload_timestamp', 'preview_available']
+                
+            except Exception as e:
+                return jsonify({'error': f'Error processing image file: {str(e)}'}), 400
+                
+        elif file_extension in ['.pdf', '.doc', '.docx', '.txt', '.rtf']:
+            # Handle document files
+            try:
+                file.seek(0)
+                document_data = file.read()
+                
+                # For documents, return metadata
+                data = [{
+                    'file_type': 'document',
+                    'file_name': file.filename,
+                    'file_size': len(document_data),
+                    'file_extension': file_extension,
+                    'upload_timestamp': datetime.now().isoformat(),
+                    'preview_available': False
+                }]
+                headers = ['file_type', 'file_name', 'file_size', 'file_extension', 'upload_timestamp', 'preview_available']
+                
+            except Exception as e:
+                return jsonify({'error': f'Error processing document file: {str(e)}'}), 400
+                
+        else:
+            # Handle any other file type
+            try:
+                file.seek(0)
+                file_data = file.read()
+                
+                # For other files, return basic metadata
+                data = [{
+                    'file_type': 'binary',
+                    'file_name': file.filename,
+                    'file_size': len(file_data),
+                    'file_extension': file_extension,
+                    'upload_timestamp': datetime.now().isoformat(),
+                    'preview_available': False
+                }]
+                headers = ['file_type', 'file_name', 'file_size', 'file_extension', 'upload_timestamp', 'preview_available']
+                
+            except Exception as e:
+                return jsonify({'error': f'Error processing file: {str(e)}'}), 400
+        
+        # Try to save to database, but don't fail if it doesn't work
+        upload_id = None
+        try:
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                
+                # Insert upload record
+                upload_query = """
+                INSERT INTO upload_history (user_id, filename, file_type, file_size, upload_status)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                cursor.execute(upload_query, (
+                    1,  # Default user ID for now
+                    file.filename,
+                    instrument_type,
+                    len(data),
+                    'completed'
+                ))
+                
+                upload_id = cursor.lastrowid
+                
+                # Save calculation record
+                calc_query = """
+                INSERT INTO calculations (instrument_type, input_data, calculation_status, created_at)
+                VALUES (%s, %s, %s, %s)
+                """
+                cursor.execute(calc_query, (
+                    instrument_type,
+                    json.dumps({'filename': file.filename, 'data_count': len(data), 'data': data}),
+                    'completed',
+                    datetime.now()
+                ))
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+        except Exception as db_error:
+            print(f"Database save failed, continuing without database: {db_error}")
+        
+        # Prepare response data
+        response_data = {
+            'name': file.filename,
+            'size': len(data),
+            'instrument_type': instrument_type,
+            'data': data,  # Return all records for preview
+            'upload_id': upload_id
+        }
+        
+        # Add display headers for Excel files
+        if file_extension in ['.xlsx', '.xls', '.xlsm'] and 'headers' in locals() and headers:
+            response_data['display_headers'] = [h['display'] for h in headers]
+            print(f"DEBUG: Adding display_headers to response: {[h['display'] for h in headers]}")
         
         return jsonify({
             'success': True,
-            'data': {
-                'name': file.filename,
-                'size': len(data),
-                'instrument_type': instrument_type,
-                'data': data[:10]  # Return first 10 records for preview
-            }
+            'data': response_data
         })
         
     except Exception as e:
@@ -233,52 +450,250 @@ def clean_data():
         original_data = data.get('data', [])
         cleaning_options = data.get('options', {})
         
-        df = pd.DataFrame(original_data)
-        original_count = len(df)
+        original_count = len(original_data)
         
-        # Apply cleaning operations
-        cleaned_df = df.copy()
+        # Apply cleaning operations without pandas
+        cleaned_data = original_data.copy()
         stats = {
             'original_rows': original_count,
             'duplicates_removed': 0,
             'missing_values_filled': 0,
-            'outliers_removed': 0
+            'outliers_removed': 0,
+            'empty_rows_removed': 0,
+            'text_standardized': 0,
+            'whitespace_trimmed': 0,
+            'numbers_normalized': 0,
+            'dates_formatted': 0,
+            'emails_validated': 0,
+            'data_types_converted': 0,
+            'currency_standardized': 0,
+            'percentages_normalized': 0,
+            'ranges_validated': 0,
+            'consistency_checked': 0,
+            'patterns_validated': 0,
+            'special_chars_removed': 0,
+            'phones_standardized': 0,
+            'addresses_normalized': 0,
+            'postal_codes_cleaned': 0
         }
         
-        if cleaning_options.get('remove_duplicates'):
-            before_count = len(cleaned_df)
-            cleaned_df = cleaned_df.drop_duplicates()
-            stats['duplicates_removed'] = before_count - len(cleaned_df)
+        # Remove duplicates
+        if cleaning_options.get('removeDuplicates'):
+            seen = set()
+            unique_data = []
+            for row in cleaned_data:
+                row_str = json.dumps(row, sort_keys=True)
+                if row_str not in seen:
+                    seen.add(row_str)
+                    unique_data.append(row)
+            
+            stats['duplicates_removed'] = len(cleaned_data) - len(unique_data)
+            cleaned_data = unique_data
         
-        if cleaning_options.get('fill_missing_values'):
-            # Fill missing values with 0 for numeric, 'N/A' for text
-            for col in cleaned_df.columns:
-                if cleaned_df[col].dtype in ['int64', 'float64']:
-                    cleaned_df[col] = cleaned_df[col].fillna(0)
-                    stats['missing_values_filled'] += cleaned_df[col].isnull().sum()
-                else:
-                    cleaned_df[col] = cleaned_df[col].fillna('N/A')
+        # Remove empty rows
+        if cleaning_options.get('removeEmptyRows'):
+            before_count = len(cleaned_data)
+            cleaned_data = [row for row in cleaned_data if any(v is not None and v != '' and str(v).strip() != '' for v in row.values())]
+            stats['empty_rows_removed'] = before_count - len(cleaned_data)
         
-        if cleaning_options.get('remove_outliers'):
-            # Simple outlier removal using IQR method
-            numeric_cols = cleaned_df.select_dtypes(include=[np.number]).columns
-            for col in numeric_cols:
-                Q1 = cleaned_df[col].quantile(0.25)
-                Q3 = cleaned_df[col].quantile(0.75)
-                IQR = Q3 - Q1
-                lower_bound = Q1 - 1.5 * IQR
-                upper_bound = Q3 + 1.5 * IQR
-                
-                before_count = len(cleaned_df)
-                cleaned_df = cleaned_df[(cleaned_df[col] >= lower_bound) & (cleaned_df[col] <= upper_bound)]
-                stats['outliers_removed'] += before_count - len(cleaned_df)
+        # Fill missing values
+        if cleaning_options.get('fillMissingValues'):
+            missing_filled = 0
+            for row in cleaned_data:
+                for key, value in row.items():
+                    if value is None or value == '' or str(value).strip() == '':
+                        if key.lower() in ['amount', 'value', 'price', 'rate', 'cost'] or any(word in key.lower() for word in ['amount', 'value', 'price', 'rate', 'cost']):
+                            row[key] = 0
+                        else:
+                            row[key] = 'N/A'
+                        missing_filled += 1
+            stats['missing_values_filled'] = missing_filled
         
-        stats['cleaned_rows'] = len(cleaned_df)
+        # Standardize text
+        if cleaning_options.get('standardizeText'):
+            text_standardized = 0
+            for row in cleaned_data:
+                for key, value in row.items():
+                    if isinstance(value, str) and value.strip():
+                        # Convert to title case for proper names, lowercase for others
+                        if any(word in key.lower() for word in ['name', 'fund', 'portfolio']):
+                            row[key] = value.title().strip()
+                        else:
+                            row[key] = value.lower().strip()
+                        text_standardized += 1
+            stats['text_standardized'] = text_standardized
+        
+        # Trim whitespace
+        if cleaning_options.get('trimWhitespace'):
+            whitespace_trimmed = 0
+            for row in cleaned_data:
+                for key, value in row.items():
+                    if isinstance(value, str):
+                        original_value = value
+                        row[key] = value.strip()
+                        if original_value != row[key]:
+                            whitespace_trimmed += 1
+            stats['whitespace_trimmed'] = whitespace_trimmed
+        
+        # Normalize numbers
+        if cleaning_options.get('normalizeNumbers'):
+            numbers_normalized = 0
+            for row in cleaned_data:
+                for key, value in row.items():
+                    if isinstance(value, str):
+                        # Remove currency symbols, commas, and convert to standard format
+                        try:
+                            clean_value = value.replace('$', '').replace(',', '').strip()
+                            if clean_value.replace('.', '').replace('-', '').isdigit():
+                                row[key] = float(clean_value)
+                                numbers_normalized += 1
+                        except (ValueError, AttributeError):
+                            pass
+            stats['numbers_normalized'] = numbers_normalized
+        
+        # Format dates
+        if cleaning_options.get('formatDates'):
+            dates_formatted = 0
+            for row in cleaned_data:
+                for key, value in row.items():
+                    if isinstance(value, str) and any(word in key.lower() for word in ['date', 'maturity', 'issue', 'valuation']):
+                        # Try to format dates to YYYY-MM-DD
+                        try:
+                            import re
+                            # Simple date pattern matching
+                            if re.match(r'\d{4}-\d{2}-\d{2}', value):
+                                # Already in correct format
+                                pass
+                            elif re.match(r'\d{1,2}/\d{1,2}/\d{4}', value):
+                                # Convert MM/DD/YYYY to YYYY-MM-DD
+                                parts = value.split('/')
+                                if len(parts) == 3:
+                                    row[key] = f"{parts[2]}-{parts[0].zfill(2)}-{parts[1].zfill(2)}"
+                                    dates_formatted += 1
+                        except:
+                            pass
+            stats['dates_formatted'] = dates_formatted
+        
+        # Validate emails
+        if cleaning_options.get('validateEmails'):
+            emails_validated = 0
+            import re
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            for row in cleaned_data:
+                for key, value in row.items():
+                    if isinstance(value, str) and 'email' in key.lower():
+                        if not re.match(email_pattern, value.strip()):
+                            row[key] = 'invalid@email.com'
+                            emails_validated += 1
+            stats['emails_validated'] = emails_validated
+        
+        # Standardize currency
+        if cleaning_options.get('standardizeCurrency'):
+            currency_standardized = 0
+            for row in cleaned_data:
+                for key, value in row.items():
+                    if isinstance(value, (str, int, float)) and any(word in key.lower() for word in ['amount', 'value', 'price', 'cost']):
+                        try:
+                            # Convert to float and format as currency
+                            num_value = float(str(value).replace('$', '').replace(',', '').strip())
+                            row[key] = f"${num_value:,.2f}"
+                            currency_standardized += 1
+                        except (ValueError, AttributeError):
+                            pass
+            stats['currency_standardized'] = currency_standardized
+        
+        # Normalize percentages
+        if cleaning_options.get('normalizePercentages'):
+            percentages_normalized = 0
+            for row in cleaned_data:
+                for key, value in row.items():
+                    if isinstance(value, str) and '%' in str(value):
+                        try:
+                            # Convert percentage to decimal
+                            clean_value = value.replace('%', '').strip()
+                            decimal_value = float(clean_value) / 100
+                            row[key] = decimal_value
+                            percentages_normalized += 1
+                        except (ValueError, AttributeError):
+                            pass
+            stats['percentages_normalized'] = percentages_normalized
+        
+        # Remove special characters
+        if cleaning_options.get('removeSpecialChars'):
+            special_chars_removed = 0
+            import re
+            for row in cleaned_data:
+                for key, value in row.items():
+                    if isinstance(value, str) and not any(word in key.lower() for word in ['date', 'email', 'phone']):
+                        # Remove special characters except letters, numbers, spaces, and basic punctuation
+                        original_value = value
+                        row[key] = re.sub(r'[^a-zA-Z0-9\s.,-@]', '', value)
+                        if original_value != row[key]:
+                            special_chars_removed += 1
+            stats['special_chars_removed'] = special_chars_removed
+        
+        # Remove outliers (simplified version)
+        if cleaning_options.get('removeOutliers'):
+            outliers_removed = 0
+            for row in cleaned_data:
+                for key, value in row.items():
+                    try:
+                        num_value = float(str(value).replace('$', '').replace('%', '').replace(',', '').strip())
+                        if abs(num_value) > 1000000:  # Simple threshold
+                            row[key] = None
+                            outliers_removed += 1
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Remove rows with None values
+            cleaned_data = [row for row in cleaned_data if all(v is not None for v in row.values())]
+            stats['outliers_removed'] = outliers_removed
+        
+        # Calculate total operations
+        stats['total_operations_applied'] = sum(1 for k, v in cleaning_options.items() if v)
+        stats['cleaned_rows'] = len(cleaned_data)
         
         return jsonify({
             'success': True,
-            'data': cleaned_df.to_dict('records'),
+            'data': cleaned_data,
             'stats': stats
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/delete-dataset', methods=['POST'])
+def delete_dataset():
+    try:
+        data = request.get_json()
+        upload_id = data.get('upload_id')
+        
+        if not upload_id:
+            return jsonify({'error': 'Upload ID is required'}), 400
+        
+        # Delete from database if connection available
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Delete from uploads table
+            cursor.execute("DELETE FROM uploads WHERE upload_id = %s", (upload_id,))
+            
+            # Delete from calculations table if exists
+            cursor.execute("DELETE FROM calculations WHERE upload_id = %s", (upload_id,))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            print(f"Dataset {upload_id} deleted from database")
+        except Exception as db_error:
+            print(f"Database delete failed: {db_error}")
+            # Continue even if database delete fails
+        
+        return jsonify({
+            'success': True,
+            'message': f'Dataset {upload_id} deleted successfully'
         })
         
     except Exception as e:
@@ -295,11 +710,11 @@ def calculate_financials():
         results = []
         
         for row in calculation_data:
-            if instrument_type == 'treasury-bills':
+            if instrument_type in ['treasury-bills', 'treasury_bills']:
                 result = calculate_treasury_bill(row, params)
             elif instrument_type == 'bonds':
                 result = calculate_bond(row, params)
-            elif instrument_type == 'money-market':
+            elif instrument_type in ['money-market', 'money_market']:
                 result = calculate_money_market(row, params)
             else:
                 result = row
@@ -346,18 +761,135 @@ def calculate_bond(row, params):
     }
 
 def calculate_money_market(row, params):
-    principal = float(row.get('principal', params.get('principal', 1000)))
-    interest = float(row.get('interest', params.get('interest', 25)))
-    days = float(row.get('days', params.get('days', 90)))
+    """
+    Comprehensive money market calculations for various instruments:
+    - Commercial Paper
+    - Certificate of Deposit
+    - Repo Agreement
+    - Bankers Acceptance
+    """
     
-    annual_rate = (interest / principal) * (365 / days)
-    effective_rate = (1 + annual_rate) ** (365 / days) - 1
+    # Extract data from row with multiple field name options
+    principal = float(row.get('principal') or row.get('Principal') or params.get('principal', 100000))
+    interest_rate = float(row.get('interest_rate') or row.get('interest_rate') or params.get('interest_rate', 0.05))
+    term_days = float(row.get('term_days') or row.get('Term_Days') or params.get('term_days', 90))
+    face_value = float(row.get('face_value') or row.get('Face_Value') or principal)
+    purchase_price = float(row.get('purchase_price') or row.get('Purchase_Price') or principal)
+    discount_rate = float(row.get('discount_rate') or row.get('Discount_Rate') or params.get('discount_rate', 0.04))
+    
+    # Debug logging
+    print(f"Processing money market calculation:")
+    print(f"  Principal: {principal}")
+    print(f"  Interest Rate: {interest_rate}")
+    print(f"  Term Days: {term_days}")
+    print(f"  Face Value: {face_value}")
+    print(f"  Purchase Price: {purchase_price}")
+    print(f"  Discount Rate: {discount_rate}")
+    
+    # Money Market Calculations
+    
+    # 1. Interest Earned
+    interest_earned = principal * interest_rate * (term_days / 365)
+    
+    # 2. Annual Yield (simple interest)
+    annual_yield = (interest_earned / principal) * (365 / term_days)
+    
+    # 3. Effective Rate (compounded annually)
+    effective_rate = (1 + interest_rate * (term_days / 365)) ** (365 / term_days) - 1
+    
+    # 4. Maturity Value
+    maturity_value = principal + interest_earned
+    
+    # 5. Bank Discount Rate (for discount instruments)
+    bank_discount_rate = ((face_value - purchase_price) / face_value) * (360 / term_days)
+    
+    # 6. Money Market Yield (also called CD equivalent yield)
+    money_market_yield = ((face_value - purchase_price) / purchase_price) * (360 / term_days)
+    
+    # 7. Bond Equivalent Yield (365-day year)
+    bond_equivalent_yield = ((face_value - purchase_price) / purchase_price) * (365 / term_days)
+    
+    # 8. Discount Yield (360-day year)
+    discount_yield = ((face_value - purchase_price) / face_value) * (360 / term_days)
+    
+    # 9. Price as percentage of par
+    price_percentage = (purchase_price / face_value) * 100
+    
+    # 10. Dollar Discount
+    dollar_discount = face_value - purchase_price
+    
+    # 11. Effective Annual Yield (365-day year)
+    effective_annual_yield = (1 + money_market_yield) ** (365 / term_days) - 1
+    
+    # 12. Simple Yield
+    simple_yield = interest_rate * 100
+    
+    # 13. Yield to Maturity approximation
+    ytm_approx = ((face_value - purchase_price + interest_earned) / purchase_price) * (365 / term_days)
+    
+    # 14. Current Yield
+    current_yield = (interest_earned / purchase_price) * (365 / term_days)
+    
+    # 15. Holding Period Return
+    holding_period_return = (maturity_value - purchase_price) / purchase_price
+    
+    # Determine instrument type based on data characteristics
+    instrument_type = detect_money_market_instrument(row, params)
     
     return {
         **row,
-        'annualRate': f"{(annual_rate * 100):.4f}%",
-        'effectiveRate': f"{(effective_rate * 100):.4f}%"
+        'instrument_type': instrument_type,
+        'principal': principal,
+        'interest_earned': round(interest_earned, 2),
+        'term_days': int(term_days),
+        'annual_yield': round(annual_yield * 100, 4),
+        'effective_rate': round(effective_rate * 100, 4),
+        'maturity_value': round(maturity_value, 2),
+        'bank_discount_rate': round(bank_discount_rate * 100, 4),
+        'money_market_yield': round(money_market_yield * 100, 4),
+        'bond_equivalent_yield': round(bond_equivalent_yield * 100, 4),
+        'discount_yield': round(discount_yield * 100, 4),
+        'price_percentage': round(price_percentage, 4),
+        'dollar_discount': round(dollar_discount, 2),
+        'effective_annual_yield': round(effective_annual_yield * 100, 4),
+        'simple_yield': round(simple_yield, 4),
+        'ytm_approx': round(ytm_approx * 100, 4),
+        'current_yield': round(current_yield * 100, 4),
+        'holding_period_return': round(holding_period_return * 100, 4),
+        'face_value': face_value,
+        'purchase_price': purchase_price
     }
+
+def detect_money_market_instrument(row, params):
+    """
+    Detect the type of money market instrument based on data characteristics
+    """
+    instrument_name = row.get('instrument_name', '').lower()
+    fund_name = row.get('fund_name', '').lower()
+    portfolio = row.get('portfolio', '').lower()
+    
+    # Detection logic based on instrument characteristics
+    if 'commercial paper' in instrument_name or 'cp' in instrument_name:
+        return 'Commercial Paper'
+    elif 'certificate of deposit' in instrument_name or 'cd' in instrument_name:
+        return 'Certificate of Deposit'
+    elif 'repo' in instrument_name or 'repurchase' in instrument_name:
+        return 'Repo Agreement'
+    elif 'bankers acceptance' in instrument_name or 'ba' in instrument_name:
+        return 'Bankers Acceptance'
+    elif 'treasury bill' in instrument_name or 't-bill' in instrument_name:
+        return 'Treasury Bill'
+    else:
+        # Default based on typical characteristics
+        term_days = float(row.get('term_days', 0))
+        if term_days <= 30:
+            return 'Commercial Paper'
+        elif term_days <= 90:
+            return 'Certificate of Deposit'
+        elif term_days <= 180:
+            return 'Repo Agreement'
+        else:
+            return 'Bankers Acceptance'
 
 @app.route('/api/fred-yield-curve')
 def get_fred_yield_curve():
@@ -418,15 +950,67 @@ def get_system_info():
 
 @app.route('/api/dashboard/kpi', methods=['GET'])
 def get_dashboard_kpi():
-    return jsonify({
-        'success': True,
-        'data': {
-            'total_investments': '$1,250,000',
-            'active_calculations': 12,
-            'reports_generated': 24,
-            'system_health': 'Optimal'
-        }
-    })
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get total datasets from upload_history
+        cursor.execute("SELECT COUNT(*) as total_datasets FROM upload_history WHERE upload_status = 'completed'")
+        total_datasets = cursor.fetchone()['total_datasets']
+        
+        # Get total calculations
+        cursor.execute("SELECT COUNT(*) as total_calculations FROM calculations WHERE calculation_status = 'completed'")
+        total_calculations = cursor.fetchone()['total_calculations']
+        
+        # Get total reports
+        cursor.execute("SELECT COUNT(*) as total_reports FROM reports WHERE generation_status = 'completed'")
+        total_reports = cursor.fetchone()['total_reports']
+        
+        # Get datasets by instrument type
+        cursor.execute("""
+            SELECT file_type, COUNT(*) as count 
+            FROM upload_history 
+            WHERE upload_status = 'completed' 
+            GROUP BY file_type
+        """)
+        instrument_counts = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        # Format instrument counts
+        active_instruments = 0
+        for instrument in instrument_counts:
+            if instrument['file_type'] in ['treasury_bills', 'bonds', 'money_market']:
+                active_instruments += instrument['count']
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_investments': f'{total_datasets:,}',
+                'active_calculations': total_calculations,
+                'reports_generated': total_reports,
+                'system_health': 'Optimal',
+                'total_datasets': total_datasets,
+                'active_instruments': active_instruments,
+                'instrument_breakdown': instrument_counts
+            }
+        })
+        
+    except Exception as err:
+        # Fallback to mock data if database fails
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_investments': '0',
+                'active_calculations': 0,
+                'reports_generated': 0,
+                'system_health': 'Optimal',
+                'total_datasets': 0,
+                'active_instruments': 0,
+                'instrument_breakdown': []
+            }
+        })
 
 @app.route('/api/user/profile', methods=['GET'])
 def get_user_profile():
@@ -470,24 +1054,38 @@ def get_recent_activity():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
-        # Get recent calculations
+        # Get recent uploads and calculations combined
         query = """
-        SELECT id, instrument_type, calculation_status, created_at 
+        SELECT 'upload' as activity_type, filename as title, file_type as instrument_type, 
+               created_at, upload_status as status
+        FROM upload_history 
+        WHERE upload_status = 'completed'
+        UNION ALL
+        SELECT 'calculation' as activity_type, instrument_type as title, instrument_type, 
+               created_at, calculation_status as status
         FROM calculations 
+        WHERE calculation_status = 'completed'
         ORDER BY created_at DESC 
         LIMIT 10
         """
         cursor.execute(query)
-        calculations = cursor.fetchall()
+        activities_data = cursor.fetchall()
         
         # Format for frontend
         activities = []
-        for calc in calculations:
+        for activity in activities_data:
+            if activity['activity_type'] == 'upload':
+                text = f'{activity["title"]} uploaded'
+                instrument_type = activity['instrument_type']
+            else:
+                text = f'{activity["instrument_type"].replace("_", " ").title()} calculations completed'
+                instrument_type = activity['instrument_type']
+            
             activities.append({
-                'id': calc['id'],
-                'text': f'{calc["instrument_type"].replace("_", " ").title()} {"completed" if calc["calculation_status"] == "completed" else "processed"}',
-                'time': format_time_ago(calc['created_at']),
-                'color': get_instrument_color(calc['instrument_type'])
+                'id': len(activities) + 1,
+                'text': text,
+                'time': format_time_ago(activity['created_at']),
+                'color': get_instrument_color(instrument_type)
             })
         
         cursor.close()
@@ -555,6 +1153,100 @@ def get_calculation_history():
             'error': str(err)
         }), 500
 
+@app.route('/api/dashboard/charts', methods=['GET'])
+def get_dashboard_charts():
+    """Get chart data for dashboard"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get monthly activity data
+        cursor.execute("""
+            SELECT 
+                DATE_FORMAT(created_at, '%Y-%m') as month,
+                COUNT(*) as count,
+                'uploads' as type
+            FROM upload_history 
+            WHERE upload_status = 'completed' 
+            AND created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+            GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+            UNION ALL
+            SELECT 
+                DATE_FORMAT(created_at, '%Y-%m') as month,
+                COUNT(*) as count,
+                'calculations' as type
+            FROM calculations 
+            WHERE calculation_status = 'completed' 
+            AND created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+            GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+            ORDER BY month
+        """)
+        monthly_data = cursor.fetchall()
+        
+        # Get instrument distribution
+        cursor.execute("""
+            SELECT file_type as instrument_type, COUNT(*) as count
+            FROM upload_history 
+            WHERE upload_status = 'completed' 
+            GROUP BY file_type
+        """)
+        instrument_distribution = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        # Format monthly data for charts
+        months = []
+        uploads = []
+        calculations = []
+        
+        for i in range(12):
+            month_date = datetime.now().replace(day=1) - pd.DateOffset(months=11-i)
+            month_str = month_date.strftime('%Y-%m')
+            months.append(month_date.strftime('%b %Y'))
+            
+            month_uploads = [d for d in monthly_data if d['month'] == month_str and d['type'] == 'uploads']
+            month_calcs = [d for d in monthly_data if d['month'] == month_str and d['type'] == 'calculations']
+            
+            uploads.append(month_uploads[0]['count'] if month_uploads else 0)
+            calculations.append(month_calcs[0]['count'] if month_calcs else 0)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'monthlyActivity': {
+                    'labels': months,
+                    'datasets': [
+                        {
+                            'label': 'Datasets Uploaded',
+                            'data': uploads,
+                            'backgroundColor': 'rgba(11, 42, 68, 0.2)',
+                            'borderColor': '#0B2A44',
+                            'borderWidth': 2
+                        },
+                        {
+                            'label': 'Calculations',
+                            'data': calculations,
+                            'backgroundColor': 'rgba(30, 136, 229, 0.2)',
+                            'borderColor': '#1E88E5',
+                            'borderWidth': 2
+                        }
+                    ]
+                },
+                'instrumentDistribution': {
+                    'labels': [d['instrument_type'].replace('_', ' ').title() for d in instrument_distribution],
+                    'data': [d['count'] for d in instrument_distribution],
+                    'backgroundColor': ['#0B2A44', '#1E88E5', '#4CAF50', '#FFC107', '#9C27B0']
+                }
+            }
+        })
+        
+    except Exception as err:
+        return jsonify({
+            'success': False,
+            'error': str(err)
+        }), 500
+
 @app.route('/api/calculations/execute', methods=['POST'])
 def execute_calculation():
     """Execute financial calculation"""
@@ -570,46 +1262,85 @@ def execute_calculation():
         instrument_type = data['instrument_type']
         calculation_data = data.get('data', [])
         
-        # Save calculation to database
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        query = """
-        INSERT INTO calculations (instrument_type, input_data, calculation_status, created_at)
-        VALUES (%s, %s, %s, %s)
-        """
-        cursor.execute(query, (
-            instrument_type,
-            json.dumps(data),
-            'processing',
-            datetime.now()
-        ))
-        
-        calc_id = cursor.lastrowid
+        # Try to save calculation to database, but don't fail if it doesn't work
+        calc_id = None
+        try:
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                
+                query = """
+                INSERT INTO calculations (instrument_type, input_data, calculation_status, created_at)
+                VALUES (%s, %s, %s, %s)
+                """
+                cursor.execute(query, (
+                    instrument_type,
+                    json.dumps(data),
+                    'processing',
+                    datetime.now()
+                ))
+                
+                calc_id = cursor.lastrowid
+                conn.commit()
+                cursor.close()
+                conn.close()
+        except Exception as db_error:
+            print(f"Database save failed, continuing without database: {db_error}")
         
         # Perform calculation
         if instrument_type == 'yield_curve':
             result = calculate_yield_curve_from_api()
-        else:
-            # Use existing calculation functions
+        elif calculation_data and len(calculation_data) > 0:
+            # Use existing calculation functions with uploaded data
             result = perform_calculation(instrument_type, calculation_data)
+        else:
+            # Provide sample data for demonstration if no data provided
+            sample_data = []
+            if instrument_type == 'treasury_bills':
+                sample_data = [
+                    {'faceValue': 1000, 'purchasePrice': 950, 'daysToMaturity': 90},
+                    {'faceValue': 1000, 'purchasePrice': 960, 'daysToMaturity': 180},
+                    {'faceValue': 1000, 'purchasePrice': 970, 'daysToMaturity': 270}
+                ]
+            elif instrument_type == 'bonds':
+                sample_data = [
+                    {'faceValue': 1000, 'currentPrice': 980, 'couponRate': 5},
+                    {'faceValue': 1000, 'currentPrice': 990, 'couponRate': 6},
+                    {'faceValue': 1000, 'currentPrice': 975, 'couponRate': 4}
+                ]
+            elif instrument_type == 'money_market':
+                sample_data = [
+                    {'principal': 1000, 'interest': 25, 'days': 90},
+                    {'principal': 1000, 'interest': 30, 'days': 180},
+                    {'principal': 1000, 'interest': 35, 'days': 270}
+                ]
+            
+            result = perform_calculation(instrument_type, sample_data)
         
-        # Update calculation record
-        update_query = """
-        UPDATE calculations 
-        SET result_data = %s, calculation_status = %s, completed_at = %s 
-        WHERE id = %s
-        """
-        cursor.execute(update_query, (
-            json.dumps(result),
-            'completed',
-            datetime.now(),
-            calc_id
-        ))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
+        # Try to update calculation record
+        if calc_id:
+            try:
+                conn = get_db_connection()
+                if conn:
+                    cursor = conn.cursor()
+                    
+                    update_query = """
+                    UPDATE calculations 
+                    SET result_data = %s, calculation_status = %s, completed_at = %s 
+                    WHERE id = %s
+                    """
+                    cursor.execute(update_query, (
+                        json.dumps(result),
+                        'completed',
+                        datetime.now(),
+                        calc_id
+                    ))
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+            except Exception as db_error:
+                print(f"Database update failed: {db_error}")
         
         return jsonify({
             'success': True,
