@@ -9,9 +9,9 @@
 
       <!-- ACTION BUTTONS -->
       <div class="action-buttons">
-        <v-btn color="primary" @click="loadSampleData">
+        <v-btn color="primary" @click="loadUploadedData">
           <v-icon left>mdi-database</v-icon>
-          Load Sample
+          Load Dataset
         </v-btn>
 
         <v-btn color="secondary" variant="outlined" @click="resetOptions">
@@ -19,9 +19,24 @@
           Reset Options
         </v-btn>
 
-        <v-btn color="error" variant="outlined" @click="clearResults">
+        <v-btn color="success" variant="outlined" @click="showCleanedDataPreview" v-if="cleaningResults">
+          <v-icon left>mdi-eye</v-icon>
+          Show Preview of Cleaned Data
+        </v-btn>
+
+        <v-btn color="error" variant="outlined" @click="deleteDataset" v-if="uploadId">
           <v-icon left>mdi-delete</v-icon>
+          Delete Dataset
+        </v-btn>
+
+        <v-btn color="warning" variant="outlined" @click="clearResults">
+          <v-icon left>mdi-broom</v-icon>
           Clear Results
+        </v-btn>
+
+        <v-btn color="primary" @click="completeProcess" v-if="cleaningResults">
+          <v-icon left>mdi-check</v-icon>
+          Done
         </v-btn>
       </div>
 
@@ -272,15 +287,47 @@
         </v-col>
       </v-row>
 
-      <!-- PREVIEW -->
-      <v-card v-if="cleaningResults" class="stats-card">
-        <v-card-title>Preview</v-card-title>
+      <!-- CLEANED DATA PREVIEW -->
+      <v-card v-if="cleaningResults" class="stats-card cleaned-data-preview" elevation="3">
+        <v-card-title class="card-title">
+          <v-icon class="title-icon">mdi-table-eye</v-icon>
+          Cleaned Data Preview
+          <v-spacer></v-spacer>
+          <v-chip color="success" size="small">
+            {{ cleaningResults.cleanedRows }} rows
+          </v-chip>
+        </v-card-title>
 
-        <v-data-table
-          :headers="getTableHeaders()"
-          :items="getPreviewData()"
-          density="compact"
-        />
+        <v-card-text>
+          <v-alert type="info" class="mb-4">
+            <strong>Preview of your cleaned dataset:</strong> Showing first 10 rows of {{ cleaningResults.cleanedRows }} cleaned rows.
+            <br>
+            <small>Original: {{ cleaningResults.originalRows }} rows → Cleaned: {{ cleaningResults.cleanedRows }} rows</small>
+          </v-alert>
+
+          <v-data-table
+            :headers="getTableHeaders()"
+            :items="getPreviewData()"
+            density="compact"
+            class="preview-table"
+            :loading="cleaning"
+            items-per-page="10"
+            :items-per-page-options="[5, 10, 25, 50]"
+          >
+            <template v-slot:top>
+              <v-toolbar flat color="transparent">
+                <v-toolbar-title class="text-subtitle-1">
+                  Dataset Columns: {{ Object.keys(uploadedData.value?.data?.[0] || {}).length }}
+                </v-toolbar-title>
+                <v-spacer></v-spacer>
+                <v-btn color="primary" variant="outlined" size="small" @click="exportCleanedData">
+                  <v-icon left>mdi-download</v-icon>
+                  Export
+                </v-btn>
+              </v-toolbar>
+            </template>
+          </v-data-table>
+        </v-card-text>
       </v-card>
 
     </div>
@@ -291,12 +338,19 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
+import { dataAPI } from '../services/api'
+import { useDataset } from '../composables/useDataset'
 
 const router = useRouter()
+
+// Use dataset composable for global state
+const { datasetInfo, hasDataset, loadDataset, saveDataset, clearDataset } = useDataset()
 
 const uploadedData = ref(null)
 const cleaning = ref(false)
 const cleaningResults = ref(null)
+const uploadId = ref(null)
+const datasetPersisted = ref(true)
 
 const rowsValue = computed(() => uploadedData.value?.data?.length || 0)
 const columnsValue = computed(() => getColumnCount())
@@ -378,13 +432,43 @@ const cleaningOptions = ref([
 ])
 
 onMounted(() => {
-  const data = localStorage.getItem('uploadedData')
-  if (data) uploadedData.value = JSON.parse(data)
+  loadUploadedData()
 })
 
 const isAnyOptionSelected = computed(() =>
   cleaningOptions.value.some(o => o.value)
 )
+
+const loadUploadedData = async () => {
+  try {
+    // Use dataset composable to load data
+    loadDataset()
+    
+    // Get the current dataset from localStorage
+    const storedData = localStorage.getItem('currentDataset')
+    if (storedData) {
+      const dataset = JSON.parse(storedData)
+      uploadedData.value = dataset
+      uploadId.value = dataset.upload_id
+      console.log('Loaded uploaded dataset from composable:', dataset)
+    } else {
+      // Fallback to uploadedDataset key if currentDataset not found
+      const fallbackData = localStorage.getItem('uploadedDataset')
+      if (fallbackData) {
+        const dataset = JSON.parse(fallbackData)
+        uploadedData.value = dataset
+        uploadId.value = dataset.upload_id
+        console.log('Loaded uploaded dataset from fallback:', dataset)
+      } else {
+        console.log('No uploaded dataset found, loading sample data')
+        loadSampleData()
+      }
+    }
+  } catch (error) {
+    console.error('Error loading uploaded dataset:', error)
+    loadSampleData()
+  }
+}
 
 const loadSampleData = () => {
   uploadedData.value = {
@@ -402,39 +486,65 @@ const clearResults = () => {
   cleaningResults.value = null
 }
 
-const performCleaning = () => {
+const deleteDataset = async () => {
+  if (!uploadId.value) {
+    console.error('No upload ID available for deletion')
+    return
+  }
+
+  try {
+    const response = await dataAPI.deleteDataset(uploadId.value)
+    
+    if (response.success) {
+      console.log('Dataset deleted successfully')
+      // Clear localStorage
+      localStorage.removeItem('uploadedDataset')
+      // Reset data
+      uploadedData.value = null
+      uploadId.value = null
+      cleaningResults.value = null
+      datasetPersisted.value = false
+    } else {
+      console.error('Failed to delete dataset:', response)
+    }
+  } catch (error) {
+    console.error('Error deleting dataset:', error)
+  }
+}
+
+const performCleaning = async () => {
+  if (!uploadedData.value?.data) {
+    console.error('No data available for cleaning')
+    return
+  }
+
   cleaning.value = true
 
-  setTimeout(()=>{
-    const originalRows = uploadedData.value?.data.length || 0
-    const selectedOptions = cleaningOptions.value.filter(o => o.value)
+  try {
+    // Prepare cleaning options
+    const options = {}
+    cleaningOptions.value.forEach(option => {
+      if (option.value) {
+        options[option.key] = true
+      }
+    })
+
+    // Call the cleaning API
+    const response = await dataAPI.clean(uploadedData.value.data, options)
     
-    cleaningResults.value = {
-      originalRows: originalRows,
-      cleanedRows: Math.max(0, originalRows - selectedOptions.length * 2),
-      duplicatesRemoved: selectedOptions.find(o => o.key === 'removeDuplicates') ? 2 : 0,
-      missingValuesFilled: selectedOptions.find(o => o.key === 'fillMissingValues') ? 3 : 0,
-      outliersRemoved: selectedOptions.find(o => o.key === 'removeOutliers') ? 1 : 0,
-      emptyRowsRemoved: selectedOptions.find(o => o.key === 'removeEmptyRows') ? 1 : 0,
-      textStandardized: selectedOptions.find(o => o.key === 'standardizeText') ? 5 : 0,
-      whitespaceTrimmed: selectedOptions.find(o => o.key === 'trimWhitespace') ? 8 : 0,
-      numbersNormalized: selectedOptions.find(o => o.key === 'normalizeNumbers') ? 4 : 0,
-      datesFormatted: selectedOptions.find(o => o.key === 'formatDates') ? 2 : 0,
-      emailsValidated: selectedOptions.find(o => o.key === 'validateEmails') ? 1 : 0,
-      dataTypesConverted: selectedOptions.find(o => o.key === 'convertDataTypes') ? 3 : 0,
-      currencyStandardized: selectedOptions.find(o => o.key === 'standardizeCurrency') ? 2 : 0,
-      percentagesNormalized: selectedOptions.find(o => o.key === 'normalizePercentages') ? 1 : 0,
-      rangesValidated: selectedOptions.find(o => o.key === 'validateRanges') ? 2 : 0,
-      consistencyChecked: selectedOptions.find(o => o.key === 'checkConsistency') ? 1 : 0,
-      patternsValidated: selectedOptions.find(o => o.key === 'validatePatterns') ? 1 : 0,
-      specialCharsRemoved: selectedOptions.find(o => o.key === 'removeSpecialChars') ? 3 : 0,
-      phonesStandardized: selectedOptions.find(o => o.key === 'standardizePhoneNumbers') ? 1 : 0,
-      addressesNormalized: selectedOptions.find(o => o.key === 'normalizeAddresses') ? 1 : 0,
-      postalCodesCleaned: selectedOptions.find(o => o.key === 'cleanPostalCodes') ? 1 : 0,
-      totalOperationsApplied: selectedOptions.length
+    if (response.success) {
+      cleaningResults.value = response.stats
+      // Update the uploaded data with cleaned data
+      uploadedData.value.data = response.data
+      console.log('Cleaning completed successfully:', response.stats)
+    } else {
+      console.error('Cleaning failed:', response)
     }
+  } catch (error) {
+    console.error('Error during cleaning:', error)
+  } finally {
     cleaning.value = false
-  },1500)
+  }
 }
 
 const getColumnCount = () =>
@@ -449,6 +559,72 @@ const getTableHeaders = () => {
 
 const getPreviewData = () =>
   uploadedData.value?.data.slice(0,10) || []
+
+const showCleanedDataPreview = () => {
+  // Scroll to the preview section
+  const previewSection = document.querySelector('.cleaned-data-preview')
+  if (previewSection) {
+    previewSection.scrollIntoView({ behavior: 'smooth' })
+  }
+}
+
+const exportCleanedData = () => {
+  if (!uploadedData.value?.data) {
+    alert('No data to export')
+    return
+  }
+
+  try {
+    // Convert data to CSV
+    const headers = Object.keys(uploadedData.value.data[0])
+    const csvContent = [
+      headers.join(','),
+      ...uploadedData.value.data.map(row => 
+        headers.map(header => {
+          const value = row[header]
+          // Handle values with commas by wrapping in quotes
+          if (typeof value === 'string' && value.includes(',')) {
+            return `"${value}"`
+          }
+          return value
+        }).join(',')
+      )
+    ].join('\n')
+
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `cleaned_dataset_${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Error exporting data:', error)
+    alert('Error exporting data')
+  }
+}
+
+const completeProcess = () => {
+  // Save the final cleaned data to localStorage for all pages
+  const finalData = {
+    ...uploadedData.value,
+    cleaningResults: cleaningResults.value,
+    timestamp: new Date().toISOString()
+  }
+  
+  // Save to multiple localStorage keys for persistence across pages
+  localStorage.setItem('finalCleanedData', JSON.stringify(finalData))
+  localStorage.setItem('currentDataset', JSON.stringify(finalData)) // For other pages
+  localStorage.setItem('datasetStatus', 'completed') // Status indicator
+  
+  // Show completion message
+  alert('Process completed successfully! Your cleaned data has been saved and is available on all pages.')
+  
+  console.log('Process completed:', finalData)
+}
 
 const proceedToCalculations = () => {
   localStorage.setItem('cleanedData', JSON.stringify({
@@ -701,9 +877,46 @@ const proceedToCalculations = () => {
 .cleaning-options-container {
   max-height: 400px;
   overflow-y: auto;
-  padding-right: 8px;
 }
 
+/* Enhanced cleaned data preview */
+.cleaned-data-preview {
+  border: 2px solid rgba(76, 175, 80, 0.3);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.15);
+}
+
+.cleaned-data-preview .v-card-title {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.05) 100%);
+  border-bottom: 2px solid rgba(76, 175, 80, 0.2);
+}
+
+.preview-table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.preview-table :deep(.v-data-table__thead) {
+  background: linear-gradient(135deg, #0B2A44 0%, #1a3a5a 100%);
+}
+
+.preview-table :deep(.v-data-table__thead th) {
+  color: white !important;
+  font-weight: 600 !important;
+}
+
+/* Action buttons styling */
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+
+.action-buttons .v-btn {
+  min-width: 140px;
+}
+
+/* Scrollbar styling */
 .cleaning-options-container::-webkit-scrollbar {
   width: 6px;
 }
@@ -714,12 +927,12 @@ const proceedToCalculations = () => {
 }
 
 .cleaning-options-container::-webkit-scrollbar-thumb {
-  background: rgba(11, 42, 68, 0.3);
+  background: rgba(11, 42, 68, 0.2);
   border-radius: 3px;
 }
 
 .cleaning-options-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(11, 42, 68, 0.5);
+  background: rgba(11, 42, 68, 0.3);
 }
 
 /* Enhanced checkbox styling */

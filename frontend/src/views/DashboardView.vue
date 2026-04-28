@@ -101,7 +101,7 @@
         </v-col>
       </v-row>
 
-      <!-- Charts Section - Backend Data Required -->
+      <!-- Charts Section - Real Data -->
       <v-row class="charts-section">
         <v-col cols="12" md="8">
           <v-card class="chart-card" elevation="2">
@@ -110,14 +110,13 @@
               Monthly Activity Trends
             </v-card-title>
             <v-card-text>
-              <v-alert type="info" variant="tonal" class="mb-4">
-                <v-icon left>mdi-database</v-icon>
-                Chart requires backend data connection
-              </v-alert>
-              <div class="chart-placeholder">
+              <div v-if="chartData && chartData.monthlyActivity" class="chart-container">
+                <canvas ref="monthlyChart" width="400" height="200"></canvas>
+              </div>
+              <div v-else class="chart-placeholder">
                 <v-icon size="64" color="#0B2A44">mdi-chart-line</v-icon>
-                <p class="placeholder-text">Monthly activity trends will display here when connected to backend</p>
-                <p class="placeholder-subtitle">Expected data: Monthly datasets, calculations, and reports</p>
+                <p class="placeholder-text">Loading monthly activity trends...</p>
+                <p class="placeholder-subtitle">Upload datasets to see activity trends</p>
               </div>
             </v-card-text>
           </v-card>
@@ -129,14 +128,13 @@
               Instrument Distribution
             </v-card-title>
             <v-card-text>
-              <v-alert type="info" variant="tonal" class="mb-4">
-                <v-icon left>mdi-database</v-icon>
-                Chart requires backend data connection
-              </v-alert>
-              <div class="chart-placeholder">
+              <div v-if="chartData && chartData.instrumentDistribution" class="chart-container">
+                <canvas ref="pieChart" width="200" height="200"></canvas>
+              </div>
+              <div v-else class="chart-placeholder">
                 <v-icon size="48" color="#1E88E5">mdi-chart-pie</v-icon>
-                <p class="placeholder-text">Instrument distribution will display here when connected to backend</p>
-                <p class="placeholder-subtitle">Expected data: Treasury Bills, Bonds, Money Market</p>
+                <p class="placeholder-text">Loading instrument distribution...</p>
+                <p class="placeholder-subtitle">Upload datasets to see distribution</p>
               </div>
             </v-card-text>
           </v-card>
@@ -289,10 +287,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { dashboardAPI, calculationsAPI } from '../services/api'
 import FixedLayout from '../components/FixedLayout.vue'
+import { Chart, registerables } from 'chart.js'
+
+// Register Chart.js components
+Chart.register(...registerables)
 
 const router = useRouter()
 
@@ -404,6 +406,11 @@ const quickActions = ref([
 
 const recentActivities = ref<any[]>([])
 const yieldCurveData = ref<any>(null)
+const chartData = ref<any>(null)
+const monthlyChart = ref<HTMLCanvasElement | null>(null)
+const pieChart = ref<HTMLCanvasElement | null>(null)
+let monthlyChartInstance: Chart | null = null
+let pieChartInstance: Chart | null = null
 
 // Load data from backend
 const loadDashboardData = async () => {
@@ -412,10 +419,22 @@ const loadDashboardData = async () => {
     const kpiResponse = await dashboardAPI.getKPI()
     if (kpiResponse.success) {
       // Update KPI data with real values
-      kpiData.value[0].value = kpiResponse.data.total_investments
-      kpiData.value[1].value = kpiResponse.data.active_calculations
-      kpiData.value[2].value = kpiResponse.data.reports_generated
-      kpiData.value[3].value = kpiResponse.data.system_health
+      kpiData.value[0].value = kpiResponse.data.total_datasets || 0
+      kpiData.value[1].value = kpiResponse.data.active_calculations || 0
+      kpiData.value[2].value = kpiResponse.data.reports_generated || 0
+      kpiData.value[3].value = kpiResponse.data.active_instruments || 0
+      
+      // Update instrument counts
+      if (kpiResponse.data.instrument_breakdown) {
+        kpiResponse.data.instrument_breakdown.forEach(instrument => {
+          const instrumentIndex = instruments.value.findIndex(
+            inst => inst.name.toLowerCase().replace(' ', '_') === instrument.file_type
+          )
+          if (instrumentIndex !== -1) {
+            instruments.value[instrumentIndex].count = instrument.count
+          }
+        })
+      }
     }
 
     // Load recent activity
@@ -429,8 +448,90 @@ const loadDashboardData = async () => {
     if (yieldCurveResponse.success) {
       yieldCurveData.value = yieldCurveResponse.data
     }
+
+    // Load chart data
+    const chartsResponse = await dashboardAPI.getCharts()
+    if (chartsResponse.success) {
+      chartData.value = chartsResponse.data
+      // Render charts after data is loaded
+      await nextTick()
+      renderCharts()
+    }
   } catch (error) {
     console.error('Error loading dashboard data:', error)
+  }
+}
+
+// Render charts using Chart.js
+const renderCharts = () => {
+  // Destroy existing charts
+  if (monthlyChartInstance) {
+    monthlyChartInstance.destroy()
+  }
+  if (pieChartInstance) {
+    pieChartInstance.destroy()
+  }
+
+  // Render monthly activity chart
+  if (monthlyChart.value && chartData.value?.monthlyActivity) {
+    const ctx = monthlyChart.value.getContext('2d')
+    if (ctx) {
+      monthlyChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: chartData.value.monthlyActivity.labels,
+          datasets: chartData.value.monthlyActivity.datasets
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+            },
+            title: {
+              display: false
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      })
+    }
+  }
+
+  // Render instrument distribution pie chart
+  if (pieChart.value && chartData.value?.instrumentDistribution) {
+    const ctx = pieChart.value.getContext('2d')
+    if (ctx) {
+      pieChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: chartData.value.instrumentDistribution.labels,
+          datasets: [{
+            data: chartData.value.instrumentDistribution.data,
+            backgroundColor: chartData.value.instrumentDistribution.backgroundColor,
+            borderWidth: 2,
+            borderColor: '#fff'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+            },
+            title: {
+              display: false
+            }
+          }
+        }
+      })
+    }
   }
 }
 
@@ -577,6 +678,16 @@ const navigateTo = (route: string) => {
 // Load data when component mounts
 onMounted(() => {
   loadDashboardData()
+})
+
+// Cleanup charts on unmount
+onUnmounted(() => {
+  if (monthlyChartInstance) {
+    monthlyChartInstance.destroy()
+  }
+  if (pieChartInstance) {
+    pieChartInstance.destroy()
+  }
 })
 </script>
 
@@ -795,6 +906,25 @@ onMounted(() => {
 .chart-card {
   border-radius: 12px;
   height: 100%;
+}
+
+.chart-placeholder {
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  background: rgba(11, 42, 68, 0.02);
+  border-radius: 8px;
+  border: 2px dashed rgba(11, 42, 68, 0.1);
+}
+
+.chart-container {
+  height: 300px;
+  width: 100%;
+  position: relative;
 }
 
 .chart-placeholder {

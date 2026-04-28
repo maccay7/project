@@ -5,6 +5,8 @@ const API_BASE_URL = 'http://localhost:5000'
 const apiRequest = async (endpoint, options = {}) => {
   try {
     const url = `${API_BASE_URL}${endpoint}`
+    console.log('apiRequest called:', endpoint, options.method || 'GET')
+    
     const config = {
       headers: {
         'Content-Type': 'application/json',
@@ -13,8 +15,12 @@ const apiRequest = async (endpoint, options = {}) => {
       ...options
     }
 
+    console.log('Making fetch request to:', url)
     const response = await fetch(url, config)
     const data = await response.json()
+
+    console.log('API response status:', response.status)
+    console.log('API response data:', data)
 
     if (!response.ok) {
       throw new Error(data.message || `HTTP error! status: ${response.status}`)
@@ -49,6 +55,10 @@ export const dashboardAPI = {
   
   getYieldCurve: async () => {
     return await apiRequest('/api/fred-yield-curve')
+  },
+  
+  getCharts: async () => {
+    return await apiRequest('/api/dashboard/charts')
   }
 }
 
@@ -95,15 +105,22 @@ export const systemAPI = {
 // Data Operations API
 export const dataAPI = {
   upload: async (file, instrumentType) => {
+    console.log('dataAPI.upload called with:', file?.name, instrumentType)
+    
     const formData = new FormData()
     formData.append('file', file)
     formData.append('instrument_type', instrumentType)
     
-    return await apiRequest('/api/upload', {
+    console.log('FormData created, making API request...')
+    
+    const response = await apiRequest('/api/upload', {
       method: 'POST',
       headers: {}, // Remove content-type to let browser set it for FormData
       body: formData
     })
+    
+    console.log('dataAPI.upload response:', response)
+    return response
   },
   
   clean: async (data, options) => {
@@ -120,6 +137,25 @@ export const dataAPI = {
         data, 
         instrument_type: instrumentType, 
         params 
+      })
+    })
+  },
+  
+  clean: async (data, options) => {
+    return await apiRequest('/api/clean', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        data, 
+        options 
+      })
+    })
+  },
+  
+  deleteDataset: async (uploadId) => {
+    return await apiRequest('/api/delete-dataset', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        upload_id: uploadId 
       })
     })
   }

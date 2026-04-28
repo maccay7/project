@@ -268,7 +268,7 @@ const reportSections = ref([
 ])
 
 onMounted(() => {
-  const stored = localStorage.getItem('visualizationData')
+  const stored = localStorage.getItem('calculations')
   if (stored) visualizationData.value = JSON.parse(stored)
 })
 

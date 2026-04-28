@@ -370,11 +370,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
+import { dataAPI } from '../services/api'
+import { useDataset } from '../composables/useDataset'
 
 const router = useRouter()
+
+// Use dataset composable for global state
+const { datasetInfo, hasDataset, loadDataset } = useDataset()
 
 const calculations = ref([])
 const calculating = ref(false)
@@ -383,8 +388,8 @@ const activeTab = ref('treasury')
 const selectedTreasury = ref(null)
 const selectedTreasuryBill = ref(null)
 
-const recordsValue = computed(() => 0)
-const instrumentTypeValue = computed(() => 'None')
+const recordsValue = computed(() => datasetInfo.value?.rows || 0)
+const instrumentTypeValue = computed(() => datasetInfo.value?.instrumentType || 'None')
 const calculationsCountValue = computed(() => calculations.value.length)
 const avgYieldValue = computed(() => getAverageYield() + '%')
 
@@ -559,8 +564,269 @@ const moneyMarketCalculations = ref([
   }
 ])
 
-const loadSampleData = () => {
-  calculations.value = [{ id:1, yieldRate:'5.2%' }]
+onMounted(() => {
+  loadCleanedData()
+  // Also automatically trigger calculations to ensure data is displayed
+  setTimeout(() => {
+    if (moneyMarketCalculations.value[0].principal === 0) {
+      console.log('No calculations displayed, triggering sample data load')
+      loadSampleData()
+    }
+  }, 1000)
+})
+
+const loadCleanedData = async () => {
+  try {
+    // Load dataset from composable
+    loadDataset()
+    
+    // Get the cleaned dataset from localStorage
+    const storedData = localStorage.getItem('finalCleanedData') || localStorage.getItem('currentDataset') || localStorage.getItem('uploadedDataset')
+    
+    if (storedData) {
+      const dataset = JSON.parse(storedData)
+      cleanedData.value = dataset
+      console.log('Loaded cleaned dataset:', dataset)
+      
+      // Perform calculations using the backend API
+      await performCalculations(dataset.data)
+    } else {
+      console.log('No cleaned dataset found, using sample data')
+      loadSampleData()
+    }
+  } catch (error) {
+    console.error('Error loading cleaned data:', error)
+    loadSampleData()
+  }
+}
+
+const performCalculations = async (data) => {
+  if (!data || data.length === 0) {
+    console.log('No data available for calculations')
+    return
+  }
+
+  calculating.value = true
+  
+  try {
+    // Default to money market for comprehensive calculations
+    const instrumentType = 'money_market'
+    
+    console.log('Performing calculations with instrument type:', instrumentType)
+    console.log('Data length:', data.length)
+    
+    // Call the backend calculate API with money market instrument type
+    const response = await dataAPI.calculate(data, instrumentType, {})
+    
+    if (response.success) {
+      calculations.value = response.calculations || []
+      console.log('Calculations completed:', response.calculations)
+      
+      // Save calculations to localStorage for visualizations
+      localStorage.setItem('calculations', JSON.stringify({
+        success: true,
+        calculations: response.calculations,
+        instrumentType: 'money_market',
+        timestamp: new Date().toISOString()
+      }))
+      
+      // Update all calculation types with real data
+      if (response.calculations && response.calculations.length > 0) {
+        console.log('Updating calculation displays with real data')
+        updateTreasuryCalculations(response.calculations)
+        updateMoneyMarketCalculations(response.calculations)
+        updateBondCalculations(response.calculations)
+      } else {
+        console.log('No calculation data returned from backend')
+      }
+    } else {
+      console.error('Calculations failed:', response)
+    }
+    
+    // Also fetch yield curve data
+    await fetchYieldCurveData()
+    
+  } catch (error) {
+    console.error('Error during calculations:', error)
+  } finally {
+    calculating.value = false
+  }
+}
+
+const fetchYieldCurveData = async () => {
+  try {
+    console.log('Fetching yield curve data from FRED API...')
+    const response = await fetch('http://localhost:5000/api/fred-yield-curve')
+    const data = await response.json()
+    
+    if (data.success && data.data) {
+      console.log('Yield curve data fetched:', data.data)
+      // Store yield curve data for display
+      yieldCurveData.value = data.data
+      
+      // Update calculations with yield curve assisted values
+      updateCalculationsWithYieldCurve(data.data)
+    } else {
+      console.log('Yield curve data not available, using fallback')
+    }
+  } catch (error) {
+    console.error('Error fetching yield curve data:', error)
+  }
+}
+
+const updateCalculationsWithYieldCurve = (yieldCurveData) => {
+  // Update calculations to show yield curve assisted values
+  if (yieldCurveData && yieldCurveData.current) {
+    console.log('Updating calculations with yield curve data')
+    
+    // Update treasury calculations with yield curve rates
+    if (treasuryCalculations.value.length > 0 && yieldCurveData.current.length > 0) {
+      treasuryCalculations.value.forEach((calc, index) => {
+        if (index < yieldCurveData.current.length) {
+          calc.discountYield = yieldCurveData.current[index] || calc.discountYield
+          calc.bondEquivalentYield = yieldCurveData.current[index] || calc.bondEquivalentYield
+        }
+      })
+    }
+  }
+}
+
+const yieldCurveData = ref(null)
+
+const updateTreasuryCalculations = (calculationResults) => {
+  // Update treasury calculations with real data from backend
+  if (calculationResults.length > 0) {
+    const firstCalc = calculationResults[0]
+    
+    // Update the first treasury bill with real data
+    if (treasuryCalculations.value.length > 0) {
+      treasuryCalculations.value[0] = {
+        ...treasuryCalculations.value[0],
+        faceValue: firstCalc.face_value || 1000,
+        purchasePrice: firstCalc.purchase_price || 950,
+        daysToMaturity: firstCalc.term_days || 91,
+        discountYield: firstCalc.discount_yield || 5.2,
+        bondEquivalentYield: firstCalc.bond_equivalent_yield || 5.3
+      }
+    }
+  }
+}
+
+const updateMoneyMarketCalculations = (calculationResults) => {
+  // Update money market calculations with real data from backend
+  if (calculationResults.length > 0) {
+    // Group calculations by instrument type
+    const groupedCalculations = calculationResults.reduce((groups, calc) => {
+      const instrumentType = calc.instrument_type || 'Unknown'
+      if (!groups[instrumentType]) {
+        groups[instrumentType] = []
+      }
+      groups[instrumentType].push(calc)
+      return groups
+    }, {})
+    
+    // Update money market calculations with real data
+    const moneyMarketTypes = ['Commercial Paper', 'Certificate of Deposit', 'Repo Agreement', 'Bankers Acceptance']
+    
+    moneyMarketTypes.forEach((instrumentType, index) => {
+      if (groupedCalculations[instrumentType] && groupedCalculations[instrumentType].length > 0) {
+        const calcData = groupedCalculations[instrumentType][0] // Use first calculation of this type
+        
+        if (moneyMarketCalculations.value[index]) {
+          moneyMarketCalculations.value[index] = {
+            ...moneyMarketCalculations.value[index],
+            principal: calcData.principal || 100000,
+            interestEarned: calcData.interest_earned || 0,
+            termDays: calcData.term_days || 90,
+            annualYield: calcData.annual_yield || 0,
+            effectiveRate: calcData.effective_rate || 0,
+            maturityValue: calcData.maturity_value || 0
+          }
+        }
+      } else {
+        // If no specific instrument data, use first available calculation
+        if (calculationResults.length > index && moneyMarketCalculations.value[index]) {
+          const calcData = calculationResults[index]
+          moneyMarketCalculations.value[index] = {
+            ...moneyMarketCalculations.value[index],
+            principal: calcData.principal || 100000,
+            interestEarned: calcData.interest_earned || 0,
+            termDays: calcData.term_days || 90,
+            annualYield: calcData.annual_yield || 0,
+            effectiveRate: calcData.effective_rate || 0,
+            maturityValue: calcData.maturity_value || 0
+          }
+        }
+      }
+    })
+    
+    console.log('Updated money market calculations:', moneyMarketCalculations.value)
+  }
+}
+
+const updateBondCalculations = (calculationResults) => {
+  // Update bond calculations with real data from backend
+  if (calculationResults.length > 0) {
+    const firstCalc = calculationResults[0]
+    
+    // Update bond calculations with real data
+    if (bondCalculations.value.length > 0) {
+      bondCalculations.value.forEach((bond, index) => {
+        bondCalculations.value[index] = {
+          ...bondCalculations.value[index],
+          faceValue: firstCalc.face_value || 1000,
+          currentPrice: firstCalc.purchase_price || 980,
+          couponRate: 5.0, // Default coupon rate
+          yieldToMaturity: firstCalc.ytm_approx || 5.2,
+          currentYield: firstCalc.current_yield || 5.1,
+          duration: 10.0 // Default duration
+        }
+      })
+    }
+  }
+}
+
+const loadSampleData = async () => {
+  console.log('Loading sample data for calculations')
+  
+  // Create sample money market data that will trigger real calculations
+  const sampleData = [
+    {
+      instrument_name: 'Commercial Paper',
+      principal: 100000,
+      interest_rate: 0.045,
+      term_days: 30,
+      face_value: 100000,
+      purchase_price: 99625
+    },
+    {
+      instrument_name: 'Certificate of Deposit',
+      principal: 50000,
+      interest_rate: 0.052,
+      term_days: 90,
+      face_value: 50000,
+      purchase_price: 50000
+    },
+    {
+      instrument_name: 'Repo Agreement',
+      principal: 250000,
+      interest_rate: 0.048,
+      term_days: 180,
+      face_value: 250000,
+      purchase_price: 250000
+    },
+    {
+      instrument_name: 'Bankers Acceptance',
+      principal: 75000,
+      interest_rate: 0.041,
+      term_days: 270,
+      face_value: 75000,
+      purchase_price: 74775
+    }
+  ]
+  
+  // Trigger real calculations with sample data
+  await performCalculations(sampleData)
 }
 
 const clearCalculations = () => {
