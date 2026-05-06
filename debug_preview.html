@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Preview Function</title>
+</head>
+<body>
+    <h1>Debug Preview Function</h1>
+    <p>Open browser console (F12) and click the eye icon in the upload page to see debug messages.</p>
+    
+    <h2>What to look for in console:</h2>
+    <ul>
+        <li><strong>previewFile called with index:</strong> - Should show when eye icon is clicked</li>
+        <li><strong>uploadedFiles:</strong> - Should show the uploaded files array</li>
+        <li><strong>Selected file:</strong> - Should show the file being processed</li>
+        <li><strong>dataAPI.upload called with:</strong> - Should show the API call details</li>
+        <li><strong>apiRequest called:</strong> - Should show the HTTP request details</li>
+        <li><strong>API response status:</strong> - Should show 200 for success</li>
+        <li><strong>API response data:</strong> - Should show the returned data</li>
+        <li><strong>Preview data loaded:</strong> - Should show number of rows loaded</li>
+    </ul>
+    
+    <h2>Common Issues:</h2>
+    <ul>
+        <li><strong>No console messages:</strong> - Eye icon click event not working</li>
+        <li><strong>CORS errors:</strong> - Backend not running or CORS issues</li>
+        <li><strong>Network errors:</strong> - Backend endpoint not accessible</li>
+        <li><strong>File processing errors:</strong> - Backend can't process the file</li>
+    </ul>
+    
+    <button onclick="testBackend()">Test Backend Connection</button>
+    <div id="result"></div>
+    
+    <script>
+        async function testBackend() {
+            try {
+                const response = await fetch('http://localhost:5000/api/dashboard/kpi');
+                const data = await response.json();
+                document.getElementById('result').innerHTML = `
+                    <h3>Backend Test Result:</h3>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <h3>Backend Test Error:</h3>
+                    <pre>${error.message}</pre>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 <template>
-  <fixed-layout>
+  <FixedLayout>
     <div class="dashboard-view">
       <!-- Header Section -->
       <div class="dashboard-header">
@@ -283,7 +283,7 @@
         </v-col>
       </v-row>
     </div>
-  </fixed-layout>
+  </FixedLayout>
 </template>
 
 <script setup lang="ts">
@@ -291,10 +291,11 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { dashboardAPI, calculationsAPI } from '../services/api'
 import FixedLayout from '../components/FixedLayout.vue'
-import { Chart, registerables } from 'chart.js'
 
-// Register Chart.js components
-Chart.register(...registerables)
+// Chart.js - load dynamically to prevent rendering issues
+let Chart: any = null
+let monthlyChartInstance: any = null
+let pieChartInstance: any = null
 
 const router = useRouter()
 
@@ -409,53 +410,79 @@ const yieldCurveData = ref<any>(null)
 const chartData = ref<any>(null)
 const monthlyChart = ref<HTMLCanvasElement | null>(null)
 const pieChart = ref<HTMLCanvasElement | null>(null)
-let monthlyChartInstance: Chart | null = null
-let pieChartInstance: Chart | null = null
 
 // Load data from backend
 const loadDashboardData = async () => {
   try {
     // Load KPI data
-    const kpiResponse = await dashboardAPI.getKPI()
-    if (kpiResponse.success) {
-      // Update KPI data with real values
-      kpiData.value[0].value = kpiResponse.data.total_datasets || 0
-      kpiData.value[1].value = kpiResponse.data.active_calculations || 0
-      kpiData.value[2].value = kpiResponse.data.reports_generated || 0
-      kpiData.value[3].value = kpiResponse.data.active_instruments || 0
-      
-      // Update instrument counts
-      if (kpiResponse.data.instrument_breakdown) {
-        kpiResponse.data.instrument_breakdown.forEach(instrument => {
-          const instrumentIndex = instruments.value.findIndex(
-            inst => inst.name.toLowerCase().replace(' ', '_') === instrument.file_type
-          )
-          if (instrumentIndex !== -1) {
-            instruments.value[instrumentIndex].count = instrument.count
-          }
-        })
+    try {
+      const kpiResponse = await dashboardAPI.getKPI()
+      console.log('KPI Response:', kpiResponse)
+      if (kpiResponse.success && kpiResponse.data) {
+        // Update KPI data with real values
+        const data = kpiResponse.data
+        kpiData.value[0].value = data.total_datasets || data.datasets || 0
+        kpiData.value[1].value = data.active_calculations || data.calculations || 0
+        kpiData.value[2].value = data.reports_generated || data.reports || 0
+        kpiData.value[3].value = data.active_instruments || data.instruments || 0
+        
+        console.log('Updated KPI values:', kpiData.value)
+        
+        // Update instrument counts
+        if (data.instrument_breakdown) {
+          data.instrument_breakdown.forEach((instrument: any) => {
+            const instrumentIndex = instruments.value.findIndex(
+              inst => inst.name.toLowerCase().replace(' ', '_') === instrument.file_type
+            )
+            if (instrumentIndex !== -1) {
+              instruments.value[instrumentIndex].count = instrument.count
+              console.log(`Updated ${instruments.value[instrumentIndex].name} count to ${instrument.count}`)
+            }
+          })
+        }
+      } else {
+        console.error('KPI API returned unsuccessful or no data:', kpiResponse)
       }
+    } catch (error) {
+      console.error('Error loading KPI data:', error)
     }
 
     // Load recent activity
-    const activityResponse = await dashboardAPI.getRecentActivity()
-    if (activityResponse.success) {
-      recentActivities.value = activityResponse.data
+    try {
+      const activityResponse = await dashboardAPI.getRecentActivity()
+      console.log('Recent Activity Response:', activityResponse)
+      if (activityResponse.success && activityResponse.data) {
+        recentActivities.value = activityResponse.data
+        console.log('Updated recent activities:', recentActivities.value)
+      } else {
+        console.error('Recent Activity API returned unsuccessful or no data:', activityResponse)
+      }
+    } catch (error) {
+      console.error('Error loading recent activity:', error)
     }
 
     // Load yield curve data
-    const yieldCurveResponse = await dashboardAPI.getYieldCurve()
-    if (yieldCurveResponse.success) {
-      yieldCurveData.value = yieldCurveResponse.data
+    try {
+      const yieldCurveResponse = await dashboardAPI.getYieldCurve()
+      if (yieldCurveResponse.success) {
+        yieldCurveData.value = yieldCurveResponse.data
+      }
+    } catch (error) {
+      console.error('Error loading yield curve data:', error)
     }
 
-    // Load chart data
-    const chartsResponse = await dashboardAPI.getCharts()
-    if (chartsResponse.success) {
-      chartData.value = chartsResponse.data
-      // Render charts after data is loaded
-      await nextTick()
-      renderCharts()
+    // Load chart data - don't let this fail the entire dashboard
+    try {
+      const chartsResponse = await dashboardAPI.getCharts()
+      if (chartsResponse.success) {
+        chartData.value = chartsResponse.data
+        // Render charts after data is loaded
+        await nextTick()
+        renderCharts()
+      }
+    } catch (error) {
+      console.error('Error loading charts data:', error)
+      // Dashboard should still render without charts
     }
   } catch (error) {
     console.error('Error loading dashboard data:', error)
@@ -464,74 +491,97 @@ const loadDashboardData = async () => {
 
 // Render charts using Chart.js
 const renderCharts = () => {
-  // Destroy existing charts
-  if (monthlyChartInstance) {
-    monthlyChartInstance.destroy()
-  }
-  if (pieChartInstance) {
-    pieChartInstance.destroy()
-  }
+  try {
+    // Dynamically import Chart.js to prevent rendering issues
+    import('chart.js').then(chartModule => {
+      const ChartClass = chartModule.default || chartModule.Chart
+      const registerables = chartModule.registerables || []
+      
+      // Register Chart.js components
+      ChartClass.register(...registerables)
 
-  // Render monthly activity chart
-  if (monthlyChart.value && chartData.value?.monthlyActivity) {
-    const ctx = monthlyChart.value.getContext('2d')
-    if (ctx) {
-      monthlyChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: chartData.value.monthlyActivity.labels,
-          datasets: chartData.value.monthlyActivity.datasets
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'top',
-            },
-            title: {
-              display: false
-            }
-          },
-          scales: {
-            y: {
-              beginAtZero: true
-            }
-          }
-        }
-      })
-    }
-  }
+      // Destroy existing charts
+      if (monthlyChartInstance) {
+        monthlyChartInstance.destroy()
+      }
+      if (pieChartInstance) {
+        pieChartInstance.destroy()
+      }
 
-  // Render instrument distribution pie chart
-  if (pieChart.value && chartData.value?.instrumentDistribution) {
-    const ctx = pieChart.value.getContext('2d')
-    if (ctx) {
-      pieChartInstance = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-          labels: chartData.value.instrumentDistribution.labels,
-          datasets: [{
-            data: chartData.value.instrumentDistribution.data,
-            backgroundColor: chartData.value.instrumentDistribution.backgroundColor,
-            borderWidth: 2,
-            borderColor: '#fff'
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'bottom',
-            },
-            title: {
-              display: false
-            }
+      // Render monthly activity chart
+      if (monthlyChart.value && chartData.value?.monthlyActivity) {
+        try {
+          const ctx = monthlyChart.value.getContext('2d')
+          if (ctx) {
+            monthlyChartInstance = new ChartClass(ctx, {
+              type: 'line',
+              data: {
+                labels: chartData.value.monthlyActivity.labels,
+                datasets: chartData.value.monthlyActivity.datasets
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    position: 'top',
+                  },
+                  title: {
+                    display: false
+                  }
+                },
+                scales: {
+                  y: {
+                    beginAtZero: true
+                  }
+                }
+              }
+            })
           }
+        } catch (error) {
+          console.error('Error rendering monthly chart:', error)
         }
-      })
-    }
+      }
+
+      // Render instrument distribution pie chart
+      if (pieChart.value && chartData.value?.instrumentDistribution) {
+        try {
+          const ctx = pieChart.value.getContext('2d')
+          if (ctx) {
+            pieChartInstance = new ChartClass(ctx, {
+              type: 'doughnut',
+              data: {
+                labels: chartData.value.instrumentDistribution.labels,
+                datasets: [{
+                  data: chartData.value.instrumentDistribution.data,
+                  backgroundColor: chartData.value.instrumentDistribution.backgroundColor,
+                  borderWidth: 2,
+                  borderColor: '#fff'
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    position: 'bottom',
+                  },
+                  title: {
+                    display: false
+                  }
+                }
+              }
+            })
+          }
+        } catch (error) {
+          console.error('Error rendering pie chart:', error)
+        }
+      }
+    }).catch(err => {
+      console.error('Failed to load Chart.js:', err)
+    })
+  } catch (error) {
+    console.error('Error rendering charts:', error)
   }
 }
 
@@ -675,6 +725,17 @@ const navigateTo = (route: string) => {
   router.push(route)
 }
 
+// Function to refresh dashboard data - can be called from other components
+const refreshDashboard = async () => {
+  console.log('Refreshing dashboard data...')
+  await loadDashboardData()
+}
+
+// Expose refresh function globally for other components to call
+if (typeof window !== 'undefined') {
+  (window as any).refreshDashboard = refreshDashboard
+}
+
 // Load data when component mounts
 onMounted(() => {
   loadDashboardData()
@@ -695,6 +756,8 @@ onUnmounted(() => {
 .dashboard-view {
   max-width: 1400px;
   margin: 0 auto;
+  padding: 20px;
+  min-height: 100vh;
 }
 
 .dashboard-header {

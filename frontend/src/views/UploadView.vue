@@ -49,182 +49,101 @@
         </v-card-text>
       </v-card>
 
-      <!-- File List -->
-      <v-card class="stats-card" elevation="2" v-if="uploadedFiles.length > 0">
+      <!-- Saved Datasets -->
+      <v-card class="stats-card" elevation="2">
         <v-card-title class="card-title">
-          <v-icon class="title-icon">mdi-file-multiple</v-icon>
-          Uploaded Files
+          <v-icon class="title-icon">mdi-database</v-icon>
+          Saved Datasets
         </v-card-title>
         <v-card-text>
-          <v-list>
+          <v-list v-if="savedDatasets.length > 0">
             <v-list-item
-              v-for="(file, index) in uploadedFiles"
+              v-for="(dataset, index) in savedDatasets"
               :key="index"
-              class="file-item"
+              class="dataset-item"
             >
               <template #prepend>
-                <v-icon :color="getFileIcon(file.type).color">
-                  {{ getFileIcon(file.type).icon }}
+                <v-icon color="#0B2A44">
+                  mdi-file-excel
                 </v-icon>
               </template>
-              <v-list-item-title>{{ file.name }}</v-list-item-title>
-              <v-list-item-subtitle>{{ formatFileSize(file.size) }}</v-list-item-subtitle>
+              <v-list-item-title>{{ dataset.name }}</v-list-item-title>
+              <v-list-item-subtitle>
+                {{ dataset.rows }} rows, {{ dataset.columns }} columns • Saved: {{ new Date(dataset.timestamp).toLocaleDateString() }}
+              </v-list-item-subtitle>
               <template #append>
                 <v-btn
-                  icon
-                  variant="text"
+                  size="small"
                   color="primary"
-                  @click="previewFile(index)"
-                  class="mr-2"
+                  variant="text"
+                  @click="loadSavedDataset(index)"
                 >
-                  <v-icon>mdi-eye</v-icon>
+                  <v-icon left size="small">mdi-folder-open</v-icon>
+                  Load
                 </v-btn>
                 <v-btn
-                  icon
-                  variant="text"
+                  size="small"
                   color="error"
-                  @click="removeFile(index)"
+                  variant="text"
+                  @click="deleteSavedDataset(index)"
                 >
-                  <v-icon>mdi-delete</v-icon>
+                  <v-icon left size="small">mdi-delete</v-icon>
+                  Delete
                 </v-btn>
               </template>
             </v-list-item>
           </v-list>
+          <v-alert v-else type="info" variant="tonal">
+            No saved datasets yet. Upload a file and save it to access it later.
+          </v-alert>
+        </v-card-text>
+      </v-card>
+
+      <!-- Excel Preview Toggle Button -->
+      <v-card class="stats-card" elevation="2" v-if="uploadedFiles.length > 0">
+        <v-card-text class="pa-4">
+          <v-btn
+            color="success"
+            size="large"
+            block
+            @click="loadAndShowExcel"
+            :loading="previewLoading"
+          >
+            <v-icon left size="large">mdi-microsoft-excel</v-icon>
+            Load Data to Excel
+          </v-btn>
+          <v-btn
+            v-if="showExcelPreview"
+            color="info"
+            size="small"
+            block
+            class="mt-2"
+            @click="promptSaveDataset"
+          >
+            <v-icon left size="small">mdi-content-save</v-icon>
+            Save Dataset
+          </v-btn>
+          <v-btn
+            v-if="showExcelPreview"
+            color="warning"
+            size="small"
+            block
+            class="mt-2"
+            @click="showExcelPreview = false"
+          >
+            <v-icon left size="small">mdi-eye-off</v-icon>
+            Hide Excel Preview
+          </v-btn>
         </v-card-text>
       </v-card>
 
       <!-- Data Preview -->
-      <v-card class="stats-card" elevation="2" v-if="previewLoading || paginatedData.length > 0">
-        <v-card-title class="card-title">
-          <v-icon class="title-icon">mdi-eye</v-icon>
-          Data Preview
-        </v-card-title>
-        <v-card-text>
-          <v-alert type="info" variant="tonal" class="mb-4">
-            <v-icon left>mdi-information</v-icon>
-            Showing first 10 rows of uploaded data. Full dataset will be processed in calculations.
-          </v-alert>
-          
-          <v-data-table
-            :headers="previewHeaders"
-            :items="paginatedData"
-            :loading="previewLoading"
-            density="compact"
-            class="preview-table styled-headers"
-            items-per-page="-1"
-            hide-default-footer
-          >
-            <template v-slot:headers="{ columns, isSorted, getSortIcon, toggleSort }">
-              <tr>
-                <th
-                  v-for="column in columns"
-                  :key="column.key"
-                  :class="['text-center', 'font-weight-bold']"
-                  :style="{
-                    background: 'linear-gradient(135deg, #0B2A44 0%, #1a3a5a 100%)',
-                    color: 'white',
-                    fontWeight: '700',
-                    fontSize: '12px',
-                    padding: '10px 6px',
-                    borderRight: '1px solid rgba(255, 255, 255, 0.15)',
-                    cursor: column.sortable ? 'pointer' : 'default',
-                    height: '40px',
-                    minHeight: '40px',
-                    lineHeight: '1.3',
-                    verticalAlign: 'middle',
-                    textAlign: 'center',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1)',
-                    textTransform: 'none',
-                    letterSpacing: '0.3px'
-                  }"
-                  @click="column.sortable ? toggleSort(column) : null"
-                >
-                  {{ column.title }}
-                  <v-icon
-                    v-if="column.sortable"
-                    :icon="getSortIcon(column)"
-                    size="small"
-                    class="ml-1"
-                  ></v-icon>
-                </th>
-              </tr>
-            </template>
-            <template v-slot:loading>
-              <v-skeleton-loader type="table-row@10"></v-skeleton-loader>
-            </template>
-            <template v-slot:bottom>
-              <div class="text-center pa-4" v-if="fullDataset.length > 0">
-                <v-row class="align-center">
-                  <v-col cols="12" class="text-center">
-                    <div class="pagination-info mb-2">
-                      Showing {{ startRow }}-{{ endRow }} of {{ fullDataset.length }} rows
-                    </div>
-                    <div class="pagination-controls">
-                      <v-btn
-                        variant="outlined"
-                        color="primary"
-                        @click="previousPage"
-                        :disabled="!hasPreviousPage"
-                        class="mr-2"
-                      >
-                        <v-icon left>mdi-chevron-left</v-icon>
-                        Previous
-                      </v-btn>
-                      
-                      <span class="mx-4">
-                        Page {{ currentPage }} of {{ totalPages }}
-                      </span>
-                      
-                      <v-btn
-                        variant="outlined"
-                        color="primary"
-                        @click="nextPage"
-                        :disabled="!hasNextPage"
-                        class="ml-2"
-                      >
-                        Next
-                        <v-icon right>mdi-chevron-right</v-icon>
-                      </v-btn>
-                    </div>
-                  </v-col>
-                </v-row>
-              </div>
-            </template>
-          </v-data-table>
-
-          <div class="preview-stats" v-if="paginatedData.length > 0">
-            <v-row>
-              <v-col cols="12" sm="6" md="3">
-                <div class="stat-item">
-                  <div class="stat-value">{{ totalRows }}</div>
-                  <div class="stat-label">Total Rows</div>
-                </div>
-              </v-col>
-              <v-col cols="12" sm="6" md="3">
-                <div class="stat-item">
-                  <div class="stat-value">{{ totalColumns }}</div>
-                  <div class="stat-label">Total Columns</div>
-                </div>
-              </v-col>
-              <v-col cols="12" sm="6" md="3">
-                <div class="stat-item">
-                  <div class="stat-value">{{ fileTypes.length }}</div>
-                  <div class="stat-label">File Types</div>
-                </div>
-              </v-col>
-              <v-col cols="12" sm="6" md="3">
-                <div class="stat-item">
-                  <div class="stat-value">{{ formatFileSize(totalSize) }}</div>
-                  <div class="stat-label">Total Size</div>
-                </div>
-              </v-col>
-            </v-row>
-          </div>
-        </v-card-text>
-      </v-card>
+      <ExcelGrid
+        v-if="showExcelPreview"
+        :headers="previewHeaders.map(h => typeof h === 'object' ? h.key : h)"
+        :data="fullDataset"
+        @data-update="handleDataUpdate"
+      />
 
       <!-- Quick Actions -->
       <v-card class="stats-card" elevation="2">
@@ -279,7 +198,8 @@
 
 <script setup lang="ts">
 import FixedLayout from '../components/FixedLayout.vue'
-import { ref, computed } from 'vue'
+import ExcelGrid from '../components/ExcelGrid.vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { dataAPI } from '../services/api'
 
@@ -287,6 +207,19 @@ const router = useRouter()
 const fileInput = ref()
 const isDragOver = ref(false)
 const uploadedFiles = ref<File[]>([])
+
+// Saved datasets state
+const savedDatasets = ref<Array<{ name: string; rows: number; columns: number; timestamp: string; data: any[]; headers: string[] }>>([])
+
+// Initialize from localStorage
+try {
+  const saved = localStorage.getItem('saved-datasets')
+  if (saved) {
+    savedDatasets.value = JSON.parse(saved)
+  }
+} catch (err) {
+  console.error('Failed to initialize saved datasets:', err)
+}
 
 // Preview data state
 const previewData = ref<any[]>([])
@@ -297,6 +230,161 @@ const currentPage = ref(1)
 const pageSize = ref(10)
 const totalPages = ref(0)
 const uploadId = ref<string | null>(null)
+const showExcelPreview = ref(false)
+
+// ExcelGrid metadata
+const datasetMetadata = ref({
+  country: 'United States',
+  currency: 'USD',
+  instrumentType: 'Treasury Bills',
+  dateRange: '',
+  description: ''
+})
+
+// ExcelGrid handlers
+const handleDataUpdate = (newData: any[]) => {
+  fullDataset.value = newData
+  console.log('Dataset updated:', newData.length, 'rows')
+}
+
+const handleHeadersUpdate = (newHeaders: string[]) => {
+  previewHeaders.value = newHeaders.map(h => ({ title: h, key: h, sortable: true }))
+  console.log('Headers updated:', newHeaders)
+}
+
+const handleMetadataUpdate = (metadata: any) => {
+  datasetMetadata.value = metadata
+  console.log('Metadata updated:', metadata)
+}
+
+// Saved datasets functions
+const SAVED_DATASETS_KEY = 'saved-datasets'
+
+const loadSavedDatasets = () => {
+  try {
+    const saved = localStorage.getItem(SAVED_DATASETS_KEY)
+    console.log('Loading saved datasets from localStorage:', saved)
+    if (saved) {
+      savedDatasets.value = JSON.parse(saved)
+      console.log('Loaded datasets:', savedDatasets.value)
+    } else {
+      console.log('No saved datasets found in localStorage')
+    }
+  } catch (err) {
+    console.error('Failed to load saved datasets:', err)
+  }
+}
+
+const saveDataset = (name: string) => {
+  if (fullDataset.value.length === 0) {
+    alert('No data to save. Please upload a file first.')
+    return
+  }
+
+  const dataset = {
+    name,
+    rows: fullDataset.value.length,
+    columns: previewHeaders.value.length,
+    timestamp: new Date().toISOString(),
+    data: fullDataset.value,
+    headers: previewHeaders.value.map((h: any) => typeof h === 'object' ? h.key : h)
+  }
+
+  const existingIndex = savedDatasets.value.findIndex((d: any) => d.name === name)
+  if (existingIndex !== -1) {
+    savedDatasets.value[existingIndex] = dataset
+  } else {
+    savedDatasets.value.push(dataset)
+  }
+
+  localStorage.setItem(SAVED_DATASETS_KEY, JSON.stringify(savedDatasets.value))
+  console.log('Dataset saved:', name)
+}
+
+const loadSavedDataset = (index: number) => {
+  const dataset = savedDatasets.value[index]
+  fullDataset.value = dataset.data
+  previewHeaders.value = dataset.headers.map((h: string) => ({ title: h, key: h, sortable: true }))
+  showExcelPreview.value = true
+  console.log('Dataset loaded:', dataset.name)
+}
+
+const deleteSavedDataset = (index: number) => {
+  if (confirm('Are you sure you want to delete this dataset?')) {
+    savedDatasets.value.splice(index, 1)
+    localStorage.setItem(SAVED_DATASETS_KEY, JSON.stringify(savedDatasets.value))
+    console.log('Dataset deleted')
+  }
+}
+
+const promptSaveDataset = () => {
+  const name = prompt('Enter a name for this dataset:')
+  if (name && name.trim()) {
+    saveDataset(name.trim())
+    alert('Dataset saved successfully!')
+  }
+}
+
+// Load saved datasets on mount
+onMounted(() => {
+  loadSavedDatasets()
+  console.log('savedDatasets.value after mount:', savedDatasets.value)
+  console.log('savedDatasets.value.length:', savedDatasets.value.length)
+})
+
+// Toggle Excel preview and load data if needed
+const toggleExcelPreview = async () => {
+  console.log('toggleExcelPreview called, current state:', showExcelPreview.value)
+  console.log('uploadedFiles:', uploadedFiles.value.length)
+  console.log('fullDataset:', fullDataset.value.length)
+  
+  if (!showExcelPreview.value) {
+    // Show preview - load data if not already loaded
+    if (fullDataset.value.length === 0) {
+      console.log('Loading full preview...')
+      await loadFullPreview()
+      console.log('Full preview loaded, dataset length:', fullDataset.value.length)
+    }
+    showExcelPreview.value = true
+    console.log('showExcelPreview set to true')
+  } else {
+    // Hide preview
+    showExcelPreview.value = false
+    console.log('showExcelPreview set to false')
+  }
+}
+
+// Explicit function to load data and show Excel
+const loadAndShowExcel = async () => {
+  console.log('loadAndShowExcel called')
+  console.log('uploadedFiles:', uploadedFiles.value.length)
+  
+  if (uploadedFiles.value.length === 0) {
+    console.error('No files uploaded')
+    alert('Please upload a file first')
+    return
+  }
+  
+  console.log('Loading full preview...')
+  await loadFullPreview()
+  console.log('Full preview loaded, dataset length:', fullDataset.value.length)
+  console.log('previewHeaders:', previewHeaders.value)
+  console.log('First row of data:', fullDataset.value[0])
+  console.log('Headers being passed to ExcelGrid:', previewHeaders.value.map(h => typeof h === 'object' ? h.title : h))
+  
+  if (fullDataset.value.length > 0) {
+    showExcelPreview.value = true
+    console.log('showExcelPreview set to true')
+    
+    // Auto-save the dataset with the filename
+    const filename = uploadedFiles.value[0].name.replace(/\.[^/.]+$/, '') // Remove file extension
+    saveDataset(filename)
+    console.log('Dataset auto-saved with name:', filename)
+  } else {
+    console.error('No data loaded from backend')
+    alert('Failed to load data. Please check the console for details.')
+  }
+}
 
 // Computed properties for stats
 const totalRows = computed(() => fullDataset.value.length || previewData.value.length)
@@ -527,14 +615,19 @@ const processFile = async (file: File) => {
 
 const loadFullPreview = async () => {
   previewLoading.value = true
+  console.log('loadFullPreview called')
   try {
     if (uploadedFiles.value.length > 0) {
       // Upload file to backend and get full dataset
       const file = uploadedFiles.value[0]
+      console.log('Uploading file:', file.name, file.size)
       const response = await dataAPI.upload(file, 'treasury_bills')
+      console.log('Upload response:', response)
       
       if (response.success) {
+        console.log('Response data:', response.data)
         fullDataset.value = response.data.data
+        console.log('fullDataset set to:', fullDataset.value.length, 'rows')
         uploadId.value = response.data.upload_id
         currentPage.value = 1
         
@@ -550,10 +643,14 @@ const loadFullPreview = async () => {
             key: dataKeys[index] || `col_${index}`,
             sortable: true
           }))
+          console.log('previewHeaders set to:', previewHeaders.value)
         } else if (fullDataset.value.length > 0) {
           console.log('Generating headers from data keys in loadFullPreview')
           const headers = Object.keys(fullDataset.value[0])
           previewHeaders.value = headers.map(h => ({ title: h, key: h, sortable: true }))
+          console.log('previewHeaders set to:', previewHeaders.value)
+        } else {
+          console.error('No data in response.data.data')
         }
         
         console.log('Full preview loaded:', fullDataset.value.length, 'rows total')
