@@ -19,7 +19,7 @@
             <input
               type="text"
               class="formula-input"
-              :value="selectedCell ? getCellValue(selectedCell.row, selectedCell.col) : ''"
+              :value="selectedCell ? getRawCellValue(selectedCell.row, selectedCell.col) : ''"
               :placeholder="selectedCell ? `${columnLetters[selectedCell.col]}${selectedCell.row + 1}` : 'Select a cell'"
               readonly
             />
@@ -43,7 +43,7 @@
                   :class="{ 'selected-cell': selectedCell && selectedCell.row === rowIndex && selectedCell.col === colIndex }"
                   @click="selectCell(rowIndex, colIndex)"
                 >
-                  {{ formatCellValue(row[cell], row) }}
+                  {{ formatCellValue(row[cell], row, cell) }}
                 </td>
               </tr>
             </tbody>
@@ -78,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 interface Props {
   headers: string[]
@@ -94,9 +94,22 @@ const emit = defineEmits<{
 const headers = ref<string[]>(props.headers)
 const data = ref<any[]>([...props.data])
 
-// Debug: log the data structure
-console.log('ExcelGrid data structure:', data.value)
-console.log('Sample row:', data.value[0])
+onMounted(() => {
+  console.log('ExcelGrid mounted')
+  console.log('Headers:', headers.value)
+  console.log('Data rows:', paginatedData.value.length)
+  if (paginatedData.value.length > 0) {
+    console.log('First row data:', paginatedData.value[0])
+    console.log('First row keys:', Object.keys(paginatedData.value[0]))
+    // Check if any values look like formulas
+    Object.keys(paginatedData.value[0]).forEach(key => {
+      const value = paginatedData.value[0][key]
+      if (typeof value === 'string' && value.startsWith('=')) {
+        console.log(`Formula found in field "${key}":`, value)
+      }
+    })
+  }
+})
 
 // Cell selection
 const selectedCell = ref<{ row: number; col: number } | null>(null)
@@ -125,16 +138,42 @@ const getCellValue = (rowIndex: number, colIndex: number) => {
   return value
 }
 
-const evaluateFormula = (formula: string): number | string => {
+const evaluateFormula = (formula: string, currentRow: any = null): number | string => {
   try {
     // Remove the '=' prefix
-    const expression = formula.substring(1).trim()
-    
+    let expression = formula.substring(1).trim()
+
     // If it's a simple number, return it
     if (!isNaN(Number(expression))) {
       return Number(expression)
     }
-    
+
+    // Replace cell references with actual values
+    // Pattern matches cell references like A1, B2, AA10, etc.
+    const cellRefPattern = /([A-Za-z]+)(\d+)/g
+    expression = expression.replace(cellRefPattern, (match, colLetter, rowNum) => {
+      if (!currentRow) return match
+
+      // Convert column letter to index (A=0, B=1, etc.)
+      const colIndex = columnLetterToIndex(colLetter.toUpperCase())
+      const rowIndex = parseInt(rowNum) - 1 // Convert to 0-based
+
+      // Get the header for this column
+      const header = headers.value[colIndex]
+      if (!header) return '0'
+
+      // Try to get the value from the current row or from the grid data
+      let cellValue = currentRow[header]
+
+      // If value is a formula, recursively evaluate it
+      if (typeof cellValue === 'string' && cellValue.startsWith('=')) {
+        cellValue = evaluateFormula(cellValue, currentRow)
+      }
+
+      // Return the value or 0 if undefined
+      return cellValue !== undefined && cellValue !== null ? String(cellValue) : '0'
+    })
+
     // Evaluate simple arithmetic expressions (basic safety check)
     // Only allow numbers, basic operators, and parentheses
     if (/^[0-9+\-*/().\s]+$/.test(expression)) {
@@ -142,9 +181,8 @@ const evaluateFormula = (formula: string): number | string => {
       const result = new Function('return ' + expression)()
       return result
     }
-    
-    // If it contains cell references (like A1, B2), we can't evaluate without a full grid engine
-    // Return the formula as-is for now
+
+    // Return the formula as-is if we can't evaluate it
     return formula
   } catch (e) {
     console.error('Error evaluating formula:', e)
@@ -152,14 +190,85 @@ const evaluateFormula = (formula: string): number | string => {
   }
 }
 
-const formatCellValue = (value: any, row: any) => {
-  // If value is a formula, try to evaluate it
-  if (typeof value === 'string' && value.trim().startsWith('=')) {
-    const result = evaluateFormula(value)
-    // If evaluation returned a number, show that. Otherwise show the formula
-    return typeof result === 'number' ? result : value
+// Helper function to convert column letter to index
+const columnLetterToIndex = (letter: string): number => {
+  let index = 0
+  for (let i = 0; i < letter.length; i++) {
+    index = index * 26 + (letter.charCodeAt(i) - 64)
   }
+  return index - 1
+}
+
+const getRawCellValue = (rowIndex: number, colIndex: number) => {
+  const row = paginatedData.value[rowIndex]
+  if (!row) return ''
+  const col = headers.value[colIndex]
+  if (!col) return ''
+  return row[col] || ''
+}
+
+const formatCellValue = (value: any, row: any, header: string) => {
+  // If value is an object, try to get a meaningful display value
+  if (typeof value === 'object' && value !== null) {
+    // Check if the object has a value property
+    if (value.value !== undefined) {
+      return value.value
+    }
+    // Check if it's a formula object with a display value
+    if (value.formula && value.display_value) {
+      return value.display_value
+    }
+    // Check for other common value field names
+    if (value.computed_value !== undefined) return value.computed_value
+    if (value.result !== undefined) return value.result
+    if (value.evaluated !== undefined) return value.evaluated
+    // If it's a plain object, convert to string representation
+    return JSON.stringify(value)
+  }
+
+  // If value is a string that looks like a formula (starts with '=')
+  if (typeof value === 'string' && value.startsWith('=')) {
+    // Try to find a corresponding computed value field in the row
+    if (row && header) {
+      const possibleValueFields = [
+        `${header}_value`,
+        `${header}_computed`,
+        `${header}_result`,
+        `${header}_evaluated`,
+        `${header.replace(/_formula$/, '')}`,
+      ]
+      for (const field of possibleValueFields) {
+        if (row[field] !== undefined && row[field] !== null && row[field] !== '') {
+          return row[field]
+        }
+      }
+    }
+    // If no separate value field, try simple arithmetic evaluation (no cell references)
+    const simpleEval = evaluateSimpleFormula(value)
+    if (simpleEval !== value) {
+      return simpleEval
+    }
+    // Return the formula as fallback
+    return value
+  }
+
+  // Display the value as-is
   return value
+}
+
+// Simple formula evaluator for basic arithmetic without cell references
+const evaluateSimpleFormula = (formula: string): string => {
+  try {
+    const expression = formula.substring(1).trim()
+    // Only evaluate if it's a simple arithmetic expression (no cell references)
+    if (/^[0-9+\-*/().\s]+$/.test(expression)) {
+      const result = new Function('return ' + expression)()
+      return String(result)
+    }
+    return formula
+  } catch (e) {
+    return formula
+  }
 }
 
 // Excel-style column letters (A, B, C, ..., Z, AA, AB, etc.)

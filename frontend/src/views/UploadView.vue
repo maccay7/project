@@ -59,7 +59,7 @@
           <v-list v-if="savedDatasets.length > 0">
             <v-list-item
               v-for="(dataset, index) in savedDatasets"
-              :key="index"
+              :key="dataset.name"
               class="dataset-item"
             >
               <template #prepend>
@@ -144,6 +144,50 @@
         :data="fullDataset"
         @data-update="handleDataUpdate"
       />
+
+      <!-- Dataset Description -->
+      <v-card v-if="showExcelPreview" class="stats-card" elevation="2">
+        <v-card-title class="card-title">
+          <v-icon class="title-icon">mdi-information</v-icon>
+          Dataset Information
+        </v-card-title>
+        <v-card-text>
+          <v-alert type="info" variant="tonal" class="mb-4">
+            <strong>Understanding Your Data:</strong>
+            <p class="mb-0 mt-2">
+              This dataset contains financial instrument data with {{ fullDataset.length }} records.
+              Based on the structure, this appears to be {{ datasetMetadata.instrumentType || 'financial instrument data' }}
+              from {{ datasetMetadata.country || 'various countries' }} in {{ datasetMetadata.currency || 'local currency' }}.
+            </p>
+          </v-alert>
+          <v-row>
+            <v-col cols="12" sm="6" md="3">
+              <div class="info-item">
+                <div class="info-label">Data Type</div>
+                <div class="info-value">{{ datasetMetadata.instrumentType || 'Financial Instruments' }}</div>
+              </div>
+            </v-col>
+            <v-col cols="12" sm="6" md="3">
+              <div class="info-item">
+                <div class="info-label">Country/Region</div>
+                <div class="info-value">{{ datasetMetadata.country || 'Not specified' }}</div>
+              </div>
+            </v-col>
+            <v-col cols="12" sm="6" md="3">
+              <div class="info-item">
+                <div class="info-label">Currency</div>
+                <div class="info-value">{{ datasetMetadata.currency || 'Not specified' }}</div>
+              </div>
+            </v-col>
+            <v-col cols="12" sm="6" md="3">
+              <div class="info-item">
+                <div class="info-label">Total Records</div>
+                <div class="info-value">{{ fullDataset.length }}</div>
+              </div>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
 
       <!-- Quick Actions -->
       <v-card class="stats-card" elevation="2">
@@ -897,6 +941,26 @@ const navigateTo = (route: string) => {
 .action-desc {
   font-size: 12px;
   color: #666;
+}
+
+.info-item {
+  padding: 12px;
+  background: #f9f9f9;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.info-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.info-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0B2A44;
 }
 
 /* Preview Table Styles */

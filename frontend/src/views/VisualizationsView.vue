@@ -27,7 +27,7 @@
                     <div class="kpi-info">
                       <div class="kpi-value">{{ kpi.value }}</div>
                       <div class="kpi-title">{{ kpi.title }}</div>
-                      <div class="kpi-change" :class="kpi.changeClass">
+                      <div v-if="kpi.change" class="kpi-change" :class="kpi.changeClass">
                         <v-icon size="16">{{ kpi.changeIcon }}</v-icon>
                         {{ kpi.change }}
                       </div>
@@ -47,10 +47,76 @@
           Yield Curve (FRED API)
         </v-card-title>
         <v-card-text>
+          <!-- Filters -->
+          <v-row class="mb-4">
+            <v-col cols="12" md="4">
+              <v-select
+                v-model="selectedParameter"
+                :items="yieldParameters"
+                label="Parameter"
+                density="compact"
+                @update:modelValue="updateYieldCurve"
+              ></v-select>
+              <v-text-field
+                v-if="selectedParameter === 'custom'"
+                v-model="customParameter"
+                label="Custom Parameter"
+                placeholder="Enter parameter (e.g., DGS5)"
+                density="compact"
+                class="mt-2"
+                @input="updateYieldCurve"
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-select
+                v-model="selectedCurrency"
+                :items="currencies"
+                label="Currency"
+                density="compact"
+                @update:modelValue="updateYieldCurve"
+              ></v-select>
+              <v-text-field
+                v-if="selectedCurrency === 'Custom'"
+                v-model="customCurrency"
+                label="Custom Currency"
+                placeholder="Enter currency (e.g., ZAR)"
+                density="compact"
+                class="mt-2"
+                @input="updateYieldCurve"
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12" md="4">
+              <v-text-field
+                v-model="selectedCountry"
+                label="Country"
+                placeholder="Enter country (e.g., USA, South Africa)"
+                density="compact"
+                @input="updateYieldCurve"
+              ></v-text-field>
+            </v-col>
+          </v-row>
           <div class="chart-container">
             <canvas 
               ref="yieldCurveChart"
               id="yieldCurveChart"
+              width="400"
+              height="200"
+            ></canvas>
+          </div>
+        </v-card-text>
+      </v-card>
+
+      <!-- Comparison Line Graph for All Instruments -->
+      <v-card class="chart-card" elevation="2">
+        <v-card-title class="card-title">
+          <v-icon class="title-icon">mdi-chart-multiline</v-icon>
+          Instrument Comparison
+        </v-card-title>
+        <v-card-text>
+          <div class="chart-container">
+            <canvas 
+              ref="comparisonChart"
+              id="comparisonChart"
               width="400"
               height="200"
             ></canvas>
@@ -109,10 +175,26 @@ const router = useRouter()
 
 const calculationData = ref<any>(null)
 const yieldCurveData = ref<any>(null)
-
-// Yield Curve chart ref
 const yieldCurveChart = ref<HTMLCanvasElement | null>(null)
-const yieldCurveChartInstance = ref<any>(null)
+const comparisonChart = ref<HTMLCanvasElement | null>(null)
+let yieldCurveChartInstance: any = null
+let comparisonChartInstance: any = null
+
+// Filter variables
+const selectedParameter = ref('DGS10')
+const selectedCurrency = ref('USD')
+const selectedCountry = ref('USA')
+const customParameter = ref('')
+const customCurrency = ref('')
+const customCountry = ref('')
+const yieldParameters = ref([
+  { title: '3-Month Treasury', value: 'DGS3MO' },
+  { title: '10-Year Treasury', value: 'DGS10' },
+  { title: '30-Year Treasury', value: 'DGS30' },
+  { title: '2-Year Treasury', value: 'DGS2' },
+  { title: 'Custom', value: 'custom' }
+])
+const currencies = ref(['USD', 'EUR', 'GBP', 'JPY', 'Custom'])
 
 const recordsValue = computed(() => calculationData.value?.calculations?.length ?? 0)
 const instrumentTypeValue = computed(() => calculationData.value?.instrumentType ?? 'N/A')
@@ -125,7 +207,7 @@ const visualizationsKpiData = ref([
     icon: 'mdi-database',
     color: 'rgba(11, 42, 68, 0.1)',
     iconColor: '#0B2A44',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
@@ -135,7 +217,7 @@ const visualizationsKpiData = ref([
     icon: 'mdi-chart-bubble',
     color: 'rgba(30, 136, 229, 0.1)',
     iconColor: '#1E88E5',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
@@ -145,7 +227,7 @@ const visualizationsKpiData = ref([
     icon: 'mdi-trending-up',
     color: 'rgba(76, 175, 80, 0.1)',
     iconColor: '#4CAF50',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
@@ -155,29 +237,25 @@ const visualizationsKpiData = ref([
     icon: 'mdi-api',
     color: 'rgba(255, 193, 7, 0.1)',
     iconColor: '#FFC107',
-    change: 'Active',
+    change: '',
     changeIcon: 'mdi-check',
     changeClass: 'neutral'
   }
 ])
 
-onMounted(() => {
+onMounted(async () => {
   const stored = localStorage.getItem('calculations')
   if (stored) {
     calculationData.value = JSON.parse(stored)
     console.log('Loaded calculation data for visualizations:', calculationData.value)
   } else {
-    console.log('No calculation data found, loading sample data for visualizations')
     loadSampleCalculationData()
   }
-  
-  // Fetch yield curve data from FRED API
-  fetchYieldCurveData()
-  
-  // Wait for data to load before initializing chart
+  await fetchYieldCurveData()
   nextTick(() => {
     setTimeout(() => {
       initializeYieldCurveChart()
+      initializeComparisonChart()
     }, 100)
   })
 })
@@ -273,9 +351,9 @@ const initializeYieldCurveChart = () => {
   }
 
   // Destroy existing chart if it exists
-  if (yieldCurveChartInstance.value) {
-    yieldCurveChartInstance.value.destroy()
-    yieldCurveChartInstance.value = null
+  if (yieldCurveChartInstance) {
+    yieldCurveChartInstance.destroy()
+    yieldCurveChartInstance = null
   }
 
   console.log('Initializing yield curve chart with data:', yieldCurveData.value)
@@ -292,7 +370,7 @@ const initializeYieldCurveChart = () => {
     historical: []
   }
 
-  yieldCurveChartInstance.value = new Chart(ctx, {
+  yieldCurveChartInstance = new Chart(ctx, {
     type: 'line',
     data: {
       labels: data.labels,
@@ -359,11 +437,83 @@ const getAverageYield = () => {
 const proceedToReports = () => {
   router.push('/reports')
 }
+
+const updateYieldCurve = () => {
+  // Re-fetch yield curve data with new filters
+  fetchYieldCurveData()
+}
+
+const initializeComparisonChart = () => {
+  const canvas = comparisonChart.value
+  if (!canvas) return
+
+  if (comparisonChartInstance) {
+    comparisonChartInstance.destroy()
+  }
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  comparisonChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+      datasets: [
+        {
+          label: 'Treasury Bills',
+          data: [3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6],
+          borderColor: '#0B2A44',
+          backgroundColor: 'rgba(11, 42, 68, 0.1)',
+          tension: 0.4,
+          fill: false
+        },
+        {
+          label: 'Bonds',
+          data: [4.0, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5.0, 5.1],
+          borderColor: '#1E88E5',
+          backgroundColor: 'rgba(30, 136, 229, 0.1)',
+          tension: 0.4,
+          fill: false
+        },
+        {
+          label: 'Money Market',
+          data: [2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6],
+          borderColor: '#4CAF50',
+          backgroundColor: 'rgba(76, 175, 80, 0.1)',
+          tension: 0.4,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top'
+        },
+        title: {
+          display: true,
+          text: 'Instrument Yield Comparison'
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: false,
+          title: {
+            display: true,
+            text: 'Yield Rate (%)'
+          }
+        }
+      }
+    }
+  })
+}
 </script>
 
 <style scoped>
 .visualizations-view {
-  max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
 }
 
@@ -515,21 +665,30 @@ const proceedToReports = () => {
 }
 
 .kpi-icon {
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 16px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.kpi-icon .v-icon {
+  font-size: 28px;
 }
 
 .kpi-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .kpi-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: #0B2A44;
   line-height: 1;

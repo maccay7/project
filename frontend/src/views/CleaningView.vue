@@ -59,7 +59,7 @@
                     <div class="kpi-info">
                       <div class="kpi-value">{{ kpi.value }}</div>
                       <div class="kpi-title">{{ kpi.title }}</div>
-                      <div class="kpi-change" :class="kpi.changeClass">
+                      <div v-if="kpi.change" class="kpi-change" :class="kpi.changeClass">
                         <v-icon size="16">{{ kpi.changeIcon }}</v-icon>
                         {{ kpi.change }}
                       </div>
@@ -119,8 +119,42 @@
 
           </v-card>
         </v-col>
+      </v-row>
 
-        <!-- RESULTS -->
+      <!-- DATASET PREVIEWS UNDER CLEANING OPTIONS -->
+      <v-row v-if="uploadedData && uploadedData.data">
+        <v-col cols="12" md="6">
+          <v-card class="stats-card" elevation="2">
+            <v-card-title class="card-title">
+              <v-icon class="title-icon">mdi-table</v-icon>
+              Original Dataset Preview
+            </v-card-title>
+            <v-card-text>
+              <ExcelGrid
+                :headers="Object.keys(uploadedData.data[0] || {})"
+                :data="uploadedData.data.slice(0, 10)"
+              />
+            </v-card-text>
+          </v-card>
+        </v-col>
+        <v-col cols="12" md="6" v-if="cleaningResults && cleaningResults.cleanedData">
+          <v-card class="stats-card" elevation="2">
+            <v-card-title class="card-title">
+              <v-icon class="title-icon">mdi-table-check</v-icon>
+              Cleaned Dataset Preview
+            </v-card-title>
+            <v-card-text>
+              <ExcelGrid
+                :headers="Object.keys(cleaningResults.cleanedData[0] || {})"
+                :data="cleaningResults.cleanedData.slice(0, 10)"
+              />
+            </v-card-text>
+          </v-card>
+        </v-col>
+      </v-row>
+
+      <!-- RESULTS SECTION -->
+      <v-row>
         <v-col cols="12" md="6">
           <v-card class="stats-card" elevation="2">
 
@@ -338,6 +372,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
+import ExcelGrid from '../components/ExcelGrid.vue'
 import { dataAPI } from '../services/api'
 import { useDataset } from '../composables/useDataset'
 
@@ -346,10 +381,10 @@ const router = useRouter()
 // Use dataset composable for global state
 const { datasetInfo, hasDataset, loadDataset, saveDataset, clearDataset } = useDataset()
 
-const uploadedData = ref(null)
+const uploadedData = ref<any>(null)
 const cleaning = ref(false)
-const cleaningResults = ref(null)
-const uploadId = ref(null)
+const cleaningResults = ref<any>(null)
+const uploadId = ref<string | null>(null)
 const datasetPersisted = ref(true)
 
 const rowsValue = computed(() => uploadedData.value?.data?.length || 0)
@@ -364,7 +399,7 @@ const cleaningKpiData = ref([
     icon: 'mdi-table-row',
     color: 'rgba(11, 42, 68, 0.1)',
     iconColor: '#0B2A44',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
@@ -374,7 +409,7 @@ const cleaningKpiData = ref([
     icon: 'mdi-column',
     color: 'rgba(30, 136, 229, 0.1)',
     iconColor: '#1E88E5',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
@@ -384,7 +419,7 @@ const cleaningKpiData = ref([
     icon: 'mdi-chart-line',
     color: 'rgba(76, 175, 80, 0.1)',
     iconColor: '#4CAF50',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
@@ -394,7 +429,7 @@ const cleaningKpiData = ref([
     icon: 'mdi-file-document',
     color: 'rgba(255, 193, 7, 0.1)',
     iconColor: '#FFC107',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   }
@@ -637,7 +672,7 @@ const proceedToCalculations = () => {
 
 <style scoped>
 .cleaning-view {
-  max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
 }
 
@@ -747,21 +782,30 @@ const proceedToCalculations = () => {
 }
 
 .kpi-icon {
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 16px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.kpi-icon .v-icon {
+  font-size: 28px;
 }
 
 .kpi-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .kpi-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: #0B2A44;
   line-height: 1;
@@ -877,6 +921,7 @@ const proceedToCalculations = () => {
 .cleaning-options-container {
   max-height: 400px;
   overflow-y: auto;
+  width: 100%;
 }
 
 /* Enhanced cleaned data preview */

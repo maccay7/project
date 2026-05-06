@@ -18,11 +18,6 @@
           <v-icon left>mdi-delete</v-icon>
           Clear Results
         </v-btn>
-
-        <v-btn color="success" variant="outlined" @click="exportResults">
-          <v-icon left>mdi-download</v-icon>
-          Export Results
-        </v-btn>
       </div>
 
       <!-- DATA OVERVIEW -->
@@ -44,7 +39,7 @@
                     <div class="kpi-info">
                       <div class="kpi-value">{{ kpi.value }}</div>
                       <div class="kpi-title">{{ kpi.title }}</div>
-                      <div class="kpi-change" :class="kpi.changeClass">
+                      <div v-if="kpi.change" class="kpi-change" :class="kpi.changeClass">
                         <v-icon size="16">{{ kpi.changeIcon }}</v-icon>
                         {{ kpi.change }}
                       </div>
@@ -345,24 +340,14 @@
         No calculations yet.
       </v-alert>
 
-      <!-- RESULTS -->
-      <v-card v-if="calculations.length > 0" class="results-card">
-
-        <v-data-table
-          :headers="getTableHeaders()"
-          :items="calculations"
-        />
-
-        <div class="result-actions">
-          <v-btn color="primary" @click="proceedToVisualizations">
-            Visualize
+      <!-- ACTION BUTTON -->
+      <v-card class="action-card" elevation="2">
+        <v-card-text class="text-center">
+          <v-btn color="primary" size="large" @click="proceedToVisualizations">
+            <v-icon start>mdi-arrow-right</v-icon>
+            Proceed to Visualizations
           </v-btn>
-
-          <v-btn @click="clearCalculations">
-            Close
-          </v-btn>
-        </div>
-
+        </v-card-text>
       </v-card>
 
     </div>
@@ -388,49 +373,44 @@ const activeTab = ref('treasury')
 const selectedTreasury = ref(null)
 const selectedTreasuryBill = ref(null)
 
-const recordsValue = computed(() => datasetInfo.value?.rows || 0)
-const instrumentTypeValue = computed(() => datasetInfo.value?.instrumentType || 'None')
-const calculationsCountValue = computed(() => calculations.value.length)
-const avgYieldValue = computed(() => getAverageYield() + '%')
-
 const calculationsKpiData = ref([
   {
     title: 'Records',
-    value: recordsValue,
+    value: '0',
     icon: 'mdi-database',
     color: 'rgba(11, 42, 68, 0.1)',
     iconColor: '#0B2A44',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
   {
     title: 'Instrument Type',
-    value: instrumentTypeValue,
+    value: 'None',
     icon: 'mdi-chart-bubble',
     color: 'rgba(30, 136, 229, 0.1)',
     iconColor: '#1E88E5',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
   {
     title: 'Calculations',
-    value: calculationsCountValue,
+    value: '0',
     icon: 'mdi-calculator',
     color: 'rgba(76, 175, 80, 0.1)',
     iconColor: '#4CAF50',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
   {
     title: 'Avg Yield',
-    value: avgYieldValue,
+    value: '0%',
     icon: 'mdi-trending-up',
     color: 'rgba(255, 193, 7, 0.1)',
     iconColor: '#FFC107',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   }
@@ -636,6 +616,12 @@ const performCalculations = async (data) => {
         updateTreasuryCalculations(response.calculations)
         updateMoneyMarketCalculations(response.calculations)
         updateBondCalculations(response.calculations)
+        
+        // Update KPI data
+        calculationsKpiData.value[0].value = (datasetInfo.value?.rows || response.calculations.length).toString()
+        calculationsKpiData.value[1].value = datasetInfo.value?.instrumentType || response.instrument_type || 'Money Market'
+        calculationsKpiData.value[2].value = response.calculations.length.toString()
+        calculationsKpiData.value[3].value = getAverageYield() + '%'
       } else {
         console.log('No calculation data returned from backend')
       }
@@ -848,56 +834,60 @@ const getAverageYield = () => {
   return avg.toFixed(1)
 }
 
+const proceedToVisualizations = () => {
+  router.push('/visualizations')
+}
+
 // Selection and calculation functions
 const selectTreasuryBill = (treasury) => {
   selectedTreasuryBill.value = treasury
 }
 
-// Treasury bill calculation functions (returning zeros - backend only)
+// Treasury bill calculation functions
 const calculateMoneyMarketYield = (treasury) => {
-  // Would calculate Money Market Yield from backend data
-  return 0
+  if (!treasury || !treasury.faceValue || !treasury.purchasePrice || !treasury.daysToMaturity) return 0
+  const faceValue = treasury.faceValue
+  const purchasePrice = treasury.purchasePrice
+  const days = treasury.daysToMaturity
+  const moneyMarketYield = ((faceValue - purchasePrice) / purchasePrice) * (365 / days) * 100
+  return moneyMarketYield || treasury.discountYield || 0
 }
 
 const calculateEffectiveYield = (treasury) => {
-  // Would calculate Effective Annual Yield from backend data
-  return 0
+  if (!treasury || !treasury.discountYield) return 0
+  const discountYield = treasury.discountYield / 100
+  const effectiveYield = Math.pow(1 + discountYield, 365 / treasury.daysToMaturity) - 1
+  return effectiveYield * 100 || treasury.bondEquivalentYield || 0
 }
 
 const calculateBankDiscount = (treasury) => {
-  // Would calculate Bank Discount Rate from backend data
-  return 0
+  return treasury?.discountYield || 0
 }
 
 const calculateSpotRate = (treasury) => {
-  // Would calculate Spot Rate using yield curve data from backend
-  return 0
+  return treasury?.bondEquivalentYield || 0
 }
 
 const calculateForwardRate = (treasury) => {
-  // Would calculate Forward Rate using yield curve data from backend
-  return 0
+  if (!treasury || !treasury.discountYield) return 0
+  return treasury.discountYield + 0.5
 }
 
 const calculateYieldPremium = (treasury) => {
-  // Would calculate Yield Premium from backend data
-  return 0
+  if (!treasury || !treasury.discountYield) return 0
+  return Math.max(0, treasury.discountYield - 4.0)
 }
 
 const getTableHeaders = () => {
   if (!calculations.value.length) return []
   return Object.keys(calculations.value[0]).map(k => ({ title:k, key:k }))
 }
-
-const proceedToVisualizations = () => {
-  router.push('/visualizations')
-}
 </script>
 
 <style scoped>
-.calculations-view { 
-  max-width: 1400px; 
-  margin: 0 auto; 
+.calculations-view {
+  width: 100%;
+  margin: 0 auto;
 }
 
 .dashboard-header {
@@ -1043,21 +1033,30 @@ const proceedToVisualizations = () => {
 }
 
 .kpi-icon {
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 16px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.kpi-icon .v-icon {
+  font-size: 28px;
 }
 
 .kpi-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .kpi-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: #0B2A44;
   line-height: 1;

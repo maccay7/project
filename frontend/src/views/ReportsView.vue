@@ -27,7 +27,7 @@
                     <div class="kpi-info">
                       <div class="kpi-value">{{ kpi.value }}</div>
                       <div class="kpi-title">{{ kpi.title }}</div>
-                      <div class="kpi-change" :class="kpi.changeClass">
+                      <div v-if="kpi.change" class="kpi-change" :class="kpi.changeClass">
                         <v-icon size="16">{{ kpi.changeIcon }}</v-icon>
                         {{ kpi.change }}
                       </div>
@@ -63,22 +63,13 @@
             </v-btn>
 
             <v-btn
-              color="grey"
+              color="primary"
               variant="tonal"
               class="mr-2"
               @click="clearSections"
             >
               <v-icon left>mdi-close</v-icon>
               Clear
-            </v-btn>
-
-            <v-btn
-              color="primary"
-              variant="outlined"
-              @click="goBack"
-            >
-              <v-icon left>mdi-arrow-left</v-icon>
-              Back
             </v-btn>
           </div>
 
@@ -237,6 +228,22 @@
         </v-card-text>
       </v-card>
 
+      <!-- EXCEL PREVIEW -->
+      <v-card v-if="hasData" class="preview-card" elevation="2">
+        <v-card-title class="card-title">
+          <v-icon class="title-icon">mdi-microsoft-excel</v-icon>
+          Data Preview (Excel Format)
+        </v-card-title>
+
+        <v-card-text>
+          <ExcelGrid
+            v-if="visualizationData && visualizationData.calculations && visualizationData.calculations.length > 0"
+            :headers="Object.keys(visualizationData.calculations[0] || {})"
+            :data="visualizationData.calculations"
+          />
+        </v-card-text>
+      </v-card>
+
     </div>
   </fixed-layout>
 </template>
@@ -245,6 +252,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
+import ExcelGrid from '../components/ExcelGrid.vue'
 
 const router = useRouter()
 
@@ -268,7 +276,7 @@ const reportKpiData = ref([
     icon: 'mdi-database',
     color: 'rgba(11, 42, 68, 0.1)',
     iconColor: '#0B2A44',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
@@ -278,7 +286,7 @@ const reportKpiData = ref([
     icon: 'mdi-chart-line',
     color: 'rgba(30, 136, 229, 0.1)',
     iconColor: '#1E88E5',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
@@ -288,7 +296,7 @@ const reportKpiData = ref([
     icon: 'mdi-file-export',
     color: 'rgba(76, 175, 80, 0.1)',
     iconColor: '#4CAF50',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   },
@@ -298,7 +306,7 @@ const reportKpiData = ref([
     icon: 'mdi-view-list',
     color: 'rgba(255, 193, 7, 0.1)',
     iconColor: '#FFC107',
-    change: '0%',
+    change: '',
     changeIcon: 'mdi-minus',
     changeClass: 'neutral'
   }
@@ -1467,7 +1475,7 @@ const printReport = () => {
 
 <style scoped>
 .reports-view {
-  max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
 }
 
@@ -1775,21 +1783,30 @@ const printReport = () => {
 }
 
 .kpi-icon {
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 16px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.kpi-icon .v-icon {
+  font-size: 28px;
 }
 
 .kpi-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .kpi-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: #0B2A44;
   line-height: 1;
