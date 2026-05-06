@@ -6,6 +6,8 @@ import numpy as np
 import requests
 import json
 import openpyxl
+import formulas
+import re
 import os
 from datetime import datetime
 
@@ -249,74 +251,29 @@ def upload_data():
                     file.save(temp_file.name)
                     temp_filename = temp_file.name
                 
-                # Read Excel file
-                workbook = openpyxl.load_workbook(temp_filename, read_only=True)
-                sheet = workbook.active
-                
-                # Initialize data and headers lists for Excel processing
-                data = []
-                headers = []
-                
-                for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
-                    if row_idx == 0:
-                        # First row is headers - preserve original column names
-                        headers = []
-                        print(f"DEBUG: Processing Excel headers: {row}")
-                        for i, cell in enumerate(row):
-                            if cell is not None:
-                                header_name = str(cell).strip()
-                                print(f"DEBUG: Header {i}: '{header_name}'")
-                                if header_name:
-                                    # Keep the original header name with minimal cleaning
-                                    # Only replace characters that would break JSON/HTML
-                                    clean_header = header_name.replace('"', '').replace("'", "").replace("\n", " ").replace("\r", "")
-                                    # Use the original header as-is for display
-                                    display_header = clean_header
-                                    # Create a safe key for internal use
-                                    safe_key = clean_header.replace(' ', '_').replace('-', '_').replace('.', '_')
-                                    safe_key = ''.join(c for c in safe_key if c.isalnum() or c == '_')
-                                    if not safe_key or safe_key[0].isdigit():
-                                        safe_key = f"col_{i+1}"
-                                    headers.append({
-                                        'display': display_header,
-                                        'key': safe_key
-                                    })
-                                else:
-                                    # Empty header - create a default
-                                    headers.append({
-                                        'display': f"Column {i+1}",
-                                        'key': f"col_{i+1}"
-                                    })
-                            else:
-                                # Null cell - create a default
-                                headers.append({
-                                    'display': f"Column {i+1}",
-                                    'key': f"col_{i+1}"
-                                })
-                        print(f"DEBUG: Final headers: {headers}")
-                    else:
-                        # Data rows
-                        row_data = {}
-                        for i, cell in enumerate(row):
-                            if i < len(headers):
-                                header_info = headers[i]
-                                row_data[header_info['key']] = str(cell) if cell is not None else ""
-                        if any(row_data.values()):  # Skip empty rows
-                            data.append(row_data)
-                
-                workbook.close()
-                os.unlink(temp_filename)  # Clean up temp file
-                
+                # Read Excel file using pandas (handles formulas if file was saved with Excel)
+                df = pd.read_excel(temp_filename, engine='openpyxl')
+
+                # Convert to dictionary format
+                data = df.fillna('').to_dict('records')
+                column_names = list(df.columns)
+
+                # Clean up temp file
+                os.unlink(temp_filename)
+
                 if not data:
                     return jsonify({'error': 'Excel file appears to be empty'}), 400
-                
-                # Create response with both display headers and data
+
+                # Create header objects
+                headers = [{'display': col, 'key': col} for col in column_names]
+
+                # Create response
                 response_data = {
                     'data': data,
-                    'headers': headers,  # Send header info to frontend
-                    'display_headers': [h['display'] for h in headers]  # Just display names
+                    'headers': headers,
+                    'display_headers': column_names
                 }
-                print(f"DEBUG: Returning {len(data)} rows with headers: {[h['display'] for h in headers]}")
+                print(f"DEBUG: Returning {len(data)} rows with headers: {column_names}")
                     
             except Exception as e:
                 return jsonify({'error': f'Error reading Excel file: {str(e)}'}), 400
