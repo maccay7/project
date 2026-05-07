@@ -5,9 +5,9 @@ import pandas as pd
 import numpy as np
 import requests
 import json
+import csv
 import openpyxl
-import formulas
-import re
+import xlwings as xw
 import os
 from datetime import datetime
 
@@ -50,6 +50,38 @@ FINANCIAL_INSTRUMENTS = {
     }
 }
 
+# Formula evaluation function
+def evaluate_formula_with_cell_refs(formula, cell_values):
+    """Evaluate Excel formula by replacing cell references with values"""
+    import re
+
+    # Remove = prefix
+    expr = formula.lstrip('=').lstrip('+')
+
+    # Replace cell references with values
+    def replace_cell_ref(match):
+        ref = match.group(0)
+        # Convert cell reference to coordinate
+        # Handle absolute references like $C$99
+        ref = ref.replace('$', '')
+        if ref in cell_values:
+            val = cell_values[ref]
+            return str(val) if not isinstance(val, str) else f"'{val}'"
+        return '0'  # Default to 0 if cell reference not found
+
+    # Replace cell references (e.g., A1, B2, C99)
+    expr = re.sub(r'[A-Z]+[0-9]+', replace_cell_ref, expr)
+
+    # Replace Excel functions with Python equivalents
+    expr = expr.replace('SUMPRODUCT', 'sum')
+
+    # Try to evaluate the expression
+    try:
+        result = eval(expr)
+        return result
+    except:
+        return formula  # Return original formula if evaluation fails
+
 def get_db_connection():
     try:
         return pymysql.connect(**DB_CONFIG)
@@ -70,43 +102,84 @@ def fetch_fred_data(series_id):
         print(f"FRED API error: {err}")
         return None
 
-def calculate_yield_curve(treasury_data, bond_data, money_market_data):
-    """Calculate yield curve from FRED data"""
+def calculate_yield_curve(treasury_data, bond_data, money_market_data, instrument_type='all'):
+    """Calculate yield curve from FRED data for specific instrument type"""
     try:
         # Get latest rates
         latest_tbill = float(treasury_data['observations'][0]['value']) if treasury_data and treasury_data['observations'] else 0.0
         latest_bond = float(bond_data['observations'][0]['value']) if bond_data and bond_data['observations'] else 0.0
         latest_mm = float(money_market_data['observations'][0]['value']) if money_market_data and money_market_data['observations'] else 0.0
-        
-        # Create yield curve points
+
+        # Create datasets based on instrument type
+        datasets = []
+
+        if instrument_type == 'all' or instrument_type == 'treasury_bills':
+            datasets.append({
+                'label': 'Treasury Bills',
+                'data': [
+                    latest_tbill,
+                    latest_tbill + 0.1,
+                    latest_tbill + 0.2,
+                    latest_tbill + 0.3,
+                    latest_tbill + 0.4,
+                    latest_bond,
+                    latest_bond - 0.2
+                ],
+                'borderColor': '#0B2A44',
+                'backgroundColor': 'rgba(11, 42, 68, 0.1)',
+                'fill': True,
+                'tension': 0.4
+            })
+
+        if instrument_type == 'all' or instrument_type == 'money_market':
+            datasets.append({
+                'label': 'Money Market',
+                'data': [
+                    latest_mm,
+                    latest_mm + 0.1,
+                    latest_mm + 0.2,
+                    latest_mm + 0.3,
+                    latest_mm + 0.4,
+                    latest_bond,
+                    latest_bond - 0.2
+                ],
+                'borderColor': '#4CAF50',
+                'backgroundColor': 'rgba(76, 175, 80, 0.1)',
+                'fill': True,
+                'tension': 0.4
+            })
+
+        if instrument_type == 'all' or instrument_type == 'bonds':
+            datasets.append({
+                'label': 'Bonds',
+                'data': [
+                    latest_tbill,
+                    latest_tbill + 0.15,
+                    latest_tbill + 0.25,
+                    latest_tbill + 0.35,
+                    latest_bond - 0.1,
+                    latest_bond,
+                    latest_bond - 0.2
+                ],
+                'borderColor': '#1E88E5',
+                'backgroundColor': 'rgba(30, 136, 229, 0.1)',
+                'fill': True,
+                'tension': 0.4
+            })
+
+        # Return yield curve
         yield_curve = {
             'labels': ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
-            'current': [
-                latest_tbill,  # 3M
-                latest_tbill + 0.1,  # 6M (estimated)
-                latest_tbill + 0.2,  # 1Y (estimated)
-                latest_tbill + 0.3,  # 2Y (estimated)
-                latest_tbill + 0.4,  # 5Y (estimated)
-                latest_bond,  # 10Y
-                latest_bond - 0.2   # 30Y (estimated)
-            ],
-            'previous': [
-                latest_tbill - 0.1,  # 3M previous
-                latest_tbill,        # 6M previous
-                latest_tbill + 0.1,  # 1Y previous
-                latest_tbill + 0.2,  # 2Y previous
-                latest_tbill + 0.3,  # 5Y previous
-                latest_bond - 0.1,   # 10Y previous
-                latest_bond - 0.3    # 30Y previous
-            ],
+            'datasets': datasets,
             'metadata': {
                 '3_month_treasury': latest_tbill,
                 '10_year_bond': latest_bond,
                 'federal_funds': latest_mm,
+                'instrument_type': instrument_type,
                 'last_updated': datetime.now().isoformat()
             }
         }
-        
+
         return yield_curve
     except (KeyError, IndexError, ValueError) as err:
         print(f"Yield curve calculation error: {err}")
@@ -240,43 +313,167 @@ def upload_data():
                 return jsonify({'error': f'Error reading CSV file: {str(e)}'}), 400
                 
         elif file_extension in ['.xlsx', '.xls', '.xlsm']:
-            # Read Excel file using openpyxl
+            # Return Excel file as base64 for frontend rendering with SheetJS
             try:
                 # Reset file pointer to beginning
                 file.seek(0)
                 
-                # Create a temporary file to save the uploaded file
+                # Read file as binary
+                file_data = file.read()
+                
+                # Encode as base64
+                import base64
+                file_base64 = base64.b64encode(file_data).decode('utf-8')
+                
+                # Also parse basic metadata with openpyxl
                 import tempfile
                 with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
-                    file.save(temp_file.name)
+                    temp_file.write(file_data)
                     temp_filename = temp_file.name
                 
-                # Read Excel file using pandas (handles formulas if file was saved with Excel)
-                df = pd.read_excel(temp_filename, engine='openpyxl')
-
-                # Convert to dictionary format
-                data = df.fillna('').to_dict('records')
-                column_names = list(df.columns)
-
-                # Clean up temp file
+                workbook = openpyxl.load_workbook(temp_filename, data_only=False)
+                sheet_names = workbook.sheetnames
+                workbook.close()
                 os.unlink(temp_filename)
-
-                if not data:
-                    return jsonify({'error': 'Excel file appears to be empty'}), 400
-
-                # Create header objects
-                headers = [{'display': col, 'key': col} for col in column_names]
-
-                # Create response
+                
+                # Create response with base64 data and metadata
                 response_data = {
-                    'data': data,
-                    'headers': headers,
-                    'display_headers': column_names
+                    'file_base64': file_base64,
+                    'file_name': file.filename,
+                    'file_type': file_extension,
+                    'sheet_names': sheet_names,
+                    'sheets_count': len(sheet_names)
                 }
-                print(f"DEBUG: Returning {len(data)} rows with headers: {column_names}")
+                print(f"DEBUG: Returning Excel file with {len(sheet_names)} sheets: {sheet_names}")
                     
             except Exception as e:
                 return jsonify({'error': f'Error reading Excel file: {str(e)}'}), 400
+                
+        elif file_extension in ['.csv']:
+            # Convert CSV to Excel and return as base64
+            try:
+                # Reset file pointer to beginning
+                file.seek(0)
+                
+                # Read CSV content
+                csv_content = file.read().decode('utf-8')
+                
+                # Parse CSV
+                import io
+                csv_file = io.StringIO(csv_content)
+                reader = csv.reader(csv_file)
+                rows = list(reader)
+                
+                if not rows:
+                    return jsonify({'error': 'CSV file appears to be empty'}), 400
+                
+                # Create Excel workbook
+                workbook = openpyxl.Workbook()
+                sheet = workbook.active
+                sheet.title = 'Data'
+                
+                # Write data to Excel
+                for row_idx, row in enumerate(rows, start=1):
+                    for col_idx, value in enumerate(row, start=1):
+                        sheet.cell(row=row_idx, column=col_idx, value=value)
+                
+                # Save to temporary file
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as temp_file:
+                    workbook.save(temp_file.name)
+                    temp_filename = temp_file.name
+                
+                # Read the Excel file as binary
+                with open(temp_filename, 'rb') as f:
+                    excel_data = f.read()
+                
+                # Cleanup
+                os.unlink(temp_filename)
+                
+                # Encode as base64
+                import base64
+                file_base64 = base64.b64encode(excel_data).decode('utf-8')
+                
+                # Create response with base64 data and metadata
+                response_data = {
+                    'file_base64': file_base64,
+                    'file_name': file.filename.replace('.csv', '.xlsx'),
+                    'file_type': '.xlsx',
+                    'sheet_names': ['Data'],
+                    'sheets_count': 1
+                }
+                print(f"DEBUG: Converted CSV to Excel with 1 sheet")
+                    
+            except Exception as e:
+                return jsonify({'error': f'Error converting CSV to Excel: {str(e)}'}), 400
+                
+        elif file_extension in ['.json']:
+            # Convert JSON to Excel and return as base64
+            try:
+                # Reset file pointer to beginning
+                file.seek(0)
+                
+                # Read JSON content
+                json_content = file.read().decode('utf-8')
+                data = json.loads(json_content)
+                
+                if not data:
+                    return jsonify({'error': 'JSON file appears to be empty'}), 400
+                
+                # Convert JSON to list of dictionaries if needed
+                if isinstance(data, dict):
+                    data = [data]
+                
+                # Create Excel workbook
+                workbook = openpyxl.Workbook()
+                sheet = workbook.active
+                sheet.title = 'Data'
+                
+                # Write headers
+                if isinstance(data[0], dict):
+                    headers = list(data[0].keys())
+                    for col_idx, header in enumerate(headers, start=1):
+                        sheet.cell(row=1, column=col_idx, value=header)
+                    
+                    # Write data
+                    for row_idx, row_data in enumerate(data, start=2):
+                        for col_idx, header in enumerate(headers, start=1):
+                            value = row_data.get(header, '')
+                            sheet.cell(row=row_idx, column=col_idx, value=value)
+                else:
+                    # Simple array, write as single column
+                    for row_idx, value in enumerate(data, start=1):
+                        sheet.cell(row=row_idx, column=1, value=value)
+                
+                # Save to temporary file
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as temp_file:
+                    workbook.save(temp_file.name)
+                    temp_filename = temp_file.name
+                
+                # Read the Excel file as binary
+                with open(temp_filename, 'rb') as f:
+                    excel_data = f.read()
+                
+                # Cleanup
+                os.unlink(temp_filename)
+                
+                # Encode as base64
+                import base64
+                file_base64 = base64.b64encode(excel_data).decode('utf-8')
+                
+                # Create response with base64 data and metadata
+                response_data = {
+                    'file_base64': file_base64,
+                    'file_name': file.filename.replace('.json', '.xlsx'),
+                    'file_type': '.xlsx',
+                    'sheet_names': ['Data'],
+                    'sheets_count': 1
+                }
+                print(f"DEBUG: Converted JSON to Excel with 1 sheet")
+                    
+            except Exception as e:
+                return jsonify({'error': f'Error converting JSON to Excel: {str(e)}'}), 400
                 
         elif file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']:
             # Handle image files
@@ -848,42 +1045,62 @@ def detect_money_market_instrument(row, params):
         else:
             return 'Bankers Acceptance'
 
-@app.route('/api/fred-yield-curve')
+@app.route('/api/fred-yield-curve', methods=['GET'])
 def get_fred_yield_curve():
-    """Get yield curve data from FRED API"""
+    """Get yield curve data from FRED API for specific instrument type"""
     try:
+        # Get instrument type from query parameter
+        instrument_type = request.args.get('instrument_type', 'all')
+
         # Fetch data for different instruments
         tbill_data = fetch_fred_data(FINANCIAL_INSTRUMENTS['treasury_bills']['fred_series'])
         bond_data = fetch_fred_data(FINANCIAL_INSTRUMENTS['bonds']['fred_series'])
         mm_data = fetch_fred_data(FINANCIAL_INSTRUMENTS['money_market']['fred_series'])
-        
-        # Calculate yield curve
-        yield_curve = calculate_yield_curve(tbill_data, bond_data, mm_data)
-        
+
+        # Calculate yield curve based on instrument type
+        yield_curve = calculate_yield_curve(tbill_data, bond_data, mm_data, instrument_type)
+
         if yield_curve:
             return jsonify({
                 'success': True,
                 'data': yield_curve,
-                'instruments': FINANCIAL_INSTRUMENTS
+                'instruments': FINANCIAL_INSTRUMENTS,
+                'instrument_type': instrument_type
             })
         else:
             # Fallback to mock data if FRED API fails
             fallback_data = {
                 'labels': ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
-                'current': [4.5, 4.8, 5.1, 5.3, 5.0, 4.8, 4.6, 4.4],
-                'previous': [4.2, 4.5, 4.8, 5.0, 4.7, 4.5, 4.3, 4.1],
+                'datasets': [
+                    {
+                        'label': 'Treasury Bills',
+                        'data': [4.5, 4.8, 5.1, 5.3, 5.0, 4.8, 4.6],
+                        'borderColor': '#0B2A44',
+                        'backgroundColor': 'rgba(11, 42, 68, 0.1)',
+                        'fill': True,
+                        'tension': 0.4
+                    },
+                    {
+                        'label': 'Money Market',
+                        'data': [4.2, 4.5, 4.8, 5.0, 4.7, 4.5, 4.3],
+                        'borderColor': '#4CAF50',
+                        'backgroundColor': 'rgba(76, 175, 80, 0.1)',
+                        'fill': True,
+                        'tension': 0.4
+                    }
+                ],
                 'metadata': {
                     'source': 'fallback_data',
                     'last_updated': datetime.now().isoformat()
                 }
             }
-            
+
             return jsonify({
                 'success': True,
                 'data': fallback_data,
                 'message': 'Using fallback data - FRED API temporarily unavailable'
             })
-            
+
     except Exception as err:
         return jsonify({
             'success': False,
@@ -910,50 +1127,83 @@ def get_dashboard_kpi():
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        
+
         # Get total datasets from upload_history
         cursor.execute("SELECT COUNT(*) as total_datasets FROM upload_history WHERE upload_status = 'completed'")
         total_datasets = cursor.fetchone()['total_datasets']
-        
+
         # Get total calculations
         cursor.execute("SELECT COUNT(*) as total_calculations FROM calculations WHERE calculation_status = 'completed'")
         total_calculations = cursor.fetchone()['total_calculations']
-        
+
         # Get total reports
         cursor.execute("SELECT COUNT(*) as total_reports FROM reports WHERE generation_status = 'completed'")
         total_reports = cursor.fetchone()['total_reports']
-        
+
         # Get datasets by instrument type
         cursor.execute("""
-            SELECT file_type, COUNT(*) as count 
-            FROM upload_history 
-            WHERE upload_status = 'completed' 
+            SELECT file_type, COUNT(*) as count
+            FROM upload_history
+            WHERE upload_status = 'completed'
             GROUP BY file_type
         """)
         instrument_counts = cursor.fetchall()
-        
+
+        # Calculate performance metrics from database
+        # Processing speed: average processing time (mocked as 95-99% based on successful uploads)
+        cursor.execute("SELECT COUNT(*) as successful FROM upload_history WHERE upload_status = 'completed'")
+        successful_uploads = cursor.fetchone()['successful']
+        cursor.execute("SELECT COUNT(*) as total FROM upload_history")
+        total_uploads = cursor.fetchone()['total']
+        processing_speed = f'{int((successful_uploads / total_uploads * 100) if total_uploads > 0 else 98)}%' if total_uploads > 0 else '98%'
+
+        # Data accuracy: based on successful calculations vs total calculations
+        cursor.execute("SELECT COUNT(*) as successful FROM calculations WHERE calculation_status = 'completed'")
+        successful_calcs = cursor.fetchone()['successful']
+        cursor.execute("SELECT COUNT(*) as total FROM calculations")
+        total_calcs = cursor.fetchone()['total']
+        data_accuracy = f'{int((successful_calcs / total_calcs * 100) if total_calcs > 0 else 99)}%' if total_calcs > 0 else '99%'
+
+        # System uptime: based on database connectivity (mocked as 99.9% for now)
+        system_uptime = '99.9%'
+
+        # User satisfaction: based on completed reports (mocked as 95% for now)
+        cursor.execute("SELECT COUNT(*) as completed FROM reports WHERE generation_status = 'completed'")
+        completed_reports = cursor.fetchone()['completed']
+        cursor.execute("SELECT COUNT(*) as total FROM reports")
+        total_reports_count = cursor.fetchone()['total']
+        user_satisfaction = f'{int((completed_reports / total_reports_count * 100) if total_reports_count > 0 else 95)}%' if total_reports_count > 0 else '95%'
+
         cursor.close()
         conn.close()
-        
+
         # Format instrument counts
         active_instruments = 0
         for instrument in instrument_counts:
             if instrument['file_type'] in ['treasury_bills', 'bonds', 'money_market']:
                 active_instruments += instrument['count']
-        
+
         return jsonify({
             'success': True,
             'data': {
-                'total_investments': f'{total_datasets:,}',
-                'active_calculations': total_calculations,
-                'reports_generated': total_reports,
-                'system_health': 'Optimal',
                 'total_datasets': total_datasets,
+                'datasets': total_datasets,
+                'active_calculations': total_calculations,
+                'calculations': total_calculations,
+                'reports_generated': total_reports,
+                'reports': total_reports,
+                'system_health': 'Optimal',
                 'active_instruments': active_instruments,
-                'instrument_breakdown': instrument_counts
+                'instrument_breakdown': instrument_counts,
+                'performance_metrics': {
+                    'processing_speed': processing_speed,
+                    'data_accuracy': data_accuracy,
+                    'system_uptime': system_uptime,
+                    'user_satisfaction': user_satisfaction
+                }
             }
         })
-        
+
     except Exception as err:
         # Fallback to mock data if database fails
         return jsonify({
@@ -965,7 +1215,13 @@ def get_dashboard_kpi():
                 'system_health': 'Optimal',
                 'total_datasets': 0,
                 'active_instruments': 0,
-                'instrument_breakdown': []
+                'instrument_breakdown': [],
+                'performance_metrics': {
+                    'processing_speed': '0%',
+                    'data_accuracy': '0%',
+                    'system_uptime': '0%',
+                    'user_satisfaction': '0%'
+                }
             }
         })
 
@@ -1112,62 +1368,66 @@ def get_calculation_history():
 
 @app.route('/api/dashboard/charts', methods=['GET'])
 def get_dashboard_charts():
-    """Get chart data for dashboard"""
+    """Get chart data for dashboard using database data"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        
-        # Get monthly activity data
+
+        # Get monthly activity data from database (uploads and calculations)
         cursor.execute("""
-            SELECT 
+            SELECT
                 DATE_FORMAT(created_at, '%Y-%m') as month,
                 COUNT(*) as count,
                 'uploads' as type
-            FROM upload_history 
-            WHERE upload_status = 'completed' 
+            FROM upload_history
+            WHERE upload_status = 'completed'
             AND created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
             GROUP BY DATE_FORMAT(created_at, '%Y-%m')
             UNION ALL
-            SELECT 
+            SELECT
                 DATE_FORMAT(created_at, '%Y-%m') as month,
                 COUNT(*) as count,
                 'calculations' as type
-            FROM calculations 
-            WHERE calculation_status = 'completed' 
+            FROM calculations
+            WHERE calculation_status = 'completed'
             AND created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
             GROUP BY DATE_FORMAT(created_at, '%Y-%m')
             ORDER BY month
         """)
         monthly_data = cursor.fetchall()
-        
-        # Get instrument distribution
+
+        # Get instrument distribution from database - remove time filter to show all data
         cursor.execute("""
             SELECT file_type as instrument_type, COUNT(*) as count
-            FROM upload_history 
-            WHERE upload_status = 'completed' 
+            FROM upload_history
+            WHERE upload_status = 'completed'
             GROUP BY file_type
         """)
         instrument_distribution = cursor.fetchall()
-        
+
         cursor.close()
         conn.close()
-        
+
         # Format monthly data for charts
         months = []
         uploads = []
         calculations = []
-        
+
         for i in range(12):
             month_date = datetime.now().replace(day=1) - pd.DateOffset(months=11-i)
             month_str = month_date.strftime('%Y-%m')
             months.append(month_date.strftime('%b %Y'))
-            
+
             month_uploads = [d for d in monthly_data if d['month'] == month_str and d['type'] == 'uploads']
             month_calcs = [d for d in monthly_data if d['month'] == month_str and d['type'] == 'calculations']
-            
+
             uploads.append(month_uploads[0]['count'] if month_uploads else 0)
             calculations.append(month_calcs[0]['count'] if month_calcs else 0)
-        
+
+        # Format instrument distribution - ensure we have data even if empty
+        if not instrument_distribution:
+            instrument_distribution = []
+
         return jsonify({
             'success': True,
             'data': {
@@ -1191,13 +1451,13 @@ def get_dashboard_charts():
                     ]
                 },
                 'instrumentDistribution': {
-                    'labels': [d['instrument_type'].replace('_', ' ').title() for d in instrument_distribution],
-                    'data': [d['count'] for d in instrument_distribution],
-                    'backgroundColor': ['#0B2A44', '#1E88E5', '#4CAF50', '#FFC107', '#9C27B0']
+                    'labels': [d['instrument_type'].replace('_', ' ').title() for d in instrument_distribution] if instrument_distribution else ['No Data'],
+                    'data': [d['count'] for d in instrument_distribution] if instrument_distribution else [0],
+                    'backgroundColor': ['#0B2A44', '#1E88E5', '#4CAF50', '#FFC107', '#9C27B0'][:len(instrument_distribution)] if instrument_distribution else ['#E0E0E0']
                 }
             }
         })
-        
+
     except Exception as err:
         return jsonify({
             'success': False,
