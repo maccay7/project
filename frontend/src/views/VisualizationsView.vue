@@ -320,27 +320,15 @@ const fetchYieldCurveData = async () => {
     console.log('Fetching yield curve data from FRED API...')
     const response = await fetch('http://localhost:5000/api/fred-yield-curve')
     const data = await response.json()
-    
+
     if (data.success && data.data) {
       console.log('Yield curve data fetched:', data.data)
       yieldCurveData.value = data.data
     } else {
-      console.log('Yield curve data not available, using fallback')
-      // Fallback yield curve data
-      yieldCurveData.value = {
-        labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
-        current: [0.72, 0.82, 0.92, 1.02, 1.12, 4.06, 3.86],
-        historical: []
-      }
+      console.error('Yield curve data not available from FRED API')
     }
   } catch (error) {
     console.error('Error fetching yield curve data:', error)
-    // Fallback data
-    yieldCurveData.value = {
-      labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
-      current: [0.72, 0.82, 0.92, 1.02, 1.12, 4.06, 3.86],
-      historical: []
-    }
   }
 }
 

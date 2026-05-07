@@ -74,7 +74,7 @@
 
       <!-- CLEANING OPTIONS -->
       <v-row>
-        <v-col cols="12" md="6">
+        <v-col cols="12" md="12">
           <v-card class="stats-card" elevation="2">
 
             <v-card-title class="card-title">
@@ -123,7 +123,7 @@
 
       <!-- DATASET PREVIEWS UNDER CLEANING OPTIONS -->
       <v-row v-if="uploadedData && uploadedData.data">
-        <v-col cols="12" md="6">
+        <v-col cols="12" md="12">
           <v-card class="stats-card" elevation="2">
             <v-card-title class="card-title">
               <v-icon class="title-icon">mdi-table</v-icon>
@@ -137,7 +137,7 @@
             </v-card-text>
           </v-card>
         </v-col>
-        <v-col cols="12" md="6" v-if="cleaningResults && cleaningResults.cleanedData">
+        <v-col cols="12" md="12" v-if="cleaningResults && cleaningResults.cleanedData">
           <v-card class="stats-card" elevation="2">
             <v-card-title class="card-title">
               <v-icon class="title-icon">mdi-table-check</v-icon>
@@ -155,7 +155,7 @@
 
       <!-- RESULTS SECTION -->
       <v-row>
-        <v-col cols="12" md="6">
+        <v-col cols="12" md="12">
           <v-card class="stats-card" elevation="2">
 
             <v-card-title class="card-title">
@@ -341,12 +341,13 @@
 
           <v-data-table
             :headers="getTableHeaders()"
-            :items="getPreviewData()"
+            :items="filteredData"
             density="compact"
             class="preview-table"
             :loading="cleaning"
-            items-per-page="10"
+            v-model:items-per-page="itemsPerPage"
             :items-per-page-options="[5, 10, 25, 50]"
+            :search="search"
           >
             <template v-slot:top>
               <v-toolbar flat color="transparent">
@@ -354,7 +355,16 @@
                   Dataset Columns: {{ Object.keys(uploadedData.value?.data?.[0] || {}).length }}
                 </v-toolbar-title>
                 <v-spacer></v-spacer>
-                <v-btn color="primary" variant="outlined" size="small" @click="exportCleanedData">
+                <v-text-field
+                  v-model="search"
+                  label="Search"
+                  prepend-inner-icon="mdi-magnify"
+                  variant="outlined"
+                  density="compact"
+                  style="max-width: 300px"
+                  clearable
+                ></v-text-field>
+                <v-btn color="primary" variant="outlined" size="small" @click="exportCleanedData" class="ml-2">
                   <v-icon left>mdi-download</v-icon>
                   Export
                 </v-btn>
@@ -386,11 +396,23 @@ const cleaning = ref(false)
 const cleaningResults = ref<any>(null)
 const uploadId = ref<string | null>(null)
 const datasetPersisted = ref(true)
+const itemsPerPage = ref(10)
+const search = ref('')
 
 const rowsValue = computed(() => uploadedData.value?.data?.length || 0)
 const columnsValue = computed(() => getColumnCount())
 const instrumentValue = computed(() => uploadedData.value?.instrumentType || 'N/A')
 const fileValue = computed(() => uploadedData.value?.name || 'N/A')
+
+const filteredData = computed(() => {
+  if (!search.value) return getPreviewData()
+  const searchTerm = search.value.toLowerCase()
+  return getPreviewData().filter((row: any) => {
+    return Object.values(row).some((value: any) => 
+      String(value).toLowerCase().includes(searchTerm)
+    )
+  })
+})
 
 const cleaningKpiData = ref([
   {
@@ -677,7 +699,7 @@ const proceedToCalculations = () => {
 }
 
 .dashboard-header {
-  margin-bottom: 32px;
+  margin-bottom: 0;
 }
 
 .page-title {
@@ -696,12 +718,12 @@ const proceedToCalculations = () => {
 .action-buttons {
   display: flex;
   gap: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 0;
 }
 
 .stats-card {
   border-radius: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 0;
   background: white;
   border: 1px solid rgba(11, 42, 68, 0.08);
   position: relative;
@@ -744,7 +766,7 @@ const proceedToCalculations = () => {
 
 /* KPI Styles - Matching DashboardView and ReportsView */
 .kpi-row {
-  margin-bottom: 32px;
+  margin-bottom: 0;
 }
 
 .kpi-card {
@@ -953,7 +975,7 @@ const proceedToCalculations = () => {
 .action-buttons {
   display: flex;
   gap: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 0;
   flex-wrap: wrap;
 }
 

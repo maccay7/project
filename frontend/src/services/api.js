@@ -53,8 +53,8 @@ export const dashboardAPI = {
     return await apiRequest('/api/dashboard/recent-activity')
   },
   
-  getYieldCurve: async () => {
-    return await apiRequest('/api/fred-yield-curve')
+  getYieldCurve: async (instrumentType = 'all') => {
+    return await apiRequest(`/api/fred-yield-curve?instrument_type=${instrumentType}`)
   },
   
   getCharts: async () => {

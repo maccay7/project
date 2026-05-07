@@ -110,13 +110,8 @@
               Monthly Activity Trends
             </v-card-title>
             <v-card-text>
-              <div v-if="chartData && chartData.monthlyActivity" class="chart-container">
+              <div class="chart-container">
                 <canvas ref="monthlyChart" width="400" height="200"></canvas>
-              </div>
-              <div v-else class="chart-placeholder">
-                <v-icon size="64" color="#0B2A44">mdi-chart-line</v-icon>
-                <p class="placeholder-text">Loading monthly activity trends...</p>
-                <p class="placeholder-subtitle">Upload datasets to see activity trends</p>
               </div>
             </v-card-text>
           </v-card>
@@ -128,13 +123,8 @@
               Instrument Distribution
             </v-card-title>
             <v-card-text>
-              <div v-if="chartData && chartData.instrumentDistribution" class="chart-container">
+              <div class="chart-container">
                 <canvas ref="pieChart" width="200" height="200"></canvas>
-              </div>
-              <div v-else class="chart-placeholder">
-                <v-icon size="48" color="#1E88E5">mdi-chart-pie</v-icon>
-                <p class="placeholder-text">Loading instrument distribution...</p>
-                <p class="placeholder-subtitle">Upload datasets to see distribution</p>
               </div>
             </v-card-text>
           </v-card>
@@ -147,7 +137,7 @@
           <v-card class="chart-card" elevation="2">
             <v-card-title class="card-title">
               <v-icon class="title-icon">mdi-trending-up</v-icon>
-              Yield Rate Trends (2024)
+              {{ yieldCurveTitle }}
             </v-card-title>
             <v-card-text>
               <div v-if="yieldCurveData" class="chart-container">
@@ -179,102 +169,8 @@
                       <v-icon :color="instrument.color" size="40" class="mb-3">{{ instrument.icon }}</v-icon>
                       <div class="instrument-name">{{ instrument.name }}</div>
                       <div class="instrument-desc">{{ instrument.description }}</div>
-                      <v-chip 
-                        :color="instrument.color" 
-                        variant="tonal" 
-                        size="small"
-                        class="mt-2"
-                      >
-                        {{ instrument.count }} Active
-                      </v-chip>
                     </v-card-text>
                   </v-card>
-                </v-col>
-              </v-row>
-            </v-card-text>
-          </v-card>
-        </v-col>
-      </v-row>
-
-      <!-- Additional Statistics Row -->
-      <v-row class="stats-row">
-        <v-col cols="12" md="6">
-          <v-card class="stats-card" elevation="2">
-            <v-card-title class="card-title">
-              <v-icon class="title-icon">mdi-chart-box</v-icon>
-              Performance Metrics
-            </v-card-title>
-            <v-card-text>
-              <div class="metrics-grid">
-                <div class="metric-item" v-for="metric in performanceMetrics" :key="metric.name">
-                  <div class="metric-label">{{ metric.name }}</div>
-                  <div class="metric-value" :style="{ color: metric.color }">{{ metric.value }}</div>
-                  <div class="metric-progress">
-                    <v-progress-linear 
-                      :model-value="metric.progress" 
-                      :color="metric.color"
-                      height="4"
-                      rounded
-                    ></v-progress-linear>
-                  </div>
-                </div>
-              </div>
-            </v-card-text>
-          </v-card>
-        </v-col>
-        <v-col cols="12" md="6">
-          <v-card class="stats-card" elevation="2">
-            <v-card-title class="card-title">
-              <v-icon class="title-icon">mdi-alert-circle</v-icon>
-              System Status
-            </v-card-title>
-            <v-card-text>
-              <div class="status-items">
-                <div class="status-item" v-for="status in systemStatus" :key="status.name">
-                  <div class="status-indicator" :class="status.class"></div>
-                  <div class="status-info">
-                    <div class="status-name">{{ status.name }}</div>
-                    <div class="status-value">{{ status.value }}</div>
-                  </div>
-                </div>
-              </div>
-            </v-card-text>
-          </v-card>
-        </v-col>
-      </v-row>
-
-      <!-- Quick Stats Bar -->
-      <v-row>
-        <v-col cols="12">
-          <v-card class="quick-stats-card" elevation="2">
-            <v-card-text class="pa-4">
-              <!-- Top Row - 3 Stats -->
-              <v-row class="mb-3">
-                <v-col cols="12" sm="4" v-for="stat in quickStats.slice(0, 3)" :key="stat.label">
-                  <div class="quick-stat">
-                    <div class="quick-stat-icon" :style="{ backgroundColor: stat.bgColor }">
-                      <v-icon :color="stat.color" size="20">{{ stat.icon }}</v-icon>
-                    </div>
-                    <div class="quick-stat-content">
-                      <div class="quick-stat-label">{{ stat.label }}</div>
-                      <div class="quick-stat-value">{{ stat.value }}</div>
-                    </div>
-                  </div>
-                </v-col>
-              </v-row>
-              
-              <!-- Bottom Row - 3 Stats -->
-              <v-row>
-                <v-col cols="12" sm="4" v-for="stat in quickStats.slice(3, 6)" :key="stat.label">
-                  <div class="quick-stat">
-                    <div class="quick-stat-icon" :style="{ backgroundColor: stat.bgColor }">
-                      <v-icon :color="stat.color" size="20">{{ stat.icon }}</v-icon>
-                    </div>
-                    <div class="quick-stat-content">
-                      <div class="quick-stat-label">{{ stat.label }}</div>
-                      <div class="quick-stat-value">{{ stat.value }}</div>
-                    </div>
-                  </div>
                 </v-col>
               </v-row>
             </v-card-text>
@@ -442,7 +338,7 @@ const loadDashboardData = async () => {
         // Get instrument type from saved datasets or backend data
         let instrumentType = 'N/A'
         if (savedDatasets.value.length > 0) {
-          instrumentType = savedDatasets.value[0].instrumentType || 'Unknown'
+          instrumentType = savedDatasets.value[0].instrumentType || 'N/A'
         } else if (data.instrument_type) {
           instrumentType = data.instrument_type
         } else if (data.active_instrument) {
@@ -476,28 +372,6 @@ const loadDashboardData = async () => {
           instruments.value[1].count = instrumentCounts.bonds
           instruments.value[2].count = instrumentCounts.money_market
         }
-
-        // Update performance metrics with backend data or reasonable defaults
-        if (data.performance_metrics) {
-          performanceMetrics.value[0].value = data.performance_metrics.processing_speed || '98%'
-          performanceMetrics.value[0].progress = parseInt(data.performance_metrics.processing_speed) || 98
-          performanceMetrics.value[1].value = data.performance_metrics.data_accuracy || '99%'
-          performanceMetrics.value[1].progress = parseInt(data.performance_metrics.data_accuracy) || 99
-          performanceMetrics.value[2].value = data.performance_metrics.system_uptime || '99.9%'
-          performanceMetrics.value[2].progress = 99
-          performanceMetrics.value[3].value = data.performance_metrics.user_satisfaction || '95%'
-          performanceMetrics.value[3].progress = parseInt(data.performance_metrics.user_satisfaction) || 95
-        } else {
-          // Use default values if backend doesn't provide performance metrics
-          performanceMetrics.value[0].value = '98%'
-          performanceMetrics.value[0].progress = 98
-          performanceMetrics.value[1].value = '99%'
-          performanceMetrics.value[1].progress = 99
-          performanceMetrics.value[2].value = '99.9%'
-          performanceMetrics.value[2].progress = 99
-          performanceMetrics.value[3].value = '95%'
-          performanceMetrics.value[3].progress = 95
-        }
       } else {
         console.error('KPI API returned unsuccessful or no data:', kpiResponse)
       }
@@ -521,7 +395,13 @@ const loadDashboardData = async () => {
 
     // Load yield curve data
     try {
-      const yieldCurveResponse = await dashboardAPI.getYieldCurve()
+      // Get instrument type from saved dataset
+      let instrumentType = 'all'
+      if (savedDatasets.value && savedDatasets.value.length > 0) {
+        instrumentType = savedDatasets.value[0].instrumentType?.toLowerCase().replace(' ', '_') || 'all'
+      }
+
+      const yieldCurveResponse = await dashboardAPI.getYieldCurve(instrumentType)
       if (yieldCurveResponse.success) {
         yieldCurveData.value = yieldCurveResponse.data
         // Render yield curve chart after data is loaded
@@ -532,59 +412,21 @@ const loadDashboardData = async () => {
       console.error('Error loading yield curve data:', error)
     }
 
-    // Load chart data - don't let this fail the entire dashboard
+    // Load chart data - only use FRED API data
     try {
       const chartsResponse = await dashboardAPI.getCharts()
-      if (chartsResponse.success) {
+      console.log('Charts Response:', chartsResponse)
+      if (chartsResponse.success && chartsResponse.data) {
         chartData.value = chartsResponse.data
+        console.log('Chart data set:', chartData.value)
+        // Render charts after data is loaded
+        await nextTick()
+        renderCharts()
       } else {
-        // Use fallback data if API returns success but no data
-        chartData.value = {
-          monthlyActivity: {
-            labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-            datasets: [{
-              label: 'Activity',
-              data: [1200, 1900, 3000, 5000, 2300, 3200, 4100, 5200, 6100, 7200, 8100, 9200],
-              borderColor: '#0B2A44',
-              backgroundColor: 'rgba(11, 42, 68, 0.1)',
-              fill: true,
-              tension: 0.4
-            }]
-          },
-          instrumentDistribution: {
-            labels: ['Treasury Bills', 'Bonds', 'Money Market'],
-            data: [35, 40, 25],
-            backgroundColor: ['#0B2A44', '#1E88E5', '#4CAF50']
-          }
-        }
+        console.error('Charts API returned no data:', chartsResponse)
       }
-      // Render charts after data is loaded
-      await nextTick()
-      renderCharts()
     } catch (error) {
       console.error('Error loading charts data:', error)
-      // Use fallback data when backend fails
-      chartData.value = {
-        monthlyActivity: {
-          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-          datasets: [{
-            label: 'Activity',
-            data: [1200, 1900, 3000, 5000, 2300, 3200, 4100, 5200, 6100, 7200, 8100, 9200],
-            borderColor: '#0B2A44',
-            backgroundColor: 'rgba(11, 42, 68, 0.1)',
-            fill: true,
-            tension: 0.4
-          }]
-        },
-        instrumentDistribution: {
-          labels: ['Treasury Bills', 'Bonds', 'Money Market'],
-          data: [35, 40, 25],
-          backgroundColor: ['#0B2A44', '#1E88E5', '#4CAF50']
-        }
-      }
-      // Render charts with fallback data
-      await nextTick()
-      renderCharts()
     }
   } catch (error) {
     console.error('Error loading dashboard data:', error)
@@ -614,15 +456,19 @@ const renderCharts = () => {
       }
 
       // Render monthly activity chart
-      if (monthlyChart.value && chartData.value?.monthlyActivity) {
+      if (monthlyChart.value) {
         try {
           const ctx = monthlyChart.value.getContext('2d')
           if (ctx) {
+            const monthlyData = chartData.value?.monthlyActivity || {
+              labels: [],
+              datasets: []
+            }
             monthlyChartInstance = new ChartClass(ctx, {
               type: 'line',
               data: {
-                labels: chartData.value.monthlyActivity.labels,
-                datasets: chartData.value.monthlyActivity.datasets
+                labels: monthlyData.labels || [],
+                datasets: monthlyData.datasets || []
               },
               options: {
                 responsive: true,
@@ -649,17 +495,22 @@ const renderCharts = () => {
       }
 
       // Render instrument distribution pie chart
-      if (pieChart.value && chartData.value?.instrumentDistribution) {
+      if (pieChart.value) {
         try {
           const ctx = pieChart.value.getContext('2d')
           if (ctx) {
+            const distributionData = chartData.value?.instrumentDistribution || {
+              labels: ['No Data'],
+              data: [0],
+              backgroundColor: ['#E0E0E0']
+            }
             pieChartInstance = new ChartClass(ctx, {
               type: 'doughnut',
               data: {
-                labels: chartData.value.instrumentDistribution.labels,
+                labels: distributionData.labels || ['No Data'],
                 datasets: [{
-                  data: chartData.value.instrumentDistribution.data,
-                  backgroundColor: chartData.value.instrumentDistribution.backgroundColor,
+                  data: distributionData.data || [0],
+                  backgroundColor: distributionData.backgroundColor || ['#E0E0E0'],
                   borderWidth: 2,
                   borderColor: '#fff'
                 }]
@@ -684,24 +535,18 @@ const renderCharts = () => {
       }
 
       // Render yield curve chart
-      if (yieldCurveChart.value && yieldCurveData.value) {
+      if (yieldCurveChart.value) {
         try {
           const ctx = yieldCurveChart.value.getContext('2d')
           if (ctx) {
-            const labels = yieldCurveData.value.current ? Object.keys(yieldCurveData.value.current) : []
-            const data = yieldCurveData.value.current ? Object.values(yieldCurveData.value.current) : []
+            const labels = yieldCurveData.value?.labels || []
+            const datasets = yieldCurveData.value?.datasets || []
+
             yieldCurveChartInstance = new ChartClass(ctx, {
               type: 'line',
               data: {
                 labels: labels,
-                datasets: [{
-                  label: 'Yield Rate (%)',
-                  data: data,
-                  borderColor: '#4CAF50',
-                  backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                  fill: true,
-                  tension: 0.4
-                }]
+                datasets: datasets
               },
               options: {
                 responsive: true,
@@ -782,103 +627,15 @@ const instruments = ref([
   }
 ])
 
-// Performance Metrics Data
-const performanceMetrics = ref([
-  {
-    name: 'Processing Speed',
-    value: '0%',
-    color: '#4CAF50',
-    progress: 0
-  },
-  {
-    name: 'Data Accuracy',
-    value: '0%',
-    color: '#0B2A44',
-    progress: 0
-  },
-  {
-    name: 'System Uptime',
-    value: '0%',
-    color: '#1E88E5',
-    progress: 0
-  },
-  {
-    name: 'User Satisfaction',
-    value: '0%',
-    color: '#FFC107',
-    progress: 0
+// Computed property for yield curve title based on uploaded dataset
+const yieldCurveTitle = computed(() => {
+  if (savedDatasets.value && savedDatasets.value.length > 0) {
+    const instrumentType = savedDatasets.value[0].instrumentType || 'All Instruments'
+    return `Yield Rate Trends - ${instrumentType}`
   }
-])
+  return 'Yield Rate Trends (2024)'
+})
 
-// System Status Data
-const systemStatus = ref([
-  {
-    name: 'Database Connection',
-    value: 'Healthy',
-    class: 'status-online'
-  },
-  {
-    name: 'API Services',
-    value: 'Operational',
-    class: 'status-online'
-  },
-  {
-    name: 'Data Processing',
-    value: 'Running',
-    class: 'status-warning'
-  },
-  {
-    name: 'Backup System',
-    value: 'Completed',
-    class: 'status-online'
-  }
-])
-
-// Quick Stats Data
-const quickStats = ref([
-  {
-    label: 'Daily Users',
-    value: '24',
-    icon: 'mdi-account',
-    color: '#0B2A44',
-    bgColor: 'rgba(11, 42, 68, 0.1)'
-  },
-  {
-    label: 'Transactions',
-    value: '156',
-    icon: 'mdi-swap-horizontal',
-    color: '#1E88E5',
-    bgColor: 'rgba(30, 136, 229, 0.1)'
-  },
-  {
-    label: 'Data Points',
-    value: computed(() => savedDatasets.value.reduce((sum, ds) => sum + ds.rows, 0).toString()),
-    icon: 'mdi-database',
-    color: '#4CAF50',
-    bgColor: 'rgba(76, 175, 80, 0.1)'
-  },
-  {
-    label: 'Success Rate',
-    value: '98.5%',
-    icon: 'mdi-check-circle',
-    color: '#4CAF50',
-    bgColor: 'rgba(76, 175, 80, 0.1)'
-  },
-  {
-    label: 'Avg Response',
-    value: '245ms',
-    icon: 'mdi-speedometer',
-    color: '#4CAF50',
-    bgColor: 'rgba(76, 175, 80, 0.1)'
-  },
-  {
-    label: 'Storage Used',
-    value: '2.4GB',
-    icon: 'mdi-harddisk',
-    color: '#9C27B0',
-    bgColor: 'rgba(156, 39, 176, 0.1)'
-  }
-])
 
 const navigateTo = (route: string) => {
   router.push(route)

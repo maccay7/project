@@ -891,7 +891,7 @@ const getTableHeaders = () => {
 }
 
 .dashboard-header {
-  margin-bottom: 32px;
+  margin-bottom: 0;
 }
 
 .page-title {
@@ -907,15 +907,15 @@ const getTableHeaders = () => {
   margin: 0;
 }
 
-.action-buttons { 
-  display: flex; 
-  gap: 12px; 
-  margin-bottom: 32px; 
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 0;
 }
 
 .stats-card {
   border-radius: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 0;
   background: white;
   border: 1px solid rgba(11, 42, 68, 0.08);
   position: relative;
@@ -933,7 +933,7 @@ const getTableHeaders = () => {
 
 .chart-card {
   border-radius: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 0;
   background: white;
   border: 1px solid rgba(11, 42, 68, 0.08);
   position: relative;
@@ -995,7 +995,7 @@ const getTableHeaders = () => {
 
 /* KPI Styles - Matching DashboardView and ReportsView */
 .kpi-row {
-  margin-bottom: 32px;
+  margin-bottom: 0;
 }
 
 .kpi-card {
