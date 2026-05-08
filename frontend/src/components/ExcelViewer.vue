@@ -14,7 +14,7 @@
         <div v-else class="excel-viewer-wrapper">
           <!-- Excel Ribbon/Toolbar -->
           <div class="excel-toolbar">
-            <div class="toolbar-group">
+            <div class="toolbar-group" @click="showFileMenu = !showFileMenu">
               <v-btn size="small" variant="text" icon="mdi-file-excel" color="#217346"></v-btn>
               <span class="toolbar-label">File</span>
             </div>
@@ -23,18 +23,33 @@
               <span class="toolbar-label">Home</span>
             </div>
             <div class="toolbar-group">
-              <v-btn size="small" variant="text" icon="mdi-insert" color="#217346"></v-btn>
+              <v-btn size="small" variant="text" icon="mdi-table-row-plus-after" color="#217346" @click="addRow"></v-btn>
               <span class="toolbar-label">Insert</span>
             </div>
             <div class="toolbar-group">
-              <v-btn size="small" variant="text" icon="mdi-formula" color="#217346"></v-btn>
+              <v-btn size="small" variant="text" icon="mdi-function" color="#217346" @click="insertFormula"></v-btn>
               <span class="toolbar-label">Formulas</span>
             </div>
             <div class="toolbar-group">
-              <v-btn size="small" variant="text" icon="mdi-palette" color="#217346"></v-btn>
+              <v-btn size="small" variant="text" icon="mdi-format-paint" color="#217346" @click="formatCells"></v-btn>
               <span class="toolbar-label">Format</span>
             </div>
           </div>
+          
+          <!-- File Menu Dropdown -->
+          <v-menu v-model="showFileMenu" :close-on-content-click="false">
+            <template v-slot:activator="{ props }">
+              <div></div>
+            </template>
+            <v-list>
+              <v-list-item @click="downloadExcel">
+                <v-list-item-title>Download Excel</v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="printExcel">
+                <v-list-item-title>Print</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
 
           <!-- Formula Bar with Cell Reference -->
           <div class="formula-bar">
@@ -144,6 +159,46 @@ const activeCell = ref({ row: -1, col: -1 })
 const editingCell = ref({ row: -1, col: -1, value: '' })
 const cellReference = ref('A1')
 const editInput = ref<HTMLInputElement | null>(null)
+const showFileMenu = ref(false)
+
+const addRow = () => {
+  const newRow: any = {}
+  headers.value.forEach(header => {
+    newRow[header] = ''
+  })
+  tableData.value.push(newRow)
+  emit('data-update', tableData.value)
+}
+
+const insertFormula = () => {
+  if (activeCell.value.row >= 0 && activeCell.value.col >= 0) {
+    const header = headers.value[activeCell.value.col]
+    formulaValue.value = '='
+    tableData.value[activeCell.value.row][header] = '='
+    emit('data-update', tableData.value)
+  }
+}
+
+const formatCells = () => {
+  alert('Formatting options would appear here (bold, italic, colors, etc.)')
+}
+
+const downloadExcel = () => {
+  try {
+    const worksheet = XLSX.utils.json_to_sheet(tableData.value)
+    const newWorkbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(newWorkbook, worksheet, 'Data')
+    XLSX.writeFile(newWorkbook, 'dataset.xlsx')
+    showFileMenu.value = false
+  } catch (error) {
+    console.error('Error downloading Excel:', error)
+  }
+}
+
+const printExcel = () => {
+  window.print()
+  showFileMenu.value = false
+}
 
 const getCellReference = (row: number, col: number) => {
   const colLetter = String.fromCharCode(65 + (col % 26))

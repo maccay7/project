@@ -236,10 +236,11 @@
         </v-card-title>
 
         <v-card-text>
-          <ExcelGrid
+          <ExcelViewer
             v-if="visualizationData && visualizationData.calculations && visualizationData.calculations.length > 0"
-            :headers="Object.keys(visualizationData.calculations[0] || {})"
             :data="visualizationData.calculations"
+            :headers="Object.keys(visualizationData.calculations[0] || {})"
+            @data-update="handleDataUpdate"
           />
         </v-card-text>
       </v-card>
@@ -252,7 +253,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
-import ExcelGrid from '../components/ExcelGrid.vue'
+import ExcelViewer from '../components/ExcelViewer.vue'
 
 const router = useRouter()
 

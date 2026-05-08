@@ -150,7 +150,7 @@
       </v-row>
 
       <!-- Excel Preview Toggle Button -->
-      <v-card class="stats-card" elevation="2" v-if="uploadedFiles.length > 0">
+      <v-card class="stats-card" elevation="2" v-if="uploadedFiles.length > 0 || fullDataset.length > 0 || excelFileBase64">
         <v-card-text class="pa-3">
           <v-row>
             <v-col cols="12" sm="4">
@@ -358,18 +358,26 @@ const saveDataset = (name: string) => {
 
 const loadSavedDataset = (index: number) => {
   const dataset = savedDatasets.value[index]
+  console.log('Loading saved dataset:', dataset.name)
+  console.log('Dataset has file_base64:', !!dataset.file_base64)
+  console.log('Dataset has data:', !!dataset.data)
   
   // Check if dataset has base64 data (new format)
   if (dataset.file_base64) {
     excelFileBase64.value = dataset.file_base64
+    fullDataset.value = [] // Clear old format data
+    previewHeaders.value = []
   } else {
     // Fallback to old format
     fullDataset.value = dataset.data
     previewHeaders.value = dataset.headers.map((h: string) => ({ title: h, key: h, sortable: true }))
+    excelFileBase64.value = '' // Clear base64 data
   }
   
   showExcelPreview.value = true
   console.log('Dataset loaded:', dataset.name)
+  console.log('fullDataset length:', fullDataset.value.length)
+  console.log('excelFileBase64 set:', !!excelFileBase64.value)
 }
 
 const deleteSavedDataset = (index: number) => {
@@ -392,7 +400,13 @@ const promptSaveDataset = () => {
 onMounted(() => {
   loadSavedDatasets()
   console.log('savedDatasets.value after mount:', savedDatasets.value)
-  console.log('savedDatasets.value.length:', savedDatasets.value.length)
+  console.log('savedDatasets.value.length:', savedDatasets.value)
+  
+  // Auto-load the first saved dataset if available and no data is currently loaded
+  if (savedDatasets.value.length > 0 && fullDataset.value.length === 0 && !excelFileBase64.value) {
+    console.log('Auto-loading first saved dataset')
+    loadSavedDataset(0)
+  }
 })
 
 // Toggle Excel preview and load data if needed
@@ -421,6 +435,15 @@ const toggleExcelPreview = async () => {
 const loadAndShowExcel = async () => {
   console.log('loadAndShowExcel called')
   console.log('uploadedFiles:', uploadedFiles.value.length)
+  console.log('fullDataset length:', fullDataset.value.length)
+  console.log('excelFileBase64:', !!excelFileBase64.value)
+  
+  // Check if we already have data loaded (from saved dataset or previous upload)
+  if (fullDataset.value.length > 0 || excelFileBase64.value) {
+    console.log('Data already loaded, showing preview')
+    showExcelPreview.value = true
+    return
+  }
   
   if (uploadedFiles.value.length === 0) {
     console.error('No files uploaded')

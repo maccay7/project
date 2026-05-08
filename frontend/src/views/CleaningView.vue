@@ -130,9 +130,10 @@
               Original Dataset Preview
             </v-card-title>
             <v-card-text>
-              <ExcelGrid
-                :headers="Object.keys(uploadedData.data[0] || {})"
+              <ExcelViewer
                 :data="uploadedData.data.slice(0, 10)"
+                :headers="Object.keys(uploadedData.data[0] || {})"
+                @data-update="handleDataUpdate"
               />
             </v-card-text>
           </v-card>
@@ -144,9 +145,10 @@
               Cleaned Dataset Preview
             </v-card-title>
             <v-card-text>
-              <ExcelGrid
-                :headers="Object.keys(cleaningResults.cleanedData[0] || {})"
+              <ExcelViewer
                 :data="cleaningResults.cleanedData.slice(0, 10)"
+                :headers="Object.keys(cleaningResults.cleanedData[0] || {})"
+                @data-update="handleCleanedDataUpdate"
               />
             </v-card-text>
           </v-card>
@@ -382,7 +384,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
-import ExcelGrid from '../components/ExcelGrid.vue'
+import ExcelViewer from '../components/ExcelViewer.vue'
 import { dataAPI } from '../services/api'
 import { useDataset } from '../composables/useDataset'
 
@@ -566,6 +568,20 @@ const deleteDataset = async () => {
     }
   } catch (error) {
     console.error('Error deleting dataset:', error)
+  }
+}
+
+const handleDataUpdate = (newData: any[]) => {
+  if (uploadedData.value && uploadedData.value.data) {
+    uploadedData.value.data = newData
+    console.log('Original dataset updated:', newData.length, 'rows')
+  }
+}
+
+const handleCleanedDataUpdate = (newData: any[]) => {
+  if (cleaningResults.value && cleaningResults.value.cleanedData) {
+    cleaningResults.value.cleanedData = newData
+    console.log('Cleaned dataset updated:', newData.length, 'rows')
   }
 }
 
