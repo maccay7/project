@@ -1,60 +1,67 @@
 import requests
 import openpyxl
 from io import BytesIO
+import os
 
-# Create a test Excel file with realistic column names
-workbook = openpyxl.Workbook()
-sheet = workbook.active
+def create_test_excel():
+    """Create test Excel file from environment data"""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    
+    # Get headers from environment
+    headers_env = os.environ.get('EXCEL_HEADERS', '')
+    if headers_env:
+        headers = headers_env.split(',')
+    else:
+        print("ERROR: EXCEL_HEADERS environment variable not set")
+        return None
+    
+    # Add headers
+    for i, h in enumerate(headers, 1):
+        ws.cell(1, i, h)
+    
+    # Get row count from environment
+    rows = int(os.environ.get('TEST_ROWS', '0'))
+    if rows == 0:
+        print("ERROR: TEST_ROWS environment variable not set")
+        return None
+    
+    # Add data rows
+    for i in range(2, rows + 2):
+        for col in range(1, len(headers) + 1):
+            ws.cell(i, col, f"value_{i-1}_{col}")
+    
+    return wb
 
-# Add realistic headers like those in financial datasets
-sheet['A1'] = 'Face Value Amount'
-sheet['B1'] = 'Purchase Price ($)'
-sheet['C1'] = 'Days to Maturity'
-sheet['D1'] = 'Yield Rate (%)'
-sheet['E1'] = 'Discount Rate'
+# Get API URL from environment
+api_url = os.environ.get('API_URL', 'http://localhost:5000/api/upload')
+instrument_type = os.environ.get('INSTRUMENT_TYPE', '')
 
-# Add sample data
-for i in range(1, 15):
-    sheet[f'A{i+1}'] = 1000 + (i * 100)
-    sheet[f'B{i+1}'] = 950 + (i * 5)
-    sheet[f'C{i+1}'] = 30 * i
-    sheet[f'D{i+1}'] = 4.5 + (i * 0.1)
-    sheet[f'E{i+1}'] = 0.05 + (i * 0.01)
+if not instrument_type:
+    print("ERROR: INSTRUMENT_TYPE environment variable not set")
+    exit(1)
 
-# Save to BytesIO
-excel_buffer = BytesIO()
-workbook.save(excel_buffer)
-excel_buffer.seek(0)
+# Create and upload
+wb = create_test_excel()
+if not wb:
+    exit(1)
 
-# Test upload
-url = "http://localhost:5000/api/upload"
-files = {
-    'file': ('financial_data.xlsx', excel_buffer.getvalue(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-}
-data = {
-    'instrument_type': 'treasury_bills'
-}
+buffer = BytesIO()
+wb.save(buffer)
+buffer.seek(0)
 
 try:
-    response = requests.post(url, files=files, data=data)
-    print(f"Status Code: {response.status_code}")
+    response = requests.post(
+        api_url,
+        files={'file': ('data.xlsx', buffer.getvalue(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+        data={'instrument_type': instrument_type}
+    )
     
+    print(f"Status: {response.status_code}")
     if response.status_code == 200:
-        result = response.json()
-        print(f"Success: {result.get('success')}")
-        print(f"Data rows: {len(result.get('data', {}).get('data', []))}")
-        
-        # Show column headers from first row
-        data_rows = result.get('data', {}).get('data', [])
-        if data_rows:
-            print("\nColumn Headers:")
-            first_row = data_rows[0]
-            for key in first_row.keys():
-                print(f"  - {key}")
-            
-            print("\nFirst 3 rows of data:")
-            for i, row in enumerate(data_rows[:3]):
-                print(f"Row {i+1}: {row}")
+        data = response.json().get('data', {})
+        rows = data.get('data', [])
+        print(f"Rows: {len(rows)}")
     else:
         print(f"Error: {response.text}")
         

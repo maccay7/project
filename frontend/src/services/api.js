@@ -1,171 +1,71 @@
 // API Service for DuraCapital Frontend
 const API_BASE_URL = 'http://localhost:5000'
 
-// Generic API request function
-const apiRequest = async (endpoint, options = {}) => {
-  try {
-    const url = `${API_BASE_URL}${endpoint}`
-    console.log('apiRequest called:', endpoint, options.method || 'GET')
-    
-    const config = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-      },
-      ...options
-    }
-
-    console.log('Making fetch request to:', url)
-    const response = await fetch(url, config)
-    const data = await response.json()
-
-    console.log('API response status:', response.status)
-    console.log('API response data:', data)
-
-    if (!response.ok) {
-      throw new Error(data.message || `HTTP error! status: ${response.status}`)
-    }
-
-    return data
-  } catch (error) {
-    console.error('API Error:', error)
-    throw error
+async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = false) {
+  const url = API_BASE_URL + endpoint
+  console.log('Calling:', url, method)
+  
+  const options = { method }
+  
+  if (isFileUpload) {
+    options.body = body  // FormData - browser sets Content-Type
+  } else if (body) {
+    options.headers = { 'Content-Type': 'application/json' }
+    options.body = JSON.stringify(body)
   }
+  
+  const response = await fetch(url, options)
+  const data = await response.json()
+  
+  if (!response.ok) throw new Error(data.message || 'Something went wrong')
+  return data
 }
 
-// Authentication API
+// Auth
 export const authAPI = {
-  login: async (email, password) => {
-    return await apiRequest('/api/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password })
-    })
-  }
+  login: (email, password) => callAPI('/api/login', 'POST', { email, password })
 }
 
-// Dashboard API
+// Dashboard
 export const dashboardAPI = {
-  getKPI: async () => {
-    return await apiRequest('/api/dashboard/kpi')
-  },
-  
-  getRecentActivity: async () => {
-    return await apiRequest('/api/dashboard/recent-activity')
-  },
-  
-  getYieldCurve: async (instrumentType = 'all') => {
-    return await apiRequest(`/api/fred-yield-curve?instrument_type=${instrumentType}`)
-  },
-  
-  getCharts: async () => {
-    return await apiRequest('/api/dashboard/charts')
-  }
+  getKPI: () => callAPI('/api/dashboard/kpi'),
+  getRecentActivity: () => callAPI('/api/dashboard/recent-activity'),
+  getYieldCurve: (type = 'all') => callAPI(`/api/fred-yield-curve?instrument_type=${type}`),
+  getCharts: () => callAPI('/api/dashboard/charts')
 }
 
-// Calculations API
+// Calculations
 export const calculationsAPI = {
-  execute: async (instrumentType, data = [], params = {}) => {
-    return await apiRequest('/api/calculations/execute', {
-      method: 'POST',
-      body: JSON.stringify({
-        instrument_type: instrumentType,
-        data: data,
-        params: params
-      })
-    })
-  },
-  
-  getHistory: async () => {
-    return await apiRequest('/api/calculations/history')
-  }
+  execute: (type, data = [], params = {}) => callAPI('/api/calculations/execute', 'POST', {
+    instrument_type: type, data, params
+  }),
+  getHistory: () => callAPI('/api/calculations/history')
 }
 
-// User API
+// User
 export const userAPI = {
-  getProfile: async () => {
-    return await apiRequest('/api/user/profile')
-  },
-  
-  getPreferences: async () => {
-    return await apiRequest('/api/user/preferences')
-  },
-  
-  getNotificationSettings: async () => {
-    return await apiRequest('/api/user/notifications/settings')
-  }
+  getProfile: () => callAPI('/api/user/profile'),
+  getPreferences: () => callAPI('/api/user/preferences'),
+  getNotificationSettings: () => callAPI('/api/user/notifications/settings')
 }
 
-// System API
+// System
 export const systemAPI = {
-  getInfo: async () => {
-    return await apiRequest('/api/system/info')
-  }
+  getInfo: () => callAPI('/api/system/info')
 }
 
-// Data Operations API
+// Data Operations
 export const dataAPI = {
-  upload: async (file, instrumentType) => {
-    console.log('dataAPI.upload called with:', file?.name, instrumentType)
-    
+  upload: async (file, type) => {
+    console.log('Uploading:', file.name)
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('instrument_type', instrumentType)
-    
-    console.log('FormData created, making API request...')
-    
-    const response = await apiRequest('/api/upload', {
-      method: 'POST',
-      headers: {}, // Remove content-type to let browser set it for FormData
-      body: formData
-    })
-    
-    console.log('dataAPI.upload response:', response)
-    return response
+    formData.append('instrument_type', type)
+    return await callAPI('/api/upload', 'POST', formData, true)
   },
-  
-  clean: async (data, options) => {
-    return await apiRequest('/api/clean', {
-      method: 'POST',
-      body: JSON.stringify({ data, options })
-    })
-  },
-  
-  calculate: async (data, instrumentType, params) => {
-    return await apiRequest('/api/calculate', {
-      method: 'POST',
-      body: JSON.stringify({ 
-        data, 
-        instrument_type: instrumentType, 
-        params 
-      })
-    })
-  },
-  
-  clean: async (data, options) => {
-    return await apiRequest('/api/clean', {
-      method: 'POST',
-      body: JSON.stringify({ 
-        data, 
-        options 
-      })
-    })
-  },
-  
-  deleteDataset: async (uploadId) => {
-    return await apiRequest('/api/delete-dataset', {
-      method: 'POST',
-      body: JSON.stringify({ 
-        upload_id: uploadId 
-      })
-    })
-  }
+  clean: (data, options) => callAPI('/api/clean', 'POST', { data, options }),
+  calculate: (data, type, params) => callAPI('/api/calculate', 'POST', { data, instrument_type: type, params }),
+  deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { upload_id: id })
 }
 
-export default {
-  authAPI,
-  dashboardAPI,
-  calculationsAPI,
-  userAPI,
-  systemAPI,
-  dataAPI
-}
+export default { authAPI, dashboardAPI, calculationsAPI, userAPI, systemAPI, dataAPI }

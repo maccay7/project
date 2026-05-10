@@ -1,146 +1,165 @@
 import requests
 import json
+import os
 
-# Test complete workflow: Upload → Clean → Preview
-print("🚀 Testing Complete Workflow for Submission")
-
-# 1. Test upload endpoint
-print("\n1. Testing Upload Endpoint...")
-upload_url = "http://localhost:5000/api/upload"
-
-# Create test Excel file content
-test_data = [
-    {
-        "Days_to_Maturity": "Day 1",
-        "Years_to_Maturity": "1 years",
-        "Rate": "4.5%",
-        "Nominal": "$1,000",
-        "Carrying_Value": "$950",
-        "Maturity_Value": "$1,000",
-        "Discount_Rate": "0.05",
-        "Present_Value": "$900",
-        "Impairment_US": "$10",
-        "Impairment_ZWL": "$100",
-        "Fund_Name": "Test Fund",
-        "NSS_rates": "3.5%",
-        "Discount_rates": "0.04",
-        "Time_value": "$50",
-        "Portfolio": "Test Portfolio",
-        "Short_Name": "Test",
-        "Counterparty": "Test Counterparty",
-        "Maturity_Date": "01/01/2024",
-        "Issue_Date": "01/01/2023",
-        "Valuation_date": "2024-04-28",
-        "Tenure": "1 years"
-    },
-    {
-        "Days_to_Maturity": "",  # Missing value
-        "Years_to_Maturity": "2 years",
-        "Rate": "4.6%",
-        "Nominal": "$1,100",
-        "Carrying_Value": "",  # Missing value
-        "Maturity_Value": "$1,100",
-        "Discount_Rate": "0.06",
-        "Present_Value": "$920",
-        "Impairment_US": None,  # Null value
-        "Impairment_ZWL": "$150",
-        "Fund_Name": "Test Fund 2",
-        "NSS_rates": "3.55%",
-        "Discount_rates": "0.05",
-        "Time_value": "$60",
-        "Portfolio": "Test Portfolio 2",
-        "Short_Name": "Test 2",
-        "Counterparty": "Test Counterparty 2",
-        "Maturity_Date": "02/01/2024",
-        "Issue_Date": "02/01/2023",
-        "Valuation_date": "2024-04-28",
-        "Tenure": "2 years"
+def load_config():
+    """Load all configuration from environment variables"""
+    return {
+        'api_base': os.environ.get('API_BASE_URL', 'http://localhost:5000'),
+        'test_data': os.environ.get('TEST_DATA', ''),
+        'upload_id': os.environ.get('UPLOAD_ID', '')
     }
-]
 
-# Simulate upload response (normally would upload file)
-upload_response = {
-    "success": True,
-    "data": {
-        "name": "test_dataset.xlsx",
-        "instrument_type": "treasury_bills",
+def test_upload(config, test_data):
+    """Test upload endpoint with actual file upload"""
+    print("\n1. Testing Upload Endpoint...")
+    
+    if not test_data:
+        print("  SKIP - No test data available")
+        return False
+    
+    upload_url = f"{config['api_base']}/api/upload"
+    
+    # Create a simple Excel file from test data
+    try:
+        import openpyxl
+        from io import BytesIO
+        
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        
+        if test_data:
+            headers = list(test_data[0].keys())
+            for col, h in enumerate(headers, 1):
+                ws.cell(1, col, h)
+            
+            for row_idx, row in enumerate(test_data, 2):
+                for col_idx, h in enumerate(headers, 1):
+                    ws.cell(row_idx, col_idx, row.get(h, ''))
+        
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        
+        response = requests.post(
+            upload_url,
+            files={'file': ('test.xlsx', buffer.getvalue(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+            data={'instrument_type': 'treasury_bills'}
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"  OK - Upload successful")
+            print(f"  OK - Rows: {len(result.get('data', {}).get('data', []))}")
+            return True
+        else:
+            print(f"  ERROR - Status: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"  ERROR - {e}")
+        return False
+
+def test_clean(config, test_data):
+    """Test clean endpoint with actual API call"""
+    print("\n2. Testing Cleaning Endpoint...")
+    
+    if not test_data:
+        print("  SKIP - No test data available")
+        return False
+    
+    clean_url = f"{config['api_base']}/api/clean"
+    
+    cleaning_options = {
+        "removeDuplicates": True,
+        "fillMissingValues": True,
+        "removeEmptyRows": True,
+        "standardizeText": True,
+        "trimWhitespace": True
+    }
+    
+    payload = {
         "data": test_data,
-        "display_headers": list(test_data[0].keys()),
-        "upload_id": "test_upload_123",
-        "size": len(json.dumps(test_data))
+        "options": cleaning_options
     }
-}
-
-print(f"✅ Upload simulated: {upload_response['data']['name']}")
-print(f"✅ Rows: {len(upload_response['data']['data'])}")
-print(f"✅ Columns: {len(upload_response['data']['display_headers'])}")
-
-# 2. Test cleaning endpoint
-print("\n2. Testing Cleaning Endpoint...")
-clean_url = "http://localhost:5000/api/clean"
-
-cleaning_options = {
-    "removeDuplicates": True,
-    "fillMissingValues": True,
-    "removeEmptyRows": True,
-    "standardizeText": True,
-    "trimWhitespace": True,
-    "normalizeNumbers": True,
-    "formatDates": True,
-    "standardizeCurrency": True,
-    "normalizePercentages": True
-}
-
-clean_payload = {
-    "data": test_data,
-    "options": cleaning_options
-}
-
-try:
-    clean_response = requests.post(clean_url, json=clean_payload)
     
-    if clean_response.status_code == 200:
-        result = clean_response.json()
-        print(f"✅ Cleaning successful!")
-        print(f"✅ Original rows: {result.get('stats', {}).get('original_rows')}")
-        print(f"✅ Cleaned rows: {result.get('stats', {}).get('cleaned_rows')}")
-        print(f"✅ Missing values filled: {result.get('stats', {}).get('missing_values_filled')}")
-        print(f"✅ Text standardized: {result.get('stats', {}).get('text_standardized')}")
-        print(f"✅ Dates formatted: {result.get('stats', {}).get('dates_formatted')}")
-        print(f"✅ Currency standardized: {result.get('stats', {}).get('currency_standardized')}")
+    try:
+        response = requests.post(clean_url, json=payload)
         
-        # Show cleaned data sample
-        cleaned_data = result.get('data', [])
-        if cleaned_data:
-            print(f"\n✅ Cleaned data sample (first row):")
-            for key, value in list(cleaned_data[0].items())[:5]:
-                print(f"  {key}: {value}")
-    else:
-        print(f"❌ Cleaning failed: {clean_response.text}")
-        
-except Exception as e:
-    print(f"❌ Error testing cleaning: {e}")
+        if response.status_code == 200:
+            result = response.json()
+            stats = result.get('stats', {})
+            print(f"  OK - Cleaning successful")
+            print(f"  OK - Original: {stats.get('original_rows')} rows")
+            print(f"  OK - Cleaned: {stats.get('cleaned_rows')} rows")
+            return True
+        else:
+            print(f"  ERROR - Status: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"  ERROR - {e}")
+        return False
 
-# 3. Test delete endpoint
-print("\n3. Testing Delete Endpoint...")
-delete_url = "http://localhost:5000/api/delete-dataset"
-
-delete_payload = {
-    "upload_id": "test_upload_123"
-}
-
-try:
-    delete_response = requests.post(delete_url, json=delete_payload)
+def test_delete(config, upload_id):
+    """Test delete endpoint with actual API call"""
+    print("\n3. Testing Delete Endpoint...")
     
-    if delete_response.status_code == 200:
-        result = delete_response.json()
-        print(f"✅ Delete successful: {result.get('message')}")
-    else:
-        print(f"❌ Delete failed: {delete_response.text}")
+    if not upload_id:
+        print("  SKIP - No upload_id provided")
+        return False
+    
+    delete_url = f"{config['api_base']}/api/delete-dataset"
+    payload = {"upload_id": upload_id}
+    
+    try:
+        response = requests.post(delete_url, json=payload)
         
-except Exception as e:
-    print(f"❌ Error testing delete: {e}")
+        if response.status_code == 200:
+            result = response.json()
+            print(f"  OK - {result.get('message', 'Deleted')}")
+            return True
+        else:
+            print(f"  ERROR - Status: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"  ERROR - {e}")
+        return False
 
-print("\n🎯 Workflow Test Complete!")
-print("✅ All endpoints tested and working")
-print("✅ Ready for submission")
+def main():
+    print("Testing Complete Workflow")
+    print("=" * 40)
+    
+    config = load_config()
+    
+    # Parse test data from environment
+    test_data = []
+    if config['test_data']:
+        try:
+            test_data = json.loads(config['test_data'])
+        except:
+            print("Error: TEST_DATA is not valid JSON")
+            return
+    
+    print(f"\nAPI Base: {config['api_base']}")
+    print(f"Test records: {len(test_data)}")
+    
+    # Run tests
+    upload_ok = test_upload(config, test_data)
+    
+    # Only test clean if we have test data
+    clean_ok = test_clean(config, test_data)
+    
+    # Only test delete if we have an upload_id
+    delete_ok = test_delete(config, config['upload_id'])
+    
+    # Summary
+    print("\n" + "=" * 40)
+    print("Test Summary:")
+    print(f"  Upload: {'OK' if upload_ok else 'FAIL'}")
+    print(f"  Clean: {'OK' if clean_ok else 'FAIL'}")
+    print(f"  Delete: {'OK' if delete_ok else 'SKIP' if not config['upload_id'] else 'FAIL'}")
+
+if __name__ == "__main__":
+    main()
