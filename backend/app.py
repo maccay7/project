@@ -22,7 +22,7 @@ CORS(app)
 DB_CONFIG = {
     'host': os.environ.get('DB_HOST', 'localhost'),
     'user': os.environ.get('DB_USER', 'root'),
-    'password': os.environ.get('DB_PASSWORD', ''),
+    'password': os.environ.get('DB_PASSWORD', 'businessmogul'),
     'database': os.environ.get('DB_NAME', 'duracapital'),
     'charset': 'utf8mb4',
     'cursorclass': pymysql.cursors.DictCursor
@@ -49,15 +49,23 @@ def init_database():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS upload_history (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                filename VARCHAR(255),
-                file_type VARCHAR(50),
-                file_size INT,
-                upload_status VARCHAR(50),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                instrument_type VARCHAR(50),
-                file_base64 LONGTEXT
+                file_name VARCHAR(255) NOT NULL,
+                upload_date DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS datasets (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                file_base64 TEXT,
+                sheet_names TEXT,
+                upload_id VARCHAR(255),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS calculations (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -275,12 +283,14 @@ def upload_data():
             os.unlink(temp_filename)
             
             conn = get_db_connection()
+            upload_id = None
             if conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO upload_history (filename, file_type, upload_status, instrument_type, file_base64)
                     VALUES (%s, %s, %s, %s, %s)
                 """, (file.filename, file_extension, 'completed', instrument_type, file_base64))
+                upload_id = cursor.lastrowid
                 conn.commit()
                 cursor.close()
                 conn.close()
@@ -294,7 +304,8 @@ def upload_data():
                     'sheet_names': sheet_names,
                     'data': data[:100],
                     'headers': headers,
-                    'total_rows': len(data)
+                    'total_rows': len(data),
+                    'upload_id': upload_id
                 }
             })
         
@@ -420,6 +431,112 @@ def get_fred_yield_curve():
             'datasets': datasets
         }
     })
+
+@app.route('/api/save-dataset', methods=['POST'])
+def save_dataset():
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        file_base64 = data.get('file_base64')
+        sheet_names = data.get('sheet_names', [])
+        upload_id = data.get('upload_id')
+        
+        print(f"Save dataset request: name={name}, sheet_names={sheet_names}, upload_id={upload_id}")
+        
+        conn = get_db_connection()
+        if not conn:
+            print("ERROR: get_db_connection returned None")
+            return jsonify({'success': False, 'error': 'Database connection failed'})
+        
+        cursor = conn.cursor()
+        
+        # Check if dataset already exists
+        cursor.execute("SELECT id FROM datasets WHERE name = %s", (name,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing dataset
+            cursor.execute("""
+                UPDATE datasets 
+                SET file_base64 = %s, sheet_names = %s, upload_id = %s, updated_at = %s
+                WHERE name = %s
+            """, (file_base64, json.dumps(sheet_names), upload_id, datetime.now(), name))
+        else:
+            # Insert new dataset
+            cursor.execute("""
+                INSERT INTO datasets (name, file_base64, sheet_names, upload_id, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (name, file_base64, json.dumps(sheet_names), upload_id, datetime.now(), datetime.now()))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print(f"Dataset saved successfully: {name}")
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"Error saving dataset: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/get-datasets', methods=['GET'])
+def get_datasets():
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'Database connection failed'})
+        
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, sheet_names, created_at FROM datasets ORDER BY created_at DESC")
+        datasets = cursor.fetchall()
+        
+        result = []
+        for dataset in datasets:
+            result.append({
+                'id': dataset['id'],
+                'name': dataset['name'],
+                'sheet_names': json.loads(dataset['sheet_names']) if dataset['sheet_names'] else [],
+                'timestamp': dataset['created_at'].isoformat() if dataset['created_at'] else None
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        print(f"Error getting datasets: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/load-dataset', methods=['POST'])
+def load_dataset():
+    try:
+        data = request.get_json()
+        dataset_id = data.get('dataset_id')
+        
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'Database connection failed'})
+        
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_base64, sheet_names, upload_id FROM datasets WHERE id = %s", (dataset_id,))
+        dataset = cursor.fetchone()
+        
+        if not dataset:
+            return jsonify({'success': False, 'error': 'Dataset not found'})
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'file_base64': dataset['file_base64'],
+                'sheet_names': json.loads(dataset['sheet_names']) if dataset['sheet_names'] else [],
+                'upload_id': dataset['upload_id']
+            }
+        })
+    except Exception as e:
+        print(f"Error loading dataset: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/delete-dataset', methods=['POST'])
 def delete_dataset():
