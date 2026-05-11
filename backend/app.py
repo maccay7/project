@@ -1,5 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import pymysql
 import pandas as pd
 import numpy as np
@@ -11,12 +13,30 @@ import os
 import base64
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 import re
+from dotenv import load_dotenv
+import jwt
+import bcrypt
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+
+# CORS - Restrict to specific origins
+cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:5173').split(',')
+CORS(app, origins=cors_origins, supports_credentials=True)
+
+# Rate Limiting
+rate_limit_enabled = os.environ.get('RATE_LIMIT_ENABLED', 'true').lower() == 'true'
+if rate_limit_enabled:
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=[f"{os.environ.get('RATE_LIMIT_PER_MINUTE', '60')} per minute"]
+    )
 
 # ==================== CONFIGURATION (from environment) ====================
 DB_CONFIG = {
@@ -215,27 +235,124 @@ def home():
         'fred_configured': bool(FRED_API_KEY)
     })
 
-@app.route('/api/login', methods=['POST'])
-def login():
-    data = request.get_json()
-    email = data.get('email')
-    password = data.get('password')
-    
-    admin_email = os.environ.get('ADMIN_EMAIL')
-    admin_password = os.environ.get('ADMIN_PASSWORD')
-    
-    if admin_email and admin_password and email == admin_email and password == admin_password:
+# JWT Secret and expiration
+JWT_SECRET = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-this')
+JWT_EXPIRATION = int(os.environ.get('JWT_EXPIRATION_HOURS', '24'))
+
+def generate_token(user_id, email):
+    expiration = datetime.utcnow() + timedelta(hours=JWT_EXPIRATION)
+    token = jwt.encode({
+        'user_id': user_id,
+        'email': email,
+        'exp': expiration
+    }, JWT_SECRET, algorithm='HS256')
+    return token
+
+def verify_token(token):
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+@app.route('/api/register', methods=['POST'])
+def register():
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        password = data.get('password')
+        full_name = data.get('full_name', '')
+        
+        if not email or not password:
+            return jsonify({'success': False, 'message': 'Email and password are required'}), 400
+        
+        # Hash the password
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database connection failed'}), 500
+        
+        cursor = conn.cursor()
+        
+        # Check if user already exists
+        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+        if cursor.fetchone():
+            return jsonify({'success': False, 'message': 'User already exists'}), 400
+        
+        # Create new user
+        cursor.execute("""
+            INSERT INTO users (email, password, full_name)
+            VALUES (%s, %s, %s)
+        """, (email, hashed_password.decode('utf-8'), full_name))
+        
+        user_id = cursor.lastrowid
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        # Generate token
+        token = generate_token(user_id, email)
+        
         return jsonify({
             'success': True,
-            'token': str(uuid.uuid4()),
+            'token': token,
             'user': {
+                'id': user_id,
                 'email': email,
-                'name': os.environ.get('ADMIN_NAME', ''),
-                'role': os.environ.get('ADMIN_ROLE', 'user')
+                'full_name': full_name
             }
         })
-    else:
-        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+    except Exception as e:
+        print(f"Registration error: {e}")
+        return jsonify({'success': False, 'message': 'Registration failed'}), 500
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        password = data.get('password')
+        
+        if not email or not password:
+            return jsonify({'success': False, 'message': 'Email and password are required'}), 400
+        
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database connection failed'}), 500
+        
+        cursor = conn.cursor()
+        
+        # Find user by email
+        cursor.execute("SELECT id, email, password, full_name FROM users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not user:
+            return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+        
+        # Verify password
+        if not bcrypt.checkpw(password.encode('utf-8'), user['password'].encode('utf-8')):
+            return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+        
+        # Generate token
+        token = generate_token(user['id'], user['email'])
+        
+        return jsonify({
+            'success': True,
+            'token': token,
+            'user': {
+                'id': user['id'],
+                'email': user['email'],
+                'full_name': user['full_name']
+            }
+        })
+    except Exception as e:
+        print(f"Login error: {e}")
+        return jsonify({'success': False, 'message': 'Login failed'}), 500
 
 @app.route('/api/upload', methods=['POST'])
 def upload_data():

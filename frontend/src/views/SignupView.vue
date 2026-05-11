@@ -1,8 +1,21 @@
 <template>
-  <div class="login-container">
-    <div class="login-form">
-      <h1 class="login-title">LOGIN</h1>
+  <div class="signup-container">
+    <div class="signup-form">
+      <h1 class="signup-title">SIGN UP</h1>
       
+      <div class="form-group">
+        <div class="input-wrapper">
+          <span class="input-icon">👤</span>
+          <input 
+            v-model="fullName" 
+            type="text" 
+            class="form-input" 
+            placeholder="Full Name"
+            @keyup.enter="handleSignup"
+          />
+        </div>
+      </div>
+
       <div class="form-group">
         <div class="input-wrapper">
           <span class="input-icon">📧</span>
@@ -11,7 +24,7 @@
             type="email" 
             class="form-input" 
             placeholder="Email"
-            @keyup.enter="handleLogin"
+            @keyup.enter="handleSignup"
           />
         </div>
       </div>
@@ -24,7 +37,7 @@
             :type="showPassword ? 'text' : 'password'" 
             class="form-input" 
             placeholder="Password"
-            @keyup.enter="handleLogin"
+            @keyup.enter="handleSignup"
           />
           <button 
             type="button" 
@@ -33,33 +46,48 @@
           >
             {{ showPassword ? '👁️' : '👁️‍🗨️' }}
           </button>
-          <a href="#" class="forgot-password" @click.prevent="forgotPassword">Forgot Password?</a>
         </div>
       </div>
 
-      <div class="form-options">
-        <label class="checkbox-wrapper">
-          <input v-model="rememberMe" type="checkbox" />
-          <span class="checkmark"></span>
-          <span class="checkbox-label">Remember Me</span>
-        </label>
+      <div class="form-group">
+        <div class="input-wrapper">
+          <span class="input-icon">🔒</span>
+          <input 
+            v-model="confirmPassword" 
+            :type="showConfirmPassword ? 'text' : 'password'" 
+            class="form-input" 
+            placeholder="Confirm Password"
+            @keyup.enter="handleSignup"
+          />
+          <button 
+            type="button" 
+            class="password-toggle" 
+            @click="showConfirmPassword = !showConfirmPassword"
+          >
+            {{ showConfirmPassword ? '👁️' : '👁️‍🗨️' }}
+          </button>
+        </div>
       </div>
 
       <button 
         type="button" 
-        class="login-button" 
-        @click="handleLogin"
+        class="signup-button" 
+        @click="handleSignup"
         :disabled="loading"
       >
-        {{ loading ? 'Signing in...' : 'Login' }}
+        {{ loading ? 'Creating account...' : 'Sign Up' }}
       </button>
 
-      <div class="register-link">
-        Don't have an Account? <a href="#" @click.prevent="goToRegister">Register</a>
+      <div class="login-link">
+        Already have an Account? <router-link to="/login">Login</router-link>
       </div>
 
       <div v-if="error" class="error-message">
         {{ error }}
+      </div>
+
+      <div v-if="success" class="success-message">
+        Account created successfully! Redirecting to login...
       </div>
     </div>
   </div>
@@ -73,53 +101,65 @@ import { useAuthStore } from '../stores/auth'
 const router = useRouter()
 const authStore = useAuthStore()
 
+const fullName = ref('')
 const email = ref('')
 const password = ref('')
-const rememberMe = ref(false)
+const confirmPassword = ref('')
 const showPassword = ref(false)
+const showConfirmPassword = ref(false)
 const loading = ref(false)
 const error = ref('')
+const success = ref(false)
 
-const handleLogin = async () => {
-  if (!email.value || !password.value) {
-    error.value = 'Please enter both email and password'
+const handleSignup = async () => {
+  error.value = ''
+  success.value = false
+
+  // Validation
+  if (!fullName.value || !email.value || !password.value || !confirmPassword.value) {
+    error.value = 'Please fill in all fields'
+    return
+  }
+
+  if (password.value.length < 6) {
+    error.value = 'Password must be at least 6 characters'
+    return
+  }
+
+  if (password.value !== confirmPassword.value) {
+    error.value = 'Passwords do not match'
+    return
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(email.value)) {
+    error.value = 'Invalid email format'
     return
   }
 
   loading.value = true
-  error.value = ''
 
   try {
-    // Use auth store login function
-    const success = await authStore.login(email.value, password.value)
+    const success = await authStore.register(email.value, password.value, fullName.value)
     
     if (success) {
-      if (rememberMe.value) {
-        localStorage.setItem('rememberMe', 'true')
-        localStorage.setItem('email', email.value)
-      }
-      router.push('/dashboard')
+      success.value = true
+      setTimeout(() => {
+        router.push('/dashboard')
+      }, 2000)
     } else {
-      error.value = 'Invalid email or password'
+      error.value = 'Registration failed. Email may already be in use.'
     }
   } catch (e) {
-    error.value = 'Login failed. Try again.'
+    error.value = 'Registration failed. Try again.'
   } finally {
     loading.value = false
   }
 }
-
-const forgotPassword = () => {
-  alert('Password reset feature coming soon')
-}
-
-const goToRegister = () => {
-  router.push('/signup')
-}
 </script>
 
 <style scoped>
-.login-container {
+.signup-container {
   min-height: 100vh;
   background: url('https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1600&h=900&fit=crop') center/cover no-repeat;
   display: flex;
@@ -128,7 +168,7 @@ const goToRegister = () => {
   position: relative;
 }
 
-.login-container::before {
+.signup-container::before {
   content: '';
   position: absolute;
   top: 0;
@@ -139,7 +179,7 @@ const goToRegister = () => {
   backdrop-filter: blur(2px);
 }
 
-.login-form {
+.signup-form {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   border-radius: 20px;
@@ -152,7 +192,7 @@ const goToRegister = () => {
   z-index: 1;
 }
 
-.login-title {
+.signup-title {
   font-size: 32px;
   font-weight: 700;
   text-align: center;
@@ -215,70 +255,7 @@ const goToRegister = () => {
   color: #4a90e2;
 }
 
-.forgot-password {
-  position: absolute;
-  right: 50px;
-  font-size: 12px;
-  color: #4a90e2;
-  text-decoration: none;
-  font-weight: 500;
-  transition: color 0.3s ease;
-  z-index: 2;
-}
-
-.forgot-password:hover {
-  color: #357abd;
-  text-decoration: underline;
-}
-
-.form-options {
-  display: flex;
-  align-items: center;
-  margin-bottom: 25px;
-}
-
-.checkbox-wrapper {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  font-size: 14px;
-  color: #666;
-}
-
-.checkbox-wrapper input[type="checkbox"] {
-  display: none;
-}
-
-.checkmark {
-  width: 18px;
-  height: 18px;
-  border: 2px solid #e0e0e0;
-  border-radius: 4px;
-  margin-right: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  background: white;
-}
-
-.checkbox-wrapper input[type="checkbox"]:checked + .checkmark {
-  background: #4a90e2;
-  border-color: #4a90e2;
-}
-
-.checkbox-wrapper input[type="checkbox"]:checked + .checkmark::after {
-  content: '✓';
-  color: white;
-  font-size: 12px;
-  font-weight: bold;
-}
-
-.checkbox-label {
-  user-select: none;
-}
-
-.login-button {
+.signup-button {
   width: 100%;
   padding: 15px;
   background: linear-gradient(135deg, #4a90e2, #357abd);
@@ -294,32 +271,32 @@ const goToRegister = () => {
   margin-bottom: 20px;
 }
 
-.login-button:hover:not(:disabled) {
+.signup-button:hover:not(:disabled) {
   background: linear-gradient(135deg, #357abd, #2968a3);
   transform: translateY(-2px);
   box-shadow: 0 5px 15px rgba(74, 144, 226, 0.3);
 }
 
-.login-button:disabled {
+.signup-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;
   transform: none;
 }
 
-.register-link {
+.login-link {
   text-align: center;
   font-size: 14px;
   color: #666;
 }
 
-.register-link a {
+.login-link a {
   color: #4a90e2;
   text-decoration: none;
   font-weight: 600;
   transition: color 0.3s ease;
 }
 
-.register-link a:hover {
+.login-link a:hover {
   color: #357abd;
   text-decoration: underline;
 }
@@ -335,24 +312,30 @@ const goToRegister = () => {
   border: 1px solid rgba(244, 67, 54, 0.2);
 }
 
+.success-message {
+  background: rgba(76, 175, 80, 0.1);
+  color: #4caf50;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: center;
+  margin-top: 15px;
+  border: 1px solid rgba(76, 175, 80, 0.2);
+}
+
 /* Responsive Design */
 @media (max-width: 480px) {
-  .login-form {
+  .signup-form {
     margin: 20px;
     padding: 30px 20px;
   }
   
-  .login-title {
+  .signup-title {
     font-size: 28px;
   }
   
   .form-input {
     padding: 12px 12px 12px 40px;
-  }
-  
-  .forgot-password {
-    right: 40px;
-    font-size: 11px;
   }
   
   .password-toggle {

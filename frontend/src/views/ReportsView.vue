@@ -44,6 +44,22 @@
         </v-card-text>
       </v-card>
 
+      <!-- Excel Viewer with Full Dataset -->
+      <v-card class="stats-card" v-if="hasData">
+        <v-card-title class="card-title">
+          <v-icon class="title-icon">mdi-microsoft-excel</v-icon> Dataset Viewer (Editable)
+        </v-card-title>
+        <v-card-text>
+          <ExcelViewer
+            :file-base64="visualizationData?.file_base64"
+            :file-name="visualizationData?.name || 'Report Data'"
+            :data="visualizationData?.calculations"
+            :headers="visualizationData?.calculations ? Object.keys(visualizationData.calculations[0] || {}) : []"
+            @data-update="handleDataUpdate"
+          />
+        </v-card-text>
+      </v-card>
+
       <!-- Report Sections Selection -->
       <v-card class="stats-card" v-if="hasData">
         <v-card-title class="card-title">
@@ -107,6 +123,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
+import * as XLSX from 'xlsx'
 
 const router = useRouter()
 
@@ -153,6 +170,13 @@ function loadData() {
 // Select/Deselect sections
 function selectAll() { sections.value.forEach(s => s.selected = true) }
 function clearAll() { sections.value.forEach(s => s.selected = false) }
+
+// Handle data update from Excel viewer
+function handleDataUpdate(newData) {
+  if (visualizationData.value) {
+    visualizationData.value.calculations = newData
+  }
+}
 
 // Generate report preview (shows in ExcelViewer)
 function updatePreview() {
@@ -231,7 +255,7 @@ function updatePreview() {
   reportPreview.value = true
 }
 
-// Generate Excel report (CSV download)
+// Generate Excel report (proper Excel file with formatting)
 function generateExcelReport() {
   generating.value = true
   
@@ -244,77 +268,98 @@ function generateExcelReport() {
     const instrument = visualizationData.value?.instrumentType || 'Financial Instruments'
     const date = new Date().toLocaleDateString()
     
-    let csvContent = []
+    // Create workbook
+    const workbook = XLSX.utils.book_new()
     
-    csvContent.push(`"DURA CAPITAL FINANCIAL REPORT"`)
-    csvContent.push(`"Generated: ${date}"`)
-    csvContent.push(`"Instrument Type: ${instrument}"`)
-    csvContent.push(`"Total Records: ${calculations.length}"`)
-    csvContent.push(``)
+    // Create summary sheet
+    const summaryData = [
+      ['DURA CAPITAL FINANCIAL REPORT'],
+      ['Generated:', date],
+      ['Instrument Type:', instrument],
+      ['Total Records:', calculations.length],
+      [''],
+      ['SUMMARY'],
+      ['']
+    ]
     
-    selected.forEach(section => {
-      csvContent.push(``)
-      csvContent.push(`"${section.name.toUpperCase()}"`)
-      csvContent.push(``)
+    if (selected.find(s => s.key === 'summary')) {
+      const totalPrincipal = calculations.reduce((s, c) => s + (c.principal || 0), 0)
+      const totalInterest = calculations.reduce((s, c) => s + (c.interest_earned || 0), 0)
+      const avgYield = calculations.length ? calculations.reduce((s, c) => s + (c.yield || 0), 0) / calculations.length : 0
       
-      if (section.key === 'summary') {
-        const totalPrincipal = calculations.reduce((s, c) => s + (c.principal || 0), 0)
-        const totalInterest = calculations.reduce((s, c) => s + (c.interest_earned || 0), 0)
-        const avgYield = calculations.length ? calculations.reduce((s, c) => s + (c.yield || 0), 0) / calculations.length : 0
-        
-        csvContent.push(`"Metric","Value"`)
-        csvContent.push(`"Total Principal","${totalPrincipal.toLocaleString()}"`)
-        csvContent.push(`"Total Interest Earned","${totalInterest.toLocaleString()}"`)
-        csvContent.push(`"Average Yield","${avgYield.toFixed(2)}%"`)
-        csvContent.push(`"Number of Instruments","${calculations.length}"`)
-      }
-      
-      if (section.key === 'data') {
-        const headers = ['Instrument Name', 'Principal', 'Interest Rate', 'Term Days', 'Interest Earned', 'Maturity Value', 'Yield (%)']
-        csvContent.push(headers.map(h => `"${h}"`).join(','))
-        
-        calculations.forEach(calc => {
-          const row = [
-            calc.instrument_name || calc.instrument_type || 'N/A',
-            calc.principal || 0,
-            ((calc.interest_rate || 0) * 100).toFixed(2) + '%',
-            calc.term_days || 0,
-            calc.interest_earned || 0,
-            calc.maturity_value || 0,
-            (calc.yield || 0).toFixed(2) + '%'
-          ]
-          csvContent.push(row.map(v => `"${v}"`).join(','))
-        })
-      }
-      
-      if (section.key === 'yield') {
-        const yields = calculations.map(c => c.annual_yield || c.yield || 0)
-        const avgYield = yields.reduce((a, b) => a + b, 0) / yields.length
-        const maxYield = Math.max(...yields)
-        const minYield = Math.min(...yields.filter(y => y > 0))
-        
-        csvContent.push(`"Metric","Value"`)
-        csvContent.push(`"Average Yield","${avgYield.toFixed(2)}%"`)
-        csvContent.push(`"Maximum Yield","${maxYield.toFixed(2)}%"`)
-        csvContent.push(`"Minimum Yield","${minYield.toFixed(2)}%"`)
-        csvContent.push(``)
-        csvContent.push(`"Instrument","Yield (%)"`)
-        calculations.forEach(calc => {
-          csvContent.push(`"${calc.instrument_name || calc.instrument_type || 'N/A'}","${(calc.annual_yield || calc.yield || 0).toFixed(2)}%"`)
-        })
-      }
-    })
+      summaryData.push(['Metric', 'Value'])
+      summaryData.push(['Total Principal', totalPrincipal])
+      summaryData.push(['Total Interest Earned', totalInterest])
+      summaryData.push(['Average Yield (%)', avgYield.toFixed(2)])
+      summaryData.push(['Number of Instruments', calculations.length])
+    }
     
-    csvContent.push(``)
-    csvContent.push(`"© 2024 Dura Capital - Financial Analysis Report"`)
+    summaryData.push([''])
+    summaryData.push(['DATA TABLE'])
+    summaryData.push([''])
     
-    const blob = new Blob([csvContent.join('\n')], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `Dura-Capital-Report-${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    if (selected.find(s => s.key === 'data')) {
+      const dataHeaders = ['Instrument Name', 'Principal', 'Interest Rate', 'Term Days', 'Interest Earned', 'Maturity Value', 'Yield (%)']
+      summaryData.push(dataHeaders)
+      
+      calculations.forEach(calc => {
+        summaryData.push([
+          calc.instrument_name || calc.instrument_type || 'N/A',
+          calc.principal || 0,
+          ((calc.interest_rate || 0) * 100).toFixed(2),
+          calc.term_days || 0,
+          calc.interest_earned || 0,
+          calc.maturity_value || 0,
+          (calc.yield || 0).toFixed(2)
+        ])
+      })
+    }
+    
+    summaryData.push([''])
+    summaryData.push(['YIELD ANALYSIS'])
+    summaryData.push([''])
+    
+    if (selected.find(s => s.key === 'yield')) {
+      const yields = calculations.map(c => c.annual_yield || c.yield || 0)
+      const avgYield = yields.length ? yields.reduce((a, b) => a + b, 0) / yields.length : 0
+      const maxYield = yields.length ? Math.max(...yields) : 0
+      const minYield = yields.length ? Math.min(...yields.filter(y => y > 0)) : 0
+      
+      summaryData.push(['Metric', 'Value'])
+      summaryData.push(['Average Yield (%)', avgYield.toFixed(2)])
+      summaryData.push(['Maximum Yield (%)', maxYield.toFixed(2)])
+      summaryData.push(['Minimum Yield (%)', minYield.toFixed(2)])
+      summaryData.push([''])
+      summaryData.push(['Instrument', 'Yield (%)'])
+      calculations.forEach(calc => {
+        summaryData.push([
+          calc.instrument_name || calc.instrument_type || 'N/A',
+          (calc.annual_yield || calc.yield || 0).toFixed(2)
+        ])
+      })
+    }
+    
+    summaryData.push([''])
+    summaryData.push(['© 2024 Dura Capital - Financial Analysis Report'])
+    
+    // Add sheet to workbook
+    const worksheet = XLSX.utils.aoa_to_sheet(summaryData)
+    
+    // Set column widths
+    worksheet['!cols'] = [
+      { wch: 30 }, // Column A
+      { wch: 20 }, // Column B
+      { wch: 20 }, // Column C
+      { wch: 15 }, // Column D
+      { wch: 20 }, // Column E
+      { wch: 20 }, // Column F
+      { wch: 15 }  // Column G
+    ]
+    
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report')
+    
+    // Download Excel file
+    XLSX.writeFile(workbook, `Dura-Capital-Report-${new Date().toISOString().split('T')[0]}.xlsx`)
     
     reportReady.value = true
     generating.value = false

@@ -56,15 +56,19 @@
           </v-card-text>
         </v-card>
 
-        <!-- Sheet Selector -->
-        <v-card class="stats-card" v-if="sheetNames && sheetNames.length > 1">
+        <!-- Excel Viewer with Full Dataset -->
+        <v-card class="stats-card">
           <v-card-title class="card-title">
-            <v-icon class="title-icon">mdi-sheet</v-icon> Select Sheet
+            <v-icon class="title-icon">mdi-microsoft-excel</v-icon> Dataset Viewer (Editable)
           </v-card-title>
           <v-card-text>
-            <v-btn-toggle v-model="selectedSheet" mandatory>
-              <v-btn v-for="sheet in sheetNames" :key="sheet" :value="sheet">{{ sheet }}</v-btn>
-            </v-btn-toggle>
+            <ExcelViewer
+              :file-base64="dataset?.file_base64"
+              :file-name="dataset?.name || ''"
+              :data="dataset?.data"
+              :headers="dataset?.data ? Object.keys(dataset.data[0] || {}) : []"
+              @data-update="handleDataUpdate"
+            />
           </v-card-text>
         </v-card>
 
@@ -258,6 +262,13 @@ async function deleteData() {
 function handleCleanedUpdate(newData) {
   if (results.value) {
     results.value.cleanedData = newData
+    dataset.value.data = newData
+  }
+}
+
+// Handle data update from Excel viewer
+function handleDataUpdate(newData) {
+  if (dataset.value) {
     dataset.value.data = newData
   }
 }
