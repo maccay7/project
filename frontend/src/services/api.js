@@ -68,4 +68,13 @@ export const dataAPI = {
   deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { upload_id: id })
 }
 
-export default { authAPI, dashboardAPI, calculationsAPI, userAPI, systemAPI, dataAPI }
+// Dataset Operations
+export const datasetAPI = {
+  save: (name, file_base64, sheet_names, upload_id) => 
+    callAPI('/api/save-dataset', 'POST', { name, file_base64, sheet_names, upload_id }),
+  getAll: () => callAPI('/api/get-datasets'),
+  load: (dataset_id) => callAPI('/api/load-dataset', 'POST', { dataset_id }),
+  delete: (dataset_id) => callAPI('/api/delete-dataset', 'POST', { dataset_id })
+}
+
+export default { authAPI, dashboardAPI, calculationsAPI, userAPI, systemAPI, dataAPI, datasetAPI }

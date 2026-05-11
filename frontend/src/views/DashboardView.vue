@@ -114,36 +114,40 @@
   </FixedLayout>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { dashboardAPI } from '../services/api'
 import FixedLayout from '../components/FixedLayout.vue'
+import { dashboardAPI } from '../services/api'
+import { useDataset } from '../composables/useDataset'
 
 const router = useRouter()
 
+// Use dataset composable for global state
+const { datasetInfo, hasDataset, loadDataset } = useDataset()
+
 // Chart references
-const monthlyChartRef = ref(null)
-const pieChartRef = ref(null)
-const yieldChartRef = ref(null)
+const monthlyChartRef = ref<any>(null)
+const pieChartRef = ref<any>(null)
+const yieldChartRef = ref<any>(null)
 
 // Store chart instances
-let monthlyChart = null
-let pieChart = null
-let yieldChart = null
+let monthlyChart: any = null
+let pieChart: any = null
+let yieldChart: any = null
 
 // Data from backend
-const activities = ref([])
-const monthlyData = ref(null)
-const pieData = ref(null)
-const yieldData = ref(null)
+const activities = ref<any[]>([])
+const monthlyData = ref<any>(null)
+const pieData = ref<any>(null)
+const yieldData = ref<any>(null)
 
 // Stats to display
 const stats = ref([
   { title: 'Total Datasets', value: '0', icon: 'mdi-database', bgColor: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
   { title: 'Calculations', value: '0', icon: 'mdi-calculator', bgColor: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
   { title: 'Reports', value: '0', icon: 'mdi-file-document', bgColor: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
-  { title: 'Active', value: 'N/A', icon: 'mdi-chart-line', bgColor: 'rgba(255,193,7,0.1)', iconColor: '#FFC107' }
+  { title: 'Instrument Type', value: 'N/A', icon: 'mdi-chart-line', bgColor: 'rgba(255,193,7,0.1)', iconColor: '#FFC107' }
 ])
 
 // Quick action buttons
@@ -159,29 +163,128 @@ const actions = [
 // Load all data from backend
 async function loadData() {
   try {
-    // Get stats
+    // Load dataset from localStorage
+    await loadDataset()
+    
+    // Update stats based on uploaded dataset
+    if (hasDataset.value && datasetInfo.value) {
+      const savedDatasets = JSON.parse(localStorage.getItem('saved-datasets') || '[]')
+      stats.value[0].value = savedDatasets.length || 0
+      
+      // Show instrument type from dataset
+      if (datasetInfo.value.instrumentType) {
+        stats.value[3].value = datasetInfo.value.instrumentType
+      }
+      
+      // Add recent activity for dataset upload
+      if (datasetInfo.value.name) {
+        activities.value.unshift({
+          id: Date.now(),
+          text: `Dataset uploaded: ${datasetInfo.value.name}`,
+          time: new Date().toLocaleString(),
+          color: '#4CAF50'
+        })
+      }
+      
+      // Load data from uploaded dataset for charts
+      const uploadedDataset = JSON.parse(localStorage.getItem('uploadedDataset') || '{}')
+      if (uploadedDataset.data && Array.isArray(uploadedDataset.data)) {
+        const data = uploadedDataset.data
+        
+        // Generate Monthly Activity data from dataset
+        const monthlyActivity: any = {
+          labels: [],
+          datasets: [{
+            label: 'Records per Month',
+            data: [],
+            borderColor: '#0B2A44',
+            backgroundColor: 'rgba(11, 42, 68, 0.1)',
+            fill: true,
+            tension: 0.4
+          }]
+        }
+        
+        // Group data by date if available, otherwise show distribution
+        const dateField = Object.keys(data[0]).find(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('issue'))
+        if (dateField) {
+          const monthCounts: any = {}
+          data.forEach((row: any) => {
+            try {
+              const date = new Date(row[dateField])
+              if (!isNaN(date.getTime())) {
+                const monthKey = date.toLocaleString('default', { month: 'short', year: 'numeric' })
+                monthCounts[monthKey] = (monthCounts[monthKey] || 0) + 1
+              }
+            } catch (e) {
+              // Skip invalid dates
+            }
+          })
+          monthlyActivity.labels = Object.keys(monthCounts)
+          monthlyActivity.datasets[0].data = Object.values(monthCounts)
+        } else {
+          // If no date field, show data distribution by index
+          monthlyActivity.labels = ['Dataset Size']
+          monthlyActivity.datasets[0].data = [data.length]
+        }
+        monthlyData.value = monthlyActivity
+        
+        // Generate Instrument Distribution data from dataset
+        const classificationField = Object.keys(data[0]).find(k => k.toLowerCase().includes('classification') || k.toLowerCase().includes('instrument') || k.toLowerCase().includes('type'))
+        const instrumentDistribution: any = {
+          labels: [],
+          datasets: [{
+            data: [],
+            backgroundColor: ['#0B2A44', '#1E88E5', '#4CAF50', '#FFC107', '#F44336', '#9C27B0', '#00BCD4', '#FF5722']
+          }]
+        }
+        
+        if (classificationField) {
+          const typeCounts: any = {}
+          data.forEach((row: any) => {
+            const type = row[classificationField] || 'Unknown'
+            typeCounts[type] = (typeCounts[type] || 0) + 1
+          })
+          instrumentDistribution.labels = Object.keys(typeCounts)
+          instrumentDistribution.datasets[0].data = Object.values(typeCounts)
+        } else {
+          // If no classification field, show by portfolio or other field
+          const portfolioField = Object.keys(data[0]).find(k => k.toLowerCase().includes('portfolio') || k.toLowerCase().includes('pfolio'))
+          if (portfolioField) {
+            const portfolioCounts: any = {}
+            data.forEach((row: any) => {
+              const portfolio = row[portfolioField] || 'Unknown'
+              portfolioCounts[portfolio] = (portfolioCounts[portfolio] || 0) + 1
+            })
+            instrumentDistribution.labels = Object.keys(portfolioCounts)
+            instrumentDistribution.datasets[0].data = Object.values(portfolioCounts)
+          } else {
+            // Fallback: show total records
+            instrumentDistribution.labels = ['Total Records']
+            instrumentDistribution.datasets[0].data = [data.length]
+          }
+        }
+        pieData.value = instrumentDistribution
+      }
+    }
+    
+    // Get stats from backend
     const kpi = await dashboardAPI.getKPI()
     if (kpi.success && kpi.data) {
-      stats.value[0].value = kpi.data.total_datasets || 0
-      stats.value[1].value = kpi.data.active_calculations || 0
-      stats.value[2].value = kpi.data.reports_generated || 0
+      // Only update if not already set from localStorage
+      if (stats.value[0].value === '0') {
+        stats.value[0].value = kpi.data.total_datasets || 0
+      }
+      if (stats.value[1].value === '0') {
+        stats.value[1].value = kpi.data.active_calculations || 0
+      }
+      if (stats.value[2].value === '0') {
+        stats.value[2].value = kpi.data.reports_generated || 0
+      }
     }
 
-    // Get recent activity
-    const activity = await dashboardAPI.getRecentActivity()
-    if (activity.success) {
-      activities.value = activity.data || []
-    }
-
-    // Get chart data
-    const charts = await dashboardAPI.getCharts()
-    if (charts.success) {
-      monthlyData.value = charts.data?.monthlyActivity
-      pieData.value = charts.data?.instrumentDistribution
-    }
-
-    // Get yield curve
-    const yieldResp = await dashboardAPI.getYieldCurve('all')
+    // Get yield curve data - use instrument type from dataset
+    const instrumentType = stats.value[3].value !== 'N/A' ? stats.value[3].value : 'all'
+    const yieldResp = await dashboardAPI.getYieldCurve(instrumentType.toLowerCase())
     if (yieldResp.success) {
       yieldData.value = yieldResp.data
     }
@@ -196,9 +299,8 @@ async function loadData() {
 // Draw all charts
 async function drawCharts() {
   // Load Chart.js library
-  const chartModule = await import('chart.js')
+  const chartModule = await import('chart.js/auto')
   const Chart = chartModule.default || chartModule.Chart
-  Chart.register(...(chartModule.registerables || []))
 
   // Destroy old charts if they exist
   if (monthlyChart) monthlyChart.destroy()
@@ -240,7 +342,7 @@ async function drawCharts() {
 }
 
 // Navigate to a page
-function goTo(route) {
+function goTo(route: string) {
   router.push(route)
 }
 

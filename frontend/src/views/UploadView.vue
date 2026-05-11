@@ -46,11 +46,11 @@
 
             <v-card-text>
               <div v-if="savedDatasets.length">
-                <div v-for="(ds, idx) in savedDatasets" :key="ds.name" class="dataset-row">
+                <div v-for="(ds, idx) in savedDatasets" :key="ds.id" class="dataset-row">
                   <v-icon color="#1E88E5">mdi-file-excel</v-icon>
                   <div class="dataset-info">
                     <div class="dataset-name">{{ ds.name }}</div>
-                    <div class="dataset-rows">{{ ds.rows || 0 }} rows</div>
+                    <div class="dataset-rows">{{ ds.sheet_names?.length || 0 }} sheets</div>
                   </div>
                   <v-btn size="small" variant="text" @click="loadDataset(idx)"><v-icon size="small">mdi-folder-open</v-icon></v-btn>
                   <v-btn size="small" color="error" variant="text" @click="deleteDataset(idx)"><v-icon size="small">mdi-delete</v-icon></v-btn>
@@ -100,6 +100,7 @@
 
       <!-- Excel Preview -->
       <ExcelViewer v-if="showPreview"
+        :key="fileBase64 || uploadedFile?.name"
         :file-base64="fileBase64"
         :file-name="uploadedFile?.name || ''"
         :data="dataset"
@@ -134,7 +135,7 @@ import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { dataAPI } from '../services/api'
+import { dataAPI, datasetAPI } from '../services/api'
 
 const router = useRouter()
 const fileInput = ref(null)
@@ -150,79 +151,115 @@ const fileBase64 = ref('')
 const dataset = ref([])
 const headers = ref([])
 const savedDatasets = ref([])
+const uploadId = ref('')
+const sheetNames = ref([])
 
 // Computed helpers
 const hasFile = computed(() => uploadedFile.value !== null)
 const hasData = computed(() => dataset.value.length > 0 || fileBase64.value)
 
-// Load saved datasets from browser storage
-function loadSaved() {
+// Load saved datasets from backend
+async function loadSavedDatasets() {
   try {
-    const saved = localStorage.getItem('saved-datasets')
-    if (saved) savedDatasets.value = JSON.parse(saved)
+    const response = await datasetAPI.getAll()
+    if (response.success) {
+      savedDatasets.value = response.data
+    }
   } catch (err) {
-    console.error(err)
+    console.error('Failed to load datasets:', err)
   }
 }
 
-// Save current dataset to browser storage
-function saveDataset(name) {
-  if (!fileBase64.value && !dataset.value.length) {
-    alert('No data to save')
-    return
+// Save current dataset to backend
+async function saveDataset(name, base64Data = null, sheets = null) {
+  const dataToSave = base64Data || fileBase64.value
+  const sheetNamesToSave = sheets || sheetNames.value || []
+  if (!dataToSave) {
+    console.error('No data to save')
+    return false
   }
-
-  const newDs = {
-    name,
-    rows: dataset.value.length,
-    file_base64: fileBase64.value,
-    data: dataset.value,
-    headers: headers.value,
-    timestamp: new Date().toISOString()
+  
+  try {
+    const response = await datasetAPI.save(name, dataToSave, sheetNamesToSave, uploadId.value)
+    console.log('Save dataset response:', response)
+    if (response.success) {
+      await loadSavedDatasets()
+      console.log('Dataset saved successfully:', name)
+      return true
+    } else {
+      console.error('Save failed with error:', response.error)
+    }
+  } catch (err) {
+    console.error('Failed to save dataset:', err)
   }
-
-  const existing = savedDatasets.value.findIndex(d => d.name === name)
-  if (existing !== -1) {
-    savedDatasets.value[existing] = newDs
-  } else {
-    savedDatasets.value.push(newDs)
-  }
-
-  localStorage.setItem('saved-datasets', JSON.stringify(savedDatasets.value))
-  alert(`"${name}" saved!`)
+  return false
 }
 
 // Ask user for dataset name and save
-function savePrompt() {
+async function savePrompt() {
+  console.log('Save button clicked, fileBase64 length:', fileBase64.value.length)
   const name = prompt('Dataset name:', uploadedFile.value?.name?.replace(/\.[^/.]+$/, '') || 'My Dataset')
-  if (name?.trim()) saveDataset(name.trim())
+  if (name?.trim()) {
+    const saved = await saveDataset(name.trim(), fileBase64.value, sheetNames.value)
+    if (saved) {
+      alert('Dataset saved successfully!')
+    } else {
+      alert('Failed to save dataset. Please upload a file first.')
+    }
+  }
 }
 
 // Load a previously saved dataset
-function loadDataset(idx) {
+async function loadDataset(idx) {
   const ds = savedDatasets.value[idx]
   if (!ds) return
 
-  if (ds.file_base64) {
-    fileBase64.value = ds.file_base64
-    dataset.value = []
-  } else if (ds.data) {
-    dataset.value = ds.data
-    fileBase64.value = ''
+  console.log('Loading dataset:', ds.name, 'id:', ds.id)
+
+  try {
+    const response = await datasetAPI.load(ds.id)
+    console.log('Load response:', response)
+    
+    if (response.success) {
+      // Reset state first
+      dataset.value = []
+      headers.value = []
+      
+      // Then set new data
+      fileBase64.value = response.data.file_base64
+      uploadId.value = response.data.upload_id
+      uploadedFile.value = { name: ds.name }
+      
+      // Force show preview
+      showPreview.value = true
+      
+      // Force re-render by toggling
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      console.log('Dataset loaded successfully, fileBase64 length:', fileBase64.value.length)
+    } else {
+      console.error('Load failed:', response.error)
+      alert('Failed to load dataset: ' + (response.error || 'Unknown error'))
+    }
+  } catch (err) {
+    console.error('Failed to load dataset:', err)
+    alert('Failed to load dataset')
   }
-
-  if (ds.headers) headers.value = ds.headers
-
-  showPreview.value = true
-  uploadedFile.value = { name: ds.name }
 }
 
 // Delete a saved dataset
-function deleteDataset(idx) {
+async function deleteDataset(idx) {
   const ds = savedDatasets.value[idx]
   if (confirm(`Delete "${ds.name}"?`)) {
-    savedDatasets.value.splice(idx, 1)
-    localStorage.setItem('saved-datasets', JSON.stringify(savedDatasets.value))
+    try {
+      const response = await datasetAPI.delete(ds.id)
+      if (response.success) {
+        await loadSavedDatasets()
+      }
+    } catch (err) {
+      console.error('Failed to delete dataset:', err)
+      alert('Failed to delete dataset')
+    }
   }
 }
 
@@ -252,18 +289,41 @@ async function uploadFile(file) {
 async function loadPreview() {
   if (!uploadedFile.value) return
 
+  console.log('Loading preview for:', uploadedFile.value.name)
   isLoading.value = true
   try {
     const res = await dataAPI.upload(uploadedFile.value, 'treasury_bills')
+    console.log('Full upload response:', JSON.stringify(res, null, 2))
 
-    if (res.success?.data?.file_base64) {
+    let saved = false
+    if (res.data?.file_base64) {
       fileBase64.value = res.data.file_base64
+      uploadId.value = res.data.upload_id || ''
+      sheetNames.value = res.data.sheet_names || []
+      console.log('File loaded as base64, length:', fileBase64.value.length)
+      
+      // Automatically save to database
+      const name = uploadedFile.value.name.replace(/\.[^/.]+$/, '')
+      saved = await saveDataset(name, res.data.file_base64, sheetNames.value)
     } else if (res.data?.data) {
       dataset.value = res.data.data
       headers.value = Object.keys(dataset.value[0] || {})
+      uploadId.value = res.data.upload_id || ''
+      sheetNames.value = res.data.sheet_names || []
+      console.log('Data loaded as JSON, rows:', dataset.value.length)
+      
+      // Cannot auto-save JSON data format - user needs to save manually
+    } else {
+      console.error('No file_base64 or data in response:', res)
+    }
+    
+    if (saved) {
+      console.log('Dataset auto-saved to database')
+    } else {
+      console.log('Dataset not auto-saved (might be JSON format or error)')
     }
   } catch (err) {
-    console.error(err)
+    console.error('Upload error:', err)
     alert('Upload failed')
   } finally {
     isLoading.value = false
@@ -311,7 +371,7 @@ function goToClean() {
 
 // Load saved datasets when page opens
 onMounted(() => {
-  loadSaved()
+  loadSavedDatasets()
 })
 </script>
 
