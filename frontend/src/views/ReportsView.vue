@@ -18,7 +18,7 @@
         </v-btn>
       </div>
 
-      <!-- Data Overview -->
+      <!-- Data Overview with KPI Cards -->
       <v-card class="stats-card" v-if="hasData">
         <v-card-title class="card-title">
           <v-icon class="title-icon">mdi-file-excel</v-icon> Report Overview
@@ -170,11 +170,9 @@ async function generateExcel() {
     const instrument = instrumentType.value
     const date = new Date().toLocaleDateString()
     
-    // Create workbook
     const wb = XLSX.utils.book_new()
     const rows = []
     
-    // Header
     rows.push(['DURA CAPITAL FINANCIAL REPORT'])
     rows.push(['Generated:', date])
     rows.push(['Instrument Type:', instrument])
@@ -241,13 +239,10 @@ async function generateExcel() {
     
     rows.push(['© 2024 Dura Capital - Financial Analysis Report'])
     
-    // Create worksheet
     const ws = XLSX.utils.aoa_to_sheet(rows)
     ws['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 15 }, { wch: 20 }, { wch: 20 }, { wch: 15 }]
     
     XLSX.utils.book_append_sheet(wb, ws, 'Report')
-    
-    // Download
     XLSX.writeFile(wb, `Dura-Capital-Report-${new Date().toISOString().split('T')[0]}.xlsx`)
     
     reportReady.value = true
@@ -276,28 +271,144 @@ onMounted(() => {
 
 <style scoped>
 .reports-view { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
 .page-header { margin-bottom: 30px; }
 .page-header h1 { color: #0B2A44; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
 .page-header p { color: #666; font-size: 16px; }
+
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 .action-buttons.small { margin-bottom: 16px; }
-.stats-card { border-radius: 12px; margin-bottom: 24px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); }
-.card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
-.title-icon { margin-right: 8px; }
-.kpi-card { height: 100px; border-radius: 12px; transition: 0.2s; }
-.kpi-card:hover { transform: translateY(-2px); }
-.kpi-content { display: flex; align-items: center; height: 100%; padding: 8px; }
-.kpi-icon { width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; }
-.kpi-value { font-size: 24px; font-weight: 700; color: #0B2A44; }
-.kpi-title { font-size: 12px; color: #666; }
-.section-card { cursor: pointer; transition: 0.2s; border: 2px solid transparent; border-radius: 12px; }
-.section-card:hover { transform: translateY(-2px); }
-.section-card.selected { border-color: #1E88E5; background: rgba(30,136,229,0.05); }
-.section-name { font-weight: 600; margin-top: 8px; color: #0B2A44; }
-.section-desc { font-size: 11px; color: #666; }
+
+/* Stats Card - Same as Dashboard/Visualizations */
+.stats-card {
+  border-radius: 12px;
+  margin-bottom: 24px;
+  background: white;
+  border: 1px solid rgba(11,42,68,0.08);
+  position: relative;
+}
+
+.stats-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5);
+  border-radius: 12px 12px 0 0;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  color: #0B2A44;
+  font-weight: 600;
+  font-size: 18px;
+  padding: 16px 20px 0 20px;
+}
+
+.title-icon {
+  margin-right: 8px;
+}
+
+/* KPI Card Styles - Matching DashboardView */
+.kpi-card {
+  height: 120px;
+  border-radius: 12px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: white;
+  border: 1px solid rgba(11,42,68,0.08);
+  position: relative;
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50);
+  border-radius: 12px 12px 0 0;
+}
+
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+.kpi-content {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 8px;
+}
+
+.kpi-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.kpi-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.kpi-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0B2A44;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.kpi-title {
+  font-size: 12px;
+  color: #666;
+}
+
+/* Section Cards */
+.section-card {
+  cursor: pointer;
+  transition: 0.2s;
+  border: 2px solid transparent;
+  border-radius: 12px;
+}
+
+.section-card:hover {
+  transform: translateY(-2px);
+}
+
+.section-card.selected {
+  border-color: #1E88E5;
+  background: rgba(30,136,229,0.05);
+}
+
+.section-name {
+  font-weight: 600;
+  margin-top: 8px;
+  color: #0B2A44;
+}
+
+.section-desc {
+  font-size: 11px;
+  color: #666;
+}
+
 @media (max-width: 600px) {
   .reports-view { padding: 0 16px; }
   .action-buttons { flex-direction: column; }
+  .kpi-card { height: 100px; }
+  .kpi-value { font-size: 20px; }
 }
 </style>

@@ -21,14 +21,14 @@
       <!-- Show only when data loaded -->
       <template v-if="hasData">
 
-        <!-- KPI Cards -->
+        <!-- KPI Cards - 3 columns evenly spread -->
         <v-card class="stats-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-calculator</v-icon> Dataset Overview
           </v-card-title>
           <v-card-text>
             <v-row>
-              <v-col cols="12" sm="6" md="3" v-for="stat in kpiStats" :key="stat.title">
+              <v-col cols="12" md="4" v-for="stat in kpiStats" :key="stat.title">
                 <v-card class="kpi-card">
                   <v-card-text>
                     <div class="kpi-content">
@@ -191,7 +191,7 @@ const treasuryData = ref([])
 const bondData = ref([])
 const moneyData = ref([])
 
-// KPI Stats
+// KPI Stats - 3 items evenly spread
 const kpiStats = computed(() => [
   { title: 'Records', value: rawData.value.length || 0, icon: 'mdi-database', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
   { title: 'Calculations', value: calculations.value.length || 0, icon: 'mdi-calculator', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
@@ -243,20 +243,16 @@ async function loadData() {
 // Run calculations via backend API
 async function runCalculations(dataArray) {
   try {
-    // Get instrument type from data or default
     const instrumentType = detectInstrumentType(dataArray)
-    
     const response = await dataAPI.calculate(dataArray, instrumentType, {})
     
     if (response.success && response.calculations) {
       calculations.value = response.calculations
       
-      // Update display data for all instrument types
       updateTreasuryDisplay(response.calculations)
       updateBondDisplay(response.calculations)
       updateMoneyDisplay(response.calculations)
       
-      // Save for visualizations
       localStorage.setItem('calculations', JSON.stringify({
         success: true,
         calculations: response.calculations,
@@ -362,28 +358,116 @@ onMounted(() => {
 
 <style scoped>
 .calculations-view { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
 .page-header { margin-bottom: 30px; }
 .page-header h1 { color: #0B2A44; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
 .page-header p { color: #666; font-size: 16px; }
+
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 30px; }
 
-.stats-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); border-radius: 12px 12px 0 0; }
+/* Stats Card */
+.stats-card {
+  border-radius: 12px;
+  margin-bottom: 30px;
+  background: white;
+  border: 1px solid rgba(11,42,68,0.08);
+  position: relative;
+}
 
-.card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
-.title-icon { margin-right: 8px; }
+.stats-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5);
+  border-radius: 12px 12px 0 0;
+}
 
-.kpi-card { height: 120px; border-radius: 12px; transition: 0.2s; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50); }
-.kpi-card:hover { transform: translateY(-2px); }
-.kpi-content { display: flex; align-items: center; height: 100%; padding: 8px; }
-.kpi-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; }
-.kpi-value { font-size: 24px; font-weight: 700; color: #0B2A44; }
-.kpi-title { font-size: 12px; color: #666; }
+.card-title {
+  display: flex;
+  align-items: center;
+  color: #0B2A44;
+  font-weight: 600;
+  font-size: 18px;
+  padding: 16px 20px 0 20px;
+}
 
+.title-icon {
+  margin-right: 8px;
+}
+
+/* KPI Cards - 3 columns evenly spread */
+.kpi-card {
+  height: 120px;
+  border-radius: 12px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: white;
+  border: 1px solid rgba(11,42,68,0.08);
+  position: relative;
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50);
+  border-radius: 12px 12px 0 0;
+}
+
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+.kpi-content {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 8px;
+}
+
+.kpi-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.kpi-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.kpi-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0B2A44;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.kpi-title {
+  font-size: 12px;
+  color: #666;
+}
+
+/* Instrument Selector */
 .instrument-selector { padding: 16px; background: rgba(11,42,68,0.03); border-radius: 12px; }
 .instrument-selector h4 { margin-bottom: 12px; color: #0B2A44; }
 
+/* Calculation Boxes */
 .calc-box { border-radius: 12px; margin-bottom: 16px; border: 1px solid rgba(11,42,68,0.08); }
 .calc-box .v-card-title { background: rgba(11,42,68,0.03); padding: 12px 16px; font-weight: 600; color: #0B2A44; }
 .calc-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(11,42,68,0.05); }
@@ -394,10 +478,14 @@ onMounted(() => {
 .calc-row .success { color: #4CAF50; }
 
 .tab-title { color: #0B2A44; font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+
+/* Action Card */
 .action-card { border-radius: 12px; background: white; border: 1px solid rgba(11,42,68,0.08); text-align: center; padding: 16px; }
 
 @media (max-width: 600px) {
   .calculations-view { padding: 0 16px; }
   .action-buttons { flex-direction: column; }
+  .kpi-card { height: 100px; }
+  .kpi-value { font-size: 20px; }
 }
 </style>

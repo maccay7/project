@@ -59,18 +59,6 @@
           </v-card-text>
         </v-card>
 
-        <!-- Instrument Comparison Chart -->
-        <v-card class="chart-card">
-          <v-card-title class="card-title">
-            <v-icon class="title-icon">mdi-chart-bar</v-icon> Instrument Comparison
-          </v-card-title>
-          <v-card-text>
-            <div class="chart-container">
-              <canvas ref="compareCanvas"></canvas>
-            </div>
-          </v-card-text>
-        </v-card>
-
         <!-- Proceed Button -->
         <v-card class="action-card">
           <v-card-text class="text-center">
@@ -112,13 +100,11 @@ const yieldData = ref(null)
 
 // Canvas refs
 const yieldCanvas = ref(null)
-const compareCanvas = ref(null)
 
 // Chart instances
 let yieldChart = null
-let compareChart = null
 
-// KPI Stats (will update when data loads)
+// KPI Stats
 const kpiStats = ref([
   { title: 'Records', value: 0, icon: 'mdi-database', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
   { title: 'Instrument Type', value: 'N/A', icon: 'mdi-chart-bubble', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
@@ -144,9 +130,8 @@ async function loadData() {
     kpiStats.value[1].value = calcData.value.instrumentType || 'Money Market'
     kpiStats.value[2].value = getAvgYield(calculations) + '%'
     
-    // Render charts
+    // Render chart
     await loadYieldCurve()
-    renderCompareChart(calculations)
     
     console.log(`Loaded ${calculations.length} records`)
   } catch (err) {
@@ -169,7 +154,6 @@ function clearData() {
     hasData.value = false
     calcData.value = null
     if (yieldChart) { yieldChart.destroy(); yieldChart = null }
-    if (compareChart) { compareChart.destroy(); compareChart = null }
     alert('Data cleared')
   }
 }
@@ -183,7 +167,6 @@ async function loadYieldCurve() {
     if (data.success && data.data) {
       yieldData.value = data.data
     } else {
-      // Fallback data if API fails
       yieldData.value = {
         labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
         current: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1]
@@ -231,41 +214,6 @@ function renderYieldChart() {
       scales: {
         y: { title: { display: true, text: 'Yield (%)' }, beginAtZero: true },
         x: { title: { display: true, text: 'Maturity' } }
-      }
-    }
-  })
-}
-
-// Render comparison chart (bar chart)
-function renderCompareChart(calculations) {
-  if (!compareCanvas.value) return
-  if (compareChart) compareChart.destroy()
-  
-  // Use instrument names and yields from calculation data
-  const instruments = calculations.map(c => c.instrument_type || c.instrument_name || 'Unknown')
-  const yields = calculations.map(c => parseFloat(c.annual_yield || c.yield_to_maturity || c.bond_equivalent_yield || 0))
-  
-  const ctx = compareCanvas.value.getContext('2d')
-  compareChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: instruments,
-      datasets: [{
-        label: 'Yield (%)',
-        data: yields,
-        backgroundColor: '#0B2A44',
-        borderRadius: 4
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'top' },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.raw}%` } }
-      },
-      scales: {
-        y: { title: { display: true, text: 'Yield (%)' }, beginAtZero: true }
       }
     }
   })

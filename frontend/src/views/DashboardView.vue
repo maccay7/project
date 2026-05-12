@@ -8,24 +8,31 @@
         <p>Welcome to DuraCapital Financial System</p>
       </div>
 
-      <!-- Stats Cards -->
-      <v-row>
-        <v-col cols="12" sm="6" md="3" v-for="stat in stats" :key="stat.title">
-          <v-card class="stat-card">
-            <v-card-text>
-              <div class="stat-content">
-                <div class="stat-icon" :style="{ backgroundColor: stat.bgColor }">
-                  <v-icon :color="stat.iconColor">{{ stat.icon }}</v-icon>
-                </div>
-                <div class="stat-info">
-                  <div class="stat-value">{{ stat.value }}</div>
-                  <div class="stat-title">{{ stat.title }}</div>
-                </div>
-              </div>
-            </v-card-text>
-          </v-card>
-        </v-col>
-      </v-row>
+      <!-- KPI Cards -->
+      <v-card class="stats-card">
+        <v-card-title class="card-title">
+          <v-icon class="title-icon">mdi-chart-line</v-icon> Dashboard Overview
+        </v-card-title>
+        <v-card-text>
+          <v-row>
+            <v-col cols="12" sm="6" md="3" v-for="stat in stats" :key="stat.title">
+              <v-card class="kpi-card">
+                <v-card-text>
+                  <div class="kpi-content">
+                    <div class="kpi-icon" :style="{ backgroundColor: stat.bgColor }">
+                      <v-icon :color="stat.iconColor" size="28">{{ stat.icon }}</v-icon>
+                    </div>
+                    <div class="kpi-info">
+                      <div class="kpi-value">{{ stat.value }}</div>
+                      <div class="kpi-title">{{ stat.title }}</div>
+                    </div>
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
 
       <!-- Quick Actions & Recent Activity -->
       <v-row class="mt-4">
@@ -84,7 +91,7 @@ const router = useRouter()
 const activities = ref([])
 const yieldData = ref(null)
 
-// Stats (will update from localStorage)
+// Stats (KPI Cards)
 const stats = ref([
   { title: 'Total Datasets', value: '0', icon: 'mdi-database', bgColor: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
   { title: 'Calculations', value: '0', icon: 'mdi-calculator', bgColor: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
@@ -129,7 +136,6 @@ async function loadData() {
       stats.value[1].value = calcs.length.toString()
       stats.value[2].value = calcs.length.toString()
       
-      // FIXED: No .title() error
       if (calculations.instrumentType) {
         let instrumentName = String(calculations.instrumentType).replace(/_/g, ' ')
         instrumentName = instrumentName.charAt(0).toUpperCase() + instrumentName.slice(1)
@@ -159,12 +165,102 @@ onMounted(() => {
 .welcome-section h1 { color: #0B2A44; font-size: 32px; margin-bottom: 8px; }
 .welcome-section p { color: #666; font-size: 16px; }
 
-.stat-card { height: 120px; border-radius: 12px; transition: 0.2s; }
-.stat-card:hover { transform: translateY(-2px); }
-.stat-content { display: flex; align-items: center; height: 100%; }
-.stat-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; }
-.stat-value { font-size: 24px; font-weight: 700; color: #0B2A44; }
-.stat-title { font-size: 12px; color: #666; }
+/* KPI Card Styles - Matching VisualizationsView */
+.stats-card {
+  border-radius: 12px;
+  margin-bottom: 30px;
+  background: white;
+  border: 1px solid rgba(11,42,68,0.08);
+  position: relative;
+}
+
+.stats-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5);
+  border-radius: 12px 12px 0 0;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  color: #0B2A44;
+  font-weight: 600;
+  font-size: 18px;
+  padding: 16px 20px 0 20px;
+}
+
+.title-icon {
+  margin-right: 8px;
+}
+
+.kpi-card {
+  height: 120px;
+  border-radius: 12px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: white;
+  border: 1px solid rgba(11,42,68,0.08);
+  position: relative;
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50);
+  border-radius: 12px 12px 0 0;
+}
+
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+.kpi-content {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 8px;
+}
+
+.kpi-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.kpi-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.kpi-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0B2A44;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.kpi-title {
+  font-size: 12px;
+  color: #666;
+}
 
 .action-btn { cursor: pointer; transition: 0.2s; border-radius: 8px; }
 .action-btn:hover { transform: translateY(-3px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
@@ -181,7 +277,7 @@ onMounted(() => {
 
 @media (max-width: 600px) {
   .dashboard { padding: 0 16px; }
-  .stat-card { height: 100px; }
-  .stat-value { font-size: 20px; }
+  .kpi-card { height: 100px; }
+  .kpi-value { font-size: 20px; }
 }
 </style>
