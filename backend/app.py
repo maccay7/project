@@ -213,7 +213,7 @@ def login():
         
         print(f"Login attempt: {email}")
         
-        # Direct hardcoded credentials (no environment variables needed)
+        # Hardcoded credentials - FIXED
         if email == 'makanakakanyai@gmail.com' and password == 'Business7mogul':
             return jsonify({
                 'success': True,
@@ -230,7 +230,7 @@ def login():
         
     except Exception as e:
         print(f"Login error: {e}")
-        return jsonify({'success': False, 'message': 'Login failed'}), 500
+        return jsonify({'success': False, 'message': str(e)}), 500
     
 @app.route('/api/upload', methods=['POST', 'OPTIONS'])
 def upload():

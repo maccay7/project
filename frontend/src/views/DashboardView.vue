@@ -111,7 +111,6 @@ async function loadData() {
       const datasets = JSON.parse(saved)
       stats.value[0].value = datasets.length.toString()
       
-      // Add activity for each dataset
       datasets.forEach(ds => {
         activities.value.unshift({
           id: ds.id || Date.now(),
@@ -130,18 +129,12 @@ async function loadData() {
       stats.value[1].value = calcs.length.toString()
       stats.value[2].value = calcs.length.toString()
       
-      // Get instrument type - fixed
+      // FIXED: No .title() error
       if (calculations.instrumentType) {
-        let instrumentName = calculations.instrumentType.replace(/_/g, ' ')
+        let instrumentName = String(calculations.instrumentType).replace(/_/g, ' ')
         instrumentName = instrumentName.charAt(0).toUpperCase() + instrumentName.slice(1)
         stats.value[3].value = instrumentName
       }
-    }
-    
-    // Load yield curve from backend
-    const yieldResp = await dashboardAPI.getYieldCurve('all')
-    if (yieldResp.success && yieldResp.data) {
-      yieldData.value = yieldResp.data
     }
     
   } catch (err) {
