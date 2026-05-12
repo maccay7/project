@@ -206,21 +206,32 @@ def login():
     if request.method == 'OPTIONS':
         return '', 200
     
-    if not ADMIN_EMAIL or not ADMIN_PASSWORD:
-        return jsonify({'success': False, 'message': 'Admin not configured'}), 500
+    try:
+        data = request.get_json()
+        email = data.get('email')
+        password = data.get('password')
+        
+        print(f"Login attempt: {email}")
+        
+        # Direct hardcoded credentials (no environment variables needed)
+        if email == 'makanakakanyai@gmail.com' and password == 'Business7mogul':
+            return jsonify({
+                'success': True,
+                'token': str(uuid.uuid4()),
+                'user': {
+                    'id': 1,
+                    'email': email,
+                    'full_name': 'Makanaka Kanyai',
+                    'role': 'admin'
+                }
+            })
+        
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+        
+    except Exception as e:
+        print(f"Login error: {e}")
+        return jsonify({'success': False, 'message': 'Login failed'}), 500
     
-    data = request.get_json()
-    email = data.get('email')
-    password = data.get('password')
-    
-    if email == ADMIN_EMAIL and password == ADMIN_PASSWORD:
-        return jsonify({
-            'success': True,
-            'token': str(uuid.uuid4()),
-            'user': {'id': 1, 'email': email, 'full_name': os.environ.get('ADMIN_NAME', 'Admin'), 'role': 'admin'}
-        })
-    return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-
 @app.route('/api/upload', methods=['POST', 'OPTIONS'])
 def upload():
     if request.method == 'OPTIONS':
