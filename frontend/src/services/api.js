@@ -1,4 +1,4 @@
-// API Service for DuraCapital Frontend
+// API Service for DuraCapital
 import { API_BASE_URL, RATE_LIMIT_MESSAGE } from '../config.js'
 
 async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = false) {
@@ -6,22 +6,16 @@ async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = fal
   console.log('Calling:', url, method)
   
   const options = { method }
-  
-  // Add JWT token to headers if available
   const token = localStorage.getItem('auth_token')
+  
   if (token) {
-    options.headers = {
-      'Authorization': `Bearer ${token}`
-    }
+    options.headers = { 'Authorization': `Bearer ${token}` }
   }
   
   if (isFileUpload) {
-    options.body = body  // FormData - browser sets Content-Type
+    options.body = body
   } else if (body) {
-    options.headers = { 
-      ...options.headers,
-      'Content-Type': 'application/json'
-    }
+    options.headers = { ...options.headers, 'Content-Type': 'application/json' }
     options.body = JSON.stringify(body)
   }
   
@@ -30,18 +24,14 @@ async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = fal
     const data = await response.json()
     
     if (!response.ok) {
-      // Handle specific error types
-      if (response.status === 429) {
-        throw new Error(RATE_LIMIT_MESSAGE)
-      }
+      if (response.status === 429) throw new Error(RATE_LIMIT_MESSAGE)
       if (response.status === 401) {
-        // Unauthorized - clear token and redirect to login
         localStorage.removeItem('auth_token')
         localStorage.removeItem('user')
         window.location.href = '/login'
         throw new Error('Session expired. Please login again.')
       }
-      throw new Error(data.message || data.error || 'Something went wrong')
+      throw new Error(data.message || data.error || 'Request failed')
     }
     return data
   } catch (error) {
@@ -65,9 +55,7 @@ export const dashboardAPI = {
 
 // Calculations
 export const calculationsAPI = {
-  execute: (type, data = [], params = {}) => callAPI('/api/calculations/execute', 'POST', {
-    instrument_type: type, data, params
-  }),
+  execute: (type, data = [], params = {}) => callAPI('/api/calculations/execute', 'POST', { instrument_type: type, data, params }),
   getHistory: () => callAPI('/api/calculations/history')
 }
 
@@ -99,11 +87,10 @@ export const dataAPI = {
 
 // Dataset Operations
 export const datasetAPI = {
-  save: (name, file_base64, sheet_names, upload_id) => 
-    callAPI('/api/save-dataset', 'POST', { name, file_base64, sheet_names, upload_id }),
+  save: (name, file_base64, sheet_names, upload_id) => callAPI('/api/save-dataset', 'POST', { name, file_base64, sheet_names, upload_id }),
   getAll: () => callAPI('/api/get-datasets'),
-  load: (dataset_id) => callAPI('/api/load-dataset', 'POST', { dataset_id }),
-  delete: (dataset_id) => callAPI('/api/delete-dataset', 'POST', { dataset_id })
+  load: (id) => callAPI('/api/load-dataset', 'POST', { dataset_id: id }),
+  delete: (id) => callAPI('/api/delete-dataset', 'POST', { dataset_id: id })
 }
 
 export default { authAPI, dashboardAPI, calculationsAPI, userAPI, systemAPI, dataAPI, datasetAPI }

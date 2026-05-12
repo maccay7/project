@@ -10,16 +10,18 @@
 
       <!-- Action Buttons -->
       <div class="action-buttons">
-        <v-btn color="#0B2A44" @click="loadFromCalculations">
-          <v-icon left>mdi-database</v-icon> Load Data from Calculations
+        <v-btn color="#0B2A44" @click="loadData">
+          <v-icon left>mdi-database</v-icon> Load Data
         </v-btn>
         <v-btn color="#0B2A44" variant="outlined" @click="clearData" :disabled="!hasData">
           <v-icon left>mdi-delete</v-icon> Clear Data
         </v-btn>
       </div>
 
-      <!-- KPI Cards - Only show when data loaded -->
+      <!-- Show only when data loaded -->
       <template v-if="hasData">
+
+        <!-- KPI Cards -->
         <v-card class="stats-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-chart-line</v-icon> Calculation Overview
@@ -52,19 +54,19 @@
           </v-card-title>
           <v-card-text>
             <div class="chart-container">
-              <canvas ref="yieldCurveCanvas"></canvas>
+              <canvas ref="yieldCanvas"></canvas>
             </div>
           </v-card-text>
         </v-card>
 
-        <!-- Comparison Chart -->
+        <!-- Instrument Comparison Chart -->
         <v-card class="chart-card">
           <v-card-title class="card-title">
-            <v-icon class="title-icon">mdi-chart-multiline</v-icon> Instrument Comparison
+            <v-icon class="title-icon">mdi-chart-bar</v-icon> Instrument Comparison
           </v-card-title>
           <v-card-text>
             <div class="chart-container">
-              <canvas ref="comparisonCanvas"></canvas>
+              <canvas ref="compareCanvas"></canvas>
             </div>
           </v-card-text>
         </v-card>
@@ -84,8 +86,8 @@
         <v-card-text class="text-center pa-8">
           <v-icon size="64" color="#999">mdi-chart-line-off</v-icon>
           <h3 class="mt-4">No Data Loaded</h3>
-          <p class="text-grey">Click "Load Data from Calculations" to load your calculation results</p>
-          <v-btn color="#0B2A44" @click="loadFromCalculations">Load Data from Calculations</v-btn>
+          <p>Click "Load Data" to load calculation results</p>
+          <v-btn color="#0B2A44" @click="loadData">Load Data</v-btn>
         </v-card-text>
       </v-card>
 
@@ -94,7 +96,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import { Chart, registerables } from 'chart.js'
@@ -105,18 +107,18 @@ const router = useRouter()
 
 // State
 const hasData = ref(false)
-const calculationData = ref(null)
-const yieldCurveData = ref(null)
+const calcData = ref(null)
+const yieldData = ref(null)
 
 // Canvas refs
-const yieldCurveCanvas = ref(null)
-const comparisonCanvas = ref(null)
+const yieldCanvas = ref(null)
+const compareCanvas = ref(null)
 
 // Chart instances
 let yieldChart = null
-let comparisonChart = null
+let compareChart = null
 
-// KPI Stats
+// KPI Stats (will update when data loads)
 const kpiStats = ref([
   { title: 'Records', value: 0, icon: 'mdi-database', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
   { title: 'Instrument Type', value: 'N/A', icon: 'mdi-chart-bubble', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
@@ -125,102 +127,98 @@ const kpiStats = ref([
 ])
 
 // Load data from calculations page
-function loadFromCalculations() {
+async function loadData() {
   try {
     const stored = localStorage.getItem('calculations')
     if (!stored) {
-      alert('No calculation data found. Please run calculations first on the Calculations page.')
+      alert('No calculation data found. Run calculations first on the Calculations page.')
       return
     }
     
-    calculationData.value = JSON.parse(stored)
+    calcData.value = JSON.parse(stored)
     hasData.value = true
     
-    // Update KPIs
-    const calcs = calculationData.value.calculations || []
-    kpiStats.value[0].value = calcs.length
-    kpiStats.value[1].value = calculationData.value.instrumentType || 'Money Market'
+    // Update KPI cards
+    const calculations = calcData.value.calculations || []
+    kpiStats.value[0].value = calculations.length
+    kpiStats.value[1].value = calcData.value.instrumentType || 'Money Market'
+    kpiStats.value[2].value = getAvgYield(calculations) + '%'
     
-    const avgYield = getAverageYield(calcs)
-    kpiStats.value[2].value = avgYield + '%'
+    // Render charts
+    await loadYieldCurve()
+    renderCompareChart(calculations)
     
-    // Load and render charts
-    loadYieldCurve()
-    renderComparisonChart(calcs)
-    
-    alert(`Loaded ${calcs.length} calculation records`)
+    console.log(`Loaded ${calculations.length} records`)
   } catch (err) {
-    console.error('Error loading data:', err)
-    alert('Error loading calculation data')
+    console.error(err)
+    alert('Error loading data')
   }
 }
 
-// Clear all data
-function clearData() {
-  if (confirm('Clear all visualization data?')) {
-    hasData.value = false
-    calculationData.value = null
-    if (yieldChart) { yieldChart.destroy(); yieldChart = null }
-    if (comparisonChart) { comparisonChart.destroy(); comparisonChart = null }
-    alert('Data cleared')
-  }
-}
-
-// Get average yield from calculations
-function getAverageYield(calculations) {
+// Get average yield
+function getAvgYield(calculations) {
   if (!calculations.length) return 0
-  const yields = calculations.map(c => parseFloat(c.annual_yield || c.yieldRate || 0))
+  const yields = calculations.map(c => parseFloat(c.annual_yield || c.yield_to_maturity || c.bond_equivalent_yield || 0))
   const avg = yields.reduce((a, b) => a + b, 0) / yields.length
   return avg.toFixed(2)
 }
 
-// Load yield curve from FRED API
+// Clear all data
+function clearData() {
+  if (confirm('Clear all data?')) {
+    hasData.value = false
+    calcData.value = null
+    if (yieldChart) { yieldChart.destroy(); yieldChart = null }
+    if (compareChart) { compareChart.destroy(); compareChart = null }
+    alert('Data cleared')
+  }
+}
+
+// Load yield curve from backend
 async function loadYieldCurve() {
   try {
-    const response = await fetch('http://localhost:5000/api/fred-yield-curve')
-    const data = await response.json()
+    const res = await fetch('http://localhost:5000/api/fred-yield-curve')
+    const data = await res.json()
     
     if (data.success && data.data) {
-      yieldCurveData.value = data.data
-      await nextTick()
-      renderYieldCurveChart()
+      yieldData.value = data.data
     } else {
-      // Use fallback data
-      yieldCurveData.value = {
+      // Fallback data if API fails
+      yieldData.value = {
         labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
         current: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1]
       }
-      renderYieldCurveChart()
     }
+    await nextTick()
+    renderYieldChart()
   } catch (err) {
-    console.error('Error fetching yield curve:', err)
-    yieldCurveData.value = {
+    console.error(err)
+    yieldData.value = {
       labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
       current: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1]
     }
-    renderYieldCurveChart()
+    renderYieldChart()
   }
 }
 
 // Render yield curve chart
-function renderYieldCurveChart() {
-  if (!yieldCurveCanvas.value || !yieldCurveData.value) return
-  
+function renderYieldChart() {
+  if (!yieldCanvas.value || !yieldData.value) return
   if (yieldChart) yieldChart.destroy()
   
-  const ctx = yieldCurveCanvas.value.getContext('2d')
+  const ctx = yieldCanvas.value.getContext('2d')
   yieldChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: yieldCurveData.value.labels,
+      labels: yieldData.value.labels,
       datasets: [{
         label: 'Yield Curve',
-        data: yieldCurveData.value.current,
-        borderColor: '#217346',
-        backgroundColor: 'rgba(33, 115, 70, 0.1)',
+        data: yieldData.value.current,
+        borderColor: '#0B2A44',
+        backgroundColor: 'rgba(11, 42, 68, 0.1)',
         borderWidth: 2,
-        tension: 0.4,
-        fill: true
+        fill: true,
+        tension: 0.4
       }]
     },
     options: {
@@ -228,7 +226,7 @@ function renderYieldCurveChart() {
       maintainAspectRatio: false,
       plugins: {
         legend: { position: 'top' },
-        tooltip: { mode: 'index', intersect: false }
+        tooltip: { callbacks: { label: (ctx) => `${ctx.raw}%` } }
       },
       scales: {
         y: { title: { display: true, text: 'Yield (%)' }, beginAtZero: true },
@@ -238,25 +236,25 @@ function renderYieldCurveChart() {
   })
 }
 
-// Render comparison chart from calculation data
-function renderComparisonChart(calculations) {
-  if (!comparisonCanvas.value) return
-  if (comparisonChart) comparisonChart.destroy()
+// Render comparison chart (bar chart)
+function renderCompareChart(calculations) {
+  if (!compareCanvas.value) return
+  if (compareChart) compareChart.destroy()
   
+  // Use instrument names and yields from calculation data
   const instruments = calculations.map(c => c.instrument_type || c.instrument_name || 'Unknown')
-  const yields = calculations.map(c => parseFloat(c.annual_yield || c.yieldRate || 0))
+  const yields = calculations.map(c => parseFloat(c.annual_yield || c.yield_to_maturity || c.bond_equivalent_yield || 0))
   
-  const ctx = comparisonCanvas.value.getContext('2d')
-  comparisonChart = new Chart(ctx, {
+  const ctx = compareCanvas.value.getContext('2d')
+  compareChart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: instruments,
       datasets: [{
-        label: 'Annual Yield (%)',
+        label: 'Yield (%)',
         data: yields,
-        backgroundColor: 'rgba(11, 42, 68, 0.7)',
-        borderColor: '#0B2A44',
-        borderWidth: 1
+        backgroundColor: '#0B2A44',
+        borderRadius: 4
       }]
     },
     options: {
@@ -277,10 +275,6 @@ function renderComparisonChart(calculations) {
 function goToReports() {
   router.push('/reports')
 }
-
-onMounted(() => {
-  console.log('Visualizations page ready. Click "Load Data from Calculations" to begin.')
-})
 </script>
 
 <style scoped>
@@ -298,7 +292,7 @@ onMounted(() => {
 .chart-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); }
 
 .card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
-.title-icon { margin-right: 8px; color: #0B2A44; }
+.title-icon { margin-right: 8px; }
 
 .chart-container { height: 400px; position: relative; padding: 16px; }
 

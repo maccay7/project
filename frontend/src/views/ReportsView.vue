@@ -44,23 +44,21 @@
         </v-card-text>
       </v-card>
 
-      <!-- Excel Viewer with Full Dataset -->
+      <!-- Excel Viewer -->
       <v-card class="stats-card" v-if="hasData">
         <v-card-title class="card-title">
-          <v-icon class="title-icon">mdi-microsoft-excel</v-icon> Dataset Viewer (Editable)
+          <v-icon class="title-icon">mdi-microsoft-excel</v-icon> Data Preview
         </v-card-title>
         <v-card-text>
           <ExcelViewer
-            :file-base64="visualizationData?.file_base64"
-            :file-name="visualizationData?.name || 'Report Data'"
-            :data="visualizationData?.calculations"
-            :headers="visualizationData?.calculations ? Object.keys(visualizationData.calculations[0] || {}) : []"
-            @data-update="handleDataUpdate"
+            :data="calcData"
+            :headers="dataHeaders"
+            @data-update="calcData = $event"
           />
         </v-card-text>
       </v-card>
 
-      <!-- Report Sections Selection -->
+      <!-- Report Sections -->
       <v-card class="stats-card" v-if="hasData">
         <v-card-title class="card-title">
           <v-icon class="title-icon">mdi-cog</v-icon> Report Sections
@@ -84,21 +82,11 @@
         </v-card-text>
       </v-card>
 
-      <!-- Report Preview (Excel Format) -->
-      <v-card class="stats-card" v-if="hasData && reportPreview">
-        <v-card-title class="card-title">
-          <v-icon class="title-icon">mdi-microsoft-excel</v-icon> Report Preview (Excel Format)
-        </v-card-title>
-        <v-card-text>
-          <ExcelViewer :data="reportPreviewData" :headers="reportPreviewHeaders" />
-        </v-card-text>
-      </v-card>
-
       <!-- Generate Button -->
       <v-card class="stats-card" v-if="hasData">
         <v-card-text class="text-center">
-          <v-btn color="#0B2A44" size="large" @click="generateExcelReport" :loading="generating">
-            <v-icon left>mdi-file-excel</v-icon> Generate & Download Excel Report
+          <v-btn color="#0B2A44" size="large" @click="generateExcel" :loading="generating">
+            <v-icon left>mdi-file-excel</v-icon> Generate Excel Report
           </v-btn>
           <v-alert v-if="reportReady" type="success" class="mt-3">Report downloaded!</v-alert>
         </v-card-text>
@@ -128,12 +116,10 @@ import * as XLSX from 'xlsx'
 const router = useRouter()
 
 // State
-const visualizationData = ref(null)
+const calcData = ref([])
+const instrumentType = ref('')
 const generating = ref(false)
 const reportReady = ref(false)
-const reportPreview = ref(false)
-const reportPreviewData = ref([])
-const reportPreviewHeaders = ref([])
 
 // Sections
 const sections = ref([
@@ -143,12 +129,13 @@ const sections = ref([
 ])
 
 // Computed
-const hasData = computed(() => visualizationData.value?.calculations?.length > 0)
+const hasData = computed(() => calcData.value?.length > 0)
+const dataHeaders = computed(() => calcData.value.length ? Object.keys(calcData.value[0]) : [])
 
 const kpiStats = computed(() => [
-  { title: 'Records', value: visualizationData.value?.calculations?.length || 0, icon: 'mdi-database', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
-  { title: 'Instrument', value: visualizationData.value?.instrumentType || 'N/A', icon: 'mdi-chart-line', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
-  { title: 'Export', value: 'Excel (CSV)', icon: 'mdi-file-excel', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' }
+  { title: 'Records', value: calcData.value.length || 0, icon: 'mdi-database', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
+  { title: 'Instrument', value: instrumentType.value || 'N/A', icon: 'mdi-chart-line', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
+  { title: 'Export', value: 'Excel (.xlsx)', icon: 'mdi-file-excel', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' }
 ])
 
 // Load data from calculations page
@@ -159,8 +146,10 @@ function loadData() {
       alert('No calculation data found. Please run calculations first.')
       return
     }
-    visualizationData.value = JSON.parse(stored)
-    alert(`Loaded ${visualizationData.value.calculations?.length || 0} records`)
+    const data = JSON.parse(stored)
+    calcData.value = data.calculations || []
+    instrumentType.value = data.instrumentType || 'Money Market'
+    alert(`Loaded ${calcData.value.length} records`)
   } catch (err) {
     console.error(err)
     alert('Error loading data')
@@ -171,199 +160,98 @@ function loadData() {
 function selectAll() { sections.value.forEach(s => s.selected = true) }
 function clearAll() { sections.value.forEach(s => s.selected = false) }
 
-// Handle data update from Excel viewer
-function handleDataUpdate(newData) {
-  if (visualizationData.value) {
-    visualizationData.value.calculations = newData
-  }
-}
-
-// Generate report preview (shows in ExcelViewer)
-function updatePreview() {
-  const selected = sections.value.filter(s => s.selected)
-  const calculations = visualizationData.value?.calculations || []
-  const instrument = visualizationData.value?.instrumentType || 'Financial Instruments'
-  const date = new Date().toLocaleDateString()
-  
-  let previewRows = []
-  
-  // Header rows
-  previewRows.push({ 'Section': 'DURA CAPITAL FINANCIAL REPORT', 'Value': '', 'Note': '' })
-  previewRows.push({ 'Section': `Generated: ${date}`, 'Value': '', 'Note': '' })
-  previewRows.push({ 'Section': `Instrument Type: ${instrument}`, 'Value': '', 'Note': '' })
-  previewRows.push({ 'Section': `Total Records: ${calculations.length}`, 'Value': '', 'Note': '' })
-  previewRows.push({ 'Section': '', 'Value': '', 'Note': '' })
-  
-  selected.forEach(section => {
-    previewRows.push({ 'Section': section.name.toUpperCase(), 'Value': '', 'Note': '' })
-    previewRows.push({ 'Section': '', 'Value': '', 'Note': '' })
-    
-    if (section.key === 'summary') {
-      const totalPrincipal = calculations.reduce((s, c) => s + (c.principal || 0), 0)
-      const totalInterest = calculations.reduce((s, c) => s + (c.interest_earned || 0), 0)
-      const avgYield = calculations.length ? calculations.reduce((s, c) => s + (c.yield || 0), 0) / calculations.length : 0
-      
-      previewRows.push({ 'Section': 'Metric', 'Value': 'Amount', 'Note': '' })
-      previewRows.push({ 'Section': 'Total Principal', 'Value': `$${totalPrincipal.toLocaleString()}`, 'Note': '' })
-      previewRows.push({ 'Section': 'Total Interest Earned', 'Value': `$${totalInterest.toLocaleString()}`, 'Note': '' })
-      previewRows.push({ 'Section': 'Average Yield', 'Value': `${avgYield.toFixed(2)}%`, 'Note': '' })
-      previewRows.push({ 'Section': 'Number of Instruments', 'Value': calculations.length, 'Note': '' })
-      previewRows.push({ 'Section': '', 'Value': '', 'Note': '' })
-    }
-    
-    if (section.key === 'data') {
-      previewRows.push({ 'Section': 'Instrument Name', 'Value': 'Principal', 'Note': 'Interest Rate' })
-      calculations.slice(0, 10).forEach(calc => {
-        previewRows.push({
-          'Section': calc.instrument_name || calc.instrument_type || 'N/A',
-          'Value': `$${(calc.principal || 0).toLocaleString()}`,
-          'Note': `${((calc.interest_rate || 0) * 100).toFixed(2)}%`
-        })
-      })
-      if (calculations.length > 10) {
-        previewRows.push({ 'Section': `... and ${calculations.length - 10} more rows`, 'Value': '', 'Note': '' })
-      }
-      previewRows.push({ 'Section': '', 'Value': '', 'Note': '' })
-    }
-    
-    if (section.key === 'yield') {
-      const yields = calculations.map(c => c.annual_yield || c.yield || 0)
-      const avgYield = yields.reduce((a, b) => a + b, 0) / yields.length
-      const maxYield = Math.max(...yields)
-      const minYield = Math.min(...yields.filter(y => y > 0))
-      
-      previewRows.push({ 'Section': 'Metric', 'Value': 'Rate', 'Note': '' })
-      previewRows.push({ 'Section': 'Average Yield', 'Value': `${avgYield.toFixed(2)}%`, 'Note': '' })
-      previewRows.push({ 'Section': 'Maximum Yield', 'Value': `${maxYield.toFixed(2)}%`, 'Note': '' })
-      previewRows.push({ 'Section': 'Minimum Yield', 'Value': `${minYield.toFixed(2)}%`, 'Note': '' })
-      previewRows.push({ 'Section': '', 'Value': '', 'Note': '' })
-      previewRows.push({ 'Section': 'Instrument', 'Value': 'Yield (%)', 'Note': '' })
-      calculations.slice(0, 10).forEach(calc => {
-        previewRows.push({
-          'Section': calc.instrument_name || calc.instrument_type || 'N/A',
-          'Value': `${(calc.annual_yield || calc.yield || 0).toFixed(2)}%`,
-          'Note': ''
-        })
-      })
-    }
-  })
-  
-  previewRows.push({ 'Section': '© 2024 Dura Capital - Financial Analysis Report', 'Value': '', 'Note': '' })
-  
-  reportPreviewData.value = previewRows
-  reportPreviewHeaders.value = ['Section', 'Value', 'Note']
-  reportPreview.value = true
-}
-
-// Generate Excel report (proper Excel file with formatting)
-function generateExcelReport() {
+// Generate Excel report
+async function generateExcel() {
   generating.value = true
-  
-  // First update preview
-  updatePreview()
   
   setTimeout(() => {
     const selected = sections.value.filter(s => s.selected)
-    const calculations = visualizationData.value?.calculations || []
-    const instrument = visualizationData.value?.instrumentType || 'Financial Instruments'
+    const data = calcData.value
+    const instrument = instrumentType.value
     const date = new Date().toLocaleDateString()
     
     // Create workbook
-    const workbook = XLSX.utils.book_new()
+    const wb = XLSX.utils.book_new()
+    const rows = []
     
-    // Create summary sheet
-    const summaryData = [
-      ['DURA CAPITAL FINANCIAL REPORT'],
-      ['Generated:', date],
-      ['Instrument Type:', instrument],
-      ['Total Records:', calculations.length],
-      [''],
-      ['SUMMARY'],
-      ['']
-    ]
+    // Header
+    rows.push(['DURA CAPITAL FINANCIAL REPORT'])
+    rows.push(['Generated:', date])
+    rows.push(['Instrument Type:', instrument])
+    rows.push(['Total Records:', data.length])
+    rows.push([])
     
-    if (selected.find(s => s.key === 'summary')) {
-      const totalPrincipal = calculations.reduce((s, c) => s + (c.principal || 0), 0)
-      const totalInterest = calculations.reduce((s, c) => s + (c.interest_earned || 0), 0)
-      const avgYield = calculations.length ? calculations.reduce((s, c) => s + (c.yield || 0), 0) / calculations.length : 0
+    selected.forEach(section => {
+      rows.push([section.name.toUpperCase()])
+      rows.push([])
       
-      summaryData.push(['Metric', 'Value'])
-      summaryData.push(['Total Principal', totalPrincipal])
-      summaryData.push(['Total Interest Earned', totalInterest])
-      summaryData.push(['Average Yield (%)', avgYield.toFixed(2)])
-      summaryData.push(['Number of Instruments', calculations.length])
-    }
-    
-    summaryData.push([''])
-    summaryData.push(['DATA TABLE'])
-    summaryData.push([''])
-    
-    if (selected.find(s => s.key === 'data')) {
-      const dataHeaders = ['Instrument Name', 'Principal', 'Interest Rate', 'Term Days', 'Interest Earned', 'Maturity Value', 'Yield (%)']
-      summaryData.push(dataHeaders)
+      if (section.key === 'summary') {
+        const totalPrincipal = data.reduce((s, c) => s + (c.principal || 0), 0)
+        const totalInterest = data.reduce((s, c) => s + (c.interest_earned || 0), 0)
+        const avgYield = data.length ? data.reduce((s, c) => s + (c.annual_yield || c.yield || 0), 0) / data.length : 0
+        
+        rows.push(['Metric', 'Value'])
+        rows.push(['Total Principal', totalPrincipal])
+        rows.push(['Total Interest Earned', totalInterest])
+        rows.push(['Average Yield (%)', avgYield.toFixed(2)])
+        rows.push(['Number of Instruments', data.length])
+        rows.push([])
+      }
       
-      calculations.forEach(calc => {
-        summaryData.push([
-          calc.instrument_name || calc.instrument_type || 'N/A',
-          calc.principal || 0,
-          ((calc.interest_rate || 0) * 100).toFixed(2),
-          calc.term_days || 0,
-          calc.interest_earned || 0,
-          calc.maturity_value || 0,
-          (calc.yield || 0).toFixed(2)
-        ])
-      })
-    }
-    
-    summaryData.push([''])
-    summaryData.push(['YIELD ANALYSIS'])
-    summaryData.push([''])
-    
-    if (selected.find(s => s.key === 'yield')) {
-      const yields = calculations.map(c => c.annual_yield || c.yield || 0)
-      const avgYield = yields.length ? yields.reduce((a, b) => a + b, 0) / yields.length : 0
-      const maxYield = yields.length ? Math.max(...yields) : 0
-      const minYield = yields.length ? Math.min(...yields.filter(y => y > 0)) : 0
+      if (section.key === 'data') {
+        const headers = ['Instrument Name', 'Principal', 'Interest Rate', 'Term Days', 'Interest Earned', 'Maturity Value', 'Yield (%)']
+        rows.push(headers)
+        
+        data.forEach(item => {
+          rows.push([
+            item.instrument_name || item.instrument_type || 'N/A',
+            item.principal || 0,
+            ((item.interest_rate || 0) * 100).toFixed(2),
+            item.term_days || 0,
+            item.interest_earned || 0,
+            item.maturity_value || 0,
+            (item.annual_yield || item.yield || 0).toFixed(2)
+          ])
+        })
+        rows.push([])
+      }
       
-      summaryData.push(['Metric', 'Value'])
-      summaryData.push(['Average Yield (%)', avgYield.toFixed(2)])
-      summaryData.push(['Maximum Yield (%)', maxYield.toFixed(2)])
-      summaryData.push(['Minimum Yield (%)', minYield.toFixed(2)])
-      summaryData.push([''])
-      summaryData.push(['Instrument', 'Yield (%)'])
-      calculations.forEach(calc => {
-        summaryData.push([
-          calc.instrument_name || calc.instrument_type || 'N/A',
-          (calc.annual_yield || calc.yield || 0).toFixed(2)
-        ])
-      })
-    }
+      if (section.key === 'yield') {
+        const yields = data.map(c => c.annual_yield || c.yield || 0)
+        const avgYield = yields.length ? yields.reduce((a, b) => a + b, 0) / yields.length : 0
+        const maxYield = yields.length ? Math.max(...yields) : 0
+        const minYield = yields.length ? Math.min(...yields.filter(y => y > 0)) : 0
+        
+        rows.push(['Metric', 'Value'])
+        rows.push(['Average Yield (%)', avgYield.toFixed(2)])
+        rows.push(['Maximum Yield (%)', maxYield.toFixed(2)])
+        rows.push(['Minimum Yield (%)', minYield.toFixed(2)])
+        rows.push([])
+        rows.push(['Instrument', 'Yield (%)'])
+        
+        data.forEach(item => {
+          rows.push([
+            item.instrument_name || item.instrument_type || 'N/A',
+            (item.annual_yield || item.yield || 0).toFixed(2)
+          ])
+        })
+        rows.push([])
+      }
+    })
     
-    summaryData.push([''])
-    summaryData.push(['© 2024 Dura Capital - Financial Analysis Report'])
+    rows.push(['© 2024 Dura Capital - Financial Analysis Report'])
     
-    // Add sheet to workbook
-    const worksheet = XLSX.utils.aoa_to_sheet(summaryData)
+    // Create worksheet
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 15 }, { wch: 20 }, { wch: 20 }, { wch: 15 }]
     
-    // Set column widths
-    worksheet['!cols'] = [
-      { wch: 30 }, // Column A
-      { wch: 20 }, // Column B
-      { wch: 20 }, // Column C
-      { wch: 15 }, // Column D
-      { wch: 20 }, // Column E
-      { wch: 20 }, // Column F
-      { wch: 15 }  // Column G
-    ]
+    XLSX.utils.book_append_sheet(wb, ws, 'Report')
     
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report')
-    
-    // Download Excel file
-    XLSX.writeFile(workbook, `Dura-Capital-Report-${new Date().toISOString().split('T')[0]}.xlsx`)
+    // Download
+    XLSX.writeFile(wb, `Dura-Capital-Report-${new Date().toISOString().split('T')[0]}.xlsx`)
     
     reportReady.value = true
     generating.value = false
-    
     setTimeout(() => { reportReady.value = false }, 3000)
   }, 500)
 }
@@ -376,17 +264,12 @@ function finishAndReset() {
   }
 }
 
-// Watch sections to auto-update preview
-import { watch } from 'vue'
-watch([sections, () => visualizationData.value], () => {
-  if (hasData.value) updatePreview()
-}, { deep: true })
-
 onMounted(() => {
   const stored = localStorage.getItem('calculations')
   if (stored) {
-    visualizationData.value = JSON.parse(stored)
-    updatePreview()
+    const data = JSON.parse(stored)
+    calcData.value = data.calculations || []
+    instrumentType.value = data.instrumentType || 'Money Market'
   }
 })
 </script>
@@ -399,7 +282,7 @@ onMounted(() => {
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 .action-buttons.small { margin-bottom: 16px; }
 .stats-card { border-radius: 12px; margin-bottom: 24px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); border-radius: 12px 12px 0 0; }
+.stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); }
 .card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
 .title-icon { margin-right: 8px; }
 .kpi-card { height: 100px; border-radius: 12px; transition: 0.2s; }
