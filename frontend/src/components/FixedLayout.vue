@@ -1,148 +1,301 @@
 <template>
-  <v-app>
-    <!-- Fixed Sidebar -->
-    <v-navigation-drawer app v-model="drawer" color="#0B2A44" dark permanent>
-      <v-list>
-        <v-list-item class="mb-4">
-          <v-list-item-title class="text-h6 font-weight-bold">
-            DuraCapital
-          </v-list-item-title>
-        </v-list-item>
-
-        <v-list-item
-          v-for="item in menu"
-          :key="item.title"
-          :to="item.route"
-          router
-          :class="{ 'v-list-item--active': $route.path === item.route }"
+  <div class="fixed-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">
+        <v-icon color="white" size="28">mdi-chart-line</v-icon>
+        <h2>DuraCapital</h2>
+      </div>
+      
+      <!-- Main Navigation -->
+      <div class="nav-section">
+        <div class="nav-title">MAIN</div>
+        <div 
+          v-for="item in mainNav" 
+          :key="item.path"
+          class="nav-item"
+          :class="{ active: isActive(item.path) }"
+          @click="navigateTo(item.path)"
         >
-          <template #prepend>
-            <v-icon>{{ item.icon }}</v-icon>
-          </template>
-          <v-list-item-title>{{ item.title }}</v-list-item-title>
-        </v-list-item>
-      </v-list>
-    </v-navigation-drawer>
+          <v-icon>{{ item.icon }}</v-icon>
+          <span>{{ item.name }}</span>
+        </div>
+      </div>
 
-    <!-- Top bar -->
-    <v-app-bar app color="white" elevation="1">
-      <v-app-bar-nav-icon @click="drawer = !drawer" />
-      <v-spacer />
+      <!-- Report Section -->
+      <div class="nav-section">
+        <div class="nav-title">REPORTS</div>
+        <div class="nav-item" @click="openReportDialog">
+          <v-icon>mdi-file-pdf</v-icon>
+          <span>Generate Report</span>
+        </div>
+      </div>
 
-      <v-btn icon @click="handleNotifications">
-        <v-icon>mdi-bell</v-icon>
-      </v-btn>
+      <!-- Instrument Tools -->
+      <div v-if="isOnInstrumentPage" class="nav-section">
+        <div class="nav-title">INSTRUMENT TOOLS</div>
+        <div 
+          v-for="item in instrumentNav" 
+          :key="item.tab"
+          class="nav-item"
+          :class="{ active: currentTab === item.tab }"
+          @click="changeInstrumentTab(item.tab)"
+        >
+          <v-icon>{{ item.icon }}</v-icon>
+          <span>{{ item.name }}</span>
+          <span v-if="getTabStatus(item.tab)" class="status-badge">✓</span>
+        </div>
+      </div>
 
-      <v-btn icon @click="handleProfile">
-        <v-icon>mdi-account-circle</v-icon>
-      </v-btn>
+      <!-- Bottom Section -->
+      <div class="nav-section bottom-nav">
+        <div class="nav-item" @click="goToSettings">
+          <v-icon>mdi-cog</v-icon>
+          <span>Settings</span>
+        </div>
+        <div class="nav-item" @click="logout">
+          <v-icon>mdi-logout</v-icon>
+          <span>Logout</span>
+        </div>
+      </div>
+    </aside>
 
-      <v-btn icon @click="handleLogout" color="error">
-        <v-icon>mdi-logout</v-icon>
-      </v-btn>
-    </v-app-bar>
+    <main class="main-content">
+      <slot />
+    </main>
 
-    <!-- Page content -->
-    <v-main>
-      <v-container fluid class="pa-6">
-        <slot />
-      </v-container>
-    </v-main>
-  </v-app>
+    <!-- Report Dialog -->
+    <v-dialog v-model="showReportDialog" max-width="500px">
+      <v-card>
+        <v-card-title>Generate Report</v-card-title>
+        <v-card-text>
+          <div class="report-type-selector">
+            <label>Select Report Type:</label>
+            <select v-model="reportType" class="report-select">
+              <option value="current">Current Instrument Report</option>
+              <option value="session">Full Session Report</option>
+            </select>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <button class="btn-secondary" @click="showReportDialog = false">Cancel</button>
+          <button class="btn-primary" @click="generateAndNavigate">Generate</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+  </div>
 </template>
 
-<script setup lang="ts">
-import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
+<script setup>
+import { computed, ref } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 
-const route = useRoute()
 const router = useRouter()
-const authStore = useAuthStore()
-const drawer = ref(true)
+const route = useRoute()
 
-const menu = [
-  { title: 'Dashboard', icon: 'mdi-view-dashboard', route: '/dashboard' },
-  { title: 'Upload', icon: 'mdi-upload', route: '/upload' },
-  { title: 'Cleaning', icon: 'mdi-broom', route: '/cleaning' },
-  { title: 'Calculations', icon: 'mdi-calculator', route: '/calculations' },
-  { title: 'Reports', icon: 'mdi-file-document', route: '/reports' },
-  { title: 'Visualizations', icon: 'mdi-chart-line', route: '/visualizations' },
-  { title: 'Settings', icon: 'mdi-cog', route: '/settings' }
+const showReportDialog = ref(false)
+const reportType = ref('current')
+
+const mainNav = [
+  { name: 'Dashboard', path: '/dashboard', icon: 'mdi-view-dashboard' },
+  { name: 'Summary', path: '/summary', icon: 'mdi-file-document-outline' }
 ]
 
-const handleNotifications = () => {
-  // Navigate to notifications page or show notifications dropdown
-  // For now, navigate to settings where notifications are located
+const instrumentNav = [
+  { tab: 'upload', name: 'Upload Data', icon: 'mdi-upload' },
+  { tab: 'cleaning', name: 'Clean Data', icon: 'mdi-broom' },
+  { tab: 'calculations', name: 'Calculations', icon: 'mdi-calculator' },
+  { tab: 'visualizations', name: 'Visualizations', icon: 'mdi-chart-line' },
+  { tab: 'summary', name: 'Instrument Summary', icon: 'mdi-file-document' }
+]
+
+const isOnInstrumentPage = computed(() => route.path.includes('/instrument/'))
+const currentTab = computed(() => route.query.tab || 'upload')
+
+function isActive(path) {
+  return route.path === path
+}
+
+function navigateTo(path) {
+  router.push(path)
+}
+
+function changeInstrumentTab(tab) {
+  router.push({ path: route.path, query: { tab } })
+}
+
+function getTabStatus(tab) {
+  const instrument = route.path.split('/').pop()
+  const statuses = JSON.parse(localStorage.getItem(`instrument_${instrument}_status`) || '{}')
+  return statuses[tab] || false
+}
+
+function goToSettings() {
   router.push('/settings')
 }
 
-const handleProfile = () => {
-  // Navigate to user profile section in settings
-  router.push('/settings')
-}
-
-const handleLogout = () => {
-  // Use the auth store logout function to properly clear authentication state
-  authStore.logout()
-  
-  // Clear additional stored data
-  localStorage.removeItem('rememberMe')
-  localStorage.removeItem('email')
-  
-  // Navigate to login page
+function logout() {
+  localStorage.clear()
   router.push('/login')
+}
+
+function openReportDialog() {
+  showReportDialog.value = true
+}
+
+function generateAndNavigate() {
+  const session = JSON.parse(localStorage.getItem('active_session') || '{}')
+  localStorage.setItem('report_type', reportType.value)
+  localStorage.setItem('report_session_id', session.id || '')
+  showReportDialog.value = false
+  router.push('/reports')
 }
 </script>
 
 <style scoped>
-/* Ensure sidebar is fixed and doesn't move */
-.v-navigation-drawer {
-  position: fixed !important;
-  height: 100vh !important;
-  top: 0 !important;
-  left: 0 !important;
-  z-index: 1000 !important;
+.fixed-layout {
+  display: flex;
+  min-height: 100vh;
 }
 
-/* Ensure app bar is fixed at top and spans full width */
-.v-app-bar {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  width: 100vw !important;
-  z-index: 1001 !important;
-  margin: 0 !important;
-  padding: 0 !important;
+.sidebar {
+  width: 280px;
+  background: linear-gradient(180deg, #0B2044 0%, #0a1a38 100%);
+  color: white;
+  position: fixed;
+  height: 100vh;
+  left: 0;
+  top: 0;
+  overflow-y: auto;
+  box-shadow: 2px 0 20px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Adjust main content to account for fixed header and sidebar */
-.v-main {
-  padding-top: 64px !important; /* Height of app bar */
-  padding-left: 256px !important; /* Width of sidebar */
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 20px;
 }
 
-/* Active menu item styling */
-.v-list-item--active {
-  background-color: rgba(255, 255, 255, 0.1) !important;
-  color: white !important;
+.logo h2 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin: 0;
 }
 
-.v-list-item--active .v-icon {
-  color: white !important;
+.nav-section {
+  margin-bottom: 25px;
 }
 
-/* Responsive adjustments */
-@media (max-width: 960px) {
-  .v-main {
-    padding-left: 0 !important;
-  }
+.nav-title {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 8px 20px;
+  margin-top: 10px;
 }
 
-@media (max-width: 600px) {
-  .v-main {
-    padding-top: 56px !important; /* Smaller app bar on mobile */
-  }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  margin: 4px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: rgba(255, 255, 255, 0.7);
+  position: relative;
+}
+
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  transform: translateX(5px);
+}
+
+.nav-item.active {
+  background: #1E88E5;
+  color: white;
+  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
+}
+
+.status-badge {
+  position: absolute;
+  right: 20px;
+  background: #4CAF50;
+  color: white;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bottom-nav {
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 10px;
+}
+
+.main-content {
+  margin-left: 280px;
+  flex: 1;
+  background: #f5f7fa;
+  min-height: 100vh;
+}
+
+.report-type-selector {
+  padding: 10px 0;
+}
+
+.report-type-selector label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0B2044;
+  margin-bottom: 10px;
+}
+
+.report-select {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #0B2044, #1E88E5);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.btn-secondary {
+  background: white;
+  color: #0B2044;
+  border: 1px solid #ddd;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-right: 10px;
+}
+
+@media (max-width: 768px) {
+  .sidebar { width: 80px; }
+  .logo h2, .nav-item span, .nav-title { display: none; }
+  .logo { justify-content: center; }
+  .nav-item { justify-content: center; }
+  .main-content { margin-left: 80px; }
 }
 </style>
