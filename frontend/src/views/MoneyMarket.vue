@@ -4,9 +4,6 @@
       <!-- Page Header -->
       <div class="page-header">
         <div class="header-left">
-          <button class="back-btn" @click="goToDashboard">
-            <v-icon>mdi-arrow-left</v-icon> Back to Dashboard
-          </button>
           <h1>{{ instrumentName }}</h1>
           <p>{{ instrumentDescription }}</p>
         </div>
@@ -724,7 +721,6 @@ function saveToSummary() {
   summary[instrumentType.value] = calculations.value.totalValue
   localStorage.setItem('summary_totals', JSON.stringify(summary))
   
-  // Update session data
   if (session.id) {
     if (!session.instrumentData) session.instrumentData = {}
     session.instrumentData[instrumentType.value] = {
@@ -736,7 +732,6 @@ function saveToSummary() {
     session.completedInstruments[instrumentType.value] = true
     localStorage.setItem('active_session', JSON.stringify(session))
     
-    // Update sessions list
     const sessions = JSON.parse(localStorage.getItem('sessions_list') || '[]')
     const index = sessions.findIndex(s => s.id === session.id)
     if (index !== -1) sessions[index] = session
@@ -780,25 +775,6 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 25px;
   padding: 0 10px;
-}
-
-.back-btn {
-  background: transparent;
-  border: none;
-  color: #0B2044;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  margin-bottom: 10px;
-  transition: all 0.2s;
-}
-
-.back-btn:hover {
-  background: rgba(11,32,68,0.05);
-  transform: translateX(-3px);
 }
 
 .header-left h1 {

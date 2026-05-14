@@ -1,30 +1,7 @@
 <template>
   <FixedLayout>
-    <!-- Fixed Top Navbar -->
-    <div class="top-navbar">
-      <div class="logo-area">
-        <img 
-          src="/DuraCapital logo.png" 
-          alt="DuraCapital Logo" 
-          class="navbar-logo"
-          @error="e => e.target.style.display = 'none'"
-        />
-      </div>
-      <div class="nav-actions">
-        <button class="nav-icon-btn" @click="goToSettings">
-          <v-icon>mdi-cog</v-icon>
-        </button>
-        <button class="nav-icon-btn" @click="logout">
-          <v-icon>mdi-logout</v-icon>
-        </button>
-      </div>
-    </div>
-
     <div class="summary-page">
       <div class="page-header">
-        <button class="back-btn" @click="goToDashboard">
-          <v-icon>mdi-arrow-left</v-icon> Back to Dashboard
-        </button>
         <div class="header-title">
           <h1>Portfolio Summary</h1>
           <div class="session-name" v-if="activeSession">
@@ -76,11 +53,6 @@
           </div>
         </div>
       </div>
-
-      <!-- Action Buttons -->
-      <div class="action-buttons">
-        <button class="btn-secondary" @click="goToDashboard">Back to Dashboard</button>
-      </div>
     </div>
   </FixedLayout>
 </template>
@@ -91,17 +63,7 @@ import { useRouter } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 
 const router = useRouter()
-
 const activeSession = ref(null)
-
-function goToSettings() {
-  router.push('/settings')
-}
-
-function logout() {
-  localStorage.clear()
-  router.push('/login')
-}
 
 const instruments = ref([
   { 
@@ -174,113 +136,35 @@ function loadSummary() {
   }
 }
 
-function goToDashboard() {
-  router.push('/dashboard')
-}
-
 onMounted(() => {
   loadSummary()
 })
 </script>
 
 <style scoped>
-/* Top Navbar */
-.top-navbar {
-  position: fixed;
-  top: 0;
-  left: 280px;
-  right: 0;
-  height: 60px;
-  background: white;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 30px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  z-index: 999;
-}
-
-.logo-area {
-  display: flex;
-  align-items: center;
-}
-
-.navbar-logo {
-  width: 50px;
-  height: 50px;
-  object-fit: contain;
-  border-radius: 10px;
-}
-
-.nav-actions {
-  display: flex;
-  gap: 15px;
-}
-
-.nav-icon-btn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 8px;
-  transition: all 0.2s;
-  color: #666;
-}
-
-.nav-icon-btn:hover {
-  background: #f0f0f0;
-  color: #0B2044;
-}
-
 .summary-page {
-  margin-top: 80px;
   padding: 30px;
   max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
+  margin: 0 auto;
 }
 
 .page-header {
   margin-bottom: 30px;
 }
 
-.back-btn {
-  background: transparent;
-  border: none;
-  color: #0B2044;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  transition: all 0.2s;
-}
-
-.back-btn:hover {
-  background: rgba(11,32,68,0.05);
-  transform: translateX(-3px);
-}
-
-.header-title {
-  text-align: center;
-  margin-top: 10px;
-}
-
 .header-title h1 {
   color: #0B2044;
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
-  margin: 0 0 15px 0;
+  margin: 0 0 12px 0;
 }
 
 .session-name {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   color: #0B2044;
   background: linear-gradient(135deg, #f8f9ff, #fff);
-  padding: 10px 24px;
+  padding: 8px 20px;
   border-radius: 30px;
   display: inline-block;
   border: 1px solid rgba(11,32,68,0.1);
@@ -439,33 +323,6 @@ onMounted(() => {
   font-weight: 800;
 }
 
-.action-buttons {
-  display: flex;
-  gap: 16px;
-  justify-content: center;
-}
-
-.btn-secondary {
-  background: white;
-  color: #0B2044;
-  border: 2px solid #0B2044;
-  padding: 12px 28px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.3s;
-}
-
-.btn-secondary:hover {
-  background: #0B2044;
-  color: white;
-  transform: translateY(-2px);
-}
-
 @media (max-width: 900px) {
   .summary-cards {
     grid-template-columns: 1fr;
@@ -475,25 +332,6 @@ onMounted(() => {
   .grand-total-content {
     flex-direction: column;
     text-align: center;
-  }
-  
-  .action-buttons {
-    flex-direction: column;
-  }
-  
-  .btn-secondary {
-    width: 100%;
-    justify-content: center;
-  }
-}
-
-@media (max-width: 768px) {
-  .top-navbar {
-    left: 80px;
-  }
-  
-  .summary-page {
-    margin-top: 80px;
   }
 }
 </style>
