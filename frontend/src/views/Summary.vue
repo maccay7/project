@@ -1,12 +1,45 @@
 <template>
   <FixedLayout>
+    <!-- Fixed Top Navbar -->
+    <div class="top-navbar">
+      <div class="logo-area">
+        <img 
+          src="/DuraCapital logo.png" 
+          alt="DuraCapital Logo" 
+          class="navbar-logo"
+          @error="e => e.target.style.display = 'none'"
+        />
+      </div>
+      <div class="nav-actions">
+        <button class="nav-icon-btn" @click="goToSettings">
+          <v-icon>mdi-cog</v-icon>
+        </button>
+        <button class="nav-icon-btn" @click="logout">
+          <v-icon>mdi-logout</v-icon>
+        </button>
+      </div>
+    </div>
+
     <div class="summary-page">
       <div class="page-header">
         <button class="back-btn" @click="goToDashboard">
           <v-icon>mdi-arrow-left</v-icon> Back to Dashboard
         </button>
-        <h1>Portfolio Summary</h1>
-        <p>Overall summary of all instruments in current session</p>
+        <div class="header-title">
+          <h1>Portfolio Summary</h1>
+          <div class="session-name" v-if="activeSession">
+            {{ activeSession.name }}
+          </div>
+          <div v-else class="session-name warning">
+            No active session
+          </div>
+        </div>
+      </div>
+
+      <!-- Instrument Summary Cards -->
+      <div class="section-header">
+        <v-icon color="#0B2044" size="20">mdi-chart-areaspline</v-icon>
+        <h2>Instrument Breakdown</h2>
       </div>
 
       <div class="summary-cards">
@@ -18,19 +51,34 @@
             <h3>{{ inst.name }}</h3>
             <p class="amount">${{ formatNumber(inst.value) }}</p>
             <p class="count">{{ inst.count }} instruments</p>
+            <div v-if="inst.completed" class="status-badge completed">
+              <v-icon size="12">mdi-check-circle</v-icon> Completed
+            </div>
+            <div v-else-if="inst.value > 0" class="status-badge in-progress">
+              <v-icon size="12">mdi-progress-clock</v-icon> In Progress
+            </div>
+            <div v-else class="status-badge pending">
+              <v-icon size="12">mdi-clock-outline</v-icon> Not Started
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="grand-total">
-        <h2>Grand Total</h2>
-        <p class="total-amount">${{ formatNumber(grandTotal) }}</p>
+      <!-- Grand Total Card -->
+      <div class="grand-total-card">
+        <div class="grand-total-content">
+          <div class="grand-total-left">
+            <h2>Grand Total</h2>
+            <p>Combined value of all instruments</p>
+          </div>
+          <div class="grand-total-right">
+            <div class="grand-total-amount">${{ formatNumber(grandTotal) }}</div>
+          </div>
+        </div>
       </div>
 
+      <!-- Action Buttons -->
       <div class="action-buttons">
-        <button class="btn-primary" @click="downloadSummary">
-          <v-icon>mdi-download</v-icon> Download Summary
-        </button>
         <button class="btn-secondary" @click="goToDashboard">Back to Dashboard</button>
       </div>
     </div>
@@ -44,10 +92,45 @@ import FixedLayout from '@/components/FixedLayout.vue'
 
 const router = useRouter()
 
+const activeSession = ref(null)
+
+function goToSettings() {
+  router.push('/settings')
+}
+
+function logout() {
+  localStorage.clear()
+  router.push('/login')
+}
+
 const instruments = ref([
-  { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', value: 0, count: 0 },
-  { id: 'bonds', name: 'Bonds', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', value: 0, count: 0 },
-  { id: 'tbills', name: 'T-Bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', value: 0, count: 0 }
+  { 
+    id: 'money-market', 
+    name: 'Money Market', 
+    icon: 'mdi-chart-line', 
+    gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', 
+    value: 0, 
+    count: 0,
+    completed: false
+  },
+  { 
+    id: 'bonds', 
+    name: 'Bonds', 
+    icon: 'mdi-chart-timeline', 
+    gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', 
+    value: 0, 
+    count: 0,
+    completed: false
+  },
+  { 
+    id: 'tbills', 
+    name: 'T-Bills', 
+    icon: 'mdi-finance', 
+    gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', 
+    value: 0, 
+    count: 0,
+    completed: false
+  }
 ])
 
 const grandTotal = computed(() => {
@@ -59,42 +142,36 @@ function formatNumber(num) {
 }
 
 function loadSummary() {
-  const summary = JSON.parse(localStorage.getItem('summary_totals') || '{}')
-  instruments.value.forEach(inst => {
-    inst.value = summary[inst.id] || 0
-  })
+  const session = localStorage.getItem('active_session')
+  if (session) {
+    activeSession.value = JSON.parse(session)
+  }
   
-  // Also load from active session
-  const session = JSON.parse(localStorage.getItem('active_session') || '{}')
-  if (session.instrumentData) {
+  if (activeSession.value && activeSession.value.instrumentData) {
     instruments.value.forEach(inst => {
-      if (session.instrumentData[inst.id]) {
-        inst.value = session.instrumentData[inst.id].totalValue || 0
-        inst.count = session.instrumentData[inst.id].count || 0
+      const data = activeSession.value.instrumentData[inst.id]
+      if (data) {
+        inst.value = data.totalValue || 0
+        inst.count = data.count || 0
+        inst.completed = data.completed || false
       }
     })
   }
-}
-
-function downloadSummary() {
-  const report = {
-    title: 'Portfolio Summary',
-    date: new Date().toLocaleString(),
-    instruments: instruments.value.map(inst => ({
-      name: inst.name,
-      totalValue: inst.value,
-      count: inst.count
-    })),
-    grandTotal: grandTotal.value
-  }
   
-  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `summary_${Date.now()}.json`
-  a.click()
-  URL.revokeObjectURL(url)
+  const summary = JSON.parse(localStorage.getItem('summary_totals') || '{}')
+  instruments.value.forEach(inst => {
+    if (summary[inst.id] && !inst.value) {
+      inst.value = summary[inst.id]
+    }
+  })
+  
+  if (activeSession.value && activeSession.value.completedInstruments) {
+    instruments.value.forEach(inst => {
+      if (activeSession.value.completedInstruments[inst.id]) {
+        inst.completed = true
+      }
+    })
+  }
 }
 
 function goToDashboard() {
@@ -107,10 +184,60 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* Top Navbar */
+.top-navbar {
+  position: fixed;
+  top: 0;
+  left: 280px;
+  right: 0;
+  height: 60px;
+  background: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 30px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  z-index: 999;
+}
+
+.logo-area {
+  display: flex;
+  align-items: center;
+}
+
+.navbar-logo {
+  width: 50px;
+  height: 50px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+
+.nav-actions {
+  display: flex;
+  gap: 15px;
+}
+
+.nav-icon-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: all 0.2s;
+  color: #666;
+}
+
+.nav-icon-btn:hover {
+  background: #f0f0f0;
+  color: #0B2044;
+}
+
 .summary-page {
+  margin-top: 80px;
   padding: 30px;
   max-width: 1200px;
-  margin: 0 auto;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .page-header {
@@ -128,21 +255,57 @@ onMounted(() => {
   padding: 8px 16px;
   border-radius: 8px;
   margin-bottom: 20px;
+  transition: all 0.2s;
 }
 
 .back-btn:hover {
   background: rgba(11,32,68,0.05);
+  transform: translateX(-3px);
 }
 
-.page-header h1 {
+.header-title {
+  text-align: center;
+  margin-top: 10px;
+}
+
+.header-title h1 {
   color: #0B2044;
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
+  margin: 0 0 15px 0;
 }
 
-.page-header p {
-  color: #666;
-  font-size: 14px;
+.session-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0B2044;
+  background: linear-gradient(135deg, #f8f9ff, #fff);
+  padding: 10px 24px;
+  border-radius: 30px;
+  display: inline-block;
+  border: 1px solid rgba(11,32,68,0.1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.session-name.warning {
+  background: #FFF3E0;
+  color: #E65100;
+  border-color: #FFE0B2;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  margin-top: 30px;
+}
+
+.section-header h2 {
+  color: #0B2044;
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
 }
 
 .summary-cards {
@@ -155,57 +318,124 @@ onMounted(() => {
 .summary-card {
   background: white;
   border-radius: 16px;
-  padding: 24px;
+  padding: 20px;
   display: flex;
-  align-items: center;
-  gap: 20px;
+  gap: 16px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  transition: all 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+
+.summary-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2044, #1E88E5);
+  transform: scaleX(0);
+  transition: transform 0.3s ease;
+}
+
+.summary-card:hover::before {
+  transform: scaleX(1);
+}
+
+.summary-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.1);
 }
 
 .card-icon {
-  width: 60px;
-  height: 60px;
-  border-radius: 12px;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.card-content {
+  flex: 1;
 }
 
 .card-content h3 {
   color: #0B2044;
   font-size: 16px;
+  font-weight: 600;
   margin-bottom: 8px;
 }
 
 .card-content .amount {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   color: #0B2044;
   margin-bottom: 4px;
 }
 
 .card-content .count {
-  font-size: 12px;
+  font-size: 11px;
   color: #666;
+  margin-bottom: 8px;
 }
 
-.grand-total {
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.status-badge.completed {
+  background: #E8F5E9;
+  color: #4CAF50;
+}
+
+.status-badge.in-progress {
+  background: #FFF3E0;
+  color: #FF9800;
+}
+
+.status-badge.pending {
+  background: #f5f5f5;
+  color: #999;
+}
+
+.grand-total-card {
   background: linear-gradient(135deg, #0B2044, #1a3a6e);
-  border-radius: 16px;
+  border-radius: 20px;
   padding: 30px;
-  text-align: center;
-  color: white;
   margin-bottom: 30px;
+  color: white;
 }
 
-.grand-total h2 {
-  font-size: 18px;
-  margin-bottom: 10px;
-  opacity: 0.9;
+.grand-total-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
 }
 
-.grand-total .total-amount {
-  font-size: 42px;
+.grand-total-left h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 5px;
+}
+
+.grand-total-left p {
+  opacity: 0.8;
+  font-size: 13px;
+}
+
+.grand-total-amount {
+  font-size: 36px;
   font-weight: 800;
 }
 
@@ -213,20 +443,6 @@ onMounted(() => {
   display: flex;
   gap: 16px;
   justify-content: center;
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #0B2044, #1E88E5);
-  color: white;
-  border: none;
-  padding: 12px 28px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .btn-secondary {
@@ -238,11 +454,46 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s;
+}
+
+.btn-secondary:hover {
+  background: #0B2044;
+  color: white;
+  transform: translateY(-2px);
+}
+
+@media (max-width: 900px) {
+  .summary-cards {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  
+  .grand-total-content {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .action-buttons {
+    flex-direction: column;
+  }
+  
+  .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 @media (max-width: 768px) {
-  .summary-cards {
-    grid-template-columns: 1fr;
+  .top-navbar {
+    left: 80px;
+  }
+  
+  .summary-page {
+    margin-top: 80px;
   }
 }
 </style>

@@ -3,10 +3,12 @@
     <!-- Fixed Navigation Bar -->
     <div class="top-navbar">
       <div class="logo-area">
-        <div class="logo-placeholder">
-          <v-icon size="28" color="#0B2044">mdi-chart-line</v-icon>
-          <span class="logo-text">DuraCapital</span>
-        </div>
+        <img 
+          src="/DuraCapital logo.png" 
+          alt="DuraCapital Logo" 
+          class="navbar-logo"
+          @error="e => e.target.style.display = 'none'"
+        />
       </div>
       <div class="nav-actions">
         <button class="nav-icon-btn" @click="goToSettings">
@@ -26,26 +28,25 @@
     <!-- Session Management Section -->
     <div class="session-section">
       <v-card class="session-card">
-        <v-card-title>
+        <v-card-title class="card-title">
           <v-icon>mdi-folder</v-icon>
           Session Management
-          <span class="required-badge">Required</span>
         </v-card-title>
         <v-card-text>
           <div class="session-controls">
             <div class="session-selector">
-              <label>Select or Create Session:</label>
+              <label>Select or Create Session</label>
               <div class="session-input-group">
                 <select v-model="selectedSessionId" @change="loadSelectedSession" class="session-select">
-                  <option value="">-- Create New Session --</option>
+                  <option value="">Create New Session </option>
                   <option v-for="session in sessions" :key="session.id" :value="session.id">
-                    {{ session.name }} ({{ session.date }}) - {{ session.status === 'completed' ? '✓' : '⟳' }}
+                    {{ session.name }} ({{ session.date }}) 
                   </option>
                 </select>
                 <input 
                   v-if="selectedSessionId === ''" 
                   v-model="newSessionName" 
-                  placeholder="Enter session name (e.g., Bank ABC, Client XYZ)" 
+                  placeholder="Enter session name" 
                   class="session-input"
                 />
               </div>
@@ -55,6 +56,13 @@
                 {{ selectedSessionId ? 'Load Session' : 'Create Session' }}
               </button>
               <button class="btn-secondary" @click="clearSessionSelection">Clear</button>
+              <button 
+                v-if="selectedSessionId && activeSession" 
+                class="btn-danger" 
+                @click="deleteCurrentSession"
+              >
+                <v-icon>mdi-delete</v-icon> Delete Session
+              </button>
             </div>
           </div>
           
@@ -75,10 +83,17 @@
           
           <div v-else class="no-session-warning">
             <v-icon color="warning">mdi-alert</v-icon>
-            <span>Please create or select a session to continue</span>
+            <span>Please create or select a session to continue (e.g., CBZ Bank)</span>
           </div>
         </v-card-text>
       </v-card>
+    </div>
+
+    <!-- Delete All Sessions Button -->
+    <div class="delete-all-section" v-if="sessions.length > 0">
+      <button class="btn-danger-outline" @click="deleteAllSessions">
+        <v-icon>mdi-delete</v-icon> Delete All Sessions
+      </button>
     </div>
 
     <!-- KPI Cards Row -->
@@ -142,11 +157,11 @@
       </div>
     </div>
 
-    <!-- Recent Sessions -->
+    <!-- Recent Activities - ALL sessions shown -->
     <div class="section-header">
       <v-icon color="#0B2044" size="20">mdi-history</v-icon>
-      <h2>Recent Sessions</h2>
-      <span class="session-count">{{ sessions.length }} Total</span>
+      <h2>Recent Activities</h2>
+      <span class="session-count">{{ sessions.length }} Total Sessions</span>
     </div>
 
     <div class="sessions-row">
@@ -155,7 +170,7 @@
         <p>No sessions yet. Create your first session above!</p>
       </div>
       <div 
-        v-for="session in sessions.slice(0, 3)" 
+        v-for="session in sessions" 
         :key="session.id" 
         class="session-card"
         @click="loadExistingSession(session.id)"
@@ -166,11 +181,19 @@
         <div class="session-info">
           <div class="session-name">{{ session.name }}</div>
           <div class="session-meta">{{ session.date }}</div>
-          <div class="session-rows">{{ session.instrumentCount || 0 }} instruments</div>
+          <div class="session-rows">{{ session.instrumentCount || 0 }} instruments • ${{ (session.totalValue || 0).toLocaleString() }}</div>
+          <div class="session-progress">
+            <div class="progress-bar-small">
+              <div class="progress-fill-small" :style="{ width: `${(session.instrumentCount || 0) / 3 * 100}%` }"></div>
+            </div>
+          </div>
         </div>
         <div class="session-status" :class="session.status">
           {{ session.status === 'completed' ? '✓ Complete' : '⟳ Progress' }}
         </div>
+        <button class="delete-session-btn" @click.stop="deleteSession(session.id)">
+          <v-icon size="16">mdi-close</v-icon>
+        </button>
       </div>
     </div>
   </div>
@@ -233,8 +256,8 @@ const kpiStats = computed(() => [
     gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)'
   },
   { 
-    title: 'Completion', 
-    value: `${Math.round((activeSession.value?.instrumentCount || 0) / 3 * 100)}%`, 
+    title: 'Total Value', 
+    value: `$${(activeSession.value?.totalValue || 0).toLocaleString()}`, 
     icon: 'mdi-database', 
     gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)'
   }
@@ -304,22 +327,78 @@ function clearSessionSelection() {
   localStorage.removeItem('active_session')
 }
 
+function deleteSession(sessionId) {
+  if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
+    sessions.value = sessions.value.filter(s => s.id !== sessionId)
+    
+    if (activeSession.value && activeSession.value.id === sessionId) {
+      activeSession.value = null
+      selectedSessionId.value = ''
+      localStorage.removeItem('active_session')
+    }
+    
+    if (selectedSessionId.value === sessionId) {
+      selectedSessionId.value = ''
+    }
+    
+    localStorage.removeItem(`session_${sessionId}`)
+    localStorage.setItem('sessions_list', JSON.stringify(sessions.value))
+    
+    instruments.forEach(inst => { inst.count = 0 })
+    updateInstrumentCounts()
+    alert('Session deleted successfully!')
+  }
+}
+
+function deleteCurrentSession() {
+  if (activeSession.value) {
+    deleteSession(activeSession.value.id)
+  }
+}
+
+function deleteAllSessions() {
+  if (confirm('Are you sure you want to delete ALL sessions? This action cannot be undone.')) {
+    sessions.value = []
+    activeSession.value = null
+    selectedSessionId.value = ''
+    newSessionName.value = ''
+    localStorage.removeItem('active_session')
+    localStorage.removeItem('sessions_list')
+    
+    const keysToRemove = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && (key.startsWith('session_') || key.startsWith('instrument_'))) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key))
+    
+    instruments.forEach(inst => { inst.count = 0 })
+    updateInstrumentCounts()
+    alert('All sessions deleted successfully!')
+  }
+}
+
 function updateInstrumentCounts() {
   if (!activeSession.value) return
   
   let instrumentCount = 0
+  let totalValue = 0
   
   instruments.forEach(inst => {
     const sessionData = activeSession.value.instrumentData?.[inst.id]
     if (sessionData && sessionData.totalValue > 0) {
       inst.count = 1
       instrumentCount++
+      totalValue += sessionData.totalValue
     } else {
       inst.count = 0
     }
   })
   
   activeSession.value.instrumentCount = instrumentCount
+  activeSession.value.totalValue = totalValue
   
   const completedCount = Object.values(activeSession.value.completedInstruments || {}).filter(v => v === true).length
   if (completedCount === 3 && instrumentCount === 3) {
@@ -341,8 +420,14 @@ function goToInstrument(instrumentId) {
   router.push(`/instrument/${instrumentId}?sessionId=${activeSession.value.id}`)
 }
 
-function goToSettings() { router.push('/settings') }
-function logout() { localStorage.clear(); router.push('/login') }
+function goToSettings() { 
+  router.push('/settings') 
+}
+
+function logout() { 
+  localStorage.clear()
+  router.push('/login') 
+}
 
 function loadSessions() {
   const saved = localStorage.getItem('sessions_list')
@@ -385,16 +470,11 @@ onMounted(() => {
   z-index: 1000;
 }
 
-.logo-placeholder {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.logo-text {
-  font-size: 18px;
-  font-weight: 600;
-  color: #0B2044;
+.navbar-logo {
+  width: 180px;
+  height: 200px;
+  object-fit: contain;
+  border-radius: 10px;
 }
 
 .nav-actions {
@@ -429,22 +509,35 @@ onMounted(() => {
 }
 
 .session-section {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
 }
 
 .session-card {
   border-radius: 16px;
   background: white;
   border: 1px solid rgba(11,32,68,0.1);
+  overflow: hidden;
+  position: relative;
 }
 
-.required-badge {
-  background: #FF9800;
-  color: white;
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 20px;
-  margin-left: 10px;
+.session-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50);
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #0B2044;
+  font-size: 18px;
+  font-weight: 600;
+  padding: 20px 24px 0 24px;
 }
 
 .session-controls {
@@ -463,7 +556,7 @@ onMounted(() => {
   display: block;
   font-size: 12px;
   color: #666;
-  margin-bottom: 5px;
+  margin-bottom: 8px;
   font-weight: 600;
 }
 
@@ -475,20 +568,29 @@ onMounted(() => {
 
 .session-select, .session-input {
   width: 100%;
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  padding: 12px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
   font-size: 14px;
+  transition: all 0.2s;
+  background: white;
+}
+
+.session-select:focus, .session-input:focus {
+  outline: none;
+  border-color: #0B2044;
+  box-shadow: 0 0 0 2px rgba(11,32,68,0.1);
 }
 
 .session-actions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .active-session-info {
-  margin-top: 15px;
-  padding: 15px;
+  margin-top: 20px;
+  padding: 16px 20px;
   background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
   border-radius: 12px;
 }
@@ -533,14 +635,21 @@ onMounted(() => {
 }
 
 .no-session-warning {
-  margin-top: 15px;
-  padding: 12px;
+  margin-top: 20px;
+  padding: 12px 16px;
   background: #FFF3E0;
-  border-radius: 8px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   gap: 10px;
   color: #E65100;
+  font-size: 13px;
+}
+
+.delete-all-section {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 20px;
 }
 
 .kpis-row {
@@ -558,6 +667,7 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
   transition: all 0.3s ease;
+  cursor: pointer;
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
   position: relative;
   overflow: hidden;
@@ -602,6 +712,8 @@ onMounted(() => {
   font-size: 24px;
   font-weight: 800;
   color: #0B2044;
+  line-height: 1.2;
+  word-break: break-word;
 }
 
 .kpi-title {
@@ -777,6 +889,24 @@ onMounted(() => {
   cursor: pointer;
   transition: all 0.3s ease;
   box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  position: relative;
+  overflow: hidden;
+}
+
+.session-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #0B2044, #1E88E5);
+  transform: scaleX(0);
+  transition: transform 0.3s ease;
+}
+
+.session-card:hover::before {
+  transform: scaleX(1);
 }
 
 .session-card:hover {
@@ -816,6 +946,24 @@ onMounted(() => {
   font-size: 10px;
   color: #0B2044;
   font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.session-progress {
+  margin-top: 5px;
+}
+
+.progress-bar-small {
+  height: 4px;
+  background: #e0e0e0;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill-small {
+  height: 100%;
+  background: linear-gradient(90deg, #0B2044, #1E88E5);
+  border-radius: 2px;
 }
 
 .session-status {
@@ -835,6 +983,30 @@ onMounted(() => {
   color: #4CAF50;
 }
 
+.delete-session-btn {
+  background: #f44336;
+  border: none;
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0;
+}
+
+.session-card:hover .delete-session-btn {
+  opacity: 1;
+}
+
+.delete-session-btn:hover {
+  background: #d32f2f;
+  transform: scale(1.1);
+}
+
 .empty-sessions {
   grid-column: span 3;
   text-align: center;
@@ -849,7 +1021,7 @@ onMounted(() => {
   color: white;
   border: none;
   padding: 10px 24px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -871,7 +1043,7 @@ onMounted(() => {
   color: #0B2044;
   border: 2px solid #0B2044;
   padding: 10px 24px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -880,6 +1052,46 @@ onMounted(() => {
 
 .btn-secondary:hover {
   background: #0B2044;
+  color: white;
+  transform: translateY(-2px);
+}
+
+.btn-danger {
+  background: #f44336;
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-danger:hover {
+  background: #d32f2f;
+  transform: translateY(-2px);
+}
+
+.btn-danger-outline {
+  background: transparent;
+  color: #f44336;
+  border: 2px solid #f44336;
+  padding: 8px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s;
+}
+
+.btn-danger-outline:hover {
+  background: #f44336;
   color: white;
   transform: translateY(-2px);
 }

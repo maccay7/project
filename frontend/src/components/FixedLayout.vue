@@ -1,61 +1,46 @@
 <template>
   <div class="fixed-layout">
+    <!-- Top Navbar - Shows on ALL pages -->
+    <TopNavbar />
+
     <!-- Sidebar -->
     <aside class="sidebar">
-      <div class="logo">
-        <v-icon color="white" size="28">mdi-chart-line</v-icon>
-        <h2>DuraCapital</h2>
-      </div>
-      
-      <!-- Main Navigation -->
-      <div class="nav-section">
-        <div class="nav-title">MAIN</div>
-        <div 
-          v-for="item in mainNav" 
-          :key="item.path"
-          class="nav-item"
-          :class="{ active: isActive(item.path) }"
-          @click="navigateTo(item.path)"
-        >
-          <v-icon>{{ item.icon }}</v-icon>
-          <span>{{ item.name }}</span>
+      <div class="nav-menu">
+        <div class="nav-group">
+          <div class="nav-group-title">MAIN</div>
+          <div 
+            v-for="item in mainNav" 
+            :key="item.path"
+            class="nav-link"
+            :class="{ active: isActive(item.path) }"
+            @click="navigateTo(item.path)"
+          >
+            <v-icon class="nav-icon">{{ item.icon }}</v-icon>
+            <span class="nav-label">{{ item.name }}</span>
+          </div>
         </div>
-      </div>
 
-      <!-- Report Section -->
-      <div class="nav-section">
-        <div class="nav-title">REPORTS</div>
-        <div class="nav-item" @click="openReportDialog">
-          <v-icon>mdi-file-pdf</v-icon>
-          <span>Generate Report</span>
+        <div class="nav-group">
+          <div class="nav-group-title">REPORTS</div>
+          <div class="nav-link" @click="openReportDialog">
+            <v-icon class="nav-icon">mdi-file-pdf</v-icon>
+            <span class="nav-label">Generate Report</span>
+          </div>
         </div>
-      </div>
 
-      <!-- Instrument Tools -->
-      <div v-if="isOnInstrumentPage" class="nav-section">
-        <div class="nav-title">INSTRUMENT TOOLS</div>
-        <div 
-          v-for="item in instrumentNav" 
-          :key="item.tab"
-          class="nav-item"
-          :class="{ active: currentTab === item.tab }"
-          @click="changeInstrumentTab(item.tab)"
-        >
-          <v-icon>{{ item.icon }}</v-icon>
-          <span>{{ item.name }}</span>
-          <span v-if="getTabStatus(item.tab)" class="status-badge">✓</span>
-        </div>
-      </div>
-
-      <!-- Bottom Section -->
-      <div class="nav-section bottom-nav">
-        <div class="nav-item" @click="goToSettings">
-          <v-icon>mdi-cog</v-icon>
-          <span>Settings</span>
-        </div>
-        <div class="nav-item" @click="logout">
-          <v-icon>mdi-logout</v-icon>
-          <span>Logout</span>
+        <div v-if="isOnInstrumentPage" class="nav-group">
+          <div class="nav-group-title">INSTRUMENT TOOLS</div>
+          <div 
+            v-for="item in instrumentNav" 
+            :key="item.tab"
+            class="nav-link"
+            :class="{ active: currentTab === item.tab }"
+            @click="changeInstrumentTab(item.tab)"
+          >
+            <v-icon class="nav-icon">{{ item.icon }}</v-icon>
+            <span class="nav-label">{{ item.name }}</span>
+            <span v-if="getTabStatus(item.tab)" class="check-badge">✓</span>
+          </div>
         </div>
       </div>
     </aside>
@@ -89,6 +74,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import TopNavbar from '@/components/TopNavbar.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -109,7 +95,7 @@ const instrumentNav = [
   { tab: 'summary', name: 'Instrument Summary', icon: 'mdi-file-document' }
 ]
 
-const isOnInstrumentPage = computed(() => route.path.includes('/instrument/'))
+const isOnInstrumentPage = computed(() => route.path.includes('/instrument/') || route.path.includes('/summary'))
 const currentTab = computed(() => route.query.tab || 'upload')
 
 function isActive(path) {
@@ -128,15 +114,6 @@ function getTabStatus(tab) {
   const instrument = route.path.split('/').pop()
   const statuses = JSON.parse(localStorage.getItem(`instrument_${instrument}_status`) || '{}')
   return statuses[tab] || false
-}
-
-function goToSettings() {
-  router.push('/settings')
-}
-
-function logout() {
-  localStorage.clear()
-  router.push('/login')
 }
 
 function openReportDialog() {
@@ -158,100 +135,113 @@ function generateAndNavigate() {
   min-height: 100vh;
 }
 
+/* Sidebar */
 .sidebar {
-  width: 280px;
-  background: linear-gradient(180deg, #0B2044 0%, #0a1a38 100%);
+  width: 260px;
+  background: linear-gradient(180deg, #0B2044 0%, #0e2a54 100%);
   color: white;
   position: fixed;
-  height: 100vh;
+  height: calc(100vh - 65px);
+  top: 65px;
   left: 0;
-  top: 0;
   overflow-y: auto;
-  box-shadow: 2px 0 20px rgba(0, 0, 0, 0.1);
-  z-index: 1000;
+  box-shadow: 2px 0 20px rgba(0, 0, 0, 0.08);
+  z-index: 999;
   display: flex;
   flex-direction: column;
 }
 
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 24px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  margin-bottom: 20px;
+.nav-menu {
+  flex: 1;
+  padding: 16px 12px;
 }
 
-.logo h2 {
-  font-size: 1.3rem;
-  font-weight: 600;
-  margin: 0;
+.nav-group {
+  margin-bottom: 24px;
 }
 
-.nav-section {
-  margin-bottom: 25px;
-}
-
-.nav-title {
+.nav-group-title {
   font-size: 11px;
+  font-weight: 600;
   letter-spacing: 1px;
   color: rgba(255, 255, 255, 0.4);
-  padding: 8px 20px;
-  margin-top: 10px;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
 }
 
-.nav-item {
+.nav-link {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 20px;
-  margin: 4px 12px;
+  padding: 10px 12px;
+  margin: 2px 0;
   border-radius: 10px;
   cursor: pointer;
-  transition: all 0.2s;
-  color: rgba(255, 255, 255, 0.7);
+  transition: all 0.2s ease;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 14px;
+  font-weight: 500;
   position: relative;
 }
 
-.nav-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+.nav-link:hover {
+  background: rgba(255, 255, 255, 0.08);
   color: white;
-  transform: translateX(5px);
+  transform: translateX(4px);
 }
 
-.nav-item.active {
-  background: #1E88E5;
+.nav-link.active {
+  background: linear-gradient(135deg, #1E88E5, #0B2044);
   color: white;
   box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
 }
 
-.status-badge {
-  position: absolute;
-  right: 20px;
+.nav-icon {
+  font-size: 20px;
+  width: 24px;
+  text-align: center;
+}
+
+.nav-label {
+  flex: 1;
+}
+
+.check-badge {
   background: #4CAF50;
   color: white;
   border-radius: 50%;
   width: 18px;
   height: 18px;
-  font-size: 11px;
-  display: flex;
+  font-size: 10px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
-.bottom-nav {
-  margin-top: auto;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 10px;
+.sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
 }
 
 .main-content {
-  margin-left: 280px;
+  margin-left: 260px;
   flex: 1;
   background: #f5f7fa;
   min-height: 100vh;
+  width: calc(100% - 260px);
+  padding-top: 65px;
 }
 
+/* Report Dialog */
 .report-type-selector {
   padding: 10px 0;
 }
@@ -292,10 +282,24 @@ function generateAndNavigate() {
 }
 
 @media (max-width: 768px) {
-  .sidebar { width: 80px; }
-  .logo h2, .nav-item span, .nav-title { display: none; }
-  .logo { justify-content: center; }
-  .nav-item { justify-content: center; }
-  .main-content { margin-left: 80px; }
+  .sidebar {
+    width: 70px;
+    top: 60px;
+    height: calc(100vh - 60px);
+  }
+  .nav-label, .nav-group-title {
+    display: none;
+  }
+  .nav-link {
+    justify-content: center;
+    padding: 12px;
+  }
+  .nav-icon {
+    margin: 0;
+  }
+  .main-content {
+    margin-left: 70px;
+    width: calc(100% - 70px);
+  }
 }
 </style>
