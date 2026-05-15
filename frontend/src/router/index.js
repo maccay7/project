@@ -9,11 +9,11 @@ const router = createRouter({
       redirect: '/login'
     },
     {
-      path: '/login',
-      name: 'login',
-      component: () => import('@/views/LoginView.vue'),
-      meta: { requiresAuth: false }
-    },
+  path: '/login',
+  name: 'login',
+  component: () => import('@/views/LoginView.vue'),
+  meta: { requiresAuth: false }
+},
     {
       path: '/signup',
       name: 'signup',

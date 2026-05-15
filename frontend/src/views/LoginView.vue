@@ -1,7 +1,15 @@
 <template>
   <div class="login-container">
     <div class="login-form">
-      <h1 class="login-title">LOGIN</h1>
+      <!-- Logo Section -->
+      <div class="logo-section">
+        <img 
+          src="/DuraCapital logo.png" 
+          alt="DuraCapital Logo" 
+          class="login-logo"
+          @error="e => e.target.style.display = 'none'"
+        />
+      </div>
       
       <div class="form-group">
         <div class="input-wrapper">
@@ -90,7 +98,6 @@ const handleLogin = async () => {
   error.value = ''
 
   try {
-    // Use auth store login function
     const success = await authStore.login(email.value, password.value)
     
     if (success) {
@@ -126,6 +133,7 @@ const goToRegister = () => {
   align-items: center;
   justify-content: center;
   position: relative;
+  overflow: hidden;
 }
 
 .login-container::before {
@@ -143,26 +151,35 @@ const goToRegister = () => {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   border-radius: 20px;
-  padding: 40px;
+  padding: 30px 35px;
   width: 100%;
-  max-width: 400px;
+  max-width: 380px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
   position: relative;
   z-index: 1;
 }
 
-.login-title {
-  font-size: 32px;
-  font-weight: 700;
+/* Logo Section - No padding, no spacing */
+.logo-section {
   text-align: center;
-  margin-bottom: 30px;
-  color: #333;
-  letter-spacing: 2px;
+  margin-bottom: 5px;
+  line-height: 0;
+}
+
+.login-logo {
+  width: 180px;
+  height: 200px;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  margin: 0 auto;
+  /* Remove any default image spacing */
+  vertical-align: middle;
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .input-wrapper {
@@ -173,18 +190,18 @@ const goToRegister = () => {
 
 .input-icon {
   position: absolute;
-  left: 15px;
-  font-size: 18px;
+  left: 12px;
+  font-size: 16px;
   z-index: 2;
 }
 
 .form-input {
   width: 100%;
-  padding: 15px 15px 15px 45px;
+  padding: 12px 12px 12px 38px;
   border: 2px solid #e0e0e0;
   border-radius: 10px;
-  font-size: 16px;
-  background: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  background: rgba(255, 255, 255, 0.9);
   transition: all 0.3s ease;
   outline: none;
 }
@@ -201,14 +218,15 @@ const goToRegister = () => {
 
 .password-toggle {
   position: absolute;
-  right: 15px;
+  right: 12px;
   background: none;
   border: none;
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
   color: #666;
   transition: color 0.3s ease;
   z-index: 2;
+  padding: 0;
 }
 
 .password-toggle:hover {
@@ -217,8 +235,8 @@ const goToRegister = () => {
 
 .forgot-password {
   position: absolute;
-  right: 50px;
-  font-size: 12px;
+  right: 45px;
+  font-size: 11px;
   color: #4a90e2;
   text-decoration: none;
   font-weight: 500;
@@ -234,14 +252,14 @@ const goToRegister = () => {
 .form-options {
   display: flex;
   align-items: center;
-  margin-bottom: 25px;
+  margin-bottom: 20px;
 }
 
 .checkbox-wrapper {
   display: flex;
   align-items: center;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   color: #666;
 }
 
@@ -250,8 +268,8 @@ const goToRegister = () => {
 }
 
 .checkmark {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border: 2px solid #e0e0e0;
   border-radius: 4px;
   margin-right: 8px;
@@ -270,7 +288,7 @@ const goToRegister = () => {
 .checkbox-wrapper input[type="checkbox"]:checked + .checkmark::after {
   content: '✓';
   color: white;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: bold;
 }
 
@@ -280,18 +298,18 @@ const goToRegister = () => {
 
 .login-button {
   width: 100%;
-  padding: 15px;
+  padding: 12px;
   background: linear-gradient(135deg, #4a90e2, #357abd);
   color: white;
   border: none;
   border-radius: 10px;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
   text-transform: uppercase;
   letter-spacing: 1px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .login-button:hover:not(:disabled) {
@@ -308,7 +326,7 @@ const goToRegister = () => {
 
 .register-link {
   text-align: center;
-  font-size: 14px;
+  font-size: 13px;
   color: #666;
 }
 
@@ -327,9 +345,9 @@ const goToRegister = () => {
 .error-message {
   background: rgba(244, 67, 54, 0.1);
   color: #f44336;
-  padding: 12px;
+  padding: 10px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 12px;
   text-align: center;
   margin-top: 15px;
   border: 1px solid rgba(244, 67, 54, 0.2);
@@ -339,24 +357,17 @@ const goToRegister = () => {
 @media (max-width: 480px) {
   .login-form {
     margin: 20px;
-    padding: 30px 20px;
+    padding: 25px 20px;
   }
   
-  .login-title {
-    font-size: 28px;
-  }
-  
-  .form-input {
-    padding: 12px 12px 12px 40px;
+  .login-logo {
+    width: 140px;
+    height: 160px;
   }
   
   .forgot-password {
     right: 40px;
-    font-size: 11px;
-  }
-  
-  .password-toggle {
-    right: 12px;
+    font-size: 10px;
   }
 }
 </style>

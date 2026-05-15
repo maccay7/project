@@ -1,7 +1,7 @@
 <template>
   <div class="top-navbar">
     <div class="logo-area">
-      <div class="logo-glow">
+      <div class="logo-placeholder">
         <img 
           src="/DuraCapital logo.png" 
           alt="DuraCapital Logo" 
@@ -13,11 +13,9 @@
     <div class="nav-actions">
       <button class="nav-icon-btn" @click="goToSettings">
         <v-icon>mdi-cog</v-icon>
-        <span>Settings</span>
       </button>
       <button class="nav-icon-btn" @click="handleLogout">
         <v-icon>mdi-logout</v-icon>
-        <span>Logout</span>
       </button>
     </div>
   </div>
@@ -32,10 +30,13 @@ function goToSettings() {
   router.push('/settings')
 }
 
+// FIXED: Force redirect to login page
 function handleLogout() {
+  // Clear all storage
   localStorage.clear()
   sessionStorage.clear()
-  router.push('/login')
+  // Force hard navigation to login page
+  window.location.href = '/login'
 }
 </script>
 
@@ -45,7 +46,7 @@ function handleLogout() {
   top: 0;
   left: 0;
   right: 0;
-  height: 65px;
+  height: 60px;
   background: white;
   display: flex;
   justify-content: space-between;
@@ -60,17 +61,16 @@ function handleLogout() {
   align-items: center;
 }
 
-.logo-glow {
-  display: inline-flex;
+.logo-placeholder {
+  display: flex;
   align-items: center;
-  justify-content: center;
 }
 
 .navbar-logo {
   width: 180px;
   height: 200px;
   object-fit: contain;
-  filter: drop-shadow(0 0 4px rgba(30, 136, 229, 0.3));
+  border-radius: 8px;
 }
 
 .nav-actions {
@@ -83,14 +83,13 @@ function handleLogout() {
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 8px 12px;
+  padding: 8px;
   border-radius: 8px;
   transition: all 0.2s;
   color: #666;
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 14px;
+  justify-content: center;
 }
 
 .nav-icon-btn:hover {
@@ -101,9 +100,6 @@ function handleLogout() {
 @media (max-width: 768px) {
   .top-navbar {
     padding: 0 16px;
-  }
-  .nav-icon-btn span {
-    display: none;
   }
 }
 </style>
