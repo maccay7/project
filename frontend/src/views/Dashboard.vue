@@ -27,63 +27,139 @@
       <h1>Dashboard</h1>
     </div>
 
-    <!-- Session Management Section -->
-    <div class="session-section">
-      <v-card class="session-card">
-        <v-card-title class="card-title">
-          <v-icon>mdi-folder</v-icon>
-          Session Management
-        </v-card-title>
-        <v-card-text>
-          <div class="session-controls">
-            <div class="session-selector">
-              <label>Select or Create Session</label>
-              <div class="session-input-group">
-                <select v-model="selectedSessionId" @change="loadSelectedSession" class="session-select">
-                  <option value="">-- Create New Session --</option>
-                  <option v-for="session in sessions" :key="session.id" :value="session.id">
-                    {{ session.name }} ({{ session.date }}) - {{ session.status === 'completed' ? '✓ Complete' : '⟳ Progress' }}
-                  </option>
-                </select>
-                <input 
-                  v-if="selectedSessionId === ''" 
-                  v-model="newSessionName" 
-                  placeholder="Enter session name" 
-                  class="session-input"
-                />
+    <!-- Session Management - Side by Side Layout -->
+    <div class="session-management-row">
+      <!-- Recent Sessions Card -->
+      <div class="recent-sessions-card">
+        <v-card class="session-card">
+          <v-card-title class="card-title">
+            <div class="title-left">
+              <v-icon>mdi-history</v-icon>
+              Recent Sessions
+            </div>
+            <div class="title-right">
+              <span class="session-count">{{ sessions.length }} Total</span>
+            </div>
+          </v-card-title>
+          <v-card-text>
+            <!-- Search Bar -->
+            <div class="search-bar">
+              <v-icon class="search-icon" size="16">mdi-magnify</v-icon>
+              <input 
+                type="text" 
+                v-model="searchQuery" 
+                placeholder="Search sessions..." 
+                class="search-input"
+              />
+              <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''">
+                <v-icon size="14">mdi-close</v-icon>
+              </button>
+            </div>
+
+            <div class="sessions-list-container">
+              <div class="sessions-list">
+                <div v-if="filteredSessions.length === 0" class="empty-sessions-list">
+                  <v-icon size="36" color="#ccc">mdi-folder-open</v-icon>
+                  <p>No sessions yet</p>
+                  <p class="empty-hint">Create a session using the form on the right</p>
+                </div>
+                <div 
+                  v-for="session in filteredSessions" 
+                  :key="session.id" 
+                  class="session-row-item"
+                  @click="loadExistingSession(session.id)"
+                >
+                  <div class="session-row-icon" :style="{ background: '#0B2044' }">
+                    <v-icon size="14" color="white">mdi-folder</v-icon>
+                  </div>
+                  <div class="session-row-info">
+                    <div class="session-row-name">{{ session.name }}</div>
+                    <div class="session-row-meta">{{ session.date }}</div>
+                  </div>
+                  <div class="session-row-stats">
+                    <span>{{ session.instrumentCount || 0 }} instruments</span>
+                    <span class="session-row-value">${{ (session.totalValue || 0).toLocaleString() }}</span>
+                  </div>
+                  <div class="session-row-status" :class="session.status">
+                    {{ session.status === 'completed' ? '✓' : '⟳' }}
+                  </div>
+                  <button class="row-delete-btn" @click.stop="deleteSession(session.id)">
+                    <v-icon size="12">mdi-close</v-icon>
+                  </button>
+                </div>
               </div>
             </div>
-            <div class="session-actions">
-              <button class="btn-primary" @click="createOrLoadSession" :disabled="!canCreateSession">
-                {{ selectedSessionId ? 'Load Session' : 'Create Session' }}
+          </v-card-text>
+        </v-card>
+      </div>
+
+      <!-- Create New Session Card -->
+      <div class="create-session-card">
+        <v-card class="session-card">
+          <v-card-title class="card-title">
+            <v-icon>mdi-folder-plus</v-icon>
+            Create New Session
+          </v-card-title>
+          <v-card-text class="create-session-content">
+            <div class="create-session-input">
+              <input 
+                v-model="newSessionName" 
+                placeholder="Enter session name (e.g., CBZ Bank, Old Mutual)" 
+                class="session-input"
+                @keyup.enter="createNewSession"
+              />
+            </div>
+            <div class="create-session-action">
+              <button class="btn-primary full-width" @click="createNewSession" :disabled="!newSessionName.trim()">
+                <v-icon>mdi-plus</v-icon> Create Session
               </button>
-              <button class="btn-secondary" @click="clearSessionSelection">Clear</button>
-              <button v-if="selectedSessionId && activeSession" class="btn-danger" @click="deleteCurrentSession">
-                Delete Session
-              </button>
             </div>
-          </div>
-          
-          <div v-if="activeSession" class="active-session-info">
-            <div class="session-header">
-              <v-icon color="#4CAF50">mdi-check-circle</v-icon>
-              <span class="session-name-display">{{ activeSession.name }}</span>
-              <span class="session-status-badge" :class="activeSession.status">
-                {{ activeSession.status === 'completed' ? 'Completed' : 'In Progress' }}
-              </span>
+            
+            <div class="active-session-container">
+              <div v-if="activeSession" class="active-session-info">
+                <div class="session-header">
+                  <v-icon color="#4CAF50" size="16">mdi-check-circle</v-icon>
+                  <span class="session-name-display">Active: {{ activeSession.name }}</span>
+                  <span class="session-status-badge" :class="activeSession.status">
+                    {{ activeSession.status === 'completed' ? 'Completed' : 'In Progress' }}
+                  </span>
+                </div>
+                <div class="session-details">
+                  <span>Created: {{ activeSession.date }}</span>
+                  <span>Instruments: {{ activeSession.instrumentCount || 0 }}/3</span>
+                </div>
+              </div>
+              <div v-else class="no-session-warning">
+                <v-icon color="warning" size="16">mdi-alert</v-icon>
+                <span>No active session selected</span>
+              </div>
             </div>
-            <div class="session-details">
-              <span>Created: {{ activeSession.date }}</span>
-              <span>Instruments: {{ activeSession.instrumentCount || 0 }}/3</span>
+
+            <div class="flex-spacer"></div>
+
+            <div class="session-stats-summary">
+              <div class="stats-header">
+                <v-icon size="16">mdi-chart-box</v-icon>
+                <span>Session Summary</span>
+              </div>
+              <div class="stats-grid">
+                <div class="stat-item">
+                  <div class="stat-number">{{ totalSessions }}</div>
+                  <div class="stat-label">Total Sessions</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-number">{{ completedSessions }}</div>
+                  <div class="stat-label">Completed</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-number">{{ inProgressSessions }}</div>
+                  <div class="stat-label">In Progress</div>
+                </div>
+              </div>
             </div>
-          </div>
-          
-          <div v-else class="no-session-warning">
-            <v-icon color="warning">mdi-alert</v-icon>
-            <span>Please create or select a session to continue</span>
-          </div>
-        </v-card-text>
-      </v-card>
+          </v-card-text>
+        </v-card>
+      </div>
     </div>
 
     <!-- KPI Cards -->
@@ -91,7 +167,7 @@
       <div v-for="stat in kpiStats" :key="stat.title" class="kpi-card">
         <div class="kpi-top-bar"></div>
         <div class="kpi-icon" :style="{ background: stat.gradient }">
-          <v-icon size="32" color="white">{{ stat.icon }}</v-icon>
+          <v-icon size="28" color="white">{{ stat.icon }}</v-icon>
         </div>
         <div class="kpi-info">
           <div class="kpi-value">{{ stat.value }}</div>
@@ -115,7 +191,7 @@
         @click="activeSession && goToInstrument(instrument.id)"
       >
         <div class="instrument-icon" :style="{ background: instrument.gradient }">
-          <v-icon size="32" color="white">{{ instrument.icon }}</v-icon>
+          <v-icon size="28" color="white">{{ instrument.icon }}</v-icon>
         </div>
         <div class="instrument-info">
           <h3>{{ instrument.name }}</h3>
@@ -123,36 +199,6 @@
         </div>
         <div v-if="!activeSession" class="lock-overlay">
           <v-icon>mdi-lock</v-icon>
-        </div>
-      </div>
-    </div>
-
-    <!-- Recent Sessions -->
-    <div class="section-header">
-      <v-icon color="#0B2044" size="20">mdi-history</v-icon>
-      <h2>Recent Sessions</h2>
-    </div>
-
-    <div class="sessions-row">
-      <div v-if="sessions.length === 0" class="empty-sessions">
-        <v-icon size="48" color="#ccc">mdi-folder-open</v-icon>
-        <p>No sessions yet. Create your first session above!</p>
-      </div>
-      <div 
-        v-for="session in sessions.slice(0, 3)" 
-        :key="session.id" 
-        class="session-card"
-        @click="loadExistingSession(session.id)"
-      >
-        <div class="session-icon" :style="{ background: '#0B2044' }">
-          <v-icon size="20" color="white">mdi-folder</v-icon>
-        </div>
-        <div class="session-info">
-          <div class="session-name">{{ session.name }}</div>
-          <div class="session-meta">{{ session.date }}</div>
-        </div>
-        <div class="session-status" :class="session.status">
-          {{ session.status === 'completed' ? '✓' : '⟳' }}
         </div>
       </div>
     </div>
@@ -166,7 +212,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 
 const sessions = ref([])
-const selectedSessionId = ref('')
+const searchQuery = ref('')
 const newSessionName = ref('')
 const activeSession = ref(null)
 
@@ -176,10 +222,17 @@ const instruments = [
   { id: 'tbills', name: 'T-Bills', description: 'Treasury bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
 ]
 
-const canCreateSession = computed(() => {
-  if (selectedSessionId.value) return true
-  return newSessionName.value.trim() !== ''
+const filteredSessions = computed(() => {
+  if (!searchQuery.value) return sessions.value
+  const query = searchQuery.value.toLowerCase()
+  return sessions.value.filter(session => 
+    session.name.toLowerCase().includes(query)
+  )
 })
+
+const totalSessions = computed(() => sessions.value.length)
+const completedSessions = computed(() => sessions.value.filter(s => s.status === 'completed').length)
+const inProgressSessions = computed(() => sessions.value.filter(s => s.status === 'in-progress').length)
 
 const kpiStats = computed(() => [
   { title: 'Active Session', value: activeSession.value?.name || 'No Session', icon: 'mdi-folder', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
@@ -191,12 +244,9 @@ function goToSettings() {
   router.push('/settings')
 }
 
-// FIXED LOGOUT - Force redirect to login page
 function handleLogout() {
-  // Clear all storage
   localStorage.clear()
   sessionStorage.clear()
-  // Force hard navigation to login page (bypasses any router issues)
   window.location.href = '/login'
 }
 
@@ -204,70 +254,61 @@ function loadExistingSession(sessionId) {
   const session = sessions.value.find(s => s.id === sessionId)
   if (session) {
     activeSession.value = session
-    selectedSessionId.value = session.id
     localStorage.setItem('active_session', JSON.stringify(session))
   }
 }
 
-function loadSelectedSession() {
-  if (selectedSessionId.value) {
-    const session = sessions.value.find(s => s.id === selectedSessionId.value)
-    if (session) activeSession.value = session
-  } else {
-    activeSession.value = null
+function createNewSession() {
+  if (!newSessionName.value.trim()) return
+  
+  const newSession = {
+    id: Date.now().toString(),
+    name: newSessionName.value.trim(),
+    date: new Date().toLocaleString(),
+    status: 'in-progress',
+    instrumentCount: 0,
+    totalValue: 0,
+    instrumentData: {}
   }
-}
-
-function createOrLoadSession() {
-  if (selectedSessionId.value) {
-    const session = sessions.value.find(s => s.id === selectedSessionId.value)
-    if (session) {
-      activeSession.value = session
-      localStorage.setItem('active_session', JSON.stringify(session))
-    }
-  } else if (newSessionName.value.trim()) {
-    const newSession = {
-      id: Date.now().toString(),
-      name: newSessionName.value.trim(),
-      date: new Date().toLocaleString(),
-      status: 'in-progress',
-      instrumentCount: 0,
-      instrumentData: {}
-    }
-    sessions.value.push(newSession)
-    activeSession.value = newSession
-    selectedSessionId.value = newSession.id
-    localStorage.setItem('sessions_list', JSON.stringify(sessions.value))
-    localStorage.setItem('active_session', JSON.stringify(newSession))
-    newSessionName.value = ''
-  }
-}
-
-function clearSessionSelection() {
-  selectedSessionId.value = ''
+  sessions.value.unshift(newSession)
+  activeSession.value = newSession
+  localStorage.setItem('sessions_list', JSON.stringify(sessions.value))
+  localStorage.setItem('active_session', JSON.stringify(newSession))
   newSessionName.value = ''
-  activeSession.value = null
-  localStorage.removeItem('active_session')
 }
 
-function deleteCurrentSession() {
-  if (activeSession.value) {
-    sessions.value = sessions.value.filter(s => s.id !== activeSession.value.id)
+function deleteSession(sessionId) {
+  if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
+    sessions.value = sessions.value.filter(s => s.id !== sessionId)
     localStorage.setItem('sessions_list', JSON.stringify(sessions.value))
-    clearSessionSelection()
+    
+    if (activeSession.value && activeSession.value.id === sessionId) {
+      activeSession.value = null
+      localStorage.removeItem('active_session')
+    }
   }
 }
 
 function goToInstrument(instrumentId) {
-  if (!activeSession.value) return
+  if (!activeSession.value) {
+    alert('Please create or select a session first')
+    return
+  }
   router.push(`/instrument/${instrumentId}`)
 }
 
 function loadSessions() {
   const saved = localStorage.getItem('sessions_list')
-  if (saved) sessions.value = JSON.parse(saved)
+  if (saved) {
+    sessions.value = JSON.parse(saved)
+  } else {
+    sessions.value = []
+  }
+  
   const active = localStorage.getItem('active_session')
-  if (active) activeSession.value = JSON.parse(active)
+  if (active) {
+    activeSession.value = JSON.parse(active)
+  }
 }
 
 onMounted(() => {
@@ -303,8 +344,8 @@ onMounted(() => {
 }
 
 .navbar-logo {
-  width: 180px;
-  height: 200px;
+  width: 45px;
+  height: 45px;
   object-fit: contain;
   border-radius: 8px;
 }
@@ -344,12 +385,27 @@ onMounted(() => {
   font-weight: 700;
 }
 
+.session-management-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 30px;
+}
+
+.recent-sessions-card,
+.create-session-card {
+  width: 100%;
+}
+
 .session-card {
   border-radius: 16px;
   background: white;
-  margin-bottom: 30px;
   overflow: hidden;
   position: relative;
+  height: 100%;
+  min-height: 440px;
+  display: flex;
+  flex-direction: column;
 }
 
 .session-card::before {
@@ -364,67 +420,285 @@ onMounted(() => {
 
 .card-title {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px 0 18px;
+}
+
+.title-left {
+  display: flex;
   align-items: center;
   gap: 8px;
   color: #0B2044;
-  padding: 20px 24px 0 24px;
+  font-size: 15px;
+  font-weight: 600;
 }
 
-.session-controls {
+.title-right {
   display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-  padding: 20px;
+  align-items: center;
 }
 
-.session-selector {
-  flex: 2;
-  min-width: 250px;
+.session-count {
+  background: #e8ecf1;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  color: #0B2044;
 }
 
-.session-selector label {
-  display: block;
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 5px;
-}
-
-.session-select, .session-input {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid #ddd;
+.search-bar {
+  display: flex;
+  align-items: center;
+  background: #f5f5f5;
   border-radius: 8px;
+  padding: 5px 10px;
+  margin: 10px 16px;
+  border: 1px solid #e0e0e0;
+  transition: all 0.2s;
 }
 
-.session-actions {
+.search-bar:focus-within {
+  border-color: #0B2044;
+  background: white;
+}
+
+.search-icon {
+  color: #999;
+  margin-right: 6px;
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 12px;
+}
+
+.clear-search {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #999;
   display: flex;
-  gap: 10px;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+}
+
+.clear-search:hover {
+  color: #f44336;
+}
+
+.sessions-list-container {
+  min-height: 220px;
+}
+
+.sessions-list {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0 12px 8px 12px;
+}
+
+.sessions-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sessions-list::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 4px;
+}
+
+.sessions-list::-webkit-scrollbar-thumb {
+  background: #0B2044;
+  border-radius: 4px;
+}
+
+.session-row-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 3px;
+  background: #f8f9ff;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  border: 1px solid transparent;
+}
+
+.session-row-item:hover {
+  background: white;
+  border-color: #e0e0e0;
+  transform: translateX(3px);
+}
+
+.session-row-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.session-row-info {
+  flex: 2;
+  min-width: 90px;
+}
+
+.session-row-name {
+  font-weight: 600;
+  color: #0B2044;
+  font-size: 12px;
+  margin-bottom: 1px;
+}
+
+.session-row-meta {
+  font-size: 9px;
+  color: #999;
+}
+
+.session-row-stats {
+  flex: 2;
+  display: flex;
+  gap: 6px;
+  font-size: 9px;
+  color: #666;
+}
+
+.session-row-value {
+  font-weight: 600;
+  color: #4CAF50;
+}
+
+.session-row-status {
+  width: 24px;
+  text-align: center;
+  padding: 2px 0;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.session-row-status.in-progress {
+  background: #FFF3E0;
+  color: #FF9800;
+}
+
+.session-row-status.completed {
+  background: #E8F5E9;
+  color: #4CAF50;
+}
+
+.row-delete-btn {
+  background: #f44336;
+  border: none;
+  color: white;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.session-row-item:hover .row-delete-btn {
+  opacity: 1;
+}
+
+.row-delete-btn:hover {
+  background: #d32f2f;
+  transform: scale(1.1);
+}
+
+.empty-sessions-list {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+}
+
+.empty-sessions-list p {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.empty-hint {
+  font-size: 10px;
+  color: #bbb;
+  margin-top: 4px;
+}
+
+.create-session-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.create-session-input {
+  padding: 14px 16px 6px 16px;
+}
+
+.session-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.session-input:focus {
+  outline: none;
+  border-color: #0B2044;
+  box-shadow: 0 0 0 2px rgba(11, 32, 68, 0.1);
+}
+
+.create-session-action {
+  padding: 0 16px 12px 16px;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.active-session-container {
+  margin: 0 16px;
 }
 
 .active-session-info {
-  margin: 0 20px 20px;
-  padding: 15px;
+  padding: 8px 10px;
   background: #e8f5e9;
-  border-radius: 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
 }
 
 .session-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 3px;
+  flex-wrap: wrap;
 }
 
 .session-name-display {
-  font-weight: 700;
+  font-weight: 600;
   color: #0B2044;
+  font-size: 11px;
 }
 
 .session-status-badge {
-  padding: 2px 10px;
-  border-radius: 20px;
-  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 8px;
 }
 
 .session-status-badge.in-progress {
@@ -439,20 +713,66 @@ onMounted(() => {
 
 .session-details {
   display: flex;
-  gap: 20px;
-  font-size: 12px;
+  gap: 10px;
+  font-size: 9px;
   color: #555;
 }
 
 .no-session-warning {
-  margin: 0 20px 20px;
-  padding: 12px;
+  padding: 10px 10px;
   background: #FFF3E0;
   border-radius: 8px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   color: #E65100;
+  font-size: 10px;
+  margin-bottom: 12px;
+}
+
+.flex-spacer {
+  flex: 1;
+  min-height: 10px;
+}
+
+.session-stats-summary {
+  background: #f8f9ff;
+  margin: 0 16px 16px 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(11, 32, 68, 0.08);
+}
+
+.stats-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #0B2044;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-number {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0B2044;
+}
+
+.stat-label {
+  font-size: 9px;
+  color: #888;
+  margin-top: 2px;
 }
 
 .kpis-row {
@@ -465,13 +785,15 @@ onMounted(() => {
 .kpi-card {
   background: white;
   border-radius: 20px;
-  padding: 24px;
+  padding: 18px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   position: relative;
   overflow: hidden;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
 }
 
 .kpi-top-bar {
@@ -480,27 +802,28 @@ onMounted(() => {
   left: 0;
   right: 0;
   height: 4px;
-  background: linear-gradient(90deg, #0B2044, #1E88E5);
-  transform: scaleX(0);
-  transition: transform 0.3s;
-}
-
-.kpi-card:hover .kpi-top-bar {
+  background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50);
   transform: scaleX(1);
 }
 
 .kpi-card:hover {
   transform: translateY(-5px);
-  box-shadow: 0 12px 28px rgba(0,0,0,0.15);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15);
 }
 
 .kpi-icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 18px;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.3s ease;
+}
+
+.kpi-card:hover .kpi-icon {
+  transform: scale(1.05);
 }
 
 .kpi-info {
@@ -508,13 +831,13 @@ onMounted(() => {
 }
 
 .kpi-value {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 800;
   color: #0B2044;
 }
 
 .kpi-title {
-  font-size: 12px;
+  font-size: 10px;
   color: #888;
 }
 
@@ -541,9 +864,9 @@ onMounted(() => {
 .instrument-card {
   background: white;
   border-radius: 20px;
-  padding: 20px;
+  padding: 18px;
   display: flex;
-  gap: 16px;
+  gap: 14px;
   cursor: pointer;
   position: relative;
   transition: all 0.3s;
@@ -560,9 +883,9 @@ onMounted(() => {
 }
 
 .instrument-icon {
-  width: 60px;
-  height: 60px;
-  border-radius: 16px;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -574,12 +897,13 @@ onMounted(() => {
 
 .instrument-info h3 {
   color: #0B2044;
-  margin-bottom: 5px;
+  font-size: 15px;
+  margin-bottom: 4px;
 }
 
 .instrument-info p {
   color: #888;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .lock-overlay {
@@ -589,92 +913,33 @@ onMounted(() => {
   transform: translate(-50%, -50%);
   background: rgba(0,0,0,0.6);
   border-radius: 50%;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-}
-
-.sessions-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-
-.session-card {
-  background: white;
-  border-radius: 16px;
-  padding: 16px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.session-card:hover {
-  transform: translateX(5px);
-  box-shadow: 0 8px 20px rgba(0,0,0,0.12);
-}
-
-.session-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.session-info {
-  flex: 1;
-}
-
-.session-name {
-  font-weight: 700;
-  color: #0B2044;
-}
-
-.session-meta {
-  font-size: 11px;
-  color: #999;
-}
-
-.session-status {
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.session-status.in-progress {
-  background: #FFF3E0;
-  color: #FF9800;
-}
-
-.session-status.completed {
-  background: #E8F5E9;
-  color: #4CAF50;
-}
-
-.empty-sessions {
-  grid-column: span 3;
-  text-align: center;
-  padding: 40px;
-  background: white;
-  border-radius: 20px;
-  color: #999;
 }
 
 .btn-primary {
   background: linear-gradient(135deg, #0B2044, #1E88E5);
   color: white;
   border: none;
-  padding: 10px 20px;
+  padding: 8px 14px;
   border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all 0.3s;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(11, 32, 68, 0.3);
 }
 
 .btn-primary:disabled {
@@ -682,31 +947,20 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-.btn-secondary {
-  background: white;
-  color: #0B2044;
-  border: 1px solid #0B2044;
-  padding: 10px 20px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.btn-danger {
-  background: #f44336;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
 @media (max-width: 900px) {
   .dashboard { padding: 20px; }
-  .kpis-row, .instruments-row, .sessions-row {
+  .session-management-row {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .kpis-row, .instruments-row {
     grid-template-columns: 1fr;
   }
-  .empty-sessions {
-    grid-column: span 1;
+  .session-row-stats {
+    display: none;
+  }
+  .row-delete-btn {
+    opacity: 1;
   }
 }
 </style>

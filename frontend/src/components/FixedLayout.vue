@@ -22,19 +22,20 @@
 
         <div class="nav-group">
           <div class="nav-group-title">REPORTS</div>
-          <div class="nav-link" @click="openReportDialog">
+          <div class="nav-link" @click="goToReportsPage">
             <v-icon class="nav-icon">mdi-file-pdf</v-icon>
             <span class="nav-label">Generate Report</span>
           </div>
         </div>
 
-        <div v-if="isOnInstrumentPage" class="nav-group">
+        <!-- Instrument Tools - ALWAYS VISIBLE -->
+        <div class="nav-group">
           <div class="nav-group-title">INSTRUMENT TOOLS</div>
           <div 
             v-for="item in instrumentNav" 
             :key="item.tab"
             class="nav-link"
-            :class="{ active: currentTab === item.tab }"
+            :class="{ active: currentTab === item.tab && isOnInstrumentPage }"
             @click="changeInstrumentTab(item.tab)"
           >
             <v-icon class="nav-icon">{{ item.icon }}</v-icon>
@@ -48,39 +49,16 @@
     <main class="main-content">
       <slot />
     </main>
-
-    <!-- Report Dialog -->
-    <v-dialog v-model="showReportDialog" max-width="500px">
-      <v-card>
-        <v-card-title>Generate Report</v-card-title>
-        <v-card-text>
-          <div class="report-type-selector">
-            <label>Select Report Type:</label>
-            <select v-model="reportType" class="report-select">
-              <option value="current">Current Instrument Report</option>
-              <option value="session">Full Session Report</option>
-            </select>
-          </div>
-        </v-card-text>
-        <v-card-actions>
-          <button class="btn-secondary" @click="showReportDialog = false">Cancel</button>
-          <button class="btn-primary" @click="generateAndNavigate">Generate</button>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import TopNavbar from '@/components/TopNavbar.vue'
 
 const router = useRouter()
 const route = useRoute()
-
-const showReportDialog = ref(false)
-const reportType = ref('current')
 
 const mainNav = [
   { name: 'Dashboard', path: '/dashboard', icon: 'mdi-view-dashboard' },
@@ -95,7 +73,8 @@ const instrumentNav = [
   { tab: 'summary', name: 'Instrument Summary', icon: 'mdi-file-document' }
 ]
 
-const isOnInstrumentPage = computed(() => route.path.includes('/instrument/') || route.path.includes('/summary'))
+// Check if on an instrument page
+const isOnInstrumentPage = computed(() => route.path.includes('/instrument/'))
 const currentTab = computed(() => route.query.tab || 'upload')
 
 function isActive(path) {
@@ -106,27 +85,37 @@ function navigateTo(path) {
   router.push(path)
 }
 
+function goToReportsPage() {
+  router.push('/reports')
+}
+
 function changeInstrumentTab(tab) {
-  router.push({ path: route.path, query: { tab } })
+  // If on instrument page, change tab
+  if (isOnInstrumentPage.value) {
+    router.push({ path: route.path, query: { tab } })
+  } else {
+    // If not on instrument page, navigate to the last used instrument or default to money-market
+    const lastInstrument = localStorage.getItem('last_instrument') || '/instrument/money-market'
+    router.push({ path: lastInstrument, query: { tab } })
+  }
 }
 
 function getTabStatus(tab) {
-  const instrument = route.path.split('/').pop()
+  // Get current instrument from route or localStorage
+  let instrument = route.path.split('/').pop()
+  if (instrument === 'dashboard' || instrument === 'summary' || instrument === 'reports') {
+    instrument = localStorage.getItem('last_instrument')?.split('/').pop() || 'money-market'
+  }
   const statuses = JSON.parse(localStorage.getItem(`instrument_${instrument}_status`) || '{}')
   return statuses[tab] || false
 }
 
-function openReportDialog() {
-  showReportDialog.value = true
-}
-
-function generateAndNavigate() {
-  const session = JSON.parse(localStorage.getItem('active_session') || '{}')
-  localStorage.setItem('report_type', reportType.value)
-  localStorage.setItem('report_session_id', session.id || '')
-  showReportDialog.value = false
-  router.push('/reports')
-}
+// Save last instrument when on instrument page
+watch(() => route.path, (newPath) => {
+  if (newPath.includes('/instrument/')) {
+    localStorage.setItem('last_instrument', newPath)
+  }
+})
 </script>
 
 <style scoped>
@@ -135,14 +124,14 @@ function generateAndNavigate() {
   min-height: 100vh;
 }
 
-/* Sidebar */
+/* Sidebar - Below top navbar */
 .sidebar {
   width: 260px;
   background: linear-gradient(180deg, #0B2044 0%, #0e2a54 100%);
   color: white;
   position: fixed;
-  height: calc(100vh - 65px);
-  top: 65px;
+  height: calc(100vh - 60px);
+  top: 60px;
   left: 0;
   overflow-y: auto;
   box-shadow: 2px 0 20px rgba(0, 0, 0, 0.08);
@@ -238,52 +227,12 @@ function generateAndNavigate() {
   background: #f5f7fa;
   min-height: 100vh;
   width: calc(100% - 260px);
-  padding-top: 65px;
-}
-
-/* Report Dialog */
-.report-type-selector {
-  padding: 10px 0;
-}
-
-.report-type-selector label {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  color: #0B2044;
-  margin-bottom: 10px;
-}
-
-.report-select {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 14px;
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #0B2044, #1E88E5);
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.btn-secondary {
-  background: white;
-  color: #0B2044;
-  border: 1px solid #ddd;
-  padding: 10px 20px;
-  border-radius: 8px;
-  cursor: pointer;
-  margin-right: 10px;
+  padding-top: 60px;
 }
 
 @media (max-width: 768px) {
   .sidebar {
-    width: 70px;
+    width: 80px;
     top: 60px;
     height: calc(100vh - 60px);
   }
@@ -298,8 +247,8 @@ function generateAndNavigate() {
     margin: 0;
   }
   .main-content {
-    margin-left: 70px;
-    width: calc(100% - 70px);
+    margin-left: 80px;
+    width: calc(100% - 80px);
   }
 }
 </style>
