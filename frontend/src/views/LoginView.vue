@@ -151,35 +151,31 @@ const goToRegister = () => {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   border-radius: 20px;
-  padding: 30px 35px;
+  padding: 25px 30px;
   width: 100%;
-  max-width: 380px;
+  max-width: 360px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
   position: relative;
   z-index: 1;
 }
 
-/* Logo Section - No padding, no spacing */
+/* Logo Section - Perfect fit */
 .logo-section {
   text-align: center;
-  margin-bottom: 5px;
-  line-height: 0;
+  margin-bottom: 20px;
 }
 
 .login-logo {
-  width: 180px;
-  height: 200px;
+  width: 200px;
+  height: 60px;
   object-fit: contain;
-  object-position: center;
   display: block;
   margin: 0 auto;
-  /* Remove any default image spacing */
-  vertical-align: middle;
 }
 
 .form-group {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .input-wrapper {
@@ -191,14 +187,14 @@ const goToRegister = () => {
 .input-icon {
   position: absolute;
   left: 12px;
-  font-size: 16px;
+  font-size: 15px;
   z-index: 2;
 }
 
 .form-input {
   width: 100%;
-  padding: 12px 12px 12px 38px;
-  border: 2px solid #e0e0e0;
+  padding: 11px 11px 11px 36px;
+  border: 1.5px solid #e0e0e0;
   border-radius: 10px;
   font-size: 14px;
   background: rgba(255, 255, 255, 0.9);
@@ -209,7 +205,7 @@ const goToRegister = () => {
 .form-input:focus {
   border-color: #4a90e2;
   background: white;
-  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.1);
 }
 
 .form-input::placeholder {
@@ -221,7 +217,7 @@ const goToRegister = () => {
   right: 12px;
   background: none;
   border: none;
-  font-size: 16px;
+  font-size: 15px;
   cursor: pointer;
   color: #666;
   transition: color 0.3s ease;
@@ -235,8 +231,8 @@ const goToRegister = () => {
 
 .forgot-password {
   position: absolute;
-  right: 45px;
-  font-size: 11px;
+  right: 42px;
+  font-size: 10px;
   color: #4a90e2;
   text-decoration: none;
   font-weight: 500;
@@ -252,14 +248,14 @@ const goToRegister = () => {
 .form-options {
   display: flex;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .checkbox-wrapper {
   display: flex;
   align-items: center;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   color: #666;
 }
 
@@ -268,11 +264,11 @@ const goToRegister = () => {
 }
 
 .checkmark {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   border: 2px solid #e0e0e0;
-  border-radius: 4px;
-  margin-right: 8px;
+  border-radius: 3px;
+  margin-right: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -288,7 +284,7 @@ const goToRegister = () => {
 .checkbox-wrapper input[type="checkbox"]:checked + .checkmark::after {
   content: '✓';
   color: white;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: bold;
 }
 
@@ -298,24 +294,24 @@ const goToRegister = () => {
 
 .login-button {
   width: 100%;
-  padding: 12px;
+  padding: 11px;
   background: linear-gradient(135deg, #4a90e2, #357abd);
   color: white;
   border: none;
   border-radius: 10px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
   text-transform: uppercase;
   letter-spacing: 1px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .login-button:hover:not(:disabled) {
   background: linear-gradient(135deg, #357abd, #2968a3);
-  transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(74, 144, 226, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
 }
 
 .login-button:disabled {
@@ -326,7 +322,7 @@ const goToRegister = () => {
 
 .register-link {
   text-align: center;
-  font-size: 13px;
+  font-size: 12px;
   color: #666;
 }
 
@@ -345,11 +341,11 @@ const goToRegister = () => {
 .error-message {
   background: rgba(244, 67, 54, 0.1);
   color: #f44336;
-  padding: 10px;
-  border-radius: 8px;
-  font-size: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 11px;
   text-align: center;
-  margin-top: 15px;
+  margin-top: 12px;
   border: 1px solid rgba(244, 67, 54, 0.2);
 }
 
@@ -357,17 +353,18 @@ const goToRegister = () => {
 @media (max-width: 480px) {
   .login-form {
     margin: 20px;
-    padding: 25px 20px;
+    padding: 20px;
+    max-width: 320px;
   }
   
   .login-logo {
-    width: 140px;
-    height: 160px;
+    width: 100px;
+    height: 100px;
   }
   
   .forgot-password {
-    right: 40px;
-    font-size: 10px;
+    right: 38px;
+    font-size: 9px;
   }
 }
 </style>

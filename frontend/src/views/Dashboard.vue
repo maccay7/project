@@ -344,8 +344,8 @@ onMounted(() => {
 }
 
 .navbar-logo {
-  width: 45px;
-  height: 45px;
+  width: 180px;
+  height: 200px;
   object-fit: contain;
   border-radius: 8px;
 }

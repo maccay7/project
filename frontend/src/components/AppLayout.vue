@@ -163,7 +163,7 @@ const handleLogout = () => {
 
 /* Logo Section Styles */
 .logo-section {
-  padding: 24px 16px !important;
+  padding: 10px 10px !important;
   text-align: center !important;
   background: none !important;
   border: none !important;
