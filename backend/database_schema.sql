@@ -170,3 +170,20 @@ INSERT IGNORE INTO users (email, password_hash, first_name, last_name, role) VAL
 -- Insert default user preferences
 INSERT IGNORE INTO user_preferences (user_id, language, timezone, date_format, currency, email_notifications, push_notifications, weekly_reports, system_alerts) VALUES
 (1, 'English', 'GMT+2', 'DD/MM/YYYY', 'USD', TRUE, FALSE, TRUE, TRUE);
+
+-- Datasets Table (stores uploaded datasets and metadata)
+CREATE TABLE IF NOT EXISTS datasets (
+    id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    file_base64 LONGTEXT,
+    data JSON,
+    headers JSON,
+    instrument_type VARCHAR(64),
+    upload_status ENUM('uploaded','processed','deleted') DEFAULT 'uploaded',
+    done BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX (instrument_type),
+    INDEX (done),
+    INDEX (created_at)
+);
