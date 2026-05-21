@@ -9,6 +9,18 @@
         <p>Select report type and generate detailed analysis</p>
       </div>
 
+      <div class="report-actions-row">
+        <v-btn color="#0B2A44" @click="loadDatasetPreview">
+          <v-icon left>mdi-eye</v-icon> Preview Dataset
+        </v-btn>
+        <v-btn color="#1E88E5" @click="generatePreview">
+          <v-icon left>mdi-file-document-outline</v-icon> Refresh Report
+        </v-btn>
+        <v-btn color="#0B2A44" @click="markDone">
+          <v-icon left>mdi-check-circle</v-icon> Done
+        </v-btn>
+      </div>
+
       <div class="report-options">
         <div class="option-card" @click="selectReportType('current')">
           <div class="option-icon" :class="{ active: selectedType === 'current' }">
@@ -24,6 +36,24 @@
           </div>
           <h3>Full Session</h3>
           <p>Generate report for all instruments in the session</p>
+        </div>
+      </div>
+
+      <div class="dataset-preview" v-if="showDatasetPreview">
+        <h3>Excel Dataset Preview</h3>
+        <div class="dataset-info-row">
+          <span><strong>Dataset:</strong> {{ dataset?.name || 'Not loaded' }}</span>
+          <span><strong>Instrument:</strong> {{ dataset?.instrument_type || 'Unknown' }}</span>
+        </div>
+        <div class="preview-content" v-if="dataset && dataset.data && dataset.data.length">
+          <ExcelViewer
+            :data="dataset.data"
+            :headers="Object.keys(dataset.data[0] || {})"
+            @data-update="handleDatasetUpdate"
+          />
+        </div>
+        <div v-else class="preview-empty">
+          <p>No dataset loaded yet. Use Preview Dataset to load the latest upload.</p>
         </div>
       </div>
 
@@ -44,12 +74,16 @@
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
+import ExcelViewer from '@/components/ExcelViewer.vue'
+import { datasetAPI } from '@/services/api'
 
 const router = useRouter()
 const route = useRoute()
 
 const selectedType = ref('current')
 const previewData = ref(null)
+const dataset = ref(null)
+const showDatasetPreview = ref(false)
 
 function selectReportType(type) {
   selectedType.value = type
@@ -58,24 +92,26 @@ function selectReportType(type) {
 
 function generatePreview() {
   const reportType = localStorage.getItem('report_type') || selectedType.value
-  const sessionId = localStorage.getItem('report_session_id')
   const session = JSON.parse(localStorage.getItem('active_session') || '{}')
-  
+
   if (reportType === 'current') {
-    const instrument = route.query.instrument || 'current'
     previewData.value = {
       type: 'Current Instrument Report',
       date: new Date().toLocaleString(),
-      session: session.name,
-      data: { message: 'Instrument data will appear here' }
+      session: session.name || 'Current Session',
+      instrument: route.query.instrument || dataset.value?.instrument_type || 'Selected Instrument',
+      rows: dataset.value?.data?.length || 0,
+      columns: dataset.value?.data ? Object.keys(dataset.value.data[0] || {}).length : 0,
+      sample: dataset.value?.data?.slice(0, 3) || []
     }
   } else {
     previewData.value = {
       type: 'Full Session Report',
       date: new Date().toLocaleString(),
-      session: session.name,
+      session: session.name || 'Current Session',
       instruments: session.instrumentData || {},
-      totalValue: session.totalValue || 0
+      totalRows: dataset.value?.data?.length || 0,
+      summary: dataset.value ? 'Loaded dataset ready for analysis' : 'No dataset loaded'
     }
   }
 }
@@ -88,6 +124,52 @@ function downloadReport() {
   a.download = `report_${Date.now()}.json`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function handleDatasetUpdate(updatedData) {
+  if (!dataset.value) return
+  dataset.value.data = updatedData
+}
+
+async function loadDatasetPreview() {
+  showDatasetPreview.value = true
+  try {
+    const current = JSON.parse(localStorage.getItem('currentDataset') || '{}')
+    if (current.id) {
+      const res = await datasetAPI.load(current.id)
+      if (res && res.success) {
+        dataset.value = res.data
+        generatePreview()
+        return
+      }
+    }
+    if (current.data) {
+      dataset.value = current
+      generatePreview()
+      return
+    }
+    const stored = JSON.parse(localStorage.getItem('cleanedData') || localStorage.getItem('currentDataset') || '{}')
+    if (stored?.data) {
+      dataset.value = stored
+      generatePreview()
+    }
+  } catch (err) {
+    console.error('Load dataset preview error', err)
+  }
+}
+
+async function markDone() {
+  try {
+    const current = JSON.parse(localStorage.getItem('currentDataset') || '{}')
+    const id = current.id
+    if (!id) return alert('No current dataset selected')
+    const res = await datasetAPI.markDone(id)
+    if (res && res.success) {
+      alert('Dataset marked done — it will no longer be available for processing')
+    } else {
+      alert('Failed to mark dataset')
+    }
+  } catch (err) { console.error(err); alert('Error marking dataset') }
 }
 
 function goBack() {

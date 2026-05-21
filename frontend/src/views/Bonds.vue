@@ -55,9 +55,11 @@
                 <span>{{ uploadedFile.name }}</span>
                 <span class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
+                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="rawData.length === 0">
+                  <v-icon>mdi-eye</v-icon> Review Excel
+                </button>
               </div>
 
-              <!-- Excel Preview -->
               <div v-if="rawData.length > 0" class="excel-preview-section">
                 <h4>File Preview:</h4>
                 <div class="preview-toolbar">
@@ -66,6 +68,9 @@
                     <button @click="previewStartRow = Math.max(0, previewStartRow - 10)" :disabled="previewStartRow === 0" class="preview-btn">← Previous</button>
                     <span>Rows {{ previewStartRow + 1 }} - {{ Math.min(previewEndRow, rawData.length) }}</span>
                     <button @click="previewStartRow = Math.min(rawData.length - previewRows, previewStartRow + 10)" :disabled="previewEndRow >= rawData.length" class="preview-btn">Next →</button>
+                    <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">
+                      <v-icon size="16">mdi-eye</v-icon> Full Screen
+                    </button>
                   </div>
                 </div>
                 <div class="table-wrapper">
@@ -183,6 +188,9 @@
                   <button class="btn-primary" @click="cleanData" :disabled="cleanedData.length > 0">
                     <v-icon>mdi-broom</v-icon> Auto-Clean Data
                   </button>
+                  <button class="btn-review-excel" @click="openExcelReview(rawData, 'Raw Data (Before Cleaning)')" :disabled="rawData.length === 0">
+                    <v-icon>mdi-eye</v-icon> Review Raw Data
+                  </button>
                 </div>
 
                 <div v-if="cleanedData.length > 0" class="preview-section">
@@ -198,6 +206,9 @@
                       <button @click="cleanPreviewStartRow = Math.max(0, cleanPreviewStartRow - 10)" :disabled="cleanPreviewStartRow === 0" class="preview-btn">← Previous</button>
                       <span>Rows {{ cleanPreviewStartRow + 1 }} - {{ Math.min(cleanPreviewEndRow, cleanedData.length) }}</span>
                       <button @click="cleanPreviewStartRow = Math.min(cleanedData.length - cleanPreviewRows, cleanPreviewStartRow + 10)" :disabled="cleanPreviewEndRow >= cleanedData.length" class="preview-btn">Next →</button>
+                      <button class="btn-review-excel-small" @click="openExcelReview(cleanedData, 'Cleaned Data')">
+                        <v-icon size="16">mdi-eye</v-icon> Full Screen
+                      </button>
                     </div>
                   </div>
                   <div class="table-wrapper">
@@ -346,7 +357,12 @@
                   </div>
                   
                   <div class="report-data-preview">
-                    <h5>Data Preview (First 5 rows)</h5>
+                    <div class="preview-toolbar">
+                      <h5>Data Preview</h5>
+                      <button class="btn-review-excel-small" @click="openExcelReview(cleanedData, 'Report Data')" :disabled="cleanedData.length === 0">
+                        <v-icon size="16">mdi-eye</v-icon> Review Full Data
+                      </button>
+                    </div>
                     <div class="table-wrapper">
                       <table class="data-table">
                         <thead>
@@ -361,7 +377,7 @@
                             <td v-for="col in reportPreviewColumns" :key="col">{{ formatCellValue(row[col]) }}</td>
                           </tr>
                         </tbody>
-                       </table>
+                      </table>
                     </div>
                   </div>
                 </div>
@@ -384,6 +400,59 @@
         </div>
       </div>
     </div>
+
+    <!-- Excel Review Dialog -->
+    <v-dialog v-model="showExcelDialog" max-width="90%" fullscreen hide-overlay>
+      <v-card>
+        <v-card-title class="excel-dialog-title">
+          <div class="dialog-title-content">
+            <v-icon large>mdi-file-excel</v-icon>
+            <span>{{ excelDialogTitle }} - Excel Viewer</span>
+          </div>
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="closeExcelDialog">
+            <v-icon>mdi-close</v-icon>
+          </button>
+        </v-card-title>
+        <v-card-text class="excel-dialog-content">
+          <div class="excel-full-view">
+            <div class="excel-toolbar-full">
+              <div class="excel-info">
+                <span>{{ excelData.length }} rows × {{ excelColumns.length }} columns</span>
+              </div>
+              <div class="excel-export-buttons">
+                <button class="btn-excel-export" @click="exportToCSV">
+                  <v-icon size="16">mdi-file-delimited</v-icon> Export CSV
+                </button>
+                <button class="btn-excel-export" @click="exportToJSON">
+                  <v-icon size="16">mdi-code-json</v-icon> Export JSON
+                </button>
+              </div>
+            </div>
+            <div class="excel-full-table-wrapper">
+              <table class="excel-full-table">
+                <thead>
+                  <tr>
+                    <th class="sticky-col">#</th>
+                    <th v-for="col in excelColumns" :key="col" class="sticky-header">{{ col }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, idx) in excelData" :key="idx">
+                    <td class="sticky-col">{{ idx + 1 }}</td>
+                    <td v-for="col in excelColumns" :key="col">{{ formatCellValue(row[col]) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="closeExcelDialog">Close</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </FixedLayout>
 </template>
 
@@ -395,6 +464,12 @@ import * as XLSX from 'xlsx'
 
 const router = useRouter()
 const route = useRoute()
+
+// Excel Dialog State
+const showExcelDialog = ref(false)
+const excelData = ref([])
+const excelColumns = ref([])
+const excelDialogTitle = ref('')
 
 // Instrument type from route
 const instrumentType = computed(() => route.params.type || route.path.split('/').pop())
@@ -551,6 +626,55 @@ function formatCellValue(value) {
   if (typeof value === 'number') return value.toFixed(2)
   if (typeof value === 'string' && value.length > 30) return value.substring(0, 27) + '...'
   return value
+}
+
+// Excel Review Functions
+function openExcelReview(data, title) {
+  if (!data || data.length === 0) {
+    alert('No data to review. Please upload a file first.')
+    return
+  }
+  excelData.value = data
+  excelColumns.value = Object.keys(data[0] || {})
+  excelDialogTitle.value = title
+  showExcelDialog.value = true
+}
+
+function closeExcelDialog() {
+  showExcelDialog.value = false
+  excelData.value = []
+  excelColumns.value = []
+}
+
+function exportToCSV() {
+  if (excelData.value.length === 0) return
+  
+  const headers = excelColumns.value
+  const rows = excelData.value.map(row => 
+    headers.map(h => `"${String(row[h] || '').replace(/"/g, '""')}"`).join(',')
+  )
+  const csvContent = [headers.join(','), ...rows].join('\n')
+  
+  const blob = new Blob([csvContent], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${excelDialogTitle.value.toLowerCase().replace(/ /g, '_')}_${Date.now()}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportToJSON() {
+  if (excelData.value.length === 0) return
+  
+  const jsonContent = JSON.stringify(excelData.value, null, 2)
+  const blob = new Blob([jsonContent], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${excelDialogTitle.value.toLowerCase().replace(/ /g, '_')}_${Date.now()}.json`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 // Column matching functions
@@ -901,6 +1025,168 @@ onMounted(() => {
   font-size: 20px;
   cursor: pointer;
   color: #f44336;
+}
+
+/* Excel Review Button Styles */
+.btn-review-excel {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-left: 10px;
+  transition: all 0.2s;
+}
+
+.btn-review-excel:hover:not(:disabled) {
+  background: #45a049;
+  transform: translateY(-1px);
+}
+
+.btn-review-excel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-review-excel-small {
+  background: #2196F3;
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  transition: all 0.2s;
+}
+
+.btn-review-excel-small:hover {
+  background: #0b7dda;
+}
+
+/* Excel Dialog Styles */
+.excel-dialog-title {
+  background: #0B2044;
+  color: white;
+  padding: 16px 24px;
+}
+
+.dialog-title-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-close-dialog {
+  background: transparent;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.btn-close-dialog:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.excel-dialog-content {
+  padding: 0;
+  height: calc(100vh - 140px);
+}
+
+.excel-full-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.excel-toolbar-full {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.excel-info {
+  font-size: 13px;
+  color: #666;
+}
+
+.excel-export-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-excel-export {
+  background: white;
+  border: 1px solid #ddd;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.btn-excel-export:hover {
+  background: #0B2044;
+  color: white;
+  border-color: #0B2044;
+}
+
+.excel-full-table-wrapper {
+  flex: 1;
+  overflow: auto;
+}
+
+.excel-full-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.excel-full-table th,
+.excel-full-table td {
+  padding: 8px 12px;
+  border: 1px solid #e0e0e0;
+  text-align: left;
+}
+
+.excel-full-table th {
+  background: #f5f5f5;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.sticky-col {
+  position: sticky;
+  left: 0;
+  background: #f5f5f5;
+  font-weight: 600;
+}
+
+.sticky-header {
+  position: sticky;
+  top: 0;
+  background: #f5f5f5;
+  z-index: 10;
 }
 
 .excel-preview-section, .preview-toolbar {

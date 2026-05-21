@@ -57,33 +57,13 @@
                 <button class="remove-btn" @click="removeFile">×</button>
               </div>
 
-              <!-- Excel Preview -->
               <div v-if="rawData.length > 0" class="excel-preview-section">
                 <h4>File Preview:</h4>
-                <div class="preview-toolbar">
-                  <span class="preview-info">Showing {{ rawData.length }} rows × {{ Object.keys(rawData[0] || {}).length }} columns</span>
-                  <div class="preview-controls">
-                    <button @click="previewStartRow = Math.max(0, previewStartRow - 10)" :disabled="previewStartRow === 0" class="preview-btn">← Previous</button>
-                    <span>Rows {{ previewStartRow + 1 }} - {{ Math.min(previewEndRow, rawData.length) }}</span>
-                    <button @click="previewStartRow = Math.min(rawData.length - previewRows, previewStartRow + 10)" :disabled="previewEndRow >= rawData.length" class="preview-btn">Next →</button>
-                  </div>
-                </div>
-                <div class="table-wrapper">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th v-for="col in previewColumnsList" :key="col">{{ col }}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="(row, idx) in paginatedPreviewData" :key="idx">
-                        <td class="row-number">{{ previewStartRow + idx + 1 }}</td>
-                        <td v-for="col in previewColumnsList" :key="col">{{ formatCellValue(row[col]) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                <ExcelViewer
+                  :data="rawData"
+                  :headers="Object.keys(rawData[0] || {})"
+                  @data-update="handleRawDataUpdate"
+                />
               </div>
 
               <!-- Column Mapping Dialog -->
@@ -191,31 +171,11 @@
                     <p>✓ Removed {{ cleaningStats.removedRows }} invalid rows</p>
                     <p>✓ Fixed {{ cleaningStats.fixedMissing }} missing values</p>
                   </div>
-                  
-                  <div class="preview-toolbar">
-                    <span class="preview-info">Clean Data: {{ cleanedData.length }} rows</span>
-                    <div class="preview-controls">
-                      <button @click="cleanPreviewStartRow = Math.max(0, cleanPreviewStartRow - 10)" :disabled="cleanPreviewStartRow === 0" class="preview-btn">← Previous</button>
-                      <span>Rows {{ cleanPreviewStartRow + 1 }} - {{ Math.min(cleanPreviewEndRow, cleanedData.length) }}</span>
-                      <button @click="cleanPreviewStartRow = Math.min(cleanedData.length - cleanPreviewRows, cleanPreviewStartRow + 10)" :disabled="cleanPreviewEndRow >= cleanedData.length" class="preview-btn">Next →</button>
-                    </div>
-                  </div>
-                  <div class="table-wrapper">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th v-for="col in cleanPreviewColumnsList" :key="col">{{ col }}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr v-for="(row, idx) in paginatedCleanPreview" :key="idx">
-                          <td class="row-number">{{ cleanPreviewStartRow + idx + 1 }}</td>
-                          <td v-for="col in cleanPreviewColumnsList" :key="col">{{ formatCellValue(row[col]) }}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
+                  <ExcelViewer
+                    :data="cleanedData"
+                    :headers="Object.keys(cleanedData[0] || {})"
+                    @data-update="handleCleanedDataUpdate"
+                  />
                 </div>
 
                 <div class="navigation-buttons">
@@ -346,22 +306,15 @@
                   </div>
                   
                   <div class="report-data-preview">
-                    <h5>Data Preview (First 5 rows)</h5>
-                    <div class="table-wrapper">
-                      <table class="data-table">
-                        <thead>
-                          <tr>
-                            <th>#</th>
-                            <th v-for="col in reportPreviewColumns" :key="col">{{ col }}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr v-for="(row, idx) in reportDataPreview" :key="idx">
-                            <td>{{ idx + 1 }}</td>
-                            <td v-for="col in reportPreviewColumns" :key="col">{{ formatCellValue(row[col]) }}</td>
-                          </tr>
-                        </tbody>
-                       </table>
+                    <h5>Data Preview</h5>
+                    <ExcelViewer
+                      v-if="cleanedData.length > 0"
+                      :data="cleanedData"
+                      :headers="Object.keys(cleanedData[0] || {})"
+                      @data-update="handleCleanedDataUpdate"
+                    />
+                    <div v-else class="empty-state">
+                      <p>No cleaned data available for report. Please complete cleaning first.</p>
                     </div>
                   </div>
                 </div>
@@ -391,6 +344,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
+import ExcelViewer from '@/components/ExcelViewer.vue'
 import * as XLSX from 'xlsx'
 
 const router = useRouter()
@@ -545,6 +499,14 @@ function switchTab(tab) { activeTab.value = tab }
 function handleFileUpload(event) { uploadedFile.value = event.target.files[0] }
 function handleDrop(event) { uploadedFile.value = event.dataTransfer.files[0] }
 function removeFile() { uploadedFile.value = null; rawData.value = []; cleanedData.value = [] }
+
+function handleRawDataUpdate(updatedData) {
+  rawData.value = updatedData
+}
+
+function handleCleanedDataUpdate(updatedData) {
+  cleanedData.value = updatedData
+}
 
 function formatCellValue(value) {
   if (value === undefined || value === null) return '-'

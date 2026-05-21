@@ -13,6 +13,9 @@
         <v-btn color="#0B2A44" @click="loadData">
           <v-icon left>mdi-database</v-icon> Load Dataset
         </v-btn>
+        <v-btn color="#0B2A44" variant="outlined" @click="toggleDatasetPreview" :disabled="!dataset">
+          <v-icon left>mdi-eye</v-icon> Preview Dataset
+        </v-btn>
         <v-btn color="#0B2A44" variant="outlined" @click="resetOptions" :disabled="!dataset">
           <v-icon left>mdi-refresh</v-icon> Reset Options
         </v-btn>
@@ -62,13 +65,18 @@
             <v-icon class="title-icon">mdi-microsoft-excel</v-icon> Dataset Viewer (Editable)
           </v-card-title>
           <v-card-text>
-            <ExcelViewer
-              :file-base64="dataset?.file_base64"
-              :file-name="dataset?.name || ''"
-              :data="dataset?.data"
-              :headers="dataset?.data ? Object.keys(dataset.data[0] || {}) : []"
-              @data-update="handleDataUpdate"
-            />
+            <div v-if="showDatasetPreview">
+              <ExcelViewer
+                :file-base64="dataset?.file_base64"
+                :file-name="dataset?.name || ''"
+                :data="dataset?.data"
+                :headers="dataset?.data ? Object.keys(dataset.data[0] || {}) : []"
+                @data-update="handleDataUpdate"
+              />
+            </div>
+            <div v-else class="text-center pa-8">
+              <p class="text-grey">Click Preview Dataset to see the editable Excel view.</p>
+            </div>
           </v-card-text>
         </v-card>
 
@@ -175,6 +183,7 @@ const originalDataset = ref(null)
 const uploadId = ref(null)
 const results = ref(null)
 const isCleaning = ref(false)
+const showDatasetPreview = ref(false)
 const sheetNames = ref([])
 const selectedSheet = ref('')
 
@@ -202,34 +211,39 @@ const kpiStats = computed(() => {
   ]
 })
 
-// Load data from Upload page
-function loadData() {
+// Load data from Upload page using dataset API
+async function loadData() {
   try {
-    const saved = localStorage.getItem('saved-datasets')
-    if (saved) {
-      const datasets = JSON.parse(saved)
-      if (datasets.length) {
-        const last = datasets[datasets.length - 1]
-        dataset.value = {
-          name: last.name,
-          data: last.data || last.fullDataset,
-          instrumentType: last.instrumentType || 'Financial Instruments',
-          sheetNames: last.sheet_names || ['Sheet1']
-        }
-        originalDataset.value = JSON.parse(JSON.stringify(dataset.value))
-        uploadId.value = last.upload_id
-        sheetNames.value = last.sheet_names || ['Sheet1']
-        selectedSheet.value = sheetNames.value[0]
-        results.value = null
-        alert(`Loaded: ${last.name} (${dataset.value.data?.length || 0} rows)`)
-        return
-      }
+    const current = JSON.parse(localStorage.getItem('currentDataset') || '{}')
+    const id = current.id
+    if (!id) return alert('No dataset selected. Load from Upload page first.')
+    const res = await fetch('/api/load-dataset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: id }) })
+    const json = await res.json()
+    if (!json.success) return alert('Failed to load dataset')
+    const last = json.data
+    dataset.value = {
+      name: last.name,
+      data: last.data || [],
+      file_base64: last.file_base64,
+      instrumentType: last.instrument_type || 'Financial Instruments',
+      sheetNames: last.headers || ['Sheet1']
     }
-    alert('No dataset found. Please upload a file first.')
+    originalDataset.value = JSON.parse(JSON.stringify(dataset.value))
+    uploadId.value = last.id
+    sheetNames.value = last.headers || ['Sheet1']
+    selectedSheet.value = sheetNames.value[0]
+    results.value = null
+    alert(`Loaded: ${last.name} (${dataset.value.data?.length || 0} rows)`)
+    return
   } catch (err) {
     console.error(err)
     alert('Error loading dataset')
   }
+}
+
+// Toggle dataset preview
+function toggleDatasetPreview() {
+  showDatasetPreview.value = !showDatasetPreview.value
 }
 
 // Reset options
@@ -306,13 +320,32 @@ async function startCleaning() {
 }
 
 // Complete process
-function completeProcess() {
+async function completeProcess() {
   if (!dataset.value || !results.value) return alert('No results to save')
-  
-  localStorage.setItem('finalCleanedData', JSON.stringify({ ...dataset.value, cleaningResults: results.value, timestamp: new Date().toISOString() }))
-  localStorage.setItem('currentDataset', JSON.stringify({ ...dataset.value, cleaningResults: results.value }))
-  localStorage.setItem('cleanedData', JSON.stringify({ ...dataset.value, cleaningResults: results.value }))
-  alert('Process completed! Data saved.')
+  try {
+    const name = dataset.value.name || `cleaned_${Date.now()}`
+    const payload = {
+      name,
+      file_base64: dataset.value.file_base64 || '',
+      sheet_names: sheetNames.value || [],
+      upload_id: uploadId.value || null,
+      data: dataset.value.data || [],
+      headers: sheetNames.value || [],
+      instrument_type: dataset.value.instrumentType || null
+    }
+    const res = await fetch('/api/save-dataset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    const json = await res.json()
+    if (json.success) {
+      // remember current dataset for other pages
+      try { localStorage.setItem('currentDataset', JSON.stringify({ id: json.data.id, name: json.data.name })) } catch (e) {}
+      alert('Process completed! Cleaned data saved to datasets')
+    } else {
+      alert('Failed to save cleaned data')
+    }
+  } catch (err) {
+    console.error(err)
+    alert('Failed to save cleaned data')
+  }
 }
 
 // Go to calculations

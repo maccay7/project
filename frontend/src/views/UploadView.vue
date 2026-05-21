@@ -119,7 +119,7 @@ import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { dataAPI } from '../services/api'
+import { dataAPI, datasetAPI } from '../services/api'
 
 const router = useRouter()
 const fileInput = ref(null)
@@ -141,11 +141,11 @@ const hasFile = computed(() => uploadedFile.value !== null)
 const hasData = computed(() => dataset.value.length > 0 || fileBase64.value)
 
 // Load saved datasets
-function loadSavedDatasets() {
+async function loadSavedDatasets() {
   try {
-    const saved = localStorage.getItem('saved-datasets')
-    if (saved) savedDatasets.value = JSON.parse(saved)
-  } catch (err) { console.error(err) }
+    const res = await datasetAPI.getAll()
+    if (res && res.success) savedDatasets.value = res.data || []
+  } catch (err) { console.error('Load datasets error', err) }
 }
 
 // Save dataset
@@ -154,16 +154,23 @@ async function saveDataset(name) {
     alert('No data to save')
     return false
   }
-  const newDs = {
-    id: Date.now(), name, rows: dataset.value.length,
-    file_base64: fileBase64.value, data: dataset.value, headers: headers.value,
-    timestamp: new Date().toISOString()
-  }
-  const existing = savedDatasets.value.findIndex(d => d.name === name)
-  if (existing !== -1) savedDatasets.value[existing] = newDs
-  else savedDatasets.value.push(newDs)
-  localStorage.setItem('saved-datasets', JSON.stringify(savedDatasets.value))
-  return true
+  try {
+    const payload = {
+      name,
+      file_base64: fileBase64.value || '',
+      sheet_names: headers.value || [],
+      upload_id: null
+    }
+    if (dataset.value && dataset.value.length) payload.data = dataset.value
+    const res = await datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, dataset.value || null, headers.value || null)
+    if (res && res.success) {
+      // persist current dataset id for other pages (reports, cleaning)
+      try { localStorage.setItem('currentDataset', JSON.stringify({ id: res.data.id, name: res.data.name })) } catch (e) {}
+      await loadSavedDatasets()
+      return true
+    }
+  } catch (err) { console.error('Save dataset error', err) }
+  return false
 }
 
 async function savePrompt() {
@@ -175,22 +182,33 @@ async function savePrompt() {
 }
 
 // Load dataset
-function loadDataset(idx) {
+async function loadDataset(idx) {
   const ds = savedDatasets.value[idx]
   if (!ds) return
-  if (ds.file_base64) { fileBase64.value = ds.file_base64; dataset.value = [] }
-  else if (ds.data) { dataset.value = ds.data; fileBase64.value = '' }
-  if (ds.headers) headers.value = ds.headers
-  showPreview.value = true
-  uploadedFile.value = { name: ds.name }
+  try {
+    const res = await datasetAPI.load(ds.id)
+    if (res && res.success) {
+      const data = res.data || {}
+      if (data.file_base64) { fileBase64.value = data.file_base64; dataset.value = [] }
+      else if (data.data) { dataset.value = data.data; fileBase64.value = '' }
+      if (data.headers) headers.value = data.headers
+      uploadedFile.value = { name: data.name }
+      // remember selected dataset id for reporting/done
+      try { localStorage.setItem('currentDataset', JSON.stringify({ id: data.id, name: data.name })) } catch (e) {}
+      showPreview.value = true
+    }
+  } catch (err) { console.error('Load dataset error', err) }
 }
 
 // Delete dataset
-function deleteDataset(idx) {
+async function deleteDataset(idx) {
   const ds = savedDatasets.value[idx]
+  if (!ds) return
   if (confirm(`Delete "${ds.name}"?`)) {
-    savedDatasets.value.splice(idx, 1)
-    localStorage.setItem('saved-datasets', JSON.stringify(savedDatasets.value))
+    try {
+      await datasetAPI.delete(ds.id)
+      await loadSavedDatasets()
+    } catch (err) { console.error('Delete dataset error', err) }
   }
 }
 
