@@ -55,12 +55,15 @@
                 <span>{{ uploadedFile.name }}</span>
                 <span class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
-                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="rawData.length === 0">
+                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData || rawData.length === 0">
                   <v-icon>mdi-eye</v-icon> Review Excel
+                </button>
+                <button class="btn-mapping" @click="autoMatchColumns" :disabled="!rawData || rawData.length === 0">
+                  <v-icon>mdi-map</v-icon> Map Columns
                 </button>
               </div>
 
-              <div v-if="rawData.length > 0" class="excel-preview-section">
+              <div v-if="rawData && rawData.length > 0" class="excel-preview-section">
                 <h4>File Preview:</h4>
                 <div class="preview-toolbar">
                   <span class="preview-info">Showing {{ rawData.length }} rows × {{ Object.keys(rawData[0] || {}).length }} columns</span>
@@ -126,22 +129,22 @@
               <div class="required-columns">
                 <h4>Required Columns:</h4>
                 <div class="columns-list">
-                  <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col) }">
-                    <v-icon size="12">{{ hasRequiredColumn(col) ? 'mdi-check' : 'mdi-close' }}</v-icon>
+                  <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': rawData.length > 0 && !hasRequiredColumn(col) }">
+                    <v-icon size="12">{{ rawData.length > 0 && hasRequiredColumn(col) ? 'mdi-check' : 'mdi-close' }}</v-icon>
                     {{ col }}
                   </span>
                 </div>
-                <div v-if="missingColumns.length > 0" class="warning-message">
+                <div v-if="rawData.length > 0 && missingColumns.length > 0" class="warning-message">
                   <v-icon color="warning">mdi-alert</v-icon>
                   <span>Missing required columns. Click "Map Columns" to fix.</span>
                 </div>
               </div>
 
               <div class="navigation-buttons">
-                <button v-if="missingColumns.length > 0 && rawData.length > 0" class="btn-warning" @click="autoMatchColumns">
+                <button v-if="rawData.length > 0 && missingColumns.length > 0" class="btn-warning" @click="autoMatchColumns">
                   Map Columns
                 </button>
-                <button class="btn-primary" @click="uploadData" :disabled="!uploadedFile || missingColumns.length > 0">
+                <button class="btn-primary" @click="uploadData" :disabled="!uploadedFile || (rawData.length > 0 && missingColumns.length > 0)">
                   Upload & Continue
                 </button>
                 <button class="btn-secondary" @click="goToDashboard">Cancel</button>
@@ -188,9 +191,44 @@
                   <button class="btn-primary" @click="cleanData" :disabled="cleanedData.length > 0">
                     <v-icon>mdi-broom</v-icon> Auto-Clean Data
                   </button>
-                  <button class="btn-review-excel" @click="openExcelReview(rawData, 'Raw Data (Before Cleaning)')" :disabled="rawData.length === 0">
+                  <button class="btn-review-excel" @click="openExcelReview(rawData, 'Raw Data (Before Cleaning)')" :disabled="!rawData || rawData.length === 0">
                     <v-icon>mdi-eye</v-icon> Review Raw Data
                   </button>
+                </div>
+
+                <!-- Raw Data Preview with Issue Highlighting -->
+                <div v-if="rawData.length > 0 && !cleanedData.length" class="preview-section">
+                  <h4>Raw Data with Issues Highlighted:</h4>
+                  <div class="legend">
+                    <span class="legend-badge invalid-row-badge">⚠ Invalid Row</span>
+                    <span class="legend-badge invalid-cell-badge">❌ Missing/Invalid Value</span>
+                  </div>
+                  <div class="preview-toolbar">
+                    <span class="preview-info">Raw Data: {{ rawData.length }} rows</span>
+                    <div class="preview-controls">
+                      <button @click="rawPreviewStartRow = Math.max(0, rawPreviewStartRow - 10)" :disabled="rawPreviewStartRow === 0" class="preview-btn">← Previous</button>
+                      <span>Rows {{ rawPreviewStartRow + 1 }} - {{ Math.min(rawPreviewEndRow, rawData.length) }}</span>
+                      <button @click="rawPreviewStartRow = Math.min(rawData.length - rawPreviewRows, rawPreviewStartRow + 10)" :disabled="rawPreviewEndRow >= rawData.length" class="preview-btn">Next →</button>
+                    </div>
+                  </div>
+                  <div class="table-wrapper">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th v-for="col in rawPreviewColumnsList" :key="col">{{ col }}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(row, idx) in paginatedRawPreview" :key="idx" :class="{ 'invalid-row': hasInvalidData(row) }">
+                          <td class="row-number">{{ rawPreviewStartRow + idx + 1 }}</td>
+                          <td v-for="col in rawPreviewColumnsList" :key="col" :class="{ 'invalid-cell': isInvalidValue(row[col]) }">
+                            {{ formatCellValue(row[col]) }}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 <div v-if="cleanedData.length > 0" class="preview-section">
@@ -198,6 +236,7 @@
                   <div class="highlight-box">
                     <p>✓ Removed {{ cleaningStats.removedRows }} invalid rows</p>
                     <p>✓ Fixed {{ cleaningStats.fixedMissing }} missing values</p>
+                    <p class="success-text">✓ Data is now clean and ready for calculations</p>
                   </div>
                   
                   <div class="preview-toolbar">
@@ -222,7 +261,10 @@
                       <tbody>
                         <tr v-for="(row, idx) in paginatedCleanPreview" :key="idx">
                           <td class="row-number">{{ cleanPreviewStartRow + idx + 1 }}</td>
-                          <td v-for="col in cleanPreviewColumnsList" :key="col">{{ formatCellValue(row[col]) }}</td>
+                          <td v-for="col in cleanPreviewColumnsList" :key="col" :class="{ 'fixed-value': wasFixed(row, col) }">
+                            {{ formatCellValue(row[col]) }}
+                            <span v-if="wasFixed(row, col)" class="fixed-badge" title="This value was fixed during cleaning">✓</span>
+                          </td>
                         </tr>
                       </tbody>
                     </table>
@@ -259,6 +301,51 @@
                     <div class="calc-name">{{ calc.name }}</div>
                     <div class="calc-value">{{ calc.value }}</div>
                     <div class="calc-unit">{{ calc.unit }}</div>
+                  </div>
+                </div>
+
+                <!-- Additional instrument-specific calculations -->
+                <div class="detailed-calculations" v-if="instrumentType.value === 'money-market'">
+                  <h4>Money Market Details</h4>
+                  <div class="detail-item">
+                    <span class="detail-label">Weighted Average Rate:</span>
+                    <span class="detail-value">{{ calculations.weightedAvgRate || calculations.avgRate }}%</span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Total Interest (Annualized):</span>
+                    <span class="detail-value">${{ calculations.totalInterest?.toLocaleString() || 0 }}</span>
+                  </div>
+                </div>
+
+                <div class="detailed-calculations" v-if="instrumentType.value === 'bonds'">
+                  <h4>Bond Details</h4>
+                  <div class="detail-item">
+                    <span class="detail-label">Weighted Average Coupon:</span>
+                    <span class="detail-value">{{ calculations.weightedAvgCoupon || calculations.avgCouponRate }}%</span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Total Annual Income:</span>
+                    <span class="detail-value">${{ calculations.totalAnnualIncome?.toLocaleString() || 0 }}</span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Average Yield to Maturity:</span>
+                    <span class="detail-value">{{ calculations.avgYTM || 0 }}%</span>
+                  </div>
+                </div>
+
+                <div class="detailed-calculations" v-if="instrumentType.value === 'tbills'">
+                  <h4>T-Bill Details</h4>
+                  <div class="detail-item">
+                    <span class="detail-label">Weighted Average Discount:</span>
+                    <span class="detail-value">{{ calculations.weightedAvgDiscount || calculations.avgDiscountRate }}%</span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Total Discount Earned:</span>
+                    <span class="detail-value">${{ calculations.totalDiscount?.toLocaleString() || 0 }}</span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Effective Yield:</span>
+                    <span class="detail-value">{{ calculations.effectiveYield || 0 }}%</span>
                   </div>
                 </div>
 
@@ -313,6 +400,8 @@
                   <p><strong>Total Value:</strong> ${{ calculations.totalValue?.toLocaleString() || 0 }}</p>
                   <p><strong>Number of Instruments:</strong> {{ calculations.instrumentCount || 0 }}</p>
                   <p><strong>Data Processed:</strong> {{ cleanedData.length }} records</p>
+                  <p><strong>Rows Removed:</strong> {{ cleaningStats.removedRows }}</p>
+                  <p><strong>Missing Values Fixed:</strong> {{ cleaningStats.fixedMissing }}</p>
                 </div>
                 <div class="summary-section">
                   <h3>Key Metrics</h3>
@@ -359,7 +448,7 @@
                   <div class="report-data-preview">
                     <div class="preview-toolbar">
                       <h5>Data Preview</h5>
-                      <button class="btn-review-excel-small" @click="openExcelReview(cleanedData, 'Report Data')" :disabled="cleanedData.length === 0">
+                      <button class="btn-review-excel-small" @click="openExcelReview(cleanedData, 'Report Data')" :disabled="!cleanedData || cleanedData.length === 0">
                         <v-icon size="16">mdi-eye</v-icon> Review Full Data
                       </button>
                     </div>
@@ -457,7 +546,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import * as XLSX from 'xlsx'
@@ -505,13 +594,24 @@ const activeTab = computed({
   set: (val) => router.push({ query: { tab: val } })
 })
 
-// Data
+// Data - with persistence
 const uploadedFile = ref(null)
 const rawData = ref([])
 const cleanedData = ref([])
 const columnMapping = ref({})
 const showMappingDialog = ref(false)
 const fileColumns = ref([])
+const fixedValuesTracker = ref(new Map())
+
+// Raw Data Preview for Cleaning
+const rawPreviewRows = ref(10)
+const rawPreviewStartRow = ref(0)
+const rawPreviewEndRow = computed(() => Math.min(rawPreviewStartRow.value + rawPreviewRows.value, rawData.value.length))
+const rawPreviewColumnsList = computed(() => {
+  if (!rawData.value || rawData.value.length === 0) return []
+  return Object.keys(rawData.value[0]).slice(0, 8)
+})
+const paginatedRawPreview = computed(() => rawData.value.slice(rawPreviewStartRow.value, rawPreviewEndRow.value))
 
 // Required columns
 const requiredColumns = computed(() => {
@@ -542,7 +642,7 @@ const previewRows = ref(10)
 const previewStartRow = ref(0)
 const previewEndRow = computed(() => Math.min(previewStartRow.value + previewRows.value, rawData.value.length))
 const previewColumnsList = computed(() => {
-  if (rawData.value.length === 0) return []
+  if (!rawData.value || rawData.value.length === 0) return []
   return Object.keys(rawData.value[0]).slice(0, 8)
 })
 const paginatedPreviewData = computed(() => rawData.value.slice(previewStartRow.value, previewEndRow.value))
@@ -552,14 +652,14 @@ const cleanPreviewRows = ref(10)
 const cleanPreviewStartRow = ref(0)
 const cleanPreviewEndRow = computed(() => Math.min(cleanPreviewStartRow.value + cleanPreviewRows.value, cleanedData.value.length))
 const cleanPreviewColumnsList = computed(() => {
-  if (cleanedData.value.length === 0) return []
+  if (!cleanedData.value || cleanedData.value.length === 0) return []
   return Object.keys(cleanedData.value[0]).slice(0, 8)
 })
 const paginatedCleanPreview = computed(() => cleanedData.value.slice(cleanPreviewStartRow.value, cleanPreviewEndRow.value))
 
 // Report Preview
 const reportPreviewColumns = computed(() => {
-  if (cleanedData.value.length === 0) return []
+  if (!cleanedData.value || cleanedData.value.length === 0) return []
   return Object.keys(cleanedData.value[0]).slice(0, 6)
 })
 const reportDataPreview = computed(() => cleanedData.value.slice(0, 5))
@@ -575,20 +675,34 @@ const fileSize = computed(() => {
 
 // Column validation
 const hasRequiredColumn = (col) => {
-  if (rawData.value.length === 0) return false
+  if (!rawData.value || rawData.value.length === 0) return false
   return Object.keys(rawData.value[0]).includes(col)
 }
 
 const missingColumns = computed(() => {
-  if (rawData.value.length === 0) return []
+  if (!rawData.value || rawData.value.length === 0) return []
   return requiredColumns.value.filter(col => !hasRequiredColumn(col))
 })
 
 // Cleaning stats
 const cleaningStats = ref({ totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 })
 
-// Calculations
-const calculations = ref({ totalValue: 0, instrumentCount: 0 })
+// Expanded calculations
+const calculations = ref({ 
+  totalValue: 0, 
+  instrumentCount: 0, 
+  avgRate: 0, 
+  avgCouponRate: 0, 
+  avgDiscountRate: 0,
+  weightedAvgRate: 0,
+  totalInterest: 0,
+  weightedAvgCoupon: 0,
+  totalAnnualIncome: 0,
+  avgYTM: 0,
+  weightedAvgDiscount: 0,
+  totalDiscount: 0,
+  effectiveYield: 0
+})
 
 const calculationsList = computed(() => {
   const list = []
@@ -610,16 +724,106 @@ const calculationsList = computed(() => {
   return list
 })
 
-const hasData = computed(() => rawData.value.length > 0)
-const hasCleanedData = computed(() => cleanedData.value.length > 0)
+const hasData = computed(() => rawData.value && rawData.value.length > 0)
+const hasCleanedData = computed(() => cleanedData.value && cleanedData.value.length > 0)
+
+// Helper functions for highlighting
+function hasInvalidData(row) {
+  if (!row) return false
+  return requiredColumns.value.some(col => !row[col] || row[col] === '' || row[col] === null)
+}
+
+function isInvalidValue(value) {
+  return !value || value === '' || value === null
+}
+
+function wasFixed(row, col) {
+  const key = `${row[Object.keys(row)[0]] || row.Date || row.Instrument}_${col}`
+  return fixedValuesTracker.value.has(key)
+}
 
 // Navigation
-function goToDashboard() { router.push('/dashboard') }
-function switchTab(tab) { activeTab.value = tab }
+function goToDashboard() { 
+  router.push('/dashboard') 
+}
 
-function handleFileUpload(event) { uploadedFile.value = event.target.files[0] }
-function handleDrop(event) { uploadedFile.value = event.dataTransfer.files[0] }
-function removeFile() { uploadedFile.value = null; rawData.value = []; cleanedData.value = [] }
+function switchTab(tab) { 
+  activeTab.value = tab 
+}
+
+// File handling functions with persistence
+function handleFileUpload(event) {
+  const file = event.target.files[0]
+  if (file) {
+    uploadedFile.value = file
+    readFileData(file)
+  }
+}
+
+function handleDrop(event) {
+  const file = event.dataTransfer.files[0]
+  if (file) {
+    uploadedFile.value = file
+    readFileData(file)
+  }
+}
+
+async function readFileData(file) {
+  const extension = file.name.split('.').pop().toLowerCase()
+  let data = []
+  
+  try {
+    if (extension === 'csv') {
+      const text = await file.text()
+      const lines = text.split('\n')
+      const headers = lines[0].split(',').map(h => h.trim())
+      data = lines.slice(1)
+        .filter(line => line.trim())
+        .map(line => {
+          const values = line.split(',')
+          const row = {}
+          headers.forEach((h, i) => {
+            row[h] = values[i] ? values[i].trim() : ''
+          })
+          return row
+        })
+    } else {
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer)
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]]
+      data = XLSX.utils.sheet_to_json(worksheet)
+    }
+    
+    rawData.value = data
+    
+    // Save to localStorage for persistence
+    localStorage.setItem(`${instrumentType.value}_raw_data`, JSON.stringify(data))
+    localStorage.setItem(`${instrumentType.value}_uploaded_file_name`, file.name)
+    
+    // Auto-check if mapping is needed
+    await nextTick()
+    if (missingColumns.value.length > 0) {
+      autoMatchColumns()
+    }
+  } catch (error) {
+    console.error('Error reading file:', error)
+    alert('Error reading file. Please check the file format.')
+  }
+}
+
+function removeFile() { 
+  uploadedFile.value = null
+  rawData.value = []
+  cleanedData.value = []
+  fixedValuesTracker.value.clear()
+  // Clear from localStorage
+  localStorage.removeItem(`${instrumentType.value}_raw_data`)
+  localStorage.removeItem(`${instrumentType.value}_cleaned_data`)
+  localStorage.removeItem(`${instrumentType.value}_uploaded_file_name`)
+  if (fileInput.value) {
+    fileInput.value.value = ''
+  }
+}
 
 function formatCellValue(value) {
   if (value === undefined || value === null) return '-'
@@ -630,13 +834,29 @@ function formatCellValue(value) {
 
 // Excel Review Functions
 function openExcelReview(data, title) {
+  console.log('openExcelReview called with:', data, title)
+  
+  if (!data || data.length === 0) {
+    if (cleanedData.value && cleanedData.value.length > 0) {
+      data = cleanedData.value
+      title = title || 'Cleaned Data'
+    } else if (rawData.value && rawData.value.length > 0) {
+      data = rawData.value
+      title = title || 'Uploaded Data'
+    } else {
+      alert('No data to review. Please upload a file first.')
+      return
+    }
+  }
+  
   if (!data || data.length === 0) {
     alert('No data to review. Please upload a file first.')
     return
   }
+  
   excelData.value = data
   excelColumns.value = Object.keys(data[0] || {})
-  excelDialogTitle.value = title
+  excelDialogTitle.value = title || 'Data Review'
   showExcelDialog.value = true
 }
 
@@ -647,7 +867,7 @@ function closeExcelDialog() {
 }
 
 function exportToCSV() {
-  if (excelData.value.length === 0) return
+  if (!excelData.value || excelData.value.length === 0) return
   
   const headers = excelColumns.value
   const rows = excelData.value.map(row => 
@@ -665,7 +885,7 @@ function exportToCSV() {
 }
 
 function exportToJSON() {
-  if (excelData.value.length === 0) return
+  if (!excelData.value || excelData.value.length === 0) return
   
   const jsonContent = JSON.stringify(excelData.value, null, 2)
   const blob = new Blob([jsonContent], { type: 'application/json' })
@@ -679,7 +899,7 @@ function exportToJSON() {
 
 // Column matching functions
 function autoMatchColumns() {
-  if (rawData.value.length === 0) return
+  if (!rawData.value || rawData.value.length === 0) return
   fileColumns.value = Object.keys(rawData.value[0])
   const newMapping = {}
   
@@ -707,7 +927,7 @@ function autoMatchColumns() {
 }
 
 function applyColumnMapping() {
-  if (rawData.value.length === 0) return
+  if (!rawData.value || rawData.value.length === 0) return
   
   const mappedData = rawData.value.map(row => {
     const newRow = {}
@@ -723,50 +943,48 @@ function applyColumnMapping() {
   })
   
   rawData.value = mappedData
+  // Save mapped data to localStorage
+  localStorage.setItem(`${instrumentType.value}_raw_data`, JSON.stringify(mappedData))
   showMappingDialog.value = false
   alert('Columns mapped successfully!')
 }
 
 async function uploadData() {
   if (!uploadedFile.value) return
-  const file = uploadedFile.value
-  const extension = file.name.split('.').pop().toLowerCase()
-  let data = []
   
-  if (extension === 'csv') {
-    const text = await file.text()
-    const lines = text.split('\n')
-    const headers = lines[0].split(',')
-    data = lines.slice(1).map(line => {
-      const values = line.split(',')
-      const row = {}
-      headers.forEach((h, i) => row[h.trim()] = values[i])
-      return row
-    })
-  } else {
-    const buffer = await file.arrayBuffer()
-    const workbook = XLSX.read(buffer)
-    const worksheet = workbook.Sheets[workbook.SheetNames[0]]
-    data = XLSX.utils.sheet_to_json(worksheet)
+  if (rawData.value.length > 0 && missingColumns.value.length === 0) {
+    activeTab.value = 'cleaning'
+    updateStatus('upload', true)
+  } else if (rawData.value.length > 0 && missingColumns.value.length > 0) {
+    alert('Please map the missing columns first using the "Map Columns" button.')
   }
-  
-  rawData.value = data
-  activeTab.value = 'cleaning'
-  updateStatus('upload', true)
 }
 
 function cleanData() {
+  if (!rawData.value || rawData.value.length === 0) return
+  
+  fixedValuesTracker.value.clear()
   const required = requiredColumns.value
   let cleaned = rawData.value.filter(row => required.every(col => row[col] !== undefined && row[col] !== null && row[col] !== ''))
 
   let missingCount = 0
-  cleaned = cleaned.map(row => {
+  cleaned = cleaned.map((row, rowIndex) => {
     required.forEach(col => {
       if (!row[col] || row[col] === '') {
         missingCount++
-        if (col.includes('Rate') || col.includes('Yield')) row[col] = 0
-        else if (col.includes('Amount') || col.includes('Value')) row[col] = 0
-        else row[col] = 'N/A'
+        const key = `${row[Object.keys(row)[0]] || row.Date || row.Instrument || rowIndex}_${col}`
+        if (col.includes('Rate') || col.includes('Yield')) {
+          row[col] = 0
+          fixedValuesTracker.value.set(key, true)
+        }
+        else if (col.includes('Amount') || col.includes('Value')) {
+          row[col] = 0
+          fixedValuesTracker.value.set(key, true)
+        }
+        else {
+          row[col] = 'N/A'
+          fixedValuesTracker.value.set(key, true)
+        }
       }
     })
     
@@ -792,35 +1010,83 @@ function cleanData() {
 }
 
 function calculateMetrics() {
-  let totalValue = 0, totalRate = 0
+  if (!cleanedData.value || cleanedData.value.length === 0) return
+  
+  let totalValue = 0, totalRate = 0, weightedSum = 0
   
   if (instrumentType.value === 'money-market') {
     totalValue = cleanedData.value.reduce((sum, row) => sum + (row.Amount || 0), 0)
     totalRate = cleanedData.value.reduce((sum, row) => sum + (row.Rate || 0), 0)
+    weightedSum = cleanedData.value.reduce((sum, row) => sum + ((row.Rate || 0) * (row.Amount || 0)), 0)
+    
     calculations.value = {
-      totalValue, instrumentCount: cleanedData.value.length,
-      avgRate: (totalRate / cleanedData.value.length).toFixed(2)
+      totalValue, 
+      instrumentCount: cleanedData.value.length,
+      avgRate: (totalRate / cleanedData.value.length).toFixed(2),
+      avgCouponRate: 0,
+      avgDiscountRate: 0,
+      weightedAvgRate: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
+      totalInterest: (totalValue * (totalRate / cleanedData.value.length) / 100).toFixed(2),
+      weightedAvgCoupon: 0,
+      totalAnnualIncome: 0,
+      avgYTM: 0,
+      weightedAvgDiscount: 0,
+      totalDiscount: 0,
+      effectiveYield: 0
     }
   } 
   else if (instrumentType.value === 'bonds') {
     totalValue = cleanedData.value.reduce((sum, row) => sum + (row.FaceValue || 0), 0)
     totalRate = cleanedData.value.reduce((sum, row) => sum + (row.CouponRate || 0), 0)
+    weightedSum = cleanedData.value.reduce((sum, row) => sum + ((row.CouponRate || 0) * (row.FaceValue || 0)), 0)
+    const totalYield = cleanedData.value.reduce((sum, row) => sum + (row.Yield || 0), 0)
+    
     calculations.value = {
-      totalValue, instrumentCount: cleanedData.value.length,
-      avgCouponRate: (totalRate / cleanedData.value.length).toFixed(2)
+      totalValue, 
+      instrumentCount: cleanedData.value.length,
+      avgRate: 0,
+      avgCouponRate: (totalRate / cleanedData.value.length).toFixed(2),
+      avgDiscountRate: 0,
+      weightedAvgRate: 0,
+      totalInterest: 0,
+      weightedAvgCoupon: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
+      totalAnnualIncome: (totalValue * (totalRate / cleanedData.value.length) / 100).toFixed(2),
+      avgYTM: (totalYield / cleanedData.value.length).toFixed(2),
+      weightedAvgDiscount: 0,
+      totalDiscount: 0,
+      effectiveYield: 0
     }
   }
   else if (instrumentType.value === 'tbills') {
     totalValue = cleanedData.value.reduce((sum, row) => sum + (row.FaceValue || 0), 0)
     totalRate = cleanedData.value.reduce((sum, row) => sum + (row.DiscountRate || 0), 0)
+    weightedSum = cleanedData.value.reduce((sum, row) => sum + ((row.DiscountRate || 0) * (row.FaceValue || 0)), 0)
+    const effectiveYieldCalc = (totalRate / cleanedData.value.length) * (365 / 90)
+    
     calculations.value = {
-      totalValue, instrumentCount: cleanedData.value.length,
-      avgDiscountRate: (totalRate / cleanedData.value.length).toFixed(2)
+      totalValue, 
+      instrumentCount: cleanedData.value.length,
+      avgRate: 0,
+      avgCouponRate: 0,
+      avgDiscountRate: (totalRate / cleanedData.value.length).toFixed(2),
+      weightedAvgRate: 0,
+      totalInterest: 0,
+      weightedAvgCoupon: 0,
+      totalAnnualIncome: 0,
+      avgYTM: 0,
+      weightedAvgDiscount: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
+      totalDiscount: (totalValue * (totalRate / cleanedData.value.length) / 100).toFixed(2),
+      effectiveYield: effectiveYieldCalc.toFixed(2)
     }
   }
+  
+  // Save cleaned data to localStorage for persistence
+  localStorage.setItem(`${instrumentType.value}_cleaned_data`, JSON.stringify(cleanedData.value))
 }
 
 function downloadReport() {
+  if (!cleanedData.value || cleanedData.value.length === 0) return
+  
   const report = {
     instrument: instrumentName.value,
     date: new Date().toLocaleString(),
@@ -877,13 +1143,29 @@ function getTabStatus(tab) {
   return statuses[tab] || false
 }
 
+// Load persisted data on mount
 onMounted(() => {
-  const savedData = localStorage.getItem(`${instrumentType.value}_cleaned_data`)
-  if (savedData) {
-    cleanedData.value = JSON.parse(savedData)
+  // Load raw data if exists
+  const savedRawData = localStorage.getItem(`${instrumentType.value}_raw_data`)
+  if (savedRawData) {
+    rawData.value = JSON.parse(savedRawData)
+    const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
+    if (savedFileName) {
+      uploadedFile.value = { name: savedFileName, size: 0 }
+    }
+    fileColumns.value = Object.keys(rawData.value[0] || {})
+  }
+  
+  // Load cleaned data if exists
+  const savedCleanedData = localStorage.getItem(`${instrumentType.value}_cleaned_data`)
+  if (savedCleanedData) {
+    cleanedData.value = JSON.parse(savedCleanedData)
     calculateMetrics()
   }
 })
+
+// File input ref
+const fileInput = ref(null)
 </script>
 
 <style scoped>
@@ -1049,6 +1331,32 @@ onMounted(() => {
 }
 
 .btn-review-excel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Map Columns Button Styles */
+.btn-mapping {
+  background: #FF9800;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-left: 10px;
+  transition: all 0.2s;
+}
+
+.btn-mapping:hover:not(:disabled) {
+  background: #F57C00;
+  transform: translateY(-1px);
+}
+
+.btn-mapping:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -1609,5 +1917,94 @@ onMounted(() => {
 .btn-success:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 15px rgba(76, 175, 80, 0.3);
+}
+
+/* New styles for highlighting */
+.invalid-row {
+  background-color: #ffebee !important;
+}
+
+.invalid-cell {
+  background-color: #ffcdd2 !important;
+  color: #c62828 !important;
+  font-weight: 500;
+}
+
+.fixed-value {
+  background-color: #c8e6c9 !important;
+  position: relative;
+}
+
+.fixed-badge {
+  display: inline-block;
+  margin-left: 5px;
+  color: #4caf50;
+  font-weight: bold;
+  cursor: help;
+}
+
+.legend {
+  margin-bottom: 15px;
+  padding: 10px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  display: flex;
+  gap: 20px;
+}
+
+.legend-badge {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.invalid-row-badge {
+  background-color: #ffebee;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
+}
+
+.invalid-cell-badge {
+  background-color: #ffcdd2;
+  color: #c62828;
+  border: 1px solid #ef9a9a;
+}
+
+.detailed-calculations {
+  margin-top: 20px;
+  padding: 15px;
+  background: #f8f9ff;
+  border-radius: 12px;
+}
+
+.detailed-calculations h4 {
+  color: #0B2044;
+  margin-bottom: 15px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #0B2044;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: white;
+  border-radius: 8px;
+}
+
+.detail-label {
+  font-weight: 600;
+  color: #555;
+}
+
+.detail-value {
+  font-weight: 700;
+  color: #0B2044;
+}
+
+.success-text {
+  color: #4CAF50;
+  font-weight: 600;
 }
 </style>
