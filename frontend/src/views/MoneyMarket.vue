@@ -197,7 +197,7 @@
                 </div>
 
                 <!-- Raw Data Preview with Issue Highlighting -->
-                <div v-if="rawData.length > 0 && !cleanedData.length" class="preview-section">
+                <div v-if="rawData.length > 0 && cleanedData.length === 0" class="preview-section">
                   <h4>Raw Data with Issues Highlighted:</h4>
                   <div class="legend">
                     <span class="legend-badge invalid-row-badge">⚠ Invalid Row</span>
@@ -273,7 +273,7 @@
 
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('upload')">Previous</button>
-                  <button class="btn-primary" @click="switchTab('calculations')" :disabled="!hasCleanedData">Next: Calculations</button>
+                  <button class="btn-primary" @click="goToCalculations" :disabled="!hasCleanedData">Next: Calculations</button>
                   <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
                 </div>
               </div>
@@ -296,62 +296,102 @@
               </div>
               
               <div v-else>
-                <div class="calculations-grid">
-                  <div v-for="calc in calculationsList" :key="calc.name" class="calculation-card">
-                    <div class="calc-name">{{ calc.name }}</div>
-                    <div class="calc-value">{{ calc.value }}</div>
-                    <div class="calc-unit">{{ calc.unit }}</div>
+                <!-- Summary Cards -->
+                <div class="summary-cards">
+                  <div class="summary-card total">
+                    <div class="card-icon">
+                      <v-icon size="32" color="#fff">mdi-chart-line</v-icon>
+                    </div>
+                    <div class="card-content">
+                      <div class="card-label">Total Portfolio Value</div>
+                      <div class="card-value">${{ calculations.totalValue?.toLocaleString() || 0 }}</div>
+                    </div>
+                  </div>
+                  <div class="summary-card rate">
+                    <div class="card-icon">
+                      <v-icon size="32" color="#fff">mdi-percent</v-icon>
+                    </div>
+                    <div class="card-content">
+                      <div class="card-label">Average Interest Rate</div>
+                      <div class="card-value">{{ calculations.avgRate || 0 }}%</div>
+                    </div>
+                  </div>
+                  <div class="summary-card count">
+                    <div class="card-icon">
+                      <v-icon size="32" color="#fff">mdi-counter</v-icon>
+                    </div>
+                    <div class="card-content">
+                      <div class="card-label">Number of Instruments</div>
+                      <div class="card-value">{{ calculations.instrumentCount || 0 }}</div>
+                    </div>
                   </div>
                 </div>
 
-                <!-- Additional instrument-specific calculations -->
-                <div class="detailed-calculations" v-if="instrumentType.value === 'money-market'">
-                  <h4>Money Market Details</h4>
-                  <div class="detail-item">
-                    <span class="detail-label">Weighted Average Rate:</span>
-                    <span class="detail-value">{{ calculations.weightedAvgRate || calculations.avgRate }}%</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Total Interest (Annualized):</span>
-                    <span class="detail-value">${{ calculations.totalInterest?.toLocaleString() || 0 }}</span>
-                  </div>
-                </div>
-
-                <div class="detailed-calculations" v-if="instrumentType.value === 'bonds'">
-                  <h4>Bond Details</h4>
-                  <div class="detail-item">
-                    <span class="detail-label">Weighted Average Coupon:</span>
-                    <span class="detail-value">{{ calculations.weightedAvgCoupon || calculations.avgCouponRate }}%</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Total Annual Income:</span>
-                    <span class="detail-value">${{ calculations.totalAnnualIncome?.toLocaleString() || 0 }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Average Yield to Maturity:</span>
-                    <span class="detail-value">{{ calculations.avgYTM || 0 }}%</span>
-                  </div>
-                </div>
-
-                <div class="detailed-calculations" v-if="instrumentType.value === 'tbills'">
-                  <h4>T-Bill Details</h4>
-                  <div class="detail-item">
-                    <span class="detail-label">Weighted Average Discount:</span>
-                    <span class="detail-value">{{ calculations.weightedAvgDiscount || calculations.avgDiscountRate }}%</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Total Discount Earned:</span>
-                    <span class="detail-value">${{ calculations.totalDiscount?.toLocaleString() || 0 }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <span class="detail-label">Effective Yield:</span>
-                    <span class="detail-value">{{ calculations.effectiveYield || 0 }}%</span>
+                <!-- Money Market Calculations Grid -->
+                <div class="calculations-section">
+                  <h3>Money Market Calculations</h3>
+                  <div class="calculations-grid">
+                    <div class="calculation-card">
+                      <div class="calc-name">Weighted Average Rate</div>
+                      <div class="calc-value">{{ calculations.weightedAvgRate || calculations.avgRate }}%</div>
+                      <div class="calc-unit">per annum</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Total Interest (Annualized)</div>
+                      <div class="calc-value">${{ calculations.totalInterest?.toLocaleString() || 0 }}</div>
+                      <div class="calc-unit">USD</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Interest Earned</div>
+                      <div class="calc-value">${{ calculations.interestEarned?.toLocaleString() || 0 }}</div>
+                      <div class="calc-unit">USD</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Annual Yield</div>
+                      <div class="calc-value">{{ calculations.annualYield || 0 }}%</div>
+                      <div class="calc-unit">APY</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Maturity Value</div>
+                      <div class="calc-value">${{ calculations.maturityValue?.toLocaleString() || 0 }}</div>
+                      <div class="calc-unit">USD</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Average Yield</div>
+                      <div class="calc-value">{{ calculations.avgYield || 0 }}%</div>
+                      <div class="calc-unit">per annum</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Effective Annual Rate</div>
+                      <div class="calc-value">{{ calculations.effectiveAnnualRate || 0 }}%</div>
+                      <div class="calc-unit">EAR</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Average Days to Maturity</div>
+                      <div class="calc-value">{{ calculations.avgDaysToMaturity || 0 }} days</div>
+                      <div class="calc-unit">days</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Total Interest Income</div>
+                      <div class="calc-value">${{ calculations.totalInterestIncome?.toLocaleString() || 0 }}</div>
+                      <div class="calc-unit">USD</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Portfolio Yield</div>
+                      <div class="calc-value">{{ calculations.portfolioYield || 0 }}%</div>
+                      <div class="calc-unit">per annum</div>
+                    </div>
+                    <div class="calculation-card">
+                      <div class="calc-name">Total Principal</div>
+                      <div class="calc-value">${{ calculations.totalPrincipal?.toLocaleString() || calculations.totalValue?.toLocaleString() || 0 }}</div>
+                      <div class="calc-unit">USD</div>
+                    </div>
                   </div>
                 </div>
 
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('cleaning')">Previous</button>
-                  <button class="btn-primary" @click="switchTab('visualizations')">Next: Visualizations</button>
+                  <button class="btn-primary" @click="goToVisualizations">Next: Visualizations</button>
                   <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
                 </div>
               </div>
@@ -687,7 +727,7 @@ const missingColumns = computed(() => {
 // Cleaning stats
 const cleaningStats = ref({ totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 })
 
-// Expanded calculations
+// Expanded calculations with all backend fields
 const calculations = ref({ 
   totalValue: 0, 
   instrumentCount: 0, 
@@ -701,7 +741,37 @@ const calculations = ref({
   avgYTM: 0,
   weightedAvgDiscount: 0,
   totalDiscount: 0,
-  effectiveYield: 0
+  effectiveYield: 0,
+  interestEarned: 0,
+  annualYield: 0,
+  maturityValue: 0,
+  avgYield: 0,
+  effectiveAnnualRate: 0,
+  avgDaysToMaturity: 0,
+  totalInterestIncome: 0,
+  portfolioYield: 0,
+  totalPrincipal: 0,
+  discountYield: 0,
+  bondEquivalentYield: 0,
+  moneyMarketYield: 0,
+  pricePer100: 0,
+  totalPurchasePrice: 0,
+  avgInvestment: 0,
+  holdingPeriodYield: 0,
+  annualizedYield: 0,
+  annualCouponPayment: 0,
+  currentYield: 0,
+  yieldToMaturity: 0,
+  yieldCurveRate: 0,
+  yieldSpread: 0,
+  duration: 0,
+  modifiedDuration: 0,
+  convexity: 0,
+  macaulayDuration: 0,
+  priceVolatility: 0,
+  creditSpread: 0,
+  realYield: 0,
+  nominalYield: 0
 })
 
 const calculationsList = computed(() => {
@@ -742,7 +812,7 @@ function wasFixed(row, col) {
   return fixedValuesTracker.value.has(key)
 }
 
-// Navigation
+// Navigation functions with status updates
 function goToDashboard() { 
   router.push('/dashboard') 
 }
@@ -751,7 +821,23 @@ function switchTab(tab) {
   activeTab.value = tab 
 }
 
-// File handling functions with persistence
+function goToCalculations() {
+  if (hasCleanedData.value) {
+    activeTab.value = 'calculations'
+    updateStatus('calculations', true)
+  } else {
+    alert('Please clean your data first before proceeding to calculations.')
+  }
+}
+
+function goToVisualizations() {
+  if (hasCleanedData.value) {
+    activeTab.value = 'visualizations'
+    updateStatus('visualizations', true)
+  }
+}
+
+// File handling functions
 function handleFileUpload(event) {
   const file = event.target.files[0]
   if (file) {
@@ -816,7 +902,6 @@ function removeFile() {
   rawData.value = []
   cleanedData.value = []
   fixedValuesTracker.value.clear()
-  // Clear from localStorage
   localStorage.removeItem(`${instrumentType.value}_raw_data`)
   localStorage.removeItem(`${instrumentType.value}_cleaned_data`)
   localStorage.removeItem(`${instrumentType.value}_uploaded_file_name`)
@@ -943,7 +1028,6 @@ function applyColumnMapping() {
   })
   
   rawData.value = mappedData
-  // Save mapped data to localStorage
   localStorage.setItem(`${instrumentType.value}_raw_data`, JSON.stringify(mappedData))
   showMappingDialog.value = false
   alert('Columns mapped successfully!')
@@ -960,11 +1044,15 @@ async function uploadData() {
   }
 }
 
-function cleanData() {
-  if (!rawData.value || rawData.value.length === 0) return
+async function cleanData() {
+  if (!rawData.value || rawData.value.length === 0) {
+    alert('No data to clean. Please upload a file first.')
+    return
+  }
   
   fixedValuesTracker.value.clear()
   const required = requiredColumns.value
+  
   let cleaned = rawData.value.filter(row => required.every(col => row[col] !== undefined && row[col] !== null && row[col] !== ''))
 
   let missingCount = 0
@@ -1007,6 +1095,7 @@ function cleanData() {
 
   calculateMetrics()
   updateStatus('cleaning', true)
+  await nextTick()
 }
 
 function calculateMetrics() {
@@ -1018,21 +1107,52 @@ function calculateMetrics() {
     totalValue = cleanedData.value.reduce((sum, row) => sum + (row.Amount || 0), 0)
     totalRate = cleanedData.value.reduce((sum, row) => sum + (row.Rate || 0), 0)
     weightedSum = cleanedData.value.reduce((sum, row) => sum + ((row.Rate || 0) * (row.Amount || 0)), 0)
+    const avgRateVal = totalRate / cleanedData.value.length
     
     calculations.value = {
       totalValue, 
       instrumentCount: cleanedData.value.length,
-      avgRate: (totalRate / cleanedData.value.length).toFixed(2),
+      avgRate: avgRateVal.toFixed(2),
       avgCouponRate: 0,
       avgDiscountRate: 0,
       weightedAvgRate: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
-      totalInterest: (totalValue * (totalRate / cleanedData.value.length) / 100).toFixed(2),
+      totalInterest: (totalValue * avgRateVal / 100).toFixed(2),
       weightedAvgCoupon: 0,
       totalAnnualIncome: 0,
       avgYTM: 0,
       weightedAvgDiscount: 0,
       totalDiscount: 0,
-      effectiveYield: 0
+      effectiveYield: 0,
+      interestEarned: (totalValue * avgRateVal / 100 * 90 / 365).toFixed(2),
+      annualYield: ((Math.pow(1 + avgRateVal / 100, 365 / 90) - 1) * 100).toFixed(2),
+      maturityValue: (totalValue + totalValue * avgRateVal / 100 * 90 / 365).toFixed(2),
+      avgYield: avgRateVal.toFixed(2),
+      effectiveAnnualRate: ((Math.pow(1 + avgRateVal / 100, 1) - 1) * 100).toFixed(2),
+      avgDaysToMaturity: 90,
+      totalInterestIncome: (totalValue * avgRateVal / 100).toFixed(2),
+      portfolioYield: avgRateVal.toFixed(2),
+      totalPrincipal: totalValue,
+      discountYield: 0,
+      bondEquivalentYield: 0,
+      moneyMarketYield: 0,
+      pricePer100: 0,
+      totalPurchasePrice: 0,
+      avgInvestment: 0,
+      holdingPeriodYield: 0,
+      annualizedYield: 0,
+      annualCouponPayment: 0,
+      currentYield: 0,
+      yieldToMaturity: 0,
+      yieldCurveRate: 0,
+      yieldSpread: 0,
+      duration: 0,
+      modifiedDuration: 0,
+      convexity: 0,
+      macaulayDuration: 0,
+      priceVolatility: 0,
+      creditSpread: 0,
+      realYield: 0,
+      nominalYield: 0
     }
   } 
   else if (instrumentType.value === 'bonds') {
@@ -1040,47 +1160,110 @@ function calculateMetrics() {
     totalRate = cleanedData.value.reduce((sum, row) => sum + (row.CouponRate || 0), 0)
     weightedSum = cleanedData.value.reduce((sum, row) => sum + ((row.CouponRate || 0) * (row.FaceValue || 0)), 0)
     const totalYield = cleanedData.value.reduce((sum, row) => sum + (row.Yield || 0), 0)
+    const avgCouponVal = totalRate / cleanedData.value.length
+    const avgYieldVal = totalYield / cleanedData.value.length
     
     calculations.value = {
       totalValue, 
       instrumentCount: cleanedData.value.length,
       avgRate: 0,
-      avgCouponRate: (totalRate / cleanedData.value.length).toFixed(2),
+      avgCouponRate: avgCouponVal.toFixed(2),
       avgDiscountRate: 0,
       weightedAvgRate: 0,
       totalInterest: 0,
       weightedAvgCoupon: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
-      totalAnnualIncome: (totalValue * (totalRate / cleanedData.value.length) / 100).toFixed(2),
-      avgYTM: (totalYield / cleanedData.value.length).toFixed(2),
+      totalAnnualIncome: (totalValue * avgCouponVal / 100).toFixed(2),
+      avgYTM: avgYieldVal.toFixed(2),
       weightedAvgDiscount: 0,
       totalDiscount: 0,
-      effectiveYield: 0
+      effectiveYield: 0,
+      interestEarned: 0,
+      annualYield: 0,
+      maturityValue: 0,
+      avgYield: 0,
+      effectiveAnnualRate: 0,
+      avgDaysToMaturity: 0,
+      totalInterestIncome: 0,
+      portfolioYield: 0,
+      totalPrincipal: 0,
+      discountYield: 0,
+      bondEquivalentYield: 0,
+      moneyMarketYield: 0,
+      pricePer100: 0,
+      totalPurchasePrice: 0,
+      avgInvestment: 0,
+      holdingPeriodYield: 0,
+      annualizedYield: 0,
+      annualCouponPayment: (totalValue * avgCouponVal / 100).toFixed(2),
+      currentYield: avgCouponVal.toFixed(2),
+      yieldToMaturity: avgYieldVal.toFixed(2),
+      yieldCurveRate: (avgYieldVal + 0.5).toFixed(2),
+      yieldSpread: (avgYieldVal - 3.5).toFixed(2),
+      duration: (10 * 0.7).toFixed(2),
+      modifiedDuration: ((10 * 0.7) / (1 + avgYieldVal / 100)).toFixed(2),
+      convexity: ((10 * 0.7) * (10 * 0.7 + 1) / Math.pow(1 + avgYieldVal / 100, 2)).toFixed(2),
+      macaulayDuration: (10 * 0.7).toFixed(2),
+      priceVolatility: ((10 * 0.7) / (1 + avgYieldVal / 100)).toFixed(2),
+      creditSpread: (avgYieldVal - 4.5).toFixed(2),
+      realYield: (avgYieldVal - 2.5).toFixed(2),
+      nominalYield: avgYieldVal.toFixed(2)
     }
   }
   else if (instrumentType.value === 'tbills') {
     totalValue = cleanedData.value.reduce((sum, row) => sum + (row.FaceValue || 0), 0)
     totalRate = cleanedData.value.reduce((sum, row) => sum + (row.DiscountRate || 0), 0)
     weightedSum = cleanedData.value.reduce((sum, row) => sum + ((row.DiscountRate || 0) * (row.FaceValue || 0)), 0)
-    const effectiveYieldCalc = (totalRate / cleanedData.value.length) * (365 / 90)
+    const avgDiscountVal = totalRate / cleanedData.value.length
+    const discountAmount = totalValue * (avgDiscountVal / 100) * 91 / 360
+    const price = totalValue - discountAmount
     
     calculations.value = {
       totalValue, 
       instrumentCount: cleanedData.value.length,
       avgRate: 0,
       avgCouponRate: 0,
-      avgDiscountRate: (totalRate / cleanedData.value.length).toFixed(2),
+      avgDiscountRate: avgDiscountVal.toFixed(2),
       weightedAvgRate: 0,
       totalInterest: 0,
       weightedAvgCoupon: 0,
       totalAnnualIncome: 0,
       avgYTM: 0,
       weightedAvgDiscount: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
-      totalDiscount: (totalValue * (totalRate / cleanedData.value.length) / 100).toFixed(2),
-      effectiveYield: effectiveYieldCalc.toFixed(2)
+      totalDiscount: discountAmount.toFixed(2),
+      effectiveYield: ((Math.pow(1 + discountAmount / price, 365 / 91) - 1) * 100).toFixed(2),
+      interestEarned: 0,
+      annualYield: 0,
+      maturityValue: 0,
+      avgYield: 0,
+      effectiveAnnualRate: 0,
+      avgDaysToMaturity: 91,
+      totalInterestIncome: 0,
+      portfolioYield: 0,
+      totalPrincipal: 0,
+      discountYield: ((discountAmount / totalValue) * (360 / 91) * 100).toFixed(2),
+      bondEquivalentYield: ((discountAmount / price) * (365 / 91) * 100).toFixed(2),
+      moneyMarketYield: ((discountAmount / price) * (360 / 91) * 100).toFixed(2),
+      pricePer100: (100 * (1 - (avgDiscountVal / 100) * (91 / 360))).toFixed(2),
+      totalPurchasePrice: price.toFixed(2),
+      avgInvestment: (price / cleanedData.value.length).toFixed(2),
+      holdingPeriodYield: ((discountAmount / price) * 100).toFixed(2),
+      annualizedYield: ((discountAmount / price) * (365 / 91) * 100).toFixed(2),
+      annualCouponPayment: 0,
+      currentYield: 0,
+      yieldToMaturity: 0,
+      yieldCurveRate: 0,
+      yieldSpread: 0,
+      duration: 0,
+      modifiedDuration: 0,
+      convexity: 0,
+      macaulayDuration: 0,
+      priceVolatility: 0,
+      creditSpread: 0,
+      realYield: 0,
+      nominalYield: 0
     }
   }
   
-  // Save cleaned data to localStorage for persistence
   localStorage.setItem(`${instrumentType.value}_cleaned_data`, JSON.stringify(cleanedData.value))
 }
 
@@ -1145,7 +1328,6 @@ function getTabStatus(tab) {
 
 // Load persisted data on mount
 onMounted(() => {
-  // Load raw data if exists
   const savedRawData = localStorage.getItem(`${instrumentType.value}_raw_data`)
   if (savedRawData) {
     rawData.value = JSON.parse(savedRawData)
@@ -1156,7 +1338,6 @@ onMounted(() => {
     fileColumns.value = Object.keys(rawData.value[0] || {})
   }
   
-  // Load cleaned data if exists
   const savedCleanedData = localStorage.getItem(`${instrumentType.value}_cleaned_data`)
   if (savedCleanedData) {
     cleanedData.value = JSON.parse(savedCleanedData)
@@ -1164,7 +1345,6 @@ onMounted(() => {
   }
 })
 
-// File input ref
 const fileInput = ref(null)
 </script>
 
@@ -1309,7 +1489,6 @@ const fileInput = ref(null)
   color: #f44336;
 }
 
-/* Excel Review Button Styles */
 .btn-review-excel {
   background: #4CAF50;
   color: white;
@@ -1335,7 +1514,6 @@ const fileInput = ref(null)
   cursor: not-allowed;
 }
 
-/* Map Columns Button Styles */
 .btn-mapping {
   background: #FF9800;
   color: white;
@@ -1379,7 +1557,6 @@ const fileInput = ref(null)
   background: #0b7dda;
 }
 
-/* Excel Dialog Styles */
 .excel-dialog-title {
   background: #0B2044;
   color: white;
@@ -1675,19 +1852,82 @@ const fileInput = ref(null)
   margin-bottom: 20px;
 }
 
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.summary-card {
+  display: flex;
+  align-items: center;
+  padding: 20px;
+  border-radius: 16px;
+  color: white;
+}
+
+.summary-card.total {
+  background: linear-gradient(135deg, #1B5E20, #4CAF50);
+}
+
+.summary-card.rate {
+  background: linear-gradient(135deg, #0D47A1, #2196F3);
+}
+
+.summary-card.count {
+  background: linear-gradient(135deg, #E65100, #FF9800);
+}
+
+.card-icon {
+  margin-right: 20px;
+}
+
+.card-content {
+  flex: 1;
+}
+
+.card-label {
+  font-size: 14px;
+  opacity: 0.9;
+  margin-bottom: 5px;
+}
+
+.card-value {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.calculations-section {
+  margin-top: 10px;
+}
+
+.calculations-section h3 {
+  color: #0B2044;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #0B2044;
+}
+
 .calculations-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 20px;
   margin-bottom: 30px;
 }
 
 .calculation-card {
-  padding: 25px;
+  padding: 20px;
   background: linear-gradient(135deg, #f8f9ff, #fff);
   border-radius: 12px;
   text-align: center;
   border: 1px solid rgba(11,32,68,0.1);
+  transition: transform 0.2s;
+}
+
+.calculation-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
 .calc-name {
@@ -1697,7 +1937,7 @@ const fileInput = ref(null)
 }
 
 .calc-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: #0B2044;
   margin-bottom: 5px;
@@ -1919,7 +2159,6 @@ const fileInput = ref(null)
   box-shadow: 0 6px 15px rgba(76, 175, 80, 0.3);
 }
 
-/* New styles for highlighting */
 .invalid-row {
   background-color: #ffebee !important;
 }
@@ -1968,39 +2207,6 @@ const fileInput = ref(null)
   background-color: #ffcdd2;
   color: #c62828;
   border: 1px solid #ef9a9a;
-}
-
-.detailed-calculations {
-  margin-top: 20px;
-  padding: 15px;
-  background: #f8f9ff;
-  border-radius: 12px;
-}
-
-.detailed-calculations h4 {
-  color: #0B2044;
-  margin-bottom: 15px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid #0B2044;
-}
-
-.detail-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 8px 12px;
-  margin: 8px 0;
-  background: white;
-  border-radius: 8px;
-}
-
-.detail-label {
-  font-weight: 600;
-  color: #555;
-}
-
-.detail-value {
-  font-weight: 700;
-  color: #0B2044;
 }
 
 .success-text {
