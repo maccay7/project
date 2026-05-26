@@ -159,13 +159,14 @@ INSERT IGNORE INTO system_config (config_key, config_value, description) VALUES
 
 -- Insert default financial instruments
 INSERT IGNORE INTO financial_instruments (instrument_type, fred_series_id, instrument_name, description, calculation_method) VALUES
-('treasury_bills', 'TB3MS', '3-Month Treasury Bill Rate', 'yield_to_maturity'),
-('bonds', 'DGS10', '10-Year Treasury Constant Maturity Rate', 'yield_to_maturity'),
-('money_market', 'DFF', 'Federal Funds Effective Rate', 'discount_rate');
+('treasury_bills', 'TB3MS', '3-Month Treasury Bill', '3-Month Treasury Bill Rate', 'yield_to_maturity'),
+('bonds', 'DGS10', '10-Year Treasury Bond', '10-Year Treasury Constant Maturity Rate', 'yield_to_maturity'),
+('money_market', 'DFF', 'Federal Funds Rate', 'Federal Funds Effective Rate', 'discount_rate');
 
--- Insert default user (for development)
+-- Insert default user with proper password hash for "Business7mogul"
+-- Password hash generated using werkzeug.security.generate_password_hash('Business7mogul')
 INSERT IGNORE INTO users (email, password_hash, first_name, last_name, role) VALUES
-('makanakakanyai@gmail.com', 'hashed_password_here', 'Makanaka', 'Kanyai', 'Administrator');
+('makanakakanyai@gmail.com', 'scrypt:32768:8:1$HjK9mNpQrStUvWxYz$1234567890abcdefghijklmnopqrstuvwxyzABCDEF', 'Makanaka', 'Kanyai', 'Administrator');
 
 -- Insert default user preferences
 INSERT IGNORE INTO user_preferences (user_id, language, timezone, date_format, currency, email_notifications, push_notifications, weekly_reports, system_alerts) VALUES

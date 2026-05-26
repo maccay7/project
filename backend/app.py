@@ -12,7 +12,13 @@ from routes.upload import upload_routes
 from routes.settings import settings_routes
 
 app = Flask(__name__)
-CORS(app, origins=os.environ.get('CORS_ORIGINS', '*').split(','), supports_credentials=True)
+
+# Only use Flask-CORS - remove the @app.after_request
+CORS(app, 
+     origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://192.168.0.125:3000"],
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 # Register routes
 auth_routes(app)
@@ -31,4 +37,5 @@ def home():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
+    print(f"🚀 Server running on http://0.0.0.0:{port}")
     app.run(debug=True, port=port, host='0.0.0.0')

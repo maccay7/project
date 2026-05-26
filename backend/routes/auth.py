@@ -5,6 +5,7 @@ def auth_routes(app):
     
     @app.route('/api/login', methods=['POST', 'OPTIONS'])
     def login():
+        # Handle preflight OPTIONS request - just return empty response
         if request.method == 'OPTIONS':
             return '', 200
         
@@ -12,6 +13,8 @@ def auth_routes(app):
             data = request.get_json()
             email = data.get('email')
             password = data.get('password')
+            
+            print(f"Login attempt for email: {email}")
             
             # Validate input
             if not email or not password:
@@ -22,9 +25,11 @@ def auth_routes(app):
             
             # Find user in database
             user = User.find_by_email(email)
+            print(f"User found: {user is not None}")
             
             # Verify password
             if not user or not User.verify_password(user, password):
+                print(f"Password verification failed for {email}")
                 return jsonify({
                     'success': False,
                     'message': 'Invalid email or password'
@@ -48,7 +53,7 @@ def auth_routes(app):
             # Log the login action
             User.log_audit(user['id'], 'LOGIN', 'User logged in', ip_address, user_agent)
             
-            # Return success response
+            # Return success response - NO MANUAL CORS HEADERS
             return jsonify({
                 'success': True,
                 'token': token,
@@ -58,7 +63,7 @@ def auth_routes(app):
                     'first_name': user['first_name'],
                     'last_name': user['last_name'],
                     'full_name': f"{user['first_name']} {user['last_name']}",
-                    'role': user['role'],
+                    'role': user.get('role', 'User'),
                     'phone': user.get('phone', '')
                 },
                 'preferences': preferences
