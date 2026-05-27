@@ -492,13 +492,14 @@ onMounted(() => {
 }
 
 .sessions-list-container {
-  min-height: 220px;
+  margin: 0 12px;
 }
 
+/* ========== SCROLLABLE SESSION LIST ========== */
 .sessions-list {
-  max-height: 220px;
+  max-height: 280px;
   overflow-y: auto;
-  padding: 0 12px 8px 12px;
+  padding: 0 8px 8px 0;
 }
 
 .sessions-list::-webkit-scrollbar {
