@@ -74,7 +74,12 @@
                 </div>
                 <div class="table-wrapper">
                   <table class="data-table">
-                    <thead><tr><th>#</th><th v-for="col in previewColumnsList" :key="col">{{ col }}</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th v-for="col in previewColumnsList" :key="col">{{ col }}</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       <tr v-for="(row, idx) in paginatedPreviewData" :key="idx">
                         <td class="row-number">{{ previewStartRow + idx + 1 }}</td>
@@ -141,7 +146,6 @@
                 <button class="btn-primary" @click="switchTab('upload')">Go to Upload</button>
               </div>
               <div v-else>
-                <!-- Cleaning Options Panel -->
                 <div class="cleaning-options-panel">
                   <h3>Cleaning Filters</h3>
                   <div class="options-grid">
@@ -162,12 +166,16 @@
                   </div>
                 </div>
 
-                <!-- Preview of Cleaned Data -->
                 <div v-if="previewData.length" class="preview-section">
                   <h4>Preview of Cleaned Data ({{ previewData.length }} rows)</h4>
                   <div class="table-wrapper">
                     <table class="data-table">
-                      <thead><tr><th>#</th><th v-for="col in previewColumnsListClean" :key="col">{{ col }}</th></tr></thead>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th v-for="col in previewColumnsListClean" :key="col">{{ col }}</th>
+                        </tr>
+                      </thead>
                       <tbody>
                         <tr v-for="(row, idx) in previewData.slice(0,10)" :key="idx">
                           <td class="row-number">{{ idx+1 }}</td>
@@ -179,14 +187,12 @@
                   <p v-if="previewData.length > 10" class="preview-note">Showing first 10 rows</p>
                 </div>
 
-                <!-- After cleaning applied -->
                 <div v-if="cleanedData.length" class="highlight-box">
                   <p>✓ Removed {{ cleaningStats.removedRows }} invalid rows</p>
                   <p>✓ Fixed {{ cleaningStats.fixedMissing }} missing values</p>
                   <p class="success-text">✓ Data is now clean and ready for calculations</p>
                 </div>
 
-                <!-- Raw data preview before any cleaning -->
                 <div v-if="rawData.length && !cleanedData.length && !previewData.length" class="preview-section">
                   <h4>Raw Data with Issues Highlighted:</h4>
                   <div class="legend"><span class="legend-badge invalid-row-badge">⚠ Invalid Row</span><span class="legend-badge invalid-cell-badge">❌ Missing/Invalid Value</span></div>
@@ -200,7 +206,12 @@
                   </div>
                   <div class="table-wrapper">
                     <table class="data-table">
-                      <thead><tr><th>#</th><th v-for="col in rawPreviewColumnsList" :key="col">{{ col }}</th></tr></thead>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th v-for="col in rawPreviewColumnsList" :key="col">{{ col }}</th>
+                        </tr>
+                      </thead>
                       <tbody>
                         <tr v-for="(row, idx) in paginatedRawPreview" :key="idx" :class="{ 'invalid-row': hasInvalidData(row) }">
                           <td class="row-number">{{ rawPreviewStartRow + idx + 1 }}</td>
@@ -232,10 +243,15 @@
                 <button class="btn-primary" @click="switchTab('cleaning')">Go to Cleaning</button>
               </div>
               <div v-else>
-                <!-- Summary Cards -->
                 <div class="summary-cards">
-                  <div class="summary-card total"><div class="card-value">${{ calculations.totalValue?.toLocaleString() || 0 }}</div><div class="card-label">Total Portfolio Value</div></div>
+                  <div class="summary-card total">
+                    <div class="card-label">Total Portfolio Value</div>
+                    <div class="card-value">${{ calculations.totalValue?.toLocaleString() || 0 }}</div>
+                  </div>
                   <div class="summary-card rate">
+                    <div class="card-label">
+                      {{ instrumentType === 'money-market' ? 'Avg Interest Rate' : instrumentType === 'bonds' ? 'Avg Coupon Rate' : 'Avg Discount Rate' }}
+                    </div>
                     <div class="card-value">
                       {{
                         instrumentType === 'money-market' ? (calculations.avgRate || 0) :
@@ -243,18 +259,16 @@
                         (calculations.avgDiscountRate || 0)
                       }}%
                     </div>
-                    <div class="card-label">
-                      {{ instrumentType === 'money-market' ? 'Avg Interest Rate' : instrumentType === 'bonds' ? 'Avg Coupon Rate' : 'Avg Discount Rate' }}
-                    </div>
                   </div>
-                  <div class="summary-card count"><div class="card-value">{{ calculations.instrumentCount || 0 }}</div><div class="card-label">Number of Instruments</div></div>
+                  <div class="summary-card count">
+                    <div class="card-label">Number of Instruments</div>
+                    <div class="card-value">{{ calculations.instrumentCount || 0 }}</div>
+                  </div>
                 </div>
 
-                <!-- Full Calculations Grid - all metrics per instrument -->
                 <div class="calculations-section">
                   <h3>{{ instrumentName }} Calculations</h3>
                   <div class="calculations-grid">
-                    <!-- Money Market -->
                     <template v-if="instrumentType === 'money-market'">
                       <div class="calculation-card"><div class="calc-name">Weighted Average Rate</div><div class="calc-value">{{ calculations.weightedAvgRate || 0 }}%</div></div>
                       <div class="calculation-card"><div class="calc-name">Total Interest (Annualized)</div><div class="calc-value">${{ calculations.totalInterest?.toLocaleString() || 0 }}</div></div>
@@ -264,16 +278,12 @@
                       <div class="calculation-card"><div class="calc-name">Average Days to Maturity</div><div class="calc-value">{{ calculations.avgDaysToMaturity || 0 }} days</div></div>
                       <div class="calculation-card"><div class="calc-name">Total Principal</div><div class="calc-value">${{ calculations.totalPrincipal?.toLocaleString() || 0 }}</div></div>
                     </template>
-
-                    <!-- Bonds -->
                     <template v-else-if="instrumentType === 'bonds'">
                       <div class="calculation-card"><div class="calc-name">Weighted Average Coupon</div><div class="calc-value">{{ calculations.weightedAvgCoupon || 0 }}%</div></div>
                       <div class="calculation-card"><div class="calc-name">Total Annual Income</div><div class="calc-value">${{ calculations.totalAnnualIncome?.toLocaleString() || 0 }}</div></div>
                       <div class="calculation-card"><div class="calc-name">Average Yield to Maturity</div><div class="calc-value">{{ calculations.avgYTM || 0 }}%</div></div>
                       <div class="calculation-card"><div class="calc-name">Duration (years)</div><div class="calc-value">{{ calculations.duration || 0 }}</div></div>
                     </template>
-
-                    <!-- T‑Bills -->
                     <template v-else>
                       <div class="calculation-card"><div class="calc-name">Weighted Average Discount</div><div class="calc-value">{{ calculations.weightedAvgDiscount || 0 }}%</div></div>
                       <div class="calculation-card"><div class="calc-name">Total Discount</div><div class="calc-value">${{ calculations.totalDiscount?.toLocaleString() || 0 }}</div></div>
@@ -351,34 +361,59 @@
         <!-- ==================== REPORTS TAB ==================== -->
         <div v-if="activeTab === 'reports'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-file-pdf</v-icon> Generate {{ instrumentName }} Report</v-card-title>
+            <v-card-title><v-icon>mdi-file-pdf</v-icon> Generate Combined Report</v-card-title>
             <v-card-text>
               <div class="report-options">
-                <div class="report-preview">
-                  <h3>Report Preview</h3>
-                  <div class="report-content">
-                    <p><strong>Instrument:</strong> {{ instrumentName }}</p>
-                    <p><strong>Date Generated:</strong> {{ new Date().toLocaleString() }}</p>
-                    <p><strong>Total Value:</strong> ${{ calculations.totalValue?.toLocaleString() || 0 }}</p>
-                    <p><strong>Records Processed:</strong> {{ cleanedData.length }}</p>
+                <!-- Instrument Selection -->
+                <div class="instrument-selection">
+                  <h3>Select Instruments to Include</h3>
+                  <div class="selection-grid">
+                    <label class="instrument-checkbox"><input type="checkbox" v-model="selectedInstruments.moneyMarket"> Money Market</label>
+                    <label class="instrument-checkbox"><input type="checkbox" v-model="selectedInstruments.bonds"> Bonds</label>
+                    <label class="instrument-checkbox"><input type="checkbox" v-model="selectedInstruments.tbills"> T-Bills</label>
                   </div>
-                  <div class="report-data-preview">
-                    <div class="preview-toolbar"><h5>Data Preview</h5><button class="btn-review-excel-small" @click="openExcelReview(cleanedData, 'Report Data')">Review Full Data</button></div>
-                    <div class="table-wrapper">
-                      <table class="data-table">
-                        <thead><tr><th>#</th><th v-for="col in reportPreviewColumns" :key="col">{{ col }}</th></tr></thead>
-                        <tbody><tr v-for="(row, idx) in reportDataPreview" :key="idx"><td>{{ idx+1 }}</td><td v-for="col in reportPreviewColumns" :key="col">{{ formatCellValue(row[col]) }}</td></tr></tbody>
-                      </table>
-                    </div>
+                  <div class="selection-actions">
+                    <button class="btn-secondary" @click="selectAllInstruments">Select All</button>
+                    <button class="btn-secondary" @click="deselectAllInstruments">Deselect All</button>
                   </div>
                 </div>
+
+                <!-- Full Report Preview (live) -->
+                <div class="report-preview-full">
+                  <h3>Report Preview</h3>
+                  <div class="preview-content" v-if="reportPreviewData.instruments.length">
+                    <div class="preview-header">
+                      <p><strong>Session:</strong> {{ reportPreviewData.session }}</p>
+                      <p><strong>Date Generated:</strong> {{ reportPreviewData.date }}</p>
+                    </div>
+                    <div class="preview-instruments">
+                      <div v-for="inst in reportPreviewData.instruments" :key="inst.name" class="preview-instrument-card">
+                        <h4>{{ inst.name }}</h4>
+                        <table class="preview-table">
+                          <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+                          <tbody>
+                            <tr v-for="(value, key) in inst.calculations" :key="key">
+                              <td>{{ formatMetricName(key) }}</td>
+                              <td>{{ formatMetricValue(key, value) }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="preview-empty">
+                    <p>No instruments selected. Please select at least one instrument to preview the report.</p>
+                  </div>
+                </div>
+
+                <!-- Download Buttons -->
                 <div class="report-actions">
-                  <button class="btn-json" @click="downloadAsJSON">JSON</button>
-                  <button class="btn-csv" @click="downloadAsCSV">CSV</button>
-                  <button class="btn-html" @click="downloadAsHTML">HTML</button>
-                  <button class="btn-pdf" @click="downloadAsPDF">PDF</button>
-                  <button class="btn-word" @click="downloadAsWord">Word</button>
-                  <button class="btn-excel" @click="downloadAsExcel">Excel</button>
+                  <button class="btn-json" @click="downloadCombinedReport('json')">JSON</button>
+                  <button class="btn-csv" @click="downloadCombinedReport('csv')">CSV</button>
+                  <button class="btn-html" @click="downloadCombinedReport('html')">HTML</button>
+                  <button class="btn-pdf" @click="downloadCombinedReport('pdf')">PDF</button>
+                  <button class="btn-word" @click="downloadCombinedReport('word')">Word</button>
+                  <button class="btn-excel" @click="downloadCombinedReport('excel')">Excel</button>
                   <button class="btn-save" @click="saveToSession">Save to Session</button>
                 </div>
               </div>
@@ -422,9 +457,9 @@ import * as XLSX from 'xlsx'
 const router = useRouter()
 const route = useRoute()
 
-// ---------- Session & Refresh ----------
 const activeSession = ref(null)
 
+// Refresh and persistence functions
 function refreshPage() {
   rawData.value = []
   cleanedData.value = []
@@ -437,7 +472,6 @@ function refreshPage() {
   fileColumns.value = []
   showMappingDialog.value = false
   activeTab.value = 'upload'
-
   if (activeSession.value) {
     const key = `${instrumentType.value}_session_${activeSession.value.id}`
     localStorage.removeItem(`${key}_raw`)
@@ -457,12 +491,10 @@ function loadSavedData() {
   const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
   const hasSaved = savedRaw || savedClean || savedCalc
   if (!hasSaved) return false
-
   if (savedRaw) rawData.value = JSON.parse(savedRaw)
   if (savedClean) cleanedData.value = JSON.parse(savedClean)
   if (savedCalc) calculations.value = JSON.parse(savedCalc)
   if (savedFileName) uploadedFile.value = { name: savedFileName, size: 0 }
-
   if (cleanedData.value.length && rawData.value.length) {
     cleaningStats.value = {
       totalRows: rawData.value.length,
@@ -484,7 +516,30 @@ function saveSessionData() {
   localStorage.setItem(`instrument_${instrumentType.value}_last_tab`, activeTab.value)
 }
 
-// ---------- Instrument info ----------
+function updateSessionCompletion() {
+  if (!activeSession.value) return
+  if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
+  activeSession.value.instrumentData[instrumentType.value] = {
+    totalValue: calculations.value.totalValue || 0,
+    count: calculations.value.instrumentCount || 0,
+    completed: true,
+    timestamp: new Date().toISOString()
+  }
+  let total = 0, count = 0
+  for (const data of Object.values(activeSession.value.instrumentData)) {
+    if (data.completed) { total += data.totalValue || 0; count++ }
+  }
+  activeSession.value.totalValue = total
+  activeSession.value.instrumentCount = count
+  if (count === 3) activeSession.value.status = 'completed'
+  localStorage.setItem('active_session', JSON.stringify(activeSession.value))
+  const sessionsList = JSON.parse(localStorage.getItem('sessions_list') || '[]')
+  const idx = sessionsList.findIndex(s => s.id === activeSession.value.id)
+  if (idx !== -1) sessionsList[idx] = activeSession.value
+  localStorage.setItem('sessions_list', JSON.stringify(sessionsList))
+}
+
+// Instrument info
 const instrumentType = computed(() => route.params.type || route.path.split('/').pop())
 const instrumentName = computed(() => {
   const names = { 'money-market': 'Money Market', bonds: 'Bonds', tbills: 'T-Bills' }
@@ -496,7 +551,6 @@ const instrumentDescription = computed(() => ({
   tbills: 'Treasury bills - short-term government securities'
 }[instrumentType.value] || 'Financial instrument management'))
 
-// Steps
 const steps = [
   { tab: 'upload', name: 'Upload' },
   { tab: 'cleaning', name: 'Clean' },
@@ -510,11 +564,10 @@ const activeTab = computed({
   get: () => route.query.tab || 'upload',
   set: (val) => router.push({ query: { tab: val } })
 })
-
 const currentStepIndex = computed(() => steps.findIndex(s => s.tab === activeTab.value))
 const totalSteps = steps.length
 
-// ---------- Data ----------
+// Data refs
 const uploadedFile = ref(null)
 const rawData = ref([])
 const cleanedData = ref([])
@@ -537,7 +590,6 @@ const cleaningOptions = ref({
   removeOutliers: false
 })
 
-// ---------- Required columns (expanded per instrument) ----------
 const requiredColumns = computed(() => {
   if (instrumentType.value === 'money-market') {
     return ['Date', 'Instrument', 'Rate', 'Amount', 'MaturityDate', 'DaysToMaturity', 'Principal', 'InterestRate', 'DiscountRate', 'Price', 'FaceValue']
@@ -548,7 +600,6 @@ const requiredColumns = computed(() => {
   }
 })
 
-// Column variations
 const columnVariations = {
   Date: ['Date', 'date', 'DATE', 'Transaction Date', 'Trade Date', 'Settlement Date', 'Value Date', 'Start Date', 'Issue Date'],
   Instrument: ['Instrument', 'instrument', 'INSTRUMENT', 'Security', 'Security Name', 'Name', 'Description', 'Asset'],
@@ -602,6 +653,7 @@ const missingColumns = computed(() => requiredColumns.value.filter(col => !hasRe
 const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
+// Formatting helpers
 function formatCellValue(value) {
   if (value === undefined || value === null) return '-'
   if (typeof value === 'number') return value.toFixed(2)
@@ -784,7 +836,6 @@ async function applyCleaningOnly() {
   await nextTick()
 }
 
-// Calculations (full metrics per instrument)
 function calculateMetrics() {
   if (!cleanedData.value.length) return
   if (instrumentType.value === 'money-market') {
@@ -793,8 +844,7 @@ function calculateMetrics() {
     const weightedSum = cleanedData.value.reduce((s,row) => s + ((parseFloat(row.Rate)||0) * (parseFloat(row.Amount)||0)), 0)
     const avgRateVal = totalRate / cleanedData.value.length
     calculations.value = {
-      totalValue,
-      instrumentCount: cleanedData.value.length,
+      totalValue, instrumentCount: cleanedData.value.length,
       avgRate: avgRateVal.toFixed(2),
       weightedAvgRate: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
       totalInterest: (totalValue * avgRateVal / 100).toFixed(2),
@@ -812,15 +862,14 @@ function calculateMetrics() {
     const avgCoupon = totalRate / cleanedData.value.length
     const avgYieldVal = totalYield / cleanedData.value.length
     calculations.value = {
-      totalValue,
-      instrumentCount: cleanedData.value.length,
+      totalValue, instrumentCount: cleanedData.value.length,
       avgCouponRate: avgCoupon.toFixed(2),
       weightedAvgCoupon: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
       totalAnnualIncome: (totalValue * avgCoupon / 100).toFixed(2),
       avgYTM: avgYieldVal.toFixed(2),
       duration: (10 * 0.7).toFixed(2)
     }
-  } else { // tbills
+  } else {
     const totalValue = cleanedData.value.reduce((s,row) => s + (parseFloat(row.FaceValue)||0), 0)
     const totalRate = cleanedData.value.reduce((s,row) => s + (parseFloat(row.DiscountRate)||0), 0)
     const weightedSum = cleanedData.value.reduce((s,row) => s + ((parseFloat(row.DiscountRate)||0) * (parseFloat(row.FaceValue)||0)), 0)
@@ -828,8 +877,7 @@ function calculateMetrics() {
     const discountAmount = totalValue * (avgDiscount/100) * 91/360
     const price = totalValue - discountAmount
     calculations.value = {
-      totalValue,
-      instrumentCount: cleanedData.value.length,
+      totalValue, instrumentCount: cleanedData.value.length,
       avgDiscountRate: avgDiscount.toFixed(2),
       weightedAvgDiscount: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
       totalDiscount: discountAmount.toFixed(2),
@@ -846,36 +894,151 @@ function calculateMetrics() {
     }
   }
   saveSessionData()
+  updateSessionCompletion()
 }
 
-// Download report functions (7 options)
-function downloadAsJSON() {
-  const report = { instrument: instrumentName.value, date: new Date().toLocaleString(), calculations: calculations.value, cleaningStats: cleaningStats.value, totalRecords: cleanedData.value.length, data: cleanedData.value.slice(0,100) }
-  const blob = new Blob([JSON.stringify(report,null,2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${instrumentType.value}_report_${Date.now()}.json`; a.click(); URL.revokeObjectURL(url)
-}
-function downloadAsCSV() {
-  const headers = ['Metric', 'Value']
-  const rows = [ ['Instrument', instrumentName.value], ['Date Generated', new Date().toLocaleString()], ['Total Portfolio Value', `$${calculations.value.totalValue?.toLocaleString() || 0}`], ['Number of Instruments', calculations.value.instrumentCount || 0], ['Average Rate', `${calculations.value.avgRate || calculations.value.avgCouponRate || calculations.value.avgDiscountRate || 0}%`], ['Total Records Processed', cleanedData.value.length || 0] ]
-  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${instrumentType.value}_report_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url)
-}
-function downloadAsHTML() {
-  const html = `<!DOCTYPE html><html><head><title>${instrumentName.value} Report</title><style>body{font-family:Arial;margin:40px}</style></head><body><h1>${instrumentName.value} Report</h1><p>Date: ${new Date().toLocaleString()}</p><h2>Calculations</h2><table border="1">${Object.entries(calculations.value).map(([k,v])=>`<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table></body></html>`
-  const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${instrumentType.value}_report_${Date.now()}.html`; a.click(); URL.revokeObjectURL(url)
-}
-function downloadAsPDF() { const win = window.open(); win.document.write(`<!DOCTYPE html><html><head><title>${instrumentName.value} Report</title><style>body{font-family:Arial;margin:40px}</style></head><body><h1>${instrumentName.value} Report</h1><p>Date: ${new Date().toLocaleString()}</p><h2>Calculations</h2><table border="1">${Object.entries(calculations.value).map(([k,v])=>`<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table></body></html>`); win.print() }
-function downloadAsWord() {
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${instrumentName.value} Report</title></head><body><h1>${instrumentName.value} Report</h1><p>Date: ${new Date().toLocaleString()}</p><h2>Calculations</h2><table border="1">${Object.entries(calculations.value).map(([k,v])=>`<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table></body></html>`
-  const blob = new Blob([html], { type: 'application/msword' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${instrumentType.value}_report.doc`; a.click(); URL.revokeObjectURL(url)
-}
-function downloadAsExcel() {
-  const csv = [['Metric','Value'], ...Object.entries(calculations.value).map(([k,v])=>[k,v])].map(row=>row.join(',')).join('\n')
-  const blob = new Blob([csv], { type: 'application/vnd.ms-excel' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${instrumentType.value}_report.xls`; a.click(); URL.revokeObjectURL(url)
-}
-function saveToSession() { saveSessionData(); alert('Data saved to session!') }
+// ---------- REPORT LOGIC ----------
+const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
+function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
+function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
 
-// Excel viewer
+function getInstrumentData(instrumentId) {
+  if (!activeSession.value) return null
+  const key = `${instrumentId}_session_${activeSession.value.id}`
+  const savedCalc = localStorage.getItem(`${key}_calc`)
+  if (savedCalc) return JSON.parse(savedCalc)
+  if (activeSession.value.instrumentData && activeSession.value.instrumentData[instrumentId]) {
+    return activeSession.value.instrumentData[instrumentId]
+  }
+  return null
+}
+
+const reportPreviewData = computed(() => {
+  const instrumentsData = []
+  if (selectedInstruments.value.moneyMarket) {
+    const data = getInstrumentData('money-market')
+    if (data) instrumentsData.push({ name: 'Money Market', calculations: data })
+  }
+  if (selectedInstruments.value.bonds) {
+    const data = getInstrumentData('bonds')
+    if (data) instrumentsData.push({ name: 'Bonds', calculations: data })
+  }
+  if (selectedInstruments.value.tbills) {
+    const data = getInstrumentData('tbills')
+    if (data) instrumentsData.push({ name: 'T-Bills', calculations: data })
+  }
+  return {
+    session: activeSession.value?.name || 'No session',
+    date: new Date().toLocaleString(),
+    instruments: instrumentsData
+  }
+})
+
+function formatMetricName(key) {
+  const names = {
+    totalValue: 'Total Value', instrumentCount: 'Count', avgRate: 'Avg Interest Rate',
+    weightedAvgRate: 'Weighted Avg Rate', totalInterest: 'Total Interest',
+    interestEarned: 'Interest Earned', annualYield: 'Annual Yield',
+    effectiveAnnualRate: 'Effective Annual Rate', avgDaysToMaturity: 'Avg Days to Maturity',
+    totalPrincipal: 'Total Principal', avgCouponRate: 'Avg Coupon Rate',
+    weightedAvgCoupon: 'Weighted Avg Coupon', totalAnnualIncome: 'Total Annual Income',
+    avgYTM: 'Avg Yield to Maturity', duration: 'Duration', avgDiscountRate: 'Avg Discount Rate',
+    weightedAvgDiscount: 'Weighted Avg Discount', totalDiscount: 'Total Discount',
+    effectiveYield: 'Effective Yield', bondEquivalentYield: 'Bond Equivalent Yield',
+    discountYield: 'Discount Yield', moneyMarketYield: 'Money Market Yield',
+    pricePer100: 'Price per $100', totalPurchasePrice: 'Total Purchase Price',
+    avgInvestment: 'Avg Investment', holdingPeriodYield: 'Holding Period Yield',
+    annualizedYield: 'Annualized Yield'
+  }
+  return names[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
+}
+function formatMetricValue(key, value) {
+  if (typeof value === 'number') {
+    if (key.includes('Value') || key.includes('Price') || key.includes('Interest') || key.includes('Income') || key.includes('Discount') || key.includes('Principal') || key.includes('Investment'))
+      return `$${value.toLocaleString()}`
+    if (key.includes('Rate') || key.includes('Yield') || key.includes('Coupon') || key.includes('Discount'))
+      return `${value}%`
+    return value.toLocaleString()
+  }
+  return value
+}
+
+async function downloadCombinedReport(format) {
+  const report = reportPreviewData.value
+  if (report.instruments.length === 0) {
+    alert('Please select at least one instrument to include in the report.')
+    return
+  }
+  const filename = `combined_report_${Date.now()}`
+  if (format === 'json') {
+    downloadBlob(JSON.stringify(report, null, 2), `${filename}.json`, 'application/json')
+  } else if (format === 'csv') {
+    let csvRows = [['Instrument', 'Metric', 'Value']]
+    for (const inst of report.instruments) {
+      for (const [key, val] of Object.entries(inst.calculations)) {
+        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
+      }
+    }
+    const csv = csvRows.map(row => row.join(',')).join('\n')
+    downloadBlob(csv, `${filename}.csv`, 'text/csv')
+  } else if (format === 'html') {
+    let html = `<!DOCTYPE html><html><head><title>Combined Report</title><style>body{font-family:Arial;margin:40px} table{border-collapse:collapse;width:100%} th,td{border:1px solid #ddd;padding:8px} th{background:#0B2044;color:white}</style></head><body><h1>Portfolio Report</h1><p>Session: ${report.session}</p><p>Date: ${report.date}</p>`
+    for (const inst of report.instruments) {
+      html += `<h2>${inst.name}</h2><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+      for (const [key, val] of Object.entries(inst.calculations)) {
+        html += `<tr><td>${formatMetricName(key)}</td><td>${formatMetricValue(key, val)}</td></tr>`
+      }
+      html += `</tbody></table>`
+    }
+    html += `</body></html>`
+    downloadBlob(html, `${filename}.html`, 'text/html')
+  } else if (format === 'pdf') {
+    const win = window.open()
+    let html = `<!DOCTYPE html><html><head><title>Combined Report</title><style>body{font-family:Arial;margin:40px} table{border-collapse:collapse;width:100%} th,td{border:1px solid #ddd;padding:8px} th{background:#0B2044;color:white}</style></head><body><h1>Portfolio Report</h1><p>Session: ${report.session}</p><p>Date: ${report.date}</p>`
+    for (const inst of report.instruments) {
+      html += `<h2>${inst.name}</h2><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+      for (const [key, val] of Object.entries(inst.calculations)) {
+        html += `<tr><td>${formatMetricName(key)}</td><td>${formatMetricValue(key, val)}</td></tr>`
+      }
+      html += `</tbody></table>`
+    }
+    html += `</body></html>`
+    win.document.write(html)
+    win.print()
+  } else if (format === 'word') {
+    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Combined Report</title></head><body><h1>Portfolio Report</h1><p>Session: ${report.session}</p><p>Date: ${report.date}</p>`
+    for (const inst of report.instruments) {
+      html += `<h2>${inst.name}</h2><table border="1"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+      for (const [key, val] of Object.entries(inst.calculations)) {
+        html += `<tr><td>${formatMetricName(key)}</td><td>${formatMetricValue(key, val)}</td></tr>`
+      }
+      html += `</tbody></table>`
+    }
+    html += `</body></html>`
+    downloadBlob(html, `${filename}.doc`, 'application/msword')
+  } else if (format === 'excel') {
+    let csvRows = [['Instrument', 'Metric', 'Value']]
+    for (const inst of report.instruments) {
+      for (const [key, val] of Object.entries(inst.calculations)) {
+        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
+      }
+    }
+    const csv = csvRows.map(row => row.join(',')).join('\n')
+    downloadBlob(csv, `${filename}.xls`, 'application/vnd.ms-excel')
+  }
+}
+
+function downloadBlob(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// Excel viewer (unchanged)
 const showExcelDialog = ref(false)
 const excelData = ref([])
 const excelColumns = ref([])
@@ -895,6 +1058,7 @@ function exportToCSV() {
 function exportToJSON() {
   const blob = new Blob([JSON.stringify(excelData.value, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${excelDialogTitle.value.replace(/ /g, '_')}_${Date.now()}.json`; a.click(); URL.revokeObjectURL(url)
 }
+function saveToSession() { saveSessionData(); alert('Data saved to session!') }
 
 // Force refresh on instrument or session change
 let lastInstrument = ''
@@ -922,7 +1086,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* ========== ALL ORIGINAL STYLES – keep exactly as you had ========== */
+/* Keep your existing styles – they are unchanged */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
@@ -994,13 +1158,11 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .option-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; flex-wrap: wrap; }
 .cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; }
 .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
-.summary-card { display: flex; align-items: center; padding: 20px; border-radius: 16px; color: white; }
+.summary-card { background: linear-gradient(135deg, #1B5E20, #4CAF50); padding: 20px; border-radius: 16px; color: white; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .summary-card.total { background: linear-gradient(135deg, #1B5E20, #4CAF50); }
 .summary-card.rate { background: linear-gradient(135deg, #0D47A1, #2196F3); }
 .summary-card.count { background: linear-gradient(135deg, #E65100, #FF9800); }
-.card-icon { margin-right: 20px; }
-.card-content { flex: 1; }
-.card-label { font-size: 14px; opacity: 0.9; margin-bottom: 5px; }
+.card-label { font-size: 14px; opacity: 0.9; margin-bottom: 8px; }
 .card-value { font-size: 28px; font-weight: 700; }
 .calculations-section { margin-top: 10px; }
 .calculations-section h3 { color: #0B2044; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #0B2044; }
@@ -1023,10 +1185,19 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .progress-fill { height: 100%; background: linear-gradient(90deg, #4CAF50, #2E7D32); border-radius: 4px; }
 .progress-text { font-size: 12px; color: #4CAF50; font-weight: 500; margin: 0; }
 .report-options { padding: 20px; }
-.report-preview { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-.report-content { margin-top: 15px; padding: 15px; background: white; border-radius: 8px; }
-.report-data-preview { margin-top: 20px; }
-.report-data-preview h5 { color: #0B2044; margin-bottom: 10px; }
+.instrument-selection { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+.selection-grid { display: flex; gap: 20px; margin: 15px 0; flex-wrap: wrap; }
+.instrument-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.selection-actions { display: flex; gap: 10px; margin-top: 10px; }
+.report-preview-full { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; max-height: 500px; overflow-y: auto; }
+.preview-content { margin-top: 15px; }
+.preview-header { padding: 10px; background: white; border-radius: 8px; margin-bottom: 15px; }
+.preview-instrument-card { background: white; border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.preview-instrument-card h4 { color: #0B2044; margin-bottom: 10px; }
+.preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.preview-table th, .preview-table td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+.preview-table th { background: #f5f5f5; }
+.preview-empty { text-align: center; padding: 40px; color: #999; }
 .report-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px; }
 .btn-json, .btn-csv, .btn-html, .btn-pdf, .btn-word, .btn-excel, .btn-save { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; color: white; }
 .btn-json { background: #607d8b; }
