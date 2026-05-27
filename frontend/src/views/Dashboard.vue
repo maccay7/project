@@ -104,7 +104,7 @@
             <div class="create-session-input">
               <input 
                 v-model="newSessionName" 
-                placeholder="Enter session name (e.g., CBZ Bank, Old Mutual)" 
+                placeholder="Enter session name " 
                 class="session-input"
                 @keyup.enter="createNewSession"
               />

@@ -29,10 +29,7 @@
             v-for="(step, index) in steps"
             :key="step.tab"
             class="progress-step"
-            :class="{
-              active: activeTab === step.tab,
-              completed: getTabStatus(step.tab)
-            }"
+            :class="{ active: activeTab === step.tab, completed: getTabStatus(step.tab) }"
             @click="switchTab(step.tab)"
           >
             <div class="step-circle">{{ index + 1 }}</div>
@@ -46,10 +43,7 @@
         <!-- ==================== UPLOAD TAB ==================== -->
         <div v-if="activeTab === 'upload'" class="content-card">
           <v-card>
-            <v-card-title>
-              <v-icon>mdi-upload</v-icon>
-              Upload {{ instrumentName }} Dataset
-            </v-card-title>
+            <v-card-title><v-icon>mdi-upload</v-icon> Upload {{ instrumentName }} Dataset</v-card-title>
             <v-card-text>
               <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
                 <input type="file" ref="fileInput" @change="handleFileUpload" accept=".csv,.xlsx,.xls" style="display: none">
@@ -63,35 +57,24 @@
                 <span>{{ uploadedFile.name }}</span>
                 <span class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
-                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData || rawData.length === 0">
-                  <v-icon>mdi-eye</v-icon> Review Excel
-                </button>
-                <button class="btn-mapping" @click="autoMatchColumns" :disabled="!rawData || rawData.length === 0">
-                  <v-icon>mdi-map</v-icon> Map Columns
-                </button>
+                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData.length">Review Excel</button>
+                <button class="btn-mapping" @click="autoMatchColumns" :disabled="!rawData.length">Map Columns</button>
               </div>
 
-              <div v-if="rawData && rawData.length > 0" class="excel-preview-section">
+              <div v-if="rawData.length" class="excel-preview-section">
                 <h4>File Preview:</h4>
                 <div class="preview-toolbar">
-                  <span class="preview-info">Showing {{ rawData.length }} rows × {{ Object.keys(rawData[0] || {}).length }} columns</span>
+                  <span class="preview-info">{{ rawData.length }} rows × {{ Object.keys(rawData[0] || {}).length }} columns</span>
                   <div class="preview-controls">
                     <button @click="previewStartRow = Math.max(0, previewStartRow - 10)" :disabled="previewStartRow === 0" class="preview-btn">← Previous</button>
                     <span>Rows {{ previewStartRow + 1 }} - {{ Math.min(previewEndRow, rawData.length) }}</span>
                     <button @click="previewStartRow = Math.min(rawData.length - previewRows, previewStartRow + 10)" :disabled="previewEndRow >= rawData.length" class="preview-btn">Next →</button>
-                    <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">
-                      <v-icon size="16">mdi-eye</v-icon> Full Screen
-                    </button>
+                    <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
                   </div>
                 </div>
                 <div class="table-wrapper">
                   <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th v-for="col in previewColumnsList" :key="col">{{ col }}</th>
-                      </tr>
-                    </thead>
+                    <thead><tr><th>#</th><th v-for="col in previewColumnsList" :key="col">{{ col }}</th></tr></thead>
                     <tbody>
                       <tr v-for="(row, idx) in paginatedPreviewData" :key="idx">
                         <td class="row-number">{{ previewStartRow + idx + 1 }}</td>
@@ -105,27 +88,18 @@
               <!-- Column Mapping Dialog -->
               <v-dialog v-model="showMappingDialog" max-width="700px">
                 <v-card>
-                  <v-card-title>
-                    <v-icon>mdi-map</v-icon>
-                    Map Columns
-                  </v-card-title>
+                  <v-card-title>Map Columns</v-card-title>
                   <v-card-text>
-                    <p>Please map the required columns to columns in your file:</p>
                     <div class="mapping-grid">
                       <div v-for="reqCol in requiredColumns" :key="reqCol" class="mapping-row">
                         <label class="required-label">{{ reqCol }}:</label>
                         <select v-model="columnMapping[reqCol]" class="mapping-select">
                           <option :value="null">-- Select column --</option>
-                          <option v-for="fileCol in fileColumns" :key="fileCol" :value="fileCol">
-                            {{ fileCol }}
-                          </option>
+                          <option v-for="fileCol in fileColumns" :key="fileCol" :value="fileCol">{{ fileCol }}</option>
                         </select>
                       </div>
                     </div>
-                    <div class="mapping-hint">
-                      <v-icon size="16">mdi-information</v-icon>
-                      <small>Column names are matched automatically. You can adjust the mapping above.</small>
-                    </div>
+                    <div class="mapping-hint"><v-icon size="16">mdi-information</v-icon><small>Column names are matched automatically.</small></div>
                   </v-card-text>
                   <v-card-actions>
                     <button class="btn-secondary" @click="showMappingDialog = false">Cancel</button>
@@ -137,24 +111,19 @@
               <div class="required-columns">
                 <h4>Required Columns:</h4>
                 <div class="columns-list">
-                  <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': rawData.length > 0 && !hasRequiredColumn(col) }">
-                    <v-icon size="12">{{ rawData.length > 0 && hasRequiredColumn(col) ? 'mdi-check' : 'mdi-close' }}</v-icon>
+                  <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': rawData.length && !hasRequiredColumn(col) }">
+                    <v-icon size="12">{{ rawData.length && hasRequiredColumn(col) ? 'mdi-check' : 'mdi-close' }}</v-icon>
                     {{ col }}
                   </span>
                 </div>
-                <div v-if="rawData.length > 0 && missingColumns.length > 0" class="warning-message">
-                  <v-icon color="warning">mdi-alert</v-icon>
-                  <span>Missing required columns. Click "Map Columns" to fix.</span>
+                <div v-if="rawData.length && missingColumns.length" class="warning-message">
+                  <v-icon color="warning">mdi-alert</v-icon><span>Missing required columns. Click "Map Columns".</span>
                 </div>
               </div>
 
               <div class="navigation-buttons">
-                <button v-if="rawData.length > 0 && missingColumns.length > 0" class="btn-warning" @click="autoMatchColumns">
-                  Map Columns
-                </button>
-                <button class="btn-primary" @click="uploadData" :disabled="!uploadedFile || (rawData.length > 0 && missingColumns.length > 0)">
-                  Upload & Continue
-                </button>
+                <button v-if="rawData.length && missingColumns.length" class="btn-warning" @click="autoMatchColumns">Map Columns</button>
+                <button class="btn-primary" @click="uploadData" :disabled="!uploadedFile || (rawData.length && missingColumns.length)">Upload & Continue</button>
                 <button class="btn-secondary" @click="goToDashboard">Cancel</button>
               </div>
             </v-card-text>
@@ -164,55 +133,28 @@
         <!-- ==================== CLEANING TAB ==================== -->
         <div v-if="activeTab === 'cleaning'" class="content-card">
           <v-card>
-            <v-card-title>
-              <v-icon>mdi-broom</v-icon>
-              Clean {{ instrumentName }} Data
-            </v-card-title>
+            <v-card-title><v-icon>mdi-broom</v-icon> Clean {{ instrumentName }} Data</v-card-title>
             <v-card-text>
               <div v-if="!hasData" class="empty-state">
                 <v-icon size="48" color="#ccc">mdi-database</v-icon>
-                <p>No data uploaded yet. Please upload a dataset first.</p>
+                <p>No data uploaded yet.</p>
                 <button class="btn-primary" @click="switchTab('upload')">Go to Upload</button>
               </div>
-
               <div v-else>
                 <!-- Cleaning Options Panel -->
                 <div class="cleaning-options-panel">
                   <h3>Cleaning Filters</h3>
                   <div class="options-grid">
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeDuplicates"> Remove duplicate rows</label>
                     <label class="option-checkbox">
-                      <input type="checkbox" v-model="cleaningOptions.removeDuplicates">
-                      Remove duplicate rows
+                      <input type="checkbox" v-model="cleaningOptions.fillMissingNumeric"> Fill missing numeric with:
+                      <select v-model="cleaningOptions.fillMethod"><option value="zero">Zero</option><option value="mean">Mean</option><option value="median">Median</option></select>
                     </label>
-                    <label class="option-checkbox">
-                      <input type="checkbox" v-model="cleaningOptions.fillMissingNumeric">
-                      Fill missing numeric values with:
-                      <select v-model="cleaningOptions.fillMethod">
-                        <option value="zero">Zero</option>
-                        <option value="mean">Mean</option>
-                        <option value="median">Median</option>
-                      </select>
-                    </label>
-                    <label class="option-checkbox">
-                      <input type="checkbox" v-model="cleaningOptions.fillMissingText">
-                      Fill missing text with "N/A"
-                    </label>
-                    <label class="option-checkbox">
-                      <input type="checkbox" v-model="cleaningOptions.dropRowsWithMissing">
-                      Drop rows that have ANY missing value
-                    </label>
-                    <label class="option-checkbox">
-                      <input type="checkbox" v-model="cleaningOptions.trimWhitespace">
-                      Trim whitespace from all text cells
-                    </label>
-                    <label class="option-checkbox">
-                      <input type="checkbox" v-model="cleaningOptions.convertToNumbers">
-                      Convert numeric columns to numbers (fix text numbers)
-                    </label>
-                    <label class="option-checkbox">
-                      <input type="checkbox" v-model="cleaningOptions.removeOutliers">
-                      Remove outliers (values beyond 3 standard deviations)
-                    </label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingText"> Fill missing text with "N/A"</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.dropRowsWithMissing"> Drop rows with ANY missing value</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.trimWhitespace"> Trim whitespace</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.convertToNumbers"> Convert text numbers to numeric</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeOutliers"> Remove outliers (3σ)</label>
                   </div>
                   <div class="cleaning-buttons">
                     <button class="btn-primary" @click="previewCleanedData">Preview Cleaned Data</button>
@@ -220,17 +162,12 @@
                   </div>
                 </div>
 
-                <!-- Preview of Cleaned Data (after preview or apply) -->
+                <!-- Preview of Cleaned Data -->
                 <div v-if="previewData.length" class="preview-section">
                   <h4>Preview of Cleaned Data ({{ previewData.length }} rows)</h4>
                   <div class="table-wrapper">
                     <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th v-for="col in previewColumnsListClean" :key="col">{{ col }}</th>
-                        </tr>
-                      </thead>
+                      <thead><tr><th>#</th><th v-for="col in previewColumnsListClean" :key="col">{{ col }}</th></tr></thead>
                       <tbody>
                         <tr v-for="(row, idx) in previewData.slice(0,10)" :key="idx">
                           <td class="row-number">{{ idx+1 }}</td>
@@ -239,45 +176,35 @@
                       </tbody>
                     </table>
                   </div>
-                  <p v-if="previewData.length > 10" class="preview-note">Showing first 10 rows of {{ previewData.length }}</p>
+                  <p v-if="previewData.length > 10" class="preview-note">Showing first 10 rows</p>
                 </div>
 
-                <!-- After cleaning has been applied, show cleaned data stats -->
+                <!-- After cleaning applied -->
                 <div v-if="cleanedData.length" class="highlight-box">
                   <p>✓ Removed {{ cleaningStats.removedRows }} invalid rows</p>
                   <p>✓ Fixed {{ cleaningStats.fixedMissing }} missing values</p>
                   <p class="success-text">✓ Data is now clean and ready for calculations</p>
                 </div>
 
-                <!-- Original Raw Data Preview with Highlighting (only before preview/clean) -->
-                <div v-if="rawData.length > 0 && cleanedData.length === 0 && !previewData.length" class="preview-section">
+                <!-- Raw data preview before any cleaning -->
+                <div v-if="rawData.length && !cleanedData.length && !previewData.length" class="preview-section">
                   <h4>Raw Data with Issues Highlighted:</h4>
-                  <div class="legend">
-                    <span class="legend-badge invalid-row-badge">⚠ Invalid Row</span>
-                    <span class="legend-badge invalid-cell-badge">❌ Missing/Invalid Value</span>
-                  </div>
+                  <div class="legend"><span class="legend-badge invalid-row-badge">⚠ Invalid Row</span><span class="legend-badge invalid-cell-badge">❌ Missing/Invalid Value</span></div>
                   <div class="preview-toolbar">
-                    <span class="preview-info">Raw Data: {{ rawData.length }} rows</span>
+                    <span class="preview-info">{{ rawData.length }} rows</span>
                     <div class="preview-controls">
-                      <button @click="rawPreviewStartRow = Math.max(0, rawPreviewStartRow - 10)" :disabled="rawPreviewStartRow === 0" class="preview-btn">← Previous</button>
+                      <button @click="rawPreviewStartRow = Math.max(0, rawPreviewStartRow - 10)" :disabled="rawPreviewStartRow === 0">← Previous</button>
                       <span>Rows {{ rawPreviewStartRow + 1 }} - {{ Math.min(rawPreviewEndRow, rawData.length) }}</span>
-                      <button @click="rawPreviewStartRow = Math.min(rawData.length - rawPreviewRows, rawPreviewStartRow + 10)" :disabled="rawPreviewEndRow >= rawData.length" class="preview-btn">Next →</button>
+                      <button @click="rawPreviewStartRow = Math.min(rawData.length - rawPreviewRows, rawPreviewStartRow + 10)" :disabled="rawPreviewEndRow >= rawData.length">Next →</button>
                     </div>
                   </div>
                   <div class="table-wrapper">
                     <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th v-for="col in rawPreviewColumnsList" :key="col">{{ col }}</th>
-                        </tr>
-                      </thead>
+                      <thead><tr><th>#</th><th v-for="col in rawPreviewColumnsList" :key="col">{{ col }}</th></tr></thead>
                       <tbody>
                         <tr v-for="(row, idx) in paginatedRawPreview" :key="idx" :class="{ 'invalid-row': hasInvalidData(row) }">
                           <td class="row-number">{{ rawPreviewStartRow + idx + 1 }}</td>
-                          <td v-for="col in rawPreviewColumnsList" :key="col" :class="{ 'invalid-cell': isInvalidValue(row[col]) }">
-                            {{ formatCellValue(row[col]) }}
-                          </td>
+                          <td v-for="col in rawPreviewColumnsList" :key="col" :class="{ 'invalid-cell': isInvalidValue(row[col]) }">{{ formatCellValue(row[col]) }}</td>
                         </tr>
                       </tbody>
                     </table>
@@ -297,54 +224,37 @@
         <!-- ==================== CALCULATIONS TAB ==================== -->
         <div v-if="activeTab === 'calculations'" class="content-card">
           <v-card>
-            <v-card-title>
-              <v-icon>mdi-calculator</v-icon>
-              {{ instrumentName }} Calculations
-            </v-card-title>
+            <v-card-title><v-icon>mdi-calculator</v-icon> {{ instrumentName }} Calculations</v-card-title>
             <v-card-text>
               <div v-if="!hasCleanedData" class="empty-state">
                 <v-icon size="48" color="#ccc">mdi-calculator</v-icon>
-                <p>No cleaned data available. Please clean your data first.</p>
+                <p>No cleaned data. Please clean first.</p>
                 <button class="btn-primary" @click="switchTab('cleaning')">Go to Cleaning</button>
               </div>
-
               <div v-else>
+                <!-- Summary Cards -->
                 <div class="summary-cards">
-                  <div class="summary-card total">
-                    <div class="card-icon"><v-icon size="32" color="#fff">mdi-chart-line</v-icon></div>
-                    <div class="card-content">
-                      <div class="card-label">Total Portfolio Value</div>
-                      <div class="card-value">${{ calculations.totalValue?.toLocaleString() || 0 }}</div>
-                    </div>
-                  </div>
+                  <div class="summary-card total"><div class="card-value">${{ calculations.totalValue?.toLocaleString() || 0 }}</div><div class="card-label">Total Portfolio Value</div></div>
                   <div class="summary-card rate">
-                    <div class="card-icon"><v-icon size="32" color="#fff">mdi-percent</v-icon></div>
-                    <div class="card-content">
-                      <div class="card-label" v-if="instrumentType === 'money-market'">Average Interest Rate</div>
-                      <div class="card-label" v-else-if="instrumentType === 'bonds'">Average Coupon Rate</div>
-                      <div class="card-label" v-else>Average Discount Rate</div>
-                      <div class="card-value">
-                        {{
-                          instrumentType === 'money-market' ? (calculations.avgRate || 0) :
-                          instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) :
-                          (calculations.avgDiscountRate || 0)
-                        }}%
-                      </div>
+                    <div class="card-value">
+                      {{
+                        instrumentType === 'money-market' ? (calculations.avgRate || 0) :
+                        instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) :
+                        (calculations.avgDiscountRate || 0)
+                      }}%
+                    </div>
+                    <div class="card-label">
+                      {{ instrumentType === 'money-market' ? 'Avg Interest Rate' : instrumentType === 'bonds' ? 'Avg Coupon Rate' : 'Avg Discount Rate' }}
                     </div>
                   </div>
-                  <div class="summary-card count">
-                    <div class="card-icon"><v-icon size="32" color="#fff">mdi-counter</v-icon></div>
-                    <div class="card-content">
-                      <div class="card-label">Number of Instruments</div>
-                      <div class="card-value">{{ calculations.instrumentCount || 0 }}</div>
-                    </div>
-                  </div>
+                  <div class="summary-card count"><div class="card-value">{{ calculations.instrumentCount || 0 }}</div><div class="card-label">Number of Instruments</div></div>
                 </div>
 
+                <!-- Full Calculations Grid - all metrics per instrument -->
                 <div class="calculations-section">
                   <h3>{{ instrumentName }} Calculations</h3>
                   <div class="calculations-grid">
-                    <!-- Money Market metrics -->
+                    <!-- Money Market -->
                     <template v-if="instrumentType === 'money-market'">
                       <div class="calculation-card"><div class="calc-name">Weighted Average Rate</div><div class="calc-value">{{ calculations.weightedAvgRate || 0 }}%</div></div>
                       <div class="calculation-card"><div class="calc-name">Total Interest (Annualized)</div><div class="calc-value">${{ calculations.totalInterest?.toLocaleString() || 0 }}</div></div>
@@ -355,15 +265,15 @@
                       <div class="calculation-card"><div class="calc-name">Total Principal</div><div class="calc-value">${{ calculations.totalPrincipal?.toLocaleString() || 0 }}</div></div>
                     </template>
 
-                    <!-- Bonds metrics -->
+                    <!-- Bonds -->
                     <template v-else-if="instrumentType === 'bonds'">
                       <div class="calculation-card"><div class="calc-name">Weighted Average Coupon</div><div class="calc-value">{{ calculations.weightedAvgCoupon || 0 }}%</div></div>
                       <div class="calculation-card"><div class="calc-name">Total Annual Income</div><div class="calc-value">${{ calculations.totalAnnualIncome?.toLocaleString() || 0 }}</div></div>
                       <div class="calculation-card"><div class="calc-name">Average Yield to Maturity</div><div class="calc-value">{{ calculations.avgYTM || 0 }}%</div></div>
-                      <div class="calculation-card"><div class="calc-name">Duration</div><div class="calc-value">{{ calculations.duration || 0 }} years</div></div>
+                      <div class="calculation-card"><div class="calc-name">Duration (years)</div><div class="calc-value">{{ calculations.duration || 0 }}</div></div>
                     </template>
 
-                    <!-- T‑Bills metrics -->
+                    <!-- T‑Bills -->
                     <template v-else>
                       <div class="calculation-card"><div class="calc-name">Weighted Average Discount</div><div class="calc-value">{{ calculations.weightedAvgDiscount || 0 }}%</div></div>
                       <div class="calculation-card"><div class="calc-name">Total Discount</div><div class="calc-value">${{ calculations.totalDiscount?.toLocaleString() || 0 }}</div></div>
@@ -391,21 +301,13 @@
         <!-- ==================== VISUALIZATIONS TAB ==================== -->
         <div v-if="activeTab === 'visualizations'" class="content-card">
           <v-card>
-            <v-card-title>
-              <v-icon>mdi-chart-line</v-icon>
-              {{ instrumentName }} Visualizations
-            </v-card-title>
+            <v-card-title><v-icon>mdi-chart-line</v-icon> {{ instrumentName }} Visualizations</v-card-title>
             <v-card-text>
               <div class="visualization-placeholder">
                 <v-icon size="64" color="#0B2044">mdi-chart-line</v-icon>
                 <h3>Visualizations Coming Soon</h3>
                 <p>Yield curve and other visualizations will be displayed here once the backend API is integrated.</p>
-                <div class="placeholder-note">
-                  <v-icon>mdi-information</v-icon>
-                  <span>Backend API integration in progress</span>
-                </div>
               </div>
-
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('calculations')">Previous</button>
                 <button class="btn-primary" @click="switchTab('summary')">Next: Summary</button>
@@ -418,10 +320,7 @@
         <!-- ==================== SUMMARY TAB ==================== -->
         <div v-if="activeTab === 'summary'" class="content-card">
           <v-card>
-            <v-card-title>
-              <v-icon>mdi-file-document</v-icon>
-              {{ instrumentName }} Summary
-            </v-card-title>
+            <v-card-title><v-icon>mdi-file-document</v-icon> {{ instrumentName }} Summary</v-card-title>
             <v-card-text>
               <div class="summary-grid">
                 <div class="summary-section">
@@ -434,19 +333,12 @@
                 </div>
                 <div class="summary-section">
                   <h3>Key Metrics</h3>
-                  <p><strong>Average Rate:</strong> {{ instrumentType === 'money-market' ? (calculations.avgRate || 0) : (instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) : (calculations.avgDiscountRate || 0)) }}%</p>
-                  <p><strong>Weighted Average:</strong> {{ instrumentType === 'money-market' ? (calculations.weightedAvgRate || 0) : (instrumentType === 'bonds' ? (calculations.weightedAvgCoupon || 0) : (calculations.weightedAvgDiscount || 0)) }}%</p>
-                  <p><strong>Total Interest/Discount:</strong> ${{ instrumentType === 'money-market' ? (calculations.totalInterest?.toLocaleString() || 0) : (instrumentType === 'bonds' ? (calculations.totalAnnualIncome?.toLocaleString() || 0) : (calculations.totalDiscount?.toLocaleString() || 0)) }}</p>
+                  <p><strong>Average Rate:</strong> {{ instrumentType === 'money-market' ? (calculations.avgRate || 0) : instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) : (calculations.avgDiscountRate || 0) }}%</p>
+                  <p><strong>Weighted Average:</strong> {{ instrumentType === 'money-market' ? (calculations.weightedAvgRate || 0) : instrumentType === 'bonds' ? (calculations.weightedAvgCoupon || 0) : (calculations.weightedAvgDiscount || 0) }}%</p>
+                  <p><strong>Total Interest/Discount:</strong> ${{ instrumentType === 'money-market' ? (calculations.totalInterest?.toLocaleString() || 0) : instrumentType === 'bonds' ? (calculations.totalAnnualIncome?.toLocaleString() || 0) : (calculations.totalDiscount?.toLocaleString() || 0) }}</p>
                 </div>
               </div>
-
-              <div class="summary-progress">
-                <div class="progress-bar">
-                  <div class="progress-fill" style="width: 100%"></div>
-                </div>
-                <p class="progress-text">✓ Upload ✓ Clean ✓ Calculate — Ready for Report</p>
-              </div>
-
+              <div class="summary-progress"><div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div><p class="progress-text">✓ Upload ✓ Clean ✓ Calculate — Ready for Report</p></div>
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('visualizations')">Previous</button>
                 <button class="btn-primary" @click="switchTab('reports')">Move to Report →</button>
@@ -459,10 +351,7 @@
         <!-- ==================== REPORTS TAB ==================== -->
         <div v-if="activeTab === 'reports'" class="content-card">
           <v-card>
-            <v-card-title>
-              <v-icon>mdi-file-pdf</v-icon>
-              Generate {{ instrumentName }} Report
-            </v-card-title>
+            <v-card-title><v-icon>mdi-file-pdf</v-icon> Generate {{ instrumentName }} Report</v-card-title>
             <v-card-text>
               <div class="report-options">
                 <div class="report-preview">
@@ -473,43 +362,26 @@
                     <p><strong>Total Value:</strong> ${{ calculations.totalValue?.toLocaleString() || 0 }}</p>
                     <p><strong>Records Processed:</strong> {{ cleanedData.length }}</p>
                   </div>
-
                   <div class="report-data-preview">
-                    <div class="preview-toolbar">
-                      <h5>Data Preview</h5>
-                      <button class="btn-review-excel-small" @click="openExcelReview(cleanedData, 'Report Data')" :disabled="!cleanedData || cleanedData.length === 0">
-                        <v-icon size="16">mdi-eye</v-icon> Review Full Data
-                      </button>
-                    </div>
+                    <div class="preview-toolbar"><h5>Data Preview</h5><button class="btn-review-excel-small" @click="openExcelReview(cleanedData, 'Report Data')">Review Full Data</button></div>
                     <div class="table-wrapper">
                       <table class="data-table">
-                        <thead>
-                          <tr>
-                            <th>#</th>
-                            <th v-for="col in reportPreviewColumns" :key="col">{{ col }}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr v-for="(row, idx) in reportDataPreview" :key="idx">
-                            <td>{{ idx + 1 }}</td>
-                            <td v-for="col in reportPreviewColumns" :key="col">{{ formatCellValue(row[col]) }}</td>
-                          </tr>
-                        </tbody>
+                        <thead><tr><th>#</th><th v-for="col in reportPreviewColumns" :key="col">{{ col }}</th></tr></thead>
+                        <tbody><tr v-for="(row, idx) in reportDataPreview" :key="idx"><td>{{ idx+1 }}</td><td v-for="col in reportPreviewColumns" :key="col">{{ formatCellValue(row[col]) }}</td></tr></tbody>
                       </table>
                     </div>
                   </div>
                 </div>
                 <div class="report-actions">
-                  <button class="btn-json" @click="downloadAsJSON"><v-icon>mdi-code-json</v-icon> JSON</button>
-                  <button class="btn-csv" @click="downloadAsCSV"><v-icon>mdi-file-delimited</v-icon> CSV</button>
-                  <button class="btn-html" @click="downloadAsHTML"><v-icon>mdi-language-html5</v-icon> HTML</button>
-                  <button class="btn-pdf" @click="downloadAsPDF"><v-icon>mdi-file-pdf</v-icon> PDF</button>
-                  <button class="btn-word" @click="downloadAsWord"><v-icon>mdi-file-word</v-icon> Word</button>
-                  <button class="btn-excel" @click="downloadAsExcel"><v-icon>mdi-file-excel</v-icon> Excel</button>
-                  <button class="btn-save" @click="saveToSession"><v-icon>mdi-content-save</v-icon> Save to Session</button>
+                  <button class="btn-json" @click="downloadAsJSON">JSON</button>
+                  <button class="btn-csv" @click="downloadAsCSV">CSV</button>
+                  <button class="btn-html" @click="downloadAsHTML">HTML</button>
+                  <button class="btn-pdf" @click="downloadAsPDF">PDF</button>
+                  <button class="btn-word" @click="downloadAsWord">Word</button>
+                  <button class="btn-excel" @click="downloadAsExcel">Excel</button>
+                  <button class="btn-save" @click="saveToSession">Save to Session</button>
                 </div>
               </div>
-
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('summary')">Previous</button>
                 <button class="btn-primary" @click="goToDashboard">Finish & Dashboard</button>
@@ -523,53 +395,19 @@
     <!-- Excel Review Dialog -->
     <v-dialog v-model="showExcelDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
-        <v-card-title class="excel-dialog-title">
-          <div class="dialog-title-content">
-            <v-icon large>mdi-file-excel</v-icon>
-            <span>{{ excelDialogTitle }} - Excel Viewer</span>
-          </div>
-          <v-spacer></v-spacer>
-          <button class="btn-close-dialog" @click="closeExcelDialog">
-            <v-icon>mdi-close</v-icon>
-          </button>
-        </v-card-title>
+        <v-card-title class="excel-dialog-title">{{ excelDialogTitle }} - Excel Viewer <v-spacer></v-spacer><button class="btn-close-dialog" @click="closeExcelDialog">✕</button></v-card-title>
         <v-card-text class="excel-dialog-content">
           <div class="excel-full-view">
-            <div class="excel-toolbar-full">
-              <div class="excel-info">
-                <span>{{ excelData.length }} rows × {{ excelColumns.length }} columns</span>
-              </div>
-              <div class="excel-export-buttons">
-                <button class="btn-excel-export" @click="exportToCSV">
-                  <v-icon size="16">mdi-file-delimited</v-icon> Export CSV
-                </button>
-                <button class="btn-excel-export" @click="exportToJSON">
-                  <v-icon size="16">mdi-code-json</v-icon> Export JSON
-                </button>
-              </div>
-            </div>
+            <div class="excel-toolbar-full"><span>{{ excelData.length }} rows × {{ excelColumns.length }} columns</span><div><button class="btn-excel-export" @click="exportToCSV">Export CSV</button><button class="btn-excel-export" @click="exportToJSON">Export JSON</button></div></div>
             <div class="excel-full-table-wrapper">
               <table class="excel-full-table">
-                <thead>
-                  <tr>
-                    <th class="sticky-col">#</th>
-                    <th v-for="col in excelColumns" :key="col" class="sticky-header">{{ col }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, idx) in excelData" :key="idx">
-                    <td class="sticky-col">{{ idx + 1 }}</td>
-                    <td v-for="col in excelColumns" :key="col">{{ formatCellValue(row[col]) }}</td>
-                  </tr>
-                </tbody>
+                <thead><tr><th class="sticky-col">#</th><th v-for="col in excelColumns" :key="col" class="sticky-header">{{ col }}</th></tr></thead>
+                <tbody><tr v-for="(row, idx) in excelData" :key="idx"><td class="sticky-col">{{ idx+1 }}</td><td v-for="col in excelColumns" :key="col">{{ formatCellValue(row[col]) }}</td></tr></tbody>
               </table>
             </div>
           </div>
         </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <button class="btn-secondary" @click="closeExcelDialog">Close</button>
-        </v-card-actions>
+        <v-card-actions><v-spacer></v-spacer><button class="btn-secondary" @click="closeExcelDialog">Close</button></v-card-actions>
       </v-card>
     </v-dialog>
   </FixedLayout>
@@ -705,12 +543,12 @@ const requiredColumns = computed(() => {
     return ['Date', 'Instrument', 'Rate', 'Amount', 'MaturityDate', 'DaysToMaturity', 'Principal', 'InterestRate', 'DiscountRate', 'Price', 'FaceValue']
   } else if (instrumentType.value === 'bonds') {
     return ['Date', 'BondName', 'CouponRate', 'FaceValue', 'Yield', 'MaturityDate', 'IssueDate', 'Frequency', 'Price', 'AccruedInterest', 'DaysToMaturity', 'RedemptionValue']
-  } else { // tbills
+  } else {
     return ['Date', 'TBillName', 'DiscountRate', 'FaceValue', 'MaturityDate', 'DaysToMaturity', 'IssueDate', 'Price', 'Yield']
   }
 })
 
-// Column variations (enhanced for all instruments)
+// Column variations
 const columnVariations = {
   Date: ['Date', 'date', 'DATE', 'Transaction Date', 'Trade Date', 'Settlement Date', 'Value Date', 'Start Date', 'Issue Date'],
   Instrument: ['Instrument', 'instrument', 'INSTRUMENT', 'Security', 'Security Name', 'Name', 'Description', 'Asset'],
@@ -746,11 +584,6 @@ const rawPreviewEndRow = computed(() => Math.min(rawPreviewStartRow.value + rawP
 const rawPreviewColumnsList = computed(() => rawData.value[0] ? Object.keys(rawData.value[0]).slice(0,8) : [])
 const paginatedRawPreview = computed(() => rawData.value.slice(rawPreviewStartRow.value, rawPreviewEndRow.value))
 
-const cleanPreviewRows = ref(10)
-const cleanPreviewStartRow = ref(0)
-const cleanPreviewEndRow = computed(() => Math.min(cleanPreviewStartRow.value + cleanPreviewRows.value, cleanedData.value.length))
-const cleanPreviewColumnsList = computed(() => cleanedData.value[0] ? Object.keys(cleanedData.value[0]).slice(0,8) : [])
-
 const previewColumnsListClean = computed(() => previewData.value[0] ? Object.keys(previewData.value[0]).slice(0,8) : [])
 
 const reportPreviewColumns = computed(() => cleanedData.value[0] ? Object.keys(cleanedData.value[0]).slice(0,6) : [])
@@ -769,7 +602,6 @@ const missingColumns = computed(() => requiredColumns.value.filter(col => !hasRe
 const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
-// Helper functions
 function formatCellValue(value) {
   if (value === undefined || value === null) return '-'
   if (typeof value === 'number') return value.toFixed(2)
@@ -781,10 +613,7 @@ function hasInvalidData(row) {
   if (!row) return false
   return requiredColumns.value.some(col => !row[col] || row[col] === '' || row[col] === null)
 }
-
-function isInvalidValue(value) {
-  return !value || value === '' || value === null
-}
+function isInvalidValue(value) { return !value || value === '' || value === null }
 
 // Navigation
 function goToDashboard() { router.push('/dashboard') }
@@ -794,9 +623,7 @@ function goToCalculations() {
     activeTab.value = 'calculations'
     updateStatus('calculations', true)
     saveSessionData()
-  } else {
-    alert('Please clean your data first (click Apply Cleaning).')
-  }
+  } else alert('Please clean your data first (click Apply Cleaning).')
 }
 function goToVisualizations() {
   if (hasCleanedData.value) {
@@ -957,14 +784,13 @@ async function applyCleaningOnly() {
   await nextTick()
 }
 
-// Calculations (based on mapped columns)
+// Calculations (full metrics per instrument)
 function calculateMetrics() {
   if (!cleanedData.value.length) return
-  let totalValue = 0, totalRate = 0, weightedSum = 0
   if (instrumentType.value === 'money-market') {
-    totalValue = cleanedData.value.reduce((s,row) => s + (parseFloat(row.Amount)||0), 0)
-    totalRate = cleanedData.value.reduce((s,row) => s + (parseFloat(row.Rate)||0), 0)
-    weightedSum = cleanedData.value.reduce((s,row) => s + ((parseFloat(row.Rate)||0) * (parseFloat(row.Amount)||0)), 0)
+    const totalValue = cleanedData.value.reduce((s,row) => s + (parseFloat(row.Amount)||0), 0)
+    const totalRate = cleanedData.value.reduce((s,row) => s + (parseFloat(row.Rate)||0), 0)
+    const weightedSum = cleanedData.value.reduce((s,row) => s + ((parseFloat(row.Rate)||0) * (parseFloat(row.Amount)||0)), 0)
     const avgRateVal = totalRate / cleanedData.value.length
     calculations.value = {
       totalValue,
@@ -979,9 +805,9 @@ function calculateMetrics() {
       totalPrincipal: totalValue
     }
   } else if (instrumentType.value === 'bonds') {
-    totalValue = cleanedData.value.reduce((s,row) => s + (parseFloat(row.FaceValue)||0), 0)
-    totalRate = cleanedData.value.reduce((s,row) => s + (parseFloat(row.CouponRate)||0), 0)
-    weightedSum = cleanedData.value.reduce((s,row) => s + ((parseFloat(row.CouponRate)||0) * (parseFloat(row.FaceValue)||0)), 0)
+    const totalValue = cleanedData.value.reduce((s,row) => s + (parseFloat(row.FaceValue)||0), 0)
+    const totalRate = cleanedData.value.reduce((s,row) => s + (parseFloat(row.CouponRate)||0), 0)
+    const weightedSum = cleanedData.value.reduce((s,row) => s + ((parseFloat(row.CouponRate)||0) * (parseFloat(row.FaceValue)||0)), 0)
     const totalYield = cleanedData.value.reduce((s,row) => s + (parseFloat(row.Yield)||0), 0)
     const avgCoupon = totalRate / cleanedData.value.length
     const avgYieldVal = totalYield / cleanedData.value.length
@@ -995,9 +821,9 @@ function calculateMetrics() {
       duration: (10 * 0.7).toFixed(2)
     }
   } else { // tbills
-    totalValue = cleanedData.value.reduce((s,row) => s + (parseFloat(row.FaceValue)||0), 0)
-    totalRate = cleanedData.value.reduce((s,row) => s + (parseFloat(row.DiscountRate)||0), 0)
-    weightedSum = cleanedData.value.reduce((s,row) => s + ((parseFloat(row.DiscountRate)||0) * (parseFloat(row.FaceValue)||0)), 0)
+    const totalValue = cleanedData.value.reduce((s,row) => s + (parseFloat(row.FaceValue)||0), 0)
+    const totalRate = cleanedData.value.reduce((s,row) => s + (parseFloat(row.DiscountRate)||0), 0)
+    const weightedSum = cleanedData.value.reduce((s,row) => s + ((parseFloat(row.DiscountRate)||0) * (parseFloat(row.FaceValue)||0)), 0)
     const avgDiscount = totalRate / cleanedData.value.length
     const discountAmount = totalValue * (avgDiscount/100) * 91/360
     const price = totalValue - discountAmount
@@ -1030,17 +856,17 @@ function downloadAsJSON() {
 }
 function downloadAsCSV() {
   const headers = ['Metric', 'Value']
-  const rows = [ ['Instrument', instrumentName.value], ['Date Generated', new Date().toLocaleString()], ['Total Portfolio Value', `$${calculations.value.totalValue?.toLocaleString() || 0}`], ['Number of Instruments', calculations.value.instrumentCount || 0], ['Average Interest Rate', `${calculations.value.avgRate || 0}%`], ['Total Records Processed', cleanedData.value.length || 0] ]
+  const rows = [ ['Instrument', instrumentName.value], ['Date Generated', new Date().toLocaleString()], ['Total Portfolio Value', `$${calculations.value.totalValue?.toLocaleString() || 0}`], ['Number of Instruments', calculations.value.instrumentCount || 0], ['Average Rate', `${calculations.value.avgRate || calculations.value.avgCouponRate || calculations.value.avgDiscountRate || 0}%`], ['Total Records Processed', cleanedData.value.length || 0] ]
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
   const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${instrumentType.value}_report_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url)
 }
 function downloadAsHTML() {
-  const html = `<!DOCTYPE html><html><head><title>${instrumentName.value} Report</title><style>body{font-family:Arial;margin:40px}</style></head><body><h1>${instrumentName.value} Report</h1><p>Date: ${new Date().toLocaleString()}</p><h2>Calculations</h2><table border="1">${Object.entries(calculations.value).map(([k,v])=>`<td><th>${k}</th><td>${v}</td></tr>`).join('')}<table></body></html>`
+  const html = `<!DOCTYPE html><html><head><title>${instrumentName.value} Report</title><style>body{font-family:Arial;margin:40px}</style></head><body><h1>${instrumentName.value} Report</h1><p>Date: ${new Date().toLocaleString()}</p><h2>Calculations</h2><table border="1">${Object.entries(calculations.value).map(([k,v])=>`<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table></body></html>`
   const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${instrumentType.value}_report_${Date.now()}.html`; a.click(); URL.revokeObjectURL(url)
 }
-function downloadAsPDF() { const win = window.open(); win.document.write(`<!DOCTYPE html><html><head><title>${instrumentName.value} Report</title><style>body{font-family:Arial;margin:40px}</style></head><body><h1>${instrumentName.value} Report</h1><p>Date: ${new Date().toLocaleString()}</p><h2>Calculations</h2><table border="1">${Object.entries(calculations.value).map(([k,v])=>`<td><th>${k}</th><td>${v}</td></tr>`).join('')}<tr></body></html>`); win.print() }
+function downloadAsPDF() { const win = window.open(); win.document.write(`<!DOCTYPE html><html><head><title>${instrumentName.value} Report</title><style>body{font-family:Arial;margin:40px}</style></head><body><h1>${instrumentName.value} Report</h1><p>Date: ${new Date().toLocaleString()}</p><h2>Calculations</h2><table border="1">${Object.entries(calculations.value).map(([k,v])=>`<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table></body></html>`); win.print() }
 function downloadAsWord() {
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${instrumentName.value} Report</title></head><body><h1>${instrumentName.value} Report</h1><p>Date: ${new Date().toLocaleString()}</p><h2>Calculations</h2><table border="1">${Object.entries(calculations.value).map(([k,v])=>`<td><th>${k}</th><td>${v}</td></tr>`).join('')}<tr></body></html>`
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${instrumentName.value} Report</title></head><body><h1>${instrumentName.value} Report</h1><p>Date: ${new Date().toLocaleString()}</p><h2>Calculations</h2><table border="1">${Object.entries(calculations.value).map(([k,v])=>`<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</table></body></html>`
   const blob = new Blob([html], { type: 'application/msword' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${instrumentType.value}_report.doc`; a.click(); URL.revokeObjectURL(url)
 }
 function downloadAsExcel() {
@@ -1163,12 +989,10 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .missing-column { background: #FFEBEE; color: #c62828; }
 .warning-message { margin-top: 10px; padding: 8px 12px; background: #FFF3E0; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E65100; }
 .btn-warning { background: #FF9800; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
-.cleaning-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
-.stat-card { text-align: center; padding: 20px; background: linear-gradient(135deg, #f8f9ff, #fff); border-radius: 12px; }
-.stat-value { font-size: 28px; font-weight: 700; color: #0B2044; }
-.stat-label { font-size: 12px; color: #666; margin-top: 8px; }
-.cleaning-actions { text-align: center; margin: 20px 0; }
-.highlight-box { background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
+.cleaning-options-panel { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+.options-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 15px 0; }
+.option-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; flex-wrap: wrap; }
+.cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; }
 .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
 .summary-card { display: flex; align-items: center; padding: 20px; border-radius: 16px; color: white; }
 .summary-card.total { background: linear-gradient(135deg, #1B5E20, #4CAF50); }
@@ -1235,9 +1059,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .invalid-row-badge { background-color: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
 .invalid-cell-badge { background-color: #ffcdd2; color: #c62828; border: 1px solid #ef9a9a; }
 .success-text { color: #4CAF50; font-weight: 600; }
-.cleaning-options-panel { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-.options-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 15px 0; }
-.option-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; flex-wrap: wrap; }
-.cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; }
 .preview-note { font-size: 12px; color: #666; margin-top: 10px; text-align: center; }
+.highlight-box { background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
 </style>
