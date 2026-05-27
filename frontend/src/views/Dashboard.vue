@@ -244,9 +244,23 @@ function goToSettings() {
   router.push('/settings')
 }
 
+// UPDATED: Logout without deleting sessions list
 function handleLogout() {
+  // Save the sessions list before clearing everything
+  const savedSessions = localStorage.getItem('sessions_list')
+  
+  // Clear all localStorage (this removes auth tokens, active session, etc.)
   localStorage.clear()
+  
+  // Restore the sessions list so it persists across logout/login
+  if (savedSessions) {
+    localStorage.setItem('sessions_list', savedSessions)
+  }
+  
+  // Clear sessionStorage (if any)
   sessionStorage.clear()
+  
+  // Redirect to login page
   window.location.href = '/login'
 }
 
@@ -317,6 +331,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ========== ALL STYLES REMAIN EXACTLY AS BEFORE ========== */
 .dashboard {
   min-height: 100vh;
   background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
@@ -495,7 +510,6 @@ onMounted(() => {
   margin: 0 12px;
 }
 
-/* ========== SCROLLABLE SESSION LIST ========== */
 .sessions-list {
   max-height: 280px;
   overflow-y: auto;
