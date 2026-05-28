@@ -135,7 +135,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== CLEANING TAB (expanded options) ==================== -->
+        <!-- ==================== CLEANING TAB (SCROLLABLE OPTIONS) ==================== -->
         <div v-if="activeTab === 'cleaning'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-broom</v-icon> Clean {{ instrumentName }} Data</v-card-title>
@@ -148,33 +148,36 @@
               <div v-else>
                 <div class="cleaning-options-panel">
                   <h3>Cleaning Filters (select any combination)</h3>
-                  <div class="options-grid">
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeDuplicates"> Remove duplicate rows</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingNumeric"> Fill missing numeric with: 
-                      <select v-model="cleaningOptions.fillMethod"><option value="zero">Zero</option><option value="mean">Mean</option><option value="median">Median</option></select>
-                    </label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingText"> Fill missing text with "N/A"</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.dropRowsWithMissing"> Drop rows with ANY missing value</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.trimWhitespace"> Trim whitespace from all text cells</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.convertToNumbers"> Convert text numbers to numeric</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeOutliers"> Remove outliers (3σ) from numeric columns</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeDates"> Standardize date formats to YYYY-MM-DD</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeSpecialChars"> Remove special characters from text columns (keep alphanumeric and spaces)</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.changeCase"> Change text case: 
-                      <select v-model="cleaningOptions.caseType"><option value="none">None</option><option value="upper">UPPER CASE</option><option value="lower">lower case</option><option value="title">Title Case</option></select>
-                    </label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillWithCustom"> Fill missing values with custom value: 
-                      <input type="text" v-model="cleaningOptions.customFillValue" placeholder="Custom value" style="width:100px">
-                    </label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeColumnsAllMissing"> Remove columns where ALL values are missing</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.capOutliers"> Cap outliers at 3 standard deviations (winsorize)</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeRowsSpecificColumnEmpty"> Remove rows where a specific column is empty: 
-                      <select v-model="cleaningOptions.specificColumn"><option value="">-- Select column --</option><option v-for="col in Object.keys(rawData[0]||{})" :key="col" :value="col">{{ col }}</option></select>
-                    </label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeNumericRange"> Standardize numeric columns to range [0,1] (min-max scaling)</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeEmptyRows"> Remove rows that are completely empty</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillForward"> Forward fill missing values (carry last valid observation forward)</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillBackward"> Backward fill missing values</label>
+                  <!-- SCROLLABLE CONTAINER (fixed height, ~4 items visible) -->
+                  <div class="filter-scroll-container">
+                    <div class="options-list">
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeDuplicates"> Remove duplicate rows</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingNumeric"> Fill missing numeric with:
+                        <select v-model="cleaningOptions.fillMethod"><option value="zero">Zero</option><option value="mean">Mean</option><option value="median">Median</option></select>
+                      </label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingText"> Fill missing text with "N/A"</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.dropRowsWithMissing"> Drop rows with ANY missing value</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.trimWhitespace"> Trim whitespace from all text cells</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.convertToNumbers"> Convert text numbers to numeric</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeOutliers"> Remove outliers (3σ) from numeric columns</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeDates"> Standardize date formats to YYYY-MM-DD</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeSpecialChars"> Remove special characters from text columns (keep alphanumeric and spaces)</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.changeCase"> Change text case:
+                        <select v-model="cleaningOptions.caseType"><option value="none">None</option><option value="upper">UPPER CASE</option><option value="lower">lower case</option><option value="title">Title Case</option></select>
+                      </label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillWithCustom"> Fill missing values with custom value:
+                        <input type="text" v-model="cleaningOptions.customFillValue" placeholder="Custom value" style="width:100px">
+                      </label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeColumnsAllMissing"> Remove columns where ALL values are missing</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.capOutliers"> Cap outliers at 3 standard deviations (winsorize)</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeRowsSpecificColumnEmpty"> Remove rows where a specific column is empty:
+                        <select v-model="cleaningOptions.specificColumn"><option value="">-- Select column --</option><option v-for="col in Object.keys(rawData[0]||{})" :key="col" :value="col">{{ col }}</option></select>
+                      </label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeNumericRange"> Standardize numeric columns to range [0,1] (min-max scaling)</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeEmptyRows"> Remove rows that are completely empty</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillForward"> Forward fill missing values (carry last valid observation forward)</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillBackward"> Backward fill missing values</label>
+                    </div>
                   </div>
                   <div class="cleaning-buttons">
                     <button class="btn-primary" @click="previewCleanedData">Preview Cleaned Data</button>
@@ -1237,11 +1240,11 @@ async function downloadCombinedReport(format) {
   } else if (format === 'html') {
     let html = `<!DOCTYPE html><html><head><title>Combined Report</title><style>body{font-family:Arial;margin:40px} table{border-collapse:collapse;width:100%} th,td{border:1px solid #ddd;padding:8px} th{background:#0B2044;color:white}</style></head><body><h1>Portfolio Report</h1><p>Session: ${report.session}</p><p>Date: ${report.date}</p>`
     for (const inst of report.instruments) {
-      html += `<h2>${inst.name}</h2><td><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+      html += `<h2>${inst.name}</h2><tr><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
       for (const [key, val] of Object.entries(inst.calculations)) {
         html += `<tr><td>${formatMetricName(key)}</td><td>${formatMetricValue(key, val)}</td></tr>`
       }
-      html += `</tbody></tr>`
+      html += `</tbody></table>`
     }
     html += `</body></html>`
     downloadBlob(html, `${filename}.html`, 'text/html')
@@ -1413,8 +1416,55 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .warning-message { margin-top: 10px; padding: 8px 12px; background: #FFF3E0; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E65100; }
 .btn-warning { background: #FF9800; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
 .cleaning-options-panel { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-.options-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 15px 0; }
-.option-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; flex-wrap: wrap; }
+
+/* ========== NEW SCROLLABLE STYLES ========== */
+.filter-scroll-container {
+  max-height: 200px;          /* shows about 4 items */
+  overflow-y: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fafafa;
+  margin: 12px 0;
+  padding: 8px 4px;
+  scrollbar-width: thin;
+}
+.options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.option-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+.option-checkbox:hover {
+  background: #f0f0f0;
+}
+.option-checkbox select,
+.option-checkbox input[type="text"] {
+  margin-left: 4px;
+  padding: 2px 6px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+/* Shadow on scroll (optional) */
+.filter-scroll-container {
+  background: linear-gradient(white 30%, rgba(255,255,255,0)),
+              linear-gradient(rgba(255,255,255,0), white 70%) 0 100%,
+              radial-gradient(farthest-side at 50% 0, rgba(0,0,0,0.1), rgba(0,0,0,0)),
+              radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,0.1), rgba(0,0,0,0)) 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 20px, 100% 20px, 100% 8px, 100% 8px;
+  background-attachment: local, local, scroll, scroll;
+}
+/* ========== END NEW SCROLLABLE STYLES ========== */
+
 .cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; }
 .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
 .summary-card { background: linear-gradient(135deg, #1B5E20, #4CAF50); padding: 20px; border-radius: 16px; color: white; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; }
