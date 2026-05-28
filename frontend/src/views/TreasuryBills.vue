@@ -135,7 +135,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== CLEANING TAB ==================== -->
+        <!-- ==================== CLEANING TAB (expanded options) ==================== -->
         <div v-if="activeTab === 'cleaning'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-broom</v-icon> Clean {{ instrumentName }} Data</v-card-title>
@@ -147,18 +147,34 @@
               </div>
               <div v-else>
                 <div class="cleaning-options-panel">
-                  <h3>Cleaning Filters</h3>
+                  <h3>Cleaning Filters (select any combination)</h3>
                   <div class="options-grid">
                     <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeDuplicates"> Remove duplicate rows</label>
-                    <label class="option-checkbox">
-                      <input type="checkbox" v-model="cleaningOptions.fillMissingNumeric"> Fill missing numeric with:
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingNumeric"> Fill missing numeric with: 
                       <select v-model="cleaningOptions.fillMethod"><option value="zero">Zero</option><option value="mean">Mean</option><option value="median">Median</option></select>
                     </label>
                     <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingText"> Fill missing text with "N/A"</label>
                     <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.dropRowsWithMissing"> Drop rows with ANY missing value</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.trimWhitespace"> Trim whitespace</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.trimWhitespace"> Trim whitespace from all text cells</label>
                     <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.convertToNumbers"> Convert text numbers to numeric</label>
-                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeOutliers"> Remove outliers (3σ)</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeOutliers"> Remove outliers (3σ) from numeric columns</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeDates"> Standardize date formats to YYYY-MM-DD</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeSpecialChars"> Remove special characters from text columns (keep alphanumeric and spaces)</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.changeCase"> Change text case: 
+                      <select v-model="cleaningOptions.caseType"><option value="none">None</option><option value="upper">UPPER CASE</option><option value="lower">lower case</option><option value="title">Title Case</option></select>
+                    </label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillWithCustom"> Fill missing values with custom value: 
+                      <input type="text" v-model="cleaningOptions.customFillValue" placeholder="Custom value" style="width:100px">
+                    </label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeColumnsAllMissing"> Remove columns where ALL values are missing</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.capOutliers"> Cap outliers at 3 standard deviations (winsorize)</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeRowsSpecificColumnEmpty"> Remove rows where a specific column is empty: 
+                      <select v-model="cleaningOptions.specificColumn"><option value="">-- Select column --</option><option v-for="col in Object.keys(rawData[0]||{})" :key="col" :value="col">{{ col }}</option></select>
+                    </label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeNumericRange"> Standardize numeric columns to range [0,1] (min-max scaling)</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeEmptyRows"> Remove rows that are completely empty</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillForward"> Forward fill missing values (carry last valid observation forward)</label>
+                    <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillBackward"> Backward fill missing values</label>
                   </div>
                   <div class="cleaning-buttons">
                     <button class="btn-primary" @click="previewCleanedData">Preview Cleaned Data</button>
@@ -358,19 +374,49 @@
           </v-card>
         </div>
 
-        <!-- ==================== REPORTS TAB ==================== -->
+        <!-- ==================== REPORTS TAB (improved preview) ==================== -->
         <div v-if="activeTab === 'reports'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-file-pdf</v-icon> Generate Combined Report</v-card-title>
             <v-card-text>
               <div class="report-options">
-                <!-- Instrument Selection -->
+                <!-- Instrument Selection Cards -->
                 <div class="instrument-selection">
                   <h3>Select Instruments to Include</h3>
-                  <div class="selection-grid">
-                    <label class="instrument-checkbox"><input type="checkbox" v-model="selectedInstruments.moneyMarket"> Money Market</label>
-                    <label class="instrument-checkbox"><input type="checkbox" v-model="selectedInstruments.bonds"> Bonds</label>
-                    <label class="instrument-checkbox"><input type="checkbox" v-model="selectedInstruments.tbills"> T-Bills</label>
+                  <div class="selection-cards">
+                    <div 
+                      class="selection-card" 
+                      :class="{ active: selectedInstruments.moneyMarket }"
+                      @click="selectedInstruments.moneyMarket = !selectedInstruments.moneyMarket"
+                    >
+                      <v-icon size="28" color="#1E88E5">mdi-chart-line</v-icon>
+                      <span>Money Market</span>
+                      <div class="check-indicator" v-if="selectedInstruments.moneyMarket">
+                        <v-icon size="16" color="#4CAF50">mdi-check-circle</v-icon>
+                      </div>
+                    </div>
+                    <div 
+                      class="selection-card" 
+                      :class="{ active: selectedInstruments.bonds }"
+                      @click="selectedInstruments.bonds = !selectedInstruments.bonds"
+                    >
+                      <v-icon size="28" color="#4CAF50">mdi-chart-timeline</v-icon>
+                      <span>Bonds</span>
+                      <div class="check-indicator" v-if="selectedInstruments.bonds">
+                        <v-icon size="16" color="#4CAF50">mdi-check-circle</v-icon>
+                      </div>
+                    </div>
+                    <div 
+                      class="selection-card" 
+                      :class="{ active: selectedInstruments.tbills }"
+                      @click="selectedInstruments.tbills = !selectedInstruments.tbills"
+                    >
+                      <v-icon size="28" color="#FF9800">mdi-finance</v-icon>
+                      <span>T-Bills</span>
+                      <div class="check-indicator" v-if="selectedInstruments.tbills">
+                        <v-icon size="16" color="#4CAF50">mdi-check-circle</v-icon>
+                      </div>
+                    </div>
                   </div>
                   <div class="selection-actions">
                     <button class="btn-secondary" @click="selectAllInstruments">Select All</button>
@@ -378,7 +424,7 @@
                   </div>
                 </div>
 
-                <!-- Full Report Preview (live) -->
+                <!-- Full Report Preview (live, expanded) -->
                 <div class="report-preview-full">
                   <h3>Report Preview</h3>
                   <div class="preview-content" v-if="reportPreviewData.instruments.length">
@@ -389,20 +435,27 @@
                     <div class="preview-instruments">
                       <div v-for="inst in reportPreviewData.instruments" :key="inst.name" class="preview-instrument-card">
                         <h4>{{ inst.name }}</h4>
-                        <table class="preview-table">
-                          <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-                          <tbody>
-                            <tr v-for="(value, key) in inst.calculations" :key="key">
-                              <td>{{ formatMetricName(key) }}</td>
-                              <td>{{ formatMetricValue(key, value) }}</td>
-                            </tr>
-                          </tbody>
-                        </table>
+                        <div class="report-table-wrapper">
+                          <table class="report-table">
+                            <thead>
+                              <tr>
+                                <th>Metric</th>
+                                <th>Value</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr v-for="(value, key) in inst.calculations" :key="key">
+                                <td>{{ formatMetricName(key) }}</td>
+                                <td class="report-value">{{ formatMetricValue(key, value) }}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     </div>
                   </div>
                   <div v-else class="preview-empty">
-                    <p>No instruments selected. Please select at least one instrument to preview the report.</p>
+                    <p>No data available for the selected instruments. Please complete data processing for the instruments you wish to include.</p>
                   </div>
                 </div>
 
@@ -459,7 +512,7 @@ const route = useRoute()
 
 const activeSession = ref(null)
 
-// Refresh and persistence functions
+// ========== PERSISTENCE ==========
 function refreshPage() {
   rawData.value = []
   cleanedData.value = []
@@ -539,7 +592,7 @@ function updateSessionCompletion() {
   localStorage.setItem('sessions_list', JSON.stringify(sessionsList))
 }
 
-// Instrument info
+// ========== Instrument info ==========
 const instrumentType = computed(() => route.params.type || route.path.split('/').pop())
 const instrumentName = computed(() => {
   const names = { 'money-market': 'Money Market', bonds: 'Bonds', tbills: 'T-Bills' }
@@ -567,7 +620,7 @@ const activeTab = computed({
 const currentStepIndex = computed(() => steps.findIndex(s => s.tab === activeTab.value))
 const totalSteps = steps.length
 
-// Data refs
+// ========== Data refs ==========
 const uploadedFile = ref(null)
 const rawData = ref([])
 const cleanedData = ref([])
@@ -587,7 +640,21 @@ const cleaningOptions = ref({
   dropRowsWithMissing: false,
   trimWhitespace: true,
   convertToNumbers: true,
-  removeOutliers: false
+  removeOutliers: false,
+  standardizeDates: false,
+  removeSpecialChars: false,
+  changeCase: false,
+  caseType: 'none',
+  fillWithCustom: false,
+  customFillValue: '',
+  removeColumnsAllMissing: false,
+  capOutliers: false,
+  removeRowsSpecificColumnEmpty: false,
+  specificColumn: '',
+  standardizeNumericRange: false,
+  removeEmptyRows: false,
+  fillForward: false,
+  fillBackward: false
 })
 
 const requiredColumns = computed(() => {
@@ -637,9 +704,6 @@ const paginatedRawPreview = computed(() => rawData.value.slice(rawPreviewStartRo
 
 const previewColumnsListClean = computed(() => previewData.value[0] ? Object.keys(previewData.value[0]).slice(0,8) : [])
 
-const reportPreviewColumns = computed(() => cleanedData.value[0] ? Object.keys(cleanedData.value[0]).slice(0,6) : [])
-const reportDataPreview = computed(() => cleanedData.value.slice(0,5))
-
 const fileSize = computed(() => {
   if (!uploadedFile.value) return ''
   const bytes = uploadedFile.value.size
@@ -653,7 +717,6 @@ const missingColumns = computed(() => requiredColumns.value.filter(col => !hasRe
 const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
-// Formatting helpers
 function formatCellValue(value) {
   if (value === undefined || value === null) return '-'
   if (typeof value === 'number') return value.toFixed(2)
@@ -771,16 +834,75 @@ async function uploadData() {
   } else alert('Please map missing columns first')
 }
 
-// Cleaning functions
+// ========== CLEANING FUNCTIONS (expanded) ==========
 function previewCleanedData() {
   if (!rawData.value.length) return
   let data = JSON.parse(JSON.stringify(rawData.value))
+
+  // 1. Trim whitespace
   if (cleaningOptions.value.trimWhitespace) {
-    data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].trim() }); return row })
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (typeof row[k] === 'string') row[k] = row[k].trim()
+      })
+      return row
+    })
   }
+
+  // 2. Convert text numbers to numeric
   if (cleaningOptions.value.convertToNumbers) {
-    data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string' && !isNaN(row[k]) && row[k] !== '') row[k] = parseFloat(row[k]) }); return row })
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (typeof row[k] === 'string' && !isNaN(row[k]) && row[k] !== '') {
+          row[k] = parseFloat(row[k])
+        }
+      })
+      return row
+    })
   }
+
+  // 3. Remove special characters from text columns
+  if (cleaningOptions.value.removeSpecialChars) {
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (typeof row[k] === 'string') {
+          row[k] = row[k].replace(/[^a-zA-Z0-9\s]/g, '')
+        }
+      })
+      return row
+    })
+  }
+
+  // 4. Change case
+  if (cleaningOptions.value.changeCase && cleaningOptions.value.caseType !== 'none') {
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (typeof row[k] === 'string') {
+          if (cleaningOptions.value.caseType === 'upper') row[k] = row[k].toUpperCase()
+          else if (cleaningOptions.value.caseType === 'lower') row[k] = row[k].toLowerCase()
+          else if (cleaningOptions.value.caseType === 'title') row[k] = row[k].replace(/\b\w/g, l => l.toUpperCase())
+        }
+      })
+      return row
+    })
+  }
+
+  // 5. Standardize dates (simple conversion to YYYY-MM-DD)
+  if (cleaningOptions.value.standardizeDates) {
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (k.toLowerCase().includes('date') && row[k]) {
+          let d = new Date(row[k])
+          if (!isNaN(d.getTime())) {
+            row[k] = d.toISOString().split('T')[0]
+          }
+        }
+      })
+      return row
+    })
+  }
+
+  // 6. Fill missing numeric with mean/median/zero (if option chosen)
   if (cleaningOptions.value.fillMissingNumeric) {
     const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
     const fillValues = {}
@@ -792,18 +914,102 @@ function previewCleanedData() {
         else fillValues[col] = 0
       } else fillValues[col] = 0
     })
-    data = data.map(row => { numericCols.forEach(col => { if (row[col] === undefined || row[col] === null || row[col] === '') row[col] = fillValues[col] }); return row })
+    data = data.map(row => {
+      numericCols.forEach(col => {
+        if (row[col] === undefined || row[col] === null || row[col] === '') row[col] = fillValues[col]
+      })
+      return row
+    })
   }
+
+  // 7. Fill missing text with N/A
   if (cleaningOptions.value.fillMissingText) {
-    data = data.map(row => { Object.keys(row).forEach(k => { if ((row[k] === undefined || row[k] === null || row[k] === '') && typeof row[k] !== 'number') row[k] = 'N/A' }); return row })
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if ((row[k] === undefined || row[k] === null || row[k] === '') && typeof row[k] !== 'number') {
+          row[k] = 'N/A'
+        }
+      })
+      return row
+    })
   }
+
+  // 8. Fill with custom value
+  if (cleaningOptions.value.fillWithCustom && cleaningOptions.value.customFillValue) {
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (row[k] === undefined || row[k] === null || row[k] === '') {
+          row[k] = cleaningOptions.value.customFillValue
+        }
+      })
+      return row
+    })
+  }
+
+  // 9. Forward fill
+  if (cleaningOptions.value.fillForward) {
+    for (let i = 1; i < data.length; i++) {
+      Object.keys(data[i]).forEach(k => {
+        if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') {
+          if (data[i-1] && data[i-1][k] !== undefined && data[i-1][k] !== null && data[i-1][k] !== '') {
+            data[i][k] = data[i-1][k]
+          }
+        }
+      })
+    }
+  }
+
+  // 10. Backward fill
+  if (cleaningOptions.value.fillBackward) {
+    for (let i = data.length-2; i >= 0; i--) {
+      Object.keys(data[i]).forEach(k => {
+        if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') {
+          if (data[i+1] && data[i+1][k] !== undefined && data[i+1][k] !== null && data[i+1][k] !== '') {
+            data[i][k] = data[i+1][k]
+          }
+        }
+      })
+    }
+  }
+
+  // 11. Drop rows with ANY missing (after fill attempts)
   if (cleaningOptions.value.dropRowsWithMissing) {
     data = data.filter(row => Object.values(row).every(v => v !== undefined && v !== null && v !== ''))
   }
+
+  // 12. Remove rows where specific column is empty
+  if (cleaningOptions.value.removeRowsSpecificColumnEmpty && cleaningOptions.value.specificColumn) {
+    data = data.filter(row => row[cleaningOptions.value.specificColumn] !== undefined && row[cleaningOptions.value.specificColumn] !== null && row[cleaningOptions.value.specificColumn] !== '')
+  }
+
+  // 13. Remove duplicate rows
   if (cleaningOptions.value.removeDuplicates) {
     const seen = new Set()
-    data = data.filter(row => { const key = JSON.stringify(row); if (seen.has(key)) return false; seen.add(key); return true })
+    data = data.filter(row => {
+      const key = JSON.stringify(row)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
   }
+
+  // 14. Remove columns where all values are missing
+  if (cleaningOptions.value.removeColumnsAllMissing && data.length) {
+    const cols = Object.keys(data[0])
+    cols.forEach(col => {
+      const allMissing = data.every(row => row[col] === undefined || row[col] === null || row[col] === '')
+      if (allMissing) {
+        data = data.map(row => { delete row[col]; return row })
+      }
+    })
+  }
+
+  // 15. Remove empty rows (all values missing/empty)
+  if (cleaningOptions.value.removeEmptyRows) {
+    data = data.filter(row => Object.values(row).some(v => v !== undefined && v !== null && v !== ''))
+  }
+
+  // 16. Remove outliers (3σ) on numeric columns
   if (cleaningOptions.value.removeOutliers) {
     const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
     numericCols.forEach(col => {
@@ -815,8 +1021,49 @@ function previewCleanedData() {
       data = data.filter(row => Math.abs(row[col] - mean) <= threshold)
     })
   }
+
+  // 17. Cap outliers (winsorize)
+  if (cleaningOptions.value.capOutliers) {
+    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+    numericCols.forEach(col => {
+      const values = data.map(row => row[col]).filter(v => typeof v === 'number')
+      if (values.length < 2) return
+      const mean = values.reduce((a,b)=>a+b,0)/values.length
+      const std = Math.sqrt(values.map(x=>Math.pow(x-mean,2)).reduce((a,b)=>a+b,0)/values.length)
+      const upper = mean + 3*std
+      const lower = mean - 3*std
+      data = data.map(row => {
+        if (typeof row[col] === 'number') {
+          if (row[col] > upper) row[col] = upper
+          if (row[col] < lower) row[col] = lower
+        }
+        return row
+      })
+    })
+  }
+
+  // 18. Standardize numeric range (min-max scaling)
+  if (cleaningOptions.value.standardizeNumericRange) {
+    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+    numericCols.forEach(col => {
+      const values = data.map(row => row[col]).filter(v => typeof v === 'number')
+      if (values.length < 2) return
+      const min = Math.min(...values)
+      const max = Math.max(...values)
+      if (max !== min) {
+        data = data.map(row => {
+          if (typeof row[col] === 'number') {
+            row[col] = (row[col] - min) / (max - min)
+          }
+          return row
+        })
+      }
+    })
+  }
+
   previewData.value = data
 }
+
 async function applyCleaningOnly() {
   if (!previewData.value.length) {
     alert('Please click "Preview Cleaned Data" first.')
@@ -836,6 +1083,7 @@ async function applyCleaningOnly() {
   await nextTick()
 }
 
+// ========== CALCULATIONS ==========
 function calculateMetrics() {
   if (!cleanedData.value.length) return
   if (instrumentType.value === 'money-market') {
@@ -897,18 +1145,23 @@ function calculateMetrics() {
   updateSessionCompletion()
 }
 
-// ---------- REPORT LOGIC ----------
+// ========== REPORT LOGIC ==========
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
 
 function getInstrumentData(instrumentId) {
   if (!activeSession.value) return null
-  const key = `${instrumentId}_session_${activeSession.value.id}`
-  const savedCalc = localStorage.getItem(`${key}_calc`)
-  if (savedCalc) return JSON.parse(savedCalc)
   if (activeSession.value.instrumentData && activeSession.value.instrumentData[instrumentId]) {
     return activeSession.value.instrumentData[instrumentId]
+  }
+  const key = `${instrumentId}_session_${activeSession.value.id}`
+  const savedCalc = localStorage.getItem(`${key}_calc`)
+  if (savedCalc) {
+    const data = JSON.parse(savedCalc)
+    if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
+    activeSession.value.instrumentData[instrumentId] = data
+    return data
   }
   return null
 }
@@ -966,7 +1219,7 @@ function formatMetricValue(key, value) {
 async function downloadCombinedReport(format) {
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
-    alert('Please select at least one instrument to include in the report.')
+    alert('No data available for the selected instruments. Please complete data processing for the instruments you wish to include.')
     return
   }
   const filename = `combined_report_${Date.now()}`
@@ -984,11 +1237,11 @@ async function downloadCombinedReport(format) {
   } else if (format === 'html') {
     let html = `<!DOCTYPE html><html><head><title>Combined Report</title><style>body{font-family:Arial;margin:40px} table{border-collapse:collapse;width:100%} th,td{border:1px solid #ddd;padding:8px} th{background:#0B2044;color:white}</style></head><body><h1>Portfolio Report</h1><p>Session: ${report.session}</p><p>Date: ${report.date}</p>`
     for (const inst of report.instruments) {
-      html += `<h2>${inst.name}</h2><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+      html += `<h2>${inst.name}</h2><td><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
       for (const [key, val] of Object.entries(inst.calculations)) {
         html += `<tr><td>${formatMetricName(key)}</td><td>${formatMetricValue(key, val)}</td></tr>`
       }
-      html += `</tbody></table>`
+      html += `</tbody></tr>`
     }
     html += `</body></html>`
     downloadBlob(html, `${filename}.html`, 'text/html')
@@ -1038,7 +1291,7 @@ function downloadBlob(content, filename, mimeType) {
   URL.revokeObjectURL(url)
 }
 
-// Excel viewer (unchanged)
+// Excel viewer
 const showExcelDialog = ref(false)
 const excelData = ref([])
 const excelColumns = ref([])
@@ -1060,7 +1313,7 @@ function exportToJSON() {
 }
 function saveToSession() { saveSessionData(); alert('Data saved to session!') }
 
-// Force refresh on instrument or session change
+// ========== Force refresh on instrument or session change ==========
 let lastInstrument = ''
 let lastSessionId = ''
 function checkAndReset() {
@@ -1068,15 +1321,21 @@ function checkAndReset() {
   const currentSessionId = savedSession ? JSON.parse(savedSession).id : null
   const currentInstrument = instrumentType.value
   if (currentInstrument !== lastInstrument || currentSessionId !== lastSessionId) {
-    lastInstrument = currentInstrument; lastSessionId = currentSessionId
+    lastInstrument = currentInstrument
+    lastSessionId = currentSessionId
     if (savedSession) activeSession.value = JSON.parse(savedSession)
     else activeSession.value = null
-    refreshPage()
     const loaded = loadSavedData()
-    if (!loaded) activeTab.value = 'upload'
-    else {
+    if (!loaded) {
+      refreshPage()
+      activeTab.value = 'upload'
+    } else {
       const savedTab = localStorage.getItem(`instrument_${instrumentType.value}_last_tab`)
-      if (savedTab && steps.some(s => s.tab === savedTab)) activeTab.value = savedTab
+      if (savedTab && steps.some(s => s.tab === savedTab)) {
+        activeTab.value = savedTab
+      } else {
+        activeTab.value = 'upload'
+      }
     }
   }
 }
@@ -1086,7 +1345,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* Keep your existing styles – they are unchanged */
+/* ========== All existing styles remain (unchanged) ========== */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
@@ -1186,17 +1445,56 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .progress-text { font-size: 12px; color: #4CAF50; font-weight: 500; margin: 0; }
 .report-options { padding: 20px; }
 .instrument-selection { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-.selection-grid { display: flex; gap: 20px; margin: 15px 0; flex-wrap: wrap; }
-.instrument-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-.selection-actions { display: flex; gap: 10px; margin-top: 10px; }
+.selection-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin: 20px 0;
+}
+.selection-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 16px;
+  background: white;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2px solid #e0e0e0;
+  position: relative;
+  text-align: center;
+}
+.selection-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  border-color: #0B2044;
+}
+.selection-card.active {
+  border-color: #0B2044;
+  background: #f8f9ff;
+}
+.check-indicator {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+.selection-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 10px;
+}
 .report-preview-full { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; max-height: 500px; overflow-y: auto; }
 .preview-content { margin-top: 15px; }
 .preview-header { padding: 10px; background: white; border-radius: 8px; margin-bottom: 15px; }
 .preview-instrument-card { background: white; border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 .preview-instrument-card h4 { color: #0B2044; margin-bottom: 10px; }
-.preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.preview-table th, .preview-table td { border: 1px solid #ddd; padding: 6px; text-align: left; }
-.preview-table th { background: #f5f5f5; }
+.report-table-wrapper { overflow-x: auto; }
+.report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.report-table th, .report-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+.report-table th { background: #f5f5f5; font-weight: 600; }
+.report-value { font-weight: 500; }
 .preview-empty { text-align: center; padding: 40px; color: #999; }
 .report-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px; }
 .btn-json, .btn-csv, .btn-html, .btn-pdf, .btn-word, .btn-excel, .btn-save { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; color: white; }
