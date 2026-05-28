@@ -1,139 +1,285 @@
 from flask import request, jsonify
-from models.user import User
+from werkzeug.security import generate_password_hash, check_password_hash
+from utils.db import get_db
+import uuid
+from datetime import datetime, timedelta
 
 def auth_routes(app):
-    
-    @app.route('/api/login', methods=['POST', 'OPTIONS'])
-    def login():
-        # Handle preflight OPTIONS request - just return empty response
-        if request.method == 'OPTIONS':
-            return '', 200
-        
-        try:
-            data = request.get_json()
-            email = data.get('email')
-            password = data.get('password')
-            
-            print(f"Login attempt for email: {email}")
-            
-            # Validate input
-            if not email or not password:
-                return jsonify({
-                    'success': False,
-                    'message': 'Email and password are required'
-                }), 400
-            
-            # Find user in database
-            user = User.find_by_email(email)
-            print(f"User found: {user is not None}")
-            
-            # Verify password
-            if not user or not User.verify_password(user, password):
-                print(f"Password verification failed for {email}")
-                return jsonify({
-                    'success': False,
-                    'message': 'Invalid email or password'
-                }), 401
-            
-            # Create session token
-            ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-            user_agent = request.headers.get('User-Agent')
-            
-            token = User.create_session(user['id'], ip_address, user_agent)
-            
-            if not token:
-                return jsonify({
-                    'success': False,
-                    'message': 'Failed to create session'
-                }), 500
-            
-            # Get user preferences
-            preferences = User.get_user_preferences(user['id'])
-            
-            # Log the login action
-            User.log_audit(user['id'], 'LOGIN', 'User logged in', ip_address, user_agent)
-            
-            # Return success response - NO MANUAL CORS HEADERS
-            return jsonify({
-                'success': True,
-                'token': token,
-                'user': {
-                    'id': user['id'],
-                    'email': user['email'],
-                    'first_name': user['first_name'],
-                    'last_name': user['last_name'],
-                    'full_name': f"{user['first_name']} {user['last_name']}",
-                    'role': user.get('role', 'User'),
-                    'phone': user.get('phone', '')
-                },
-                'preferences': preferences
-            })
-            
-        except Exception as e:
-            print(f"Login error: {e}")
-            return jsonify({
-                'success': False,
-                'message': 'Internal server error'
-            }), 500
-    
-    @app.route('/api/logout', methods=['POST', 'OPTIONS'])
-    def logout():
-        if request.method == 'OPTIONS':
-            return '', 200
-        return jsonify({'success': True, 'message': 'Logged out successfully'})
-
+    # -------------------- REGISTER --------------------
     @app.route('/api/register', methods=['POST', 'OPTIONS'])
     def register():
         if request.method == 'OPTIONS':
             return '', 200
-
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'message': 'No data provided'}), 400
+        
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        full_name = data.get('full_name', '').strip()
+        
+        if not email or not password:
+            return jsonify({'success': False, 'message': 'Email and password required'}), 400
+        
+        name_parts = full_name.split(' ', 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ''
+        
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database connection failed'}), 500
+        
         try:
-            data = request.get_json() or {}
-            email = data.get('email')
-            password = data.get('password')
-            full_name = data.get('full_name', '')
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM users WHERE email = %s', (email,))
+            if cursor.fetchone():
+                return jsonify({'success': False, 'message': 'Email already registered'}), 400
+            
+            password_hash = generate_password_hash(password)
+            cursor.execute(
+                'INSERT INTO users (email, password_hash, first_name, last_name) VALUES (%s, %s, %s, %s)',
+                (email, password_hash, first_name, last_name)
+            )
+            user_id = cursor.lastrowid
+            
+            cursor.execute('INSERT INTO user_preferences (user_id) VALUES (%s)', (user_id,))
+            
+            token = str(uuid.uuid4())
+            expires_at = datetime.now() + timedelta(days=7)
+            cursor.execute(
+                'INSERT INTO sessions (user_id, token, expires_at) VALUES (%s, %s, %s)',
+                (user_id, token, expires_at)
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return jsonify({
+                'success': True,
+                'token': token,
+                'user': {
+                    'id': user_id,
+                    'email': email,
+                    'name': full_name,
+                    'first_name': first_name,
+                    'last_name': last_name
+                }
+            })
+        except Exception as e:
+            print(f"Registration error: {e}")
+            return jsonify({'success': False, 'message': str(e)}), 500
 
-            if not email or not password or not full_name:
-                return jsonify({'success': False, 'message': 'Email, password, and full name are required'}), 400
-
-            if User.find_by_email(email):
-                return jsonify({'success': False, 'message': 'Email already registered'}), 409
-
-            first_name, *rest = full_name.strip().split(' ')
-            last_name = ' '.join(rest) if rest else ''
-            user_id = User.create_user(email, password, first_name, last_name)
-            if not user_id:
-                return jsonify({'success': False, 'message': 'Failed to create user'}), 500
-
-            ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-            user_agent = request.headers.get('User-Agent')
-            token = User.create_session(user_id, ip_address, user_agent)
-            if not token:
-                return jsonify({'success': False, 'message': 'Failed to create session'}), 500
-
-            user = User.find_by_email(email)
-            User.log_audit(user_id, 'REGISTER', 'User registered', ip_address, user_agent)
-
+    # -------------------- LOGIN --------------------
+    @app.route('/api/login', methods=['POST', 'OPTIONS'])
+    def login():
+        if request.method == 'OPTIONS':
+            return '', 200
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        if not email or not password:
+            return jsonify({'success': False, 'message': 'Email and password required'}), 400
+        
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, email, password_hash, first_name, last_name FROM users WHERE email = %s', (email,))
+            user = cursor.fetchone()
+            if not user or not check_password_hash(user['password_hash'], password):
+                return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+            
+            token = str(uuid.uuid4())
+            expires_at = datetime.now() + timedelta(days=7)
+            cursor.execute(
+                'INSERT INTO sessions (user_id, token, expires_at) VALUES (%s, %s, %s)',
+                (user['id'], token, expires_at)
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
             return jsonify({
                 'success': True,
                 'token': token,
                 'user': {
                     'id': user['id'],
                     'email': user['email'],
+                    'name': f"{user['first_name']} {user['last_name']}".strip(),
                     'first_name': user['first_name'],
-                    'last_name': user['last_name'],
-                    'full_name': f"{user['first_name']} {user['last_name']}"
+                    'last_name': user['last_name']
                 }
             })
         except Exception as e:
-            print(f"Register error: {e}")
-            return jsonify({'success': False, 'message': 'Internal server error'}), 500
+            print(f"Login error: {e}")
+            return jsonify({'success': False, 'message': 'Login failed'}), 500
 
-    @app.route('/api/verify-token', methods=['POST', 'OPTIONS'])
-    def verify_token():
+    # -------------------- LOGOUT --------------------
+    @app.route('/api/logout', methods=['POST', 'OPTIONS'])
+    def logout():
         if request.method == 'OPTIONS':
             return '', 200
-
         token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        valid = User.verify_session(token)
-        return jsonify({'success': True, 'valid': valid})
+        if not token:
+            return jsonify({'success': True})
+        conn = get_db()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM sessions WHERE token = %s', (token,))
+                conn.commit()
+                cursor.close()
+                conn.close()
+            except:
+                pass
+        return jsonify({'success': True})
+
+    # -------------------- SESSION CHECK --------------------
+    @app.route('/api/session', methods=['GET', 'OPTIONS'])
+    def check_session():
+        if request.method == 'OPTIONS':
+            return '', 200
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            return jsonify({'authenticated': False}), 401
+        conn = get_db()
+        if not conn:
+            return jsonify({'authenticated': False}), 401
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT s.user_id, u.email, u.first_name, u.last_name FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = %s AND s.expires_at > NOW()',
+                (token,)
+            )
+            session = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if not session:
+                return jsonify({'authenticated': False}), 401
+            return jsonify({
+                'authenticated': True,
+                'user': {
+                    'id': session['user_id'],
+                    'email': session['email'],
+                    'name': f"{session['first_name']} {session['last_name']}".strip(),
+                    'first_name': session['first_name'],
+                    'last_name': session['last_name']
+                }
+            })
+        except:
+            return jsonify({'authenticated': False}), 401
+
+    # -------------------- FORGOT PASSWORD --------------------
+    @app.route('/api/forgot-password', methods=['POST', 'OPTIONS'])
+    def forgot_password():
+        if request.method == 'OPTIONS':
+            return '', 200
+        data = request.get_json()
+        email = data.get('email')
+        if not email:
+            return jsonify({'success': False, 'message': 'Email required'}), 400
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM users WHERE email = %s', (email,))
+            user = cursor.fetchone()
+            if not user:
+                return jsonify({'success': True, 'message': 'If the email exists, a reset link has been sent.'})
+            reset_token = str(uuid.uuid4())
+            expires = datetime.now() + timedelta(hours=1)
+            # Create password_resets table if not exists (you already have it)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    token VARCHAR(255) NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT FALSE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            ''')
+            cursor.execute(
+                'INSERT INTO password_resets (user_id, token, expires_at) VALUES (%s, %s, %s)',
+                (user['id'], reset_token, expires)
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'reset_token': reset_token, 'message': 'Reset token generated (for development)'})
+        except Exception as e:
+            print(f"Forgot password error: {e}")
+            return jsonify({'success': False, 'message': 'Server error'}), 500
+
+    # -------------------- RESET PASSWORD --------------------
+    @app.route('/api/reset-password', methods=['POST', 'OPTIONS'])
+    def reset_password():
+        if request.method == 'OPTIONS':
+            return '', 200
+        data = request.get_json()
+        token = data.get('token')
+        new_password = data.get('new_password')
+        if not token or not new_password:
+            return jsonify({'success': False, 'message': 'Token and new password required'}), 400
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT user_id FROM password_resets WHERE token = %s AND expires_at > NOW() AND used = FALSE',
+                (token,)
+            )
+            reset = cursor.fetchone()
+            if not reset:
+                return jsonify({'success': False, 'message': 'Invalid or expired token'}), 400
+            password_hash = generate_password_hash(new_password)
+            cursor.execute('UPDATE users SET password_hash = %s WHERE id = %s', (password_hash, reset['user_id']))
+            cursor.execute('UPDATE password_resets SET used = TRUE WHERE token = %s', (token,))
+            cursor.execute('DELETE FROM sessions WHERE user_id = %s', (reset['user_id'],))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'message': 'Password reset successfully'})
+        except Exception as e:
+            print(f"Reset password error: {e}")
+            return jsonify({'success': False, 'message': 'Server error'}), 500
+
+    # -------------------- CHANGE PASSWORD (authenticated) --------------------
+    @app.route('/api/change-password', methods=['POST', 'OPTIONS'])
+    def change_password():
+        if request.method == 'OPTIONS':
+            return '', 200
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+        data = request.get_json()
+        old_password = data.get('old_password')
+        new_password = data.get('new_password')
+        if not old_password or not new_password:
+            return jsonify({'success': False, 'message': 'Old and new password required'}), 400
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT u.id, u.password_hash FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = %s AND s.expires_at > NOW()',
+                (token,)
+            )
+            session = cursor.fetchone()
+            if not session:
+                return jsonify({'success': False, 'message': 'Invalid session'}), 401
+            if not check_password_hash(session['password_hash'], old_password):
+                return jsonify({'success': False, 'message': 'Incorrect old password'}), 400
+            new_hash = generate_password_hash(new_password)
+            cursor.execute('UPDATE users SET password_hash = %s WHERE id = %s', (new_hash, session['id']))
+            cursor.execute('DELETE FROM sessions WHERE user_id = %s AND token != %s', (session['id'], token))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'message': 'Password changed successfully'})
+        except Exception as e:
+            print(f"Change password error: {e}")
+            return jsonify({'success': False, 'message': 'Server error'}), 500

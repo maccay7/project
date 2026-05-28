@@ -116,8 +116,31 @@ const handleLogin = async () => {
   }
 }
 
-const forgotPassword = () => {
-  alert('Password reset feature coming soon')
+const forgotPassword = async () => {
+  const userEmail = prompt('Enter your email address to reset your password:')
+  if (!userEmail) return
+  
+  try {
+    const response = await fetch('http://localhost:5000/api/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: userEmail })
+    })
+    const data = await response.json()
+    
+    if (data.success) {
+      if (data.reset_token) {
+        // Development mode: show token and direct link
+        alert(`Reset token (development only): ${data.reset_token}\n\nUse this link to reset your password:\nhttp://localhost:3000/reset-password?token=${data.reset_token}`)
+      } else {
+        alert(data.message || 'If the email exists, a reset link has been sent.')
+      }
+    } else {
+      alert(data.message || 'Failed to send reset link. Please try again.')
+    }
+  } catch (err) {
+    alert('Network error. Please try again later.')
+  }
 }
 
 const goToRegister = () => {
@@ -126,6 +149,7 @@ const goToRegister = () => {
 </script>
 
 <style scoped>
+/* ========== YOUR EXACT ORIGINAL STYLES ========== */
 .login-container {
   min-height: 100vh;
   background: url('https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1600&h=900&fit=crop') center/cover no-repeat;
@@ -160,7 +184,6 @@ const goToRegister = () => {
   z-index: 1;
 }
 
-/* Logo Section - Perfect fit */
 .logo-section {
   text-align: center;
   margin-bottom: 20px;
@@ -349,19 +372,16 @@ const goToRegister = () => {
   border: 1px solid rgba(244, 67, 54, 0.2);
 }
 
-/* Responsive Design */
 @media (max-width: 480px) {
   .login-form {
     margin: 20px;
     padding: 20px;
     max-width: 320px;
   }
-  
   .login-logo {
     width: 100px;
     height: 100px;
   }
-  
   .forgot-password {
     right: 38px;
     font-size: 9px;

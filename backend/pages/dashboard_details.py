@@ -2,7 +2,7 @@ import os
 import requests
 from utils.db import get_db
 
-FRED_API_KEY = os.environ.get('FRED_API_KEY', 'b40141a5119f30bc2388d63f59d8847e')
+FRED_API_KEY = os.environ.get('FRED_API_KEY')
 FRED_URL = 'https://api.stlouisfed.org/fred/series/observations'
 
 
@@ -58,13 +58,45 @@ def get_recent_activity():
 
 
 def get_dashboard_charts():
-    return {
-        'labels': ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-        'values': [24, 42, 34, 55, 62, 73]
-    }
+    """
+    Returns real chart data from the database.
+    If no data, returns empty arrays.
+    Replace the query with your actual table/columns.
+    """
+    conn = get_db()
+    if not conn:
+        return {'labels': [], 'values': []}
+
+    try:
+        cursor = conn.cursor()
+        # Example query – adjust to your actual schema
+        cursor.execute("""
+            SELECT DATE(created_at) as date, COUNT(*) as count
+            FROM calculations
+            WHERE calculation_status = 'completed'
+            GROUP BY DATE(created_at)
+            ORDER BY date DESC
+            LIMIT 6
+        """)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        # Reverse to show chronological order
+        labels = [row.get('date').strftime('%b') if row.get('date') else '' for row in reversed(rows)]
+        values = [row.get('count', 0) for row in reversed(rows)]
+        return {'labels': labels, 'values': values}
+    except Exception:
+        return {'labels': [], 'values': []}
 
 
 def get_yield_curve(instrument_type='all'):
+    """
+    Fetches real yield curve data from FRED API.
+    Returns empty arrays if no data or API key missing.
+    """
+    if not FRED_API_KEY:
+        return {'labels': [], 'current': []}
+
     series_map = {
         'treasury_bills': 'TB3MS',
         'bonds': 'DGS10',
@@ -84,18 +116,20 @@ def get_yield_curve(instrument_type='all'):
         response = requests.get(FRED_URL, params=params, timeout=10)
         response.raise_for_status()
         payload = response.json()
-        observations = payload.get('observations', [])[:7]
+        observations = payload.get('observations', [])
+        if not observations:
+            return {'labels': [], 'current': []}
+        # Take only up to 7 observations
+        observations = observations[:7]
         labels = [obs.get('date', '') for obs in observations]
         current = []
         for obs in observations:
-            value = obs.get('value', '0')
+            value = obs.get('value', '')
             try:
                 current.append(float(value))
-            except Exception:
+            except (ValueError, TypeError):
                 current.append(0.0)
+        # Reverse to have ascending order (oldest to newest)
         return {'labels': labels[::-1], 'current': current[::-1]}
     except Exception:
-        return {
-            'labels': ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
-            'current': [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1]
-        }
+        return {'labels': [], 'current': []}

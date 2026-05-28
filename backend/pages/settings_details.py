@@ -2,9 +2,10 @@ from utils.db import get_db
 
 
 def get_user_profile(user_id=1):
+    """Return the current user's profile (name, email). Returns empty dict if not found."""
     conn = get_db()
     if not conn:
-        return {'name': 'Guest User', 'email': 'guest@example.com'}
+        return {}
 
     try:
         cursor = conn.cursor()
@@ -13,19 +14,26 @@ def get_user_profile(user_id=1):
         cursor.close()
         conn.close()
         if not user:
-            return {'name': 'Guest User', 'email': 'guest@example.com'}
+            return {}
+        name_parts = []
+        if user.get('first_name'):
+            name_parts.append(user.get('first_name'))
+        if user.get('last_name'):
+            name_parts.append(user.get('last_name'))
+        name = ' '.join(name_parts) if name_parts else ''
         return {
-            'name': f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+            'name': name,
             'email': user.get('email', '')
         }
     except Exception:
-        return {'name': 'Guest User', 'email': 'guest@example.com'}
+        return {}
 
 
 def get_user_preferences(user_id=1):
+    """Return user preferences (language, timezone, dateFormat, currency). Returns empty dict if none."""
     conn = get_db()
     if not conn:
-        return {'language': 'English', 'timezone': 'GMT+2', 'date_format': 'DD/MM/YYYY', 'currency': 'USD'}
+        return {}
 
     try:
         cursor = conn.cursor()
@@ -34,21 +42,22 @@ def get_user_preferences(user_id=1):
         cursor.close()
         conn.close()
         if not prefs:
-            return {'language': 'English', 'timezone': 'GMT+2', 'date_format': 'DD/MM/YYYY', 'currency': 'USD'}
+            return {}
         return {
-            'language': prefs.get('language', 'English'),
-            'timezone': prefs.get('timezone', 'GMT+2'),
-            'date_format': prefs.get('date_format', 'DD/MM/YYYY'),
-            'currency': prefs.get('currency', 'USD')
+            'language': prefs.get('language', ''),
+            'timezone': prefs.get('timezone', ''),
+            'dateFormat': prefs.get('date_format', ''),
+            'currency': prefs.get('currency', '')
         }
     except Exception:
-        return {'language': 'English', 'timezone': 'GMT+2', 'date_format': 'DD/MM/YYYY', 'currency': 'USD'}
+        return {}
 
 
 def get_notification_settings(user_id=1):
+    """Return notification settings (camelCase keys). Returns empty dict if none."""
     conn = get_db()
     if not conn:
-        return {'emailNotifications': True, 'pushNotifications': False, 'weeklyReports': True, 'systemAlerts': True}
+        return {}
 
     try:
         cursor = conn.cursor()
@@ -60,21 +69,22 @@ def get_notification_settings(user_id=1):
         cursor.close()
         conn.close()
         if not prefs:
-            return {'emailNotifications': True, 'pushNotifications': False, 'weeklyReports': True, 'systemAlerts': True}
+            return {}
         return {
-            'emailNotifications': bool(prefs.get('email_notifications', True)),
+            'emailNotifications': bool(prefs.get('email_notifications', False)),
             'pushNotifications': bool(prefs.get('push_notifications', False)),
-            'weeklyReports': bool(prefs.get('weekly_reports', True)),
-            'systemAlerts': bool(prefs.get('system_alerts', True))
+            'weeklyReports': bool(prefs.get('weekly_reports', False)),
+            'systemAlerts': bool(prefs.get('system_alerts', False))
         }
     except Exception:
-        return {'emailNotifications': True, 'pushNotifications': False, 'weeklyReports': True, 'systemAlerts': True}
+        return {}
 
 
 def get_system_info():
+    """Return system info (last_updated, version, apiStatus). Returns empty dict if none."""
     conn = get_db()
     if not conn:
-        return {'last_updated': None, 'version': '1.0.0', 'api_status': 'Online'}
+        return {}
 
     try:
         cursor = conn.cursor()
@@ -83,10 +93,12 @@ def get_system_info():
         cursor.close()
         conn.close()
         result = {row.get('config_key'): row.get('config_value') for row in rows}
+        if not result:
+            return {}
         return {
-            'last_updated': result.get('updated_at') or result.get('created_at') or None,
-            'version': result.get('version', '1.0.0'),
-            'api_status': result.get('api_status', 'Online')
+            'last_updated': result.get('updated_at') or result.get('created_at'),
+            'version': result.get('version'),
+            'apiStatus': result.get('api_status')
         }
     except Exception:
-        return {'last_updated': None, 'version': '1.0.0', 'api_status': 'Online'}
+        return {}
