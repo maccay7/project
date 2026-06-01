@@ -31,21 +31,21 @@ cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
 existing = cursor.fetchone()
 
 if existing:
-    print(f"\n⚠️ User already exists (ID: {existing['id']})")
+    print(f"\n User already exists (ID: {existing['id']})")
     print("Updating password hash...")
     cursor.execute(
         "UPDATE users SET password_hash = %s WHERE email = %s",
         (password_hash, email)
     )
 else:
-    print(f"\n✅ Creating new user...")
+    print(f"\n Creating new user...")
     cursor.execute(
         """INSERT INTO users (email, password_hash, first_name, last_name, role) 
            VALUES (%s, %s, %s, %s, 'Administrator')""",
         (email, password_hash, first_name, last_name)
     )
     user_id = cursor.lastrowid
-    print(f"✅ User created with ID: {user_id}")
+    print(f" User created with ID: {user_id}")
     
     # Create user preferences
     cursor.execute(
@@ -53,15 +53,15 @@ else:
            VALUES (%s, 'English', 'GMT+2', 'DD/MM/YYYY', 'USD')""",
         (user_id,)
     )
-    print("✅ User preferences created")
+    print(" User preferences created")
 
 conn.commit()
-print("\n✅ Done! User is ready.")
+print("\n Done! User is ready.")
 
 # Verify the user
 cursor.execute("SELECT id, email, first_name, last_name, role FROM users WHERE email = %s", (email,))
 user = cursor.fetchone()
-print(f"\n📋 Verification:")
+print(f"\n Verification:")
 print(f"   ID: {user['id']}")
 print(f"   Email: {user['email']}")
 print(f"   Name: {user['first_name']} {user['last_name']}")

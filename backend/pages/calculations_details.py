@@ -7,6 +7,13 @@ def safe_float(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
 
+def parse_percentage(value: Any) -> float:
+    val = safe_float(value, 0.0)
+    # If value > 1, assume it's a percentage (e.g., 5.0 = 5%)
+    if val > 1:
+        return val / 100.0
+    return val
+
 def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
     """Normalise column names to a standard set of keys."""
     if not isinstance(row, dict):
@@ -55,27 +62,38 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
             normalized[orig_key] = value
     return normalized
 
-def parse_percentage(value: Any) -> float:
-    val = safe_float(value, 0.0)
-    if val > 1:
-        return val / 100.0
-    return val
-
 def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
     face = safe_float(item.get('face_value', 1000))
     price = safe_float(item.get('purchase_price') or item.get('current_price') or face)
     days = safe_float(item.get('term_days', 91))
+    
     if price <= 0:
         price = face
-    ytm = ((face - price) / price) * (365 / days) * 100 if days > 0 else 0
+    if days <= 0:
+        days = 91
+    
+    # Bank discount yield (360 day count)
+    discount_yield = ((face - price) / face) * (360 / days) * 100
+    
+    # Money market yield (360 day count)
+    money_market_yield = ((face - price) / price) * (360 / days) * 100
+    
+    # Bond equivalent yield (365 day count)
+    bond_equivalent_yield = ((face - price) / price) * (365 / days) * 100
+    
+    # Holding period yield
+    holding_period_yield = ((face - price) / price) * 100
+    
     return {
         'instrument_type': 'tbills',
         'face_value': round(face, 2),
         'purchase_price': round(price, 2),
         'term_days': int(days),
-        'yield_to_maturity': round(ytm, 2),
-        'annual_yield': round(ytm, 2),
-        'yield_curve_rate': round(ytm, 2)
+        'discount_yield': round(discount_yield, 2),
+        'money_market_yield': round(money_market_yield, 2),
+        'bond_equivalent_yield': round(bond_equivalent_yield, 2),
+        'holding_period_yield': round(holding_period_yield, 2),
+        'yield_curve_rate': round(money_market_yield, 2)  # primary market rate
     }
 
 def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -83,20 +101,40 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
     coupon_rate = parse_percentage(item.get('coupon_rate', 0.05))
     price = safe_float(item.get('current_price') or item.get('price') or face)
     years = safe_float(item.get('years_to_maturity', 10))
-    annual_coupon = coupon_rate * face
+    frequency = safe_float(item.get('frequency', 2))  # semi-annual by default
+    
+    if years <= 0:
+        years = 10
     if price <= 0:
         price = face
-    if years > 0:
-        ytm = ((annual_coupon + (face - price) / years) / ((face + price) / 2)) * 100
+    
+    annual_coupon = coupon_rate * face
+    coupon_per_period = annual_coupon / frequency
+    periods = years * frequency
+    
+    # Approximate yield to maturity using bond approximation formula
+    if periods > 0:
+        ytm_approx = (coupon_per_period + (face - price) / periods) / ((face + price) / 2)
+        ytm = ytm_approx * frequency * 100
     else:
         ytm = 0
+    
+    # Macaulay duration approximation (simple for fixed coupon)
+    if ytm > 0:
+        duration = (1 + ytm/100/frequency) / (ytm/100/frequency) - (1 + ytm/100/frequency + periods * (coupon_per_period/price - ytm/100/frequency)) / (coupon_per_period/price * ((1+ytm/100/frequency)**periods - 1) + ytm/100/frequency)
+        duration = max(0, duration) / frequency
+    else:
+        duration = years
+    
     return {
         'instrument_type': 'bonds',
         'face_value': round(face, 2),
         'current_price': round(price, 2),
         'coupon_rate': round(coupon_rate * 100, 2),
-        'years_to_maturity': int(years),
+        'years_to_maturity': round(years, 2),
+        'frequency': int(frequency),
         'yield_to_maturity': round(ytm, 2),
+        'duration': round(duration, 2),
         'bond_equivalent_yield': round(ytm, 2),
         'yield_curve_rate': round(ytm, 2)
     }
@@ -105,13 +143,29 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
     principal = safe_float(item.get('principal') or item.get('amount') or item.get('face_value', 1000))
     rate = parse_percentage(item.get('interest_rate') or item.get('rate', 0.05))
     days = safe_float(item.get('term_days') or item.get('days', 90))
-    discount_yield = rate * (360 / days) * 100 if days > 0 else 0
-    effective_yield = (rate / (1 - rate * days / 360)) * 100 if days > 0 and rate < 1 else 0
+    
+    if days <= 0:
+        days = 90
+    if principal <= 0:
+        principal = 1000
+    
+    # Simple interest (360 day count convention)
+    interest = principal * rate * (days / 360)
+    total_value = principal + interest
+    
+    # Discount yield (360 day count)
+    discount_yield = (interest / total_value) * (360 / days) * 100
+    
+    # Effective yield (365 day count)
+    effective_yield = (interest / principal) * (365 / days) * 100
+    
     return {
         'instrument_type': 'money-market',
         'principal': round(principal, 2),
         'interest_rate': round(rate * 100, 2),
         'term_days': int(days),
+        'interest_earned': round(interest, 2),
+        'total_value': round(total_value, 2),
         'discount_yield': round(discount_yield, 2),
         'effective_yield': round(effective_yield, 2),
         'yield_curve_rate': round(effective_yield, 2)
@@ -129,7 +183,23 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             'annualYield': 0,
             'effectiveAnnualRate': 0,
             'avgDaysToMaturity': 0,
-            'totalPrincipal': 0
+            'totalPrincipal': 0,
+            # Additional fields for specific types
+            'avgCouponRate': 0,
+            'weightedAvgCoupon': 0,
+            'totalAnnualIncome': 0,
+            'avgYTM': 0,
+            'duration': 0,
+            'avgDiscountRate': 0,
+            'weightedAvgDiscount': 0,
+            'totalDiscount': 0,
+            'effectiveYield': 0,
+            'bondEquivalentYield': 0,
+            'totalPurchasePrice': 0,
+            'avgInvestment': 0,
+            'holdingPeriodYield': 0,
+            'annualizedYield': 0,
+            'pricePer100': 0
         }
     
     total_value = 0.0
@@ -141,6 +211,7 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
     
     for row in data:
         norm = normalize_row(row)
+        # Convert percentage strings/values to decimals if needed
         if 'coupon_rate' in norm:
             norm['coupon_rate'] = parse_percentage(norm['coupon_rate'])
         if 'interest_rate' in norm:
@@ -150,15 +221,15 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
         
         if instrument_type == 'bonds':
             calc = calculate_bond(norm)
-            rate = calc.get('coupon_rate', 0)
+            rate = calc.get('yield_to_maturity', 0)
             value = calc.get('face_value', 0)
         elif instrument_type == 'money-market':
             calc = calculate_money_market(norm)
-            rate = calc.get('interest_rate', 0)
+            rate = calc.get('effective_yield', 0)
             value = calc.get('principal', 0)
-        else:
+        else:  # tbills
             calc = calculate_treasury_bill(norm)
-            rate = calc.get('yield_to_maturity', 0)
+            rate = calc.get('money_market_yield', 0)
             value = calc.get('face_value', 0)
         
         processed.append(calc)
@@ -170,9 +241,11 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
     
     avg_rate = total_rate_weighted / total_value if total_value > 0 else 0
     weighted_avg_rate = avg_rate
-    total_interest = total_value * (avg_rate / 100)
     avg_days = total_days / count if count > 0 else 0
-    interest_earned = total_interest * (avg_days / 365)
+    
+    # Simple interest calculations (adjustable if needed)
+    total_interest = total_value * (avg_rate / 100) * (avg_days / 360)
+    interest_earned = total_interest
     
     result = {
         'totalValue': round(total_value, 2),
@@ -186,26 +259,36 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
         'avgDaysToMaturity': round(avg_days, 0),
         'totalPrincipal': round(total_principal, 2)
     }
-    # Additional fields for bonds / tbills
+    
+    # Additional fields for specific instrument types
     if instrument_type == 'bonds':
+        total_annual_income = total_value * (avg_rate / 100)
         result.update({
             'avgCouponRate': round(avg_rate, 2),
             'weightedAvgCoupon': round(weighted_avg_rate, 2),
-            'totalAnnualIncome': round(total_interest, 2),
+            'totalAnnualIncome': round(total_annual_income, 2),
             'avgYTM': round(avg_rate, 2),
-            'duration': 0
+            'duration': round(sum(calc.get('duration', 0) * calc.get('face_value', 0) for calc in processed) / total_value if total_value > 0 else 0, 2)
         })
     elif instrument_type == 'tbills':
+        total_discount = total_interest
+        avg_investment = (total_value - total_interest) / count if count > 0 else 0
         result.update({
             'avgDiscountRate': round(avg_rate, 2),
             'weightedAvgDiscount': round(weighted_avg_rate, 2),
-            'totalDiscount': round(total_interest, 2),
+            'totalDiscount': round(total_discount, 2),
             'effectiveYield': round(avg_rate, 2),
             'bondEquivalentYield': round(avg_rate, 2),
-            'totalPurchasePrice': round(total_value * 0.98, 2),
-            'avgInvestment': round((total_value * 0.98) / count, 2) if count > 0 else 0,
+            'totalPurchasePrice': round(total_value - total_interest, 2),
+            'avgInvestment': round(avg_investment, 2),
             'holdingPeriodYield': round(avg_rate, 2),
             'annualizedYield': round(avg_rate, 2),
-            'pricePer100': 0
+            'pricePer100': round(100 - (avg_rate * avg_days / 360), 2) if avg_rate > 0 else 100
         })
+    else:  # money-market
+        result.update({
+            'discountYield': round(avg_rate, 2),
+            'effectiveYield': round(avg_rate, 2)
+        })
+    
     return result

@@ -10,6 +10,7 @@ from routes.dashboard import dashboard_routes
 from routes.calculations import calculations_routes
 from routes.upload import upload_routes
 from routes.settings import settings_routes
+from routes.fred import fred_routes
 
 app = Flask(__name__)
 
@@ -24,6 +25,7 @@ dashboard_routes(app)
 calculations_routes(app)
 upload_routes(app)
 settings_routes(app)
+fred_routes(app)
 
 @app.route('/')
 def home():
