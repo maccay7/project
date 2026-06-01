@@ -40,12 +40,14 @@ async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = fal
   }
 }
 
-// Auth
+// ========== AUTH ==========
 export const authAPI = {
-  login: (email, password) => callAPI('/api/login', 'POST', { email, password })
+  login: (email, password) => callAPI('/api/login', 'POST', { email, password }),
+  logout: () => callAPI('/api/logout', 'POST'),
+  register: (userData) => callAPI('/api/register', 'POST', userData)
 }
 
-// Dashboard
+// ========== DASHBOARD ==========
 export const dashboardAPI = {
   getKPI: () => callAPI('/api/dashboard/kpi'),
   getRecentActivity: () => callAPI('/api/dashboard/recent-activity'),
@@ -53,25 +55,29 @@ export const dashboardAPI = {
   getCharts: () => callAPI('/api/dashboard/charts')
 }
 
-// Calculations
+// ========== CALCULATIONS ==========
 export const calculationsAPI = {
   execute: (type, data = [], params = {}) => callAPI('/api/calculations/execute', 'POST', { instrument_type: type, data, params }),
   getHistory: () => callAPI('/api/calculations/history')
 }
 
-// User
+// ========== USER ==========
 export const userAPI = {
   getProfile: () => callAPI('/api/user/profile'),
+  updateProfile: (profile) => callAPI('/api/user/profile', 'PUT', profile),
   getPreferences: () => callAPI('/api/user/preferences'),
-  getNotificationSettings: () => callAPI('/api/user/notifications/settings')
+  updatePreferences: (prefs) => callAPI('/api/user/preferences', 'PUT', prefs),
+  getNotificationSettings: () => callAPI('/api/user/notifications/settings'),
+  updateNotificationSettings: (settings) => callAPI('/api/user/notifications/settings', 'PUT', settings)
 }
 
-// System
+// ========== SYSTEM ==========
 export const systemAPI = {
-  getInfo: () => callAPI('/api/system/info')
+  getInfo: () => callAPI('/api/system/info'),
+  getHealth: () => callAPI('/api/health')
 }
 
-// Data Operations
+// ========== DATA OPERATIONS ==========
 export const dataAPI = {
   upload: async (file, type) => {
     console.log('Uploading:', file.name)
@@ -85,7 +91,7 @@ export const dataAPI = {
   deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { upload_id: id })
 }
 
-// Dataset Operations
+// ========== DATASET MANAGEMENT ==========
 export const datasetAPI = {
   save: (name, file_base64, sheet_names, upload_id, data = null, headers = null, instrument_type = null) =>
     callAPI('/api/save-dataset', 'POST', { name, file_base64, sheet_names, upload_id, data, headers, instrument_type }),
@@ -95,4 +101,23 @@ export const datasetAPI = {
   markDone: (id) => callAPI('/api/dataset/done', 'POST', { dataset_id: id, done: true })
 }
 
-export default { authAPI, dashboardAPI, calculationsAPI, userAPI, systemAPI, dataAPI, datasetAPI }
+// ========== FRED (NEW) ==========
+export const fredAPI = {
+  getSeries: (seriesId, limit = 365, sortOrder = 'desc') =>
+    callAPI(`/api/fred/series/${seriesId}?limit=${limit}&sort_order=${sortOrder}`),
+  getCategories: () => callAPI('/api/fred/categories'),
+  getYieldCurve: (instrumentType = 'all') =>
+    callAPI(`/api/fred-yield-curve?instrument_type=${instrumentType}`)
+}
+
+// ========== EXPORT ALL ==========
+export default {
+  authAPI,
+  dashboardAPI,
+  calculationsAPI,
+  userAPI,
+  systemAPI,
+  dataAPI,
+  datasetAPI,
+  fredAPI
+}
