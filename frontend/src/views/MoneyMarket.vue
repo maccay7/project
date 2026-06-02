@@ -445,8 +445,34 @@
                   </div>
                 </div>
 
+                <div class="report-preview-full">
+                  <h3>Report Preview</h3>
+                  <div class="preview-content" v-if="reportPreviewData.instruments.length">
+                    <div class="preview-header">
+                      <p><strong>Session:</strong> {{ reportPreviewData.session }}</p>
+                      <p><strong>Date Generated:</strong> {{ reportPreviewData.date }}</p>
+                    </div>
+                    <div class="preview-instruments">
+                      <div v-for="inst in reportPreviewData.instruments" :key="inst.name" class="preview-instrument-card">
+                        <h4>{{ inst.name }}</h4>
+                        <div class="report-table-wrapper">
+                          <table class="report-table">
+                            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+                            <tbody>
+                              <tr v-for="(value, key) in inst.calculations" :key="key">
+                                <td>{{ formatMetricName(key) }}</td>
+                                <td class="report-value">{{ formatMetricValue(key, value) }}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="preview-empty"><p>No data available for the selected instruments. Please complete data processing for the instruments you wish to include.</p></div>
+                </div>
+
                 <div class="report-actions">
-                  <button class="btn-primary" @click="previewReport">Preview Report</button>
                   <button class="btn-json" @click="downloadCombinedReport('json')">JSON</button>
                   <button class="btn-csv" @click="downloadCombinedReport('csv')">CSV</button>
                   <button class="btn-html" @click="downloadCombinedReport('html')">HTML</button>
@@ -465,23 +491,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Report Preview Dialog -->
-    <v-dialog v-model="reportPreviewDialog" max-width="90%" fullscreen hide-overlay>
-      <v-card>
-        <v-card-title class="excel-dialog-title">Report Preview <v-spacer></v-spacer><button class="btn-close-dialog" @click="reportPreviewDialog = false">✕</button></v-card-title>
-        <v-card-text class="report-preview-content" style="padding:0;">
-          <iframe :srcdoc="reportPreviewHtml" frameborder="0" style="width:100%; height:80vh;"></iframe>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <button class="btn-secondary" @click="reportPreviewDialog = false">Close</button>
-          <button class="btn-primary" @click="downloadFromPreview('html')">Download HTML</button>
-          <button class="btn-pdf" @click="downloadFromPreview('pdf')">Download PDF</button>
-          <button class="btn-word" @click="downloadFromPreview('word')">Download Word</button>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
 
     <!-- Excel Review Dialog -->
     <v-dialog v-model="showExcelDialog" max-width="90%" fullscreen hide-overlay>
@@ -527,7 +536,7 @@ const router = useRouter()
 const route = useRoute()
 const activeSession = ref(null)
 
-// ========== PERSISTENCE (same as original – keep all functions) ==========
+// ========== PERSISTENCE (same as original) ==========
 function refreshPage() {
   rawData.value = []
   cleanedData.value = []
@@ -861,10 +870,177 @@ async function uploadData() {
 function previewCleanedData() {
   if (!rawData.value.length) return
   let data = JSON.parse(JSON.stringify(rawData.value))
-  // All cleaning steps (same as original – keep your full logic)
-  // (I'm not repeating the 100+ lines here, but you must include them from your original file)
+  // Apply all cleaning steps (same as original)
+  if (cleaningOptions.value.removeDuplicates) {
+    const seen = new Set()
+    data = data.filter(row => {
+      const key = JSON.stringify(row)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+  if (cleaningOptions.value.removeEmptyRows) {
+    data = data.filter(row => Object.values(row).some(v => v !== null && v !== '' && v !== undefined))
+  }
+  if (cleaningOptions.value.trimWhitespace) {
+    data = data.map(row => {
+      const newRow = {}
+      Object.keys(row).forEach(k => {
+        newRow[k] = typeof row[k] === 'string' ? row[k].trim() : row[k]
+      })
+      return newRow
+    })
+  }
+  if (cleaningOptions.value.convertToNumbers) {
+    data = data.map(row => {
+      const newRow = { ...row }
+      Object.keys(newRow).forEach(k => {
+        if (typeof newRow[k] === 'string' && !isNaN(newRow[k]) && newRow[k].trim() !== '') {
+          newRow[k] = parseFloat(newRow[k])
+        }
+      })
+      return newRow
+    })
+  }
+  if (cleaningOptions.value.fillMissingNumeric) {
+    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+    for (const col of numericCols) {
+      let fillVal = 0
+      if (cleaningOptions.value.fillMethod === 'mean') {
+        const vals = data.map(r => r[col]).filter(v => typeof v === 'number' && !isNaN(v))
+        fillVal = vals.reduce((a,b) => a+b,0) / (vals.length || 1)
+      } else if (cleaningOptions.value.fillMethod === 'median') {
+        const vals = data.map(r => r[col]).filter(v => typeof v === 'number' && !isNaN(v)).sort((a,b)=>a-b)
+        fillVal = vals[Math.floor(vals.length/2)] || 0
+      }
+      data = data.map(row => {
+        if (row[col] === undefined || row[col] === null || (typeof row[col] !== 'number')) row[col] = fillVal
+        return row
+      })
+    }
+  }
+  if (cleaningOptions.value.fillMissingText) {
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (row[k] === undefined || row[k] === null || row[k] === '') row[k] = 'N/A'
+      })
+      return row
+    })
+  }
+  if (cleaningOptions.value.dropRowsWithMissing) {
+    data = data.filter(row => Object.values(row).every(v => v !== null && v !== '' && v !== undefined && (typeof v !== 'number' || !isNaN(v))))
+  }
+  if (cleaningOptions.value.removeOutliers) {
+    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+    for (const col of numericCols) {
+      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
+      const mean = values.reduce((a,b)=>a+b,0)/values.length
+      const std = Math.sqrt(values.map(v => Math.pow(v-mean,2)).reduce((a,b)=>a+b,0)/values.length)
+      const threshold = 3 * std
+      data = data.filter(row => Math.abs(row[col] - mean) <= threshold)
+    }
+  }
+  if (cleaningOptions.value.standardizeDates) {
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (k.toLowerCase().includes('date') && row[k]) {
+          const d = new Date(row[k])
+          if (!isNaN(d)) row[k] = d.toISOString().split('T')[0]
+        }
+      })
+      return row
+    })
+  }
+  if (cleaningOptions.value.removeSpecialChars) {
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (typeof row[k] === 'string') row[k] = row[k].replace(/[^a-zA-Z0-9\s]/g, '')
+      })
+      return row
+    })
+  }
+  if (cleaningOptions.value.changeCase && cleaningOptions.value.caseType !== 'none') {
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (typeof row[k] === 'string') {
+          if (cleaningOptions.value.caseType === 'upper') row[k] = row[k].toUpperCase()
+          else if (cleaningOptions.value.caseType === 'lower') row[k] = row[k].toLowerCase()
+          else if (cleaningOptions.value.caseType === 'title') row[k] = row[k].replace(/\b\w/g, l => l.toUpperCase())
+        }
+      })
+      return row
+    })
+  }
+  if (cleaningOptions.value.fillWithCustom && cleaningOptions.value.customFillValue) {
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        if (row[k] === undefined || row[k] === null || row[k] === '') row[k] = cleaningOptions.value.customFillValue
+      })
+      return row
+    })
+  }
+  if (cleaningOptions.value.removeColumnsAllMissing) {
+    const colsToKeep = Object.keys(data[0] || {}).filter(col => data.some(row => row[col] !== null && row[col] !== '' && row[col] !== undefined))
+    data = data.map(row => {
+      const newRow = {}
+      colsToKeep.forEach(c => newRow[c] = row[c])
+      return newRow
+    })
+  }
+  if (cleaningOptions.value.capOutliers) {
+    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+    for (const col of numericCols) {
+      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
+      const mean = values.reduce((a,b)=>a+b,0)/values.length
+      const std = Math.sqrt(values.map(v => Math.pow(v-mean,2)).reduce((a,b)=>a+b,0)/values.length)
+      const upper = mean + 3*std
+      const lower = mean - 3*std
+      data = data.map(row => {
+        if (row[col] > upper) row[col] = upper
+        if (row[col] < lower) row[col] = lower
+        return row
+      })
+    }
+  }
+  if (cleaningOptions.value.removeRowsSpecificColumnEmpty && cleaningOptions.value.specificColumn) {
+    data = data.filter(row => row[cleaningOptions.value.specificColumn] !== null && row[cleaningOptions.value.specificColumn] !== '')
+  }
+  if (cleaningOptions.value.standardizeNumericRange) {
+    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+    for (const col of numericCols) {
+      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
+      const min = Math.min(...values)
+      const max = Math.max(...values)
+      if (max !== min) {
+        data = data.map(row => {
+          if (typeof row[col] === 'number') row[col] = (row[col] - min) / (max - min)
+          return row
+        })
+      }
+    }
+  }
+  if (cleaningOptions.value.fillForward) {
+    for (let i = 1; i < data.length; i++) {
+      Object.keys(data[i]).forEach(k => {
+        if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') {
+          data[i][k] = data[i-1][k]
+        }
+      })
+    }
+  }
+  if (cleaningOptions.value.fillBackward) {
+    for (let i = data.length-2; i >= 0; i--) {
+      Object.keys(data[i]).forEach(k => {
+        if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') {
+          data[i][k] = data[i+1][k]
+        }
+      })
+    }
+  }
   previewData.value = data
 }
+
 async function applyCleaningOnly() {
   if (!previewData.value.length) {
     alert('Please click "Preview Cleaned Data" first.')
@@ -946,7 +1122,7 @@ function calculateMetrics() {
   updateSessionCompletion()
 }
 
-// ========== REPORT LOGIC ==========
+// ========== REPORT LOGIC (ENHANCED with cover page, A4, background, logo, footer) ==========
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
@@ -1017,34 +1193,60 @@ function formatMetricValue(key, value) {
   return value
 }
 
-// ========== ENHANCED REPORT PREVIEW (dynamic, with formulas and graphs) ==========
-const reportPreviewDialog = ref(false)
-const reportPreviewHtml = ref('')
-
-async function generateReportHtml() {
+async function downloadCombinedReport(format) {
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
     alert('No data available for the selected instruments.')
-    return null
+    return
   }
   let chartImageBase64 = ''
   if (yieldCurveChart.value && chartData.value.datasets.length) {
     try {
       chartImageBase64 = yieldCurveChart.value.toDataURL('image/png')
-    } catch (err) {
-      console.warn('Could not capture chart:', err)
+    } catch (err) { console.warn(err) }
+  }
+  const filename = `combined_report_${Date.now()}`
+  const htmlContent = generateHtmlReport(report, chartImageBase64)
+  if (format === 'json') {
+    downloadBlob(JSON.stringify(report, null, 2), `${filename}.json`, 'application/json')
+  } else if (format === 'csv') {
+    let csvRows = [['Instrument', 'Metric', 'Value']]
+    for (const inst of report.instruments) {
+      for (const [key, val] of Object.entries(inst.calculations)) {
+        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
+      }
     }
+    const csv = csvRows.map(row => row.join(',')).join('\n')
+    downloadBlob(csv, `${filename}.csv`, 'text/csv')
+  } else if (format === 'html') {
+    downloadBlob(htmlContent, `${filename}.html`, 'text/html')
+  } else if (format === 'pdf') {
+    const win = window.open()
+    win.document.write(htmlContent)
+    win.print()
+  } else if (format === 'word') {
+    downloadBlob(htmlContent, `${filename}.doc`, 'application/msword')
+  } else if (format === 'excel') {
+    let csvRows = [['Instrument', 'Metric', 'Value']]
+    for (const inst of report.instruments) {
+      for (const [key, val] of Object.entries(inst.calculations)) {
+        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
+      }
+    }
+    const csv = csvRows.map(row => row.join(',')).join('\n')
+    downloadBlob(csv, `${filename}.xls`, 'application/vnd.ms-excel')
   }
-  // Logo path (space encoded)
-  const logoHtml = `<img src="/DuraCapital%20logo.png" alt="DuraCapital Logo" style="height:50px; margin-bottom:10px;">`
-  
-  // Calculate totals across selected instruments
-  let totalPortfolioValue = 0
-  let totalInstrumentCount = 0
+}
+
+function generateHtmlReport(report, chartImageBase64) {
+  // Calculate totals
+  let totalPortfolioValue = 0, totalInstrumentCount = 0
   for (const inst of report.instruments) {
-    totalPortfolioValue += inst.calculations.totalValue || 0
-    totalInstrumentCount += inst.calculations.instrumentCount || 0
+    totalPortfolioValue += parseFloat(inst.calculations.totalValue) || 0
+    totalInstrumentCount += parseInt(inst.calculations.instrumentCount) || 0
   }
+  const backgroundImageUrl = '/background%20report%201.webp'   // your background image in public folder
+  const logoHtml = `<img src="/DuraCapital%20logo.png" alt="DuraCapital Logo" style="height:70px;">` // adjust logo filename as needed
 
   let html = `<!DOCTYPE html>
   <html>
@@ -1052,60 +1254,166 @@ async function generateReportHtml() {
     <meta charset="UTF-8">
     <title>Portfolio Report - ${report.session}</title>
     <style>
-      body { font-family: 'Arial', sans-serif; margin: 40px; line-height: 1.5; color: #333; }
-      h1 { color: #0B2044; font-size: 28px; border-bottom: 2px solid #0B2044; padding-bottom: 10px; }
-      h2 { color: #1E88E5; margin-top: 30px; font-size: 22px; }
-      h3 { color: #0B2044; margin-top: 20px; font-size: 18px; }
-      table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-      th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-      th { background: #0B2044; color: white; }
-      .report-header { margin-bottom: 30px; text-align: center; }
-      .chart-container { text-align: center; margin: 30px 0; }
-      img { max-width: 100%; height: auto; border: 1px solid #ccc; }
-      .footer { margin-top: 40px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }
-      .logo { text-align: center; margin-bottom: 20px; }
-      .summary-text { background: #f8f9ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-      .metric-highlight { font-weight: bold; color: #0B2044; }
-      .formula { font-family: monospace; background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 1.1em; }
+      @page {
+        size: A4;
+        margin: 1.5cm;
+      }
+      @media print {
+        body {
+          margin: 0;
+          padding: 0;
+        }
+        .cover-page {
+          page-break-after: always;
+          height: 100vh;
+        }
+        .no-break {
+          page-break-inside: avoid;
+        }
+      }
+      body {
+        font-family: 'Arial', sans-serif;
+        margin: 0;
+        padding: 0;
+        line-height: 1.5;
+        color: #333;
+        background: white;
+      }
+      .cover-page {
+        position: relative;
+        height: 100vh;
+        width: 100%;
+        background: url('${backgroundImageUrl}') no-repeat center center;
+        background-size: cover;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        color: white;
+      }
+      .cover-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 1;
+      }
+      .cover-content {
+        position: relative;
+        z-index: 2;
+        padding: 20px;
+      }
+      .session-name {
+        font-size: 56px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        text-shadow: 2px 2px 8px rgba(0,0,0,0.7);
+        margin: 30px 0;
+        font-family: 'Georgia', serif;
+      }
+      .logo-cover {
+        margin-bottom: 30px;
+      }
+      .report-content {
+        padding: 20px 30px;
+        max-width: 1000px;
+        margin: 0 auto;
+      }
+      h1 {
+        color: #0B2044;
+        font-size: 28px;
+        border-bottom: 2px solid #0B2044;
+        padding-bottom: 10px;
+      }
+      h2 {
+        color: #1E88E5;
+        margin-top: 30px;
+        font-size: 22px;
+      }
+      h3 {
+        color: #0B2044;
+        margin-top: 20px;
+        font-size: 18px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-bottom: 20px;
+      }
+      th, td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+      }
+      th {
+        background: #0B2044;
+        color: white;
+      }
+      .summary-text {
+        background: #f8f9ff;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+      }
+      .metric-highlight {
+        font-weight: bold;
+        color: #0B2044;
+      }
+      .formula {
+        font-family: monospace;
+        background: #f0f0f0;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 1.1em;
+      }
+      .footer {
+        margin-top: 40px;
+        font-size: 12px;
+        color: #666;
+        text-align: center;
+        border-top: 1px solid #eee;
+        padding-top: 20px;
+      }
     </style>
   </head>
   <body>
-    <div class="logo">${logoHtml}</div>
-    <div class="report-header">
-      <h1>Portfolio Report</h1>
-      <p><strong>Session:</strong> ${report.session}</p>
-      <p><strong>Date Generated:</strong> ${report.date}</p>
-      <p><strong>Generated by:</strong> DuraCapital Platform</p>
+    <div class="cover-page">
+      <div class="cover-overlay"></div>
+      <div class="cover-content">
+        <div class="logo-cover">${logoHtml}</div>
+        <div class="session-name">${report.session}</div>
+      </div>
     </div>
-    
-    <div class="summary-text">
-      <h3>Executive Summary</h3>
-      <p>This report provides a comprehensive valuation and performance summary of the selected fixed income instruments as of the report date. The analysis includes money market instruments, corporate bonds, and treasury bills held within the portfolio. The valuations are performed in accordance with IFRS 13 fair value measurement principles.</p>
-    </div>
-
-    <div class="summary-text">
-      <h3>Portfolio Summary</h3>
-      <p>The portfolio comprises <strong>${report.instruments.length}</strong> asset class(es) with a total of <strong>${totalInstrumentCount}</strong> individual instruments. The combined fair value of the portfolio is <strong>$${totalPortfolioValue.toLocaleString()}</strong>.</p>
-      <p>Key observations:</p>
-      <ul>
-        <li>Money market instruments provide short-term liquidity with competitive yields.</li>
-        <li>Corporate bonds offer higher coupon rates but carry moderate credit risk.</li>
-        <li>Treasury bills are low-risk government securities with shorter maturities.</li>
-      </ul>
-    </div>`
+    <div class="report-content">
+      <div class="summary-text">
+        <h3>Executive Summary</h3>
+        <p>This report provides a comprehensive valuation and performance summary of the selected fixed income instruments as of the report date. The analysis includes money market instruments, corporate bonds, and treasury bills held within the portfolio. The valuations are performed in accordance with IFRS 13 fair value measurement principles.</p>
+      </div>
+      <div class="summary-text">
+        <h3>Portfolio Summary</h3>
+        <p>The portfolio comprises <strong>${report.instruments.length}</strong> asset class(es) with a total of <strong>${totalInstrumentCount}</strong> individual instruments. The combined fair value of the portfolio is <strong>$${totalPortfolioValue.toLocaleString()}</strong>.</p>
+        <p>Key observations:</p>
+        <ul>
+          <li>Money market instruments provide short-term liquidity with competitive yields.</li>
+          <li>Corporate bonds offer higher coupon rates but carry moderate credit risk.</li>
+          <li>Treasury bills are low-risk government securities with shorter maturities.</li>
+        </ul>
+      </div>`
 
   if (chartImageBase64) {
-    html += `<div class="chart-container">
+    html += `<div class="summary-text">
       <h3>Yield Curve Analysis (FRED)</h3>
-      <img src="${chartImageBase64}" alt="Yield Curve Chart" />
+      <img src="${chartImageBase64}" alt="Yield Curve Chart" style="max-width:100%; border:1px solid #ccc;" />
       <p>Figure 1: Latest yield curve from Federal Reserve Economic Data (FRED). This curve is used as a benchmark for discounting future cash flows.</p>
     </div>`
   }
 
   for (const inst of report.instruments) {
     const instData = inst.calculations
-    html += `<h2>${inst.name}</h2>`
-    html += `<div class="summary-text">`
+    html += `<h2>${inst.name}</h2><div class="summary-text">`
     if (inst.name === 'Money Market') {
       html += `<p><strong>Total Value:</strong> $${(instData.totalValue || 0).toLocaleString()}</p>
               <p><strong>Number of Instruments:</strong> ${instData.instrumentCount || 0}</p>
@@ -1121,7 +1429,7 @@ async function generateReportHtml() {
               <p><strong>Total Annual Income:</strong> $${(instData.totalAnnualIncome || 0).toLocaleString()}</p>
               <p><strong>Average Yield to Maturity:</strong> ${instData.avgYTM || 0}%</p>
               <p><strong>Duration (years):</strong> ${instData.duration || 0}</p>`
-    } else { // T-Bills
+    } else {
       html += `<p><strong>Total Value:</strong> $${(instData.totalValue || 0).toLocaleString()}</p>
               <p><strong>Number of Instruments:</strong> ${instData.instrumentCount || 0}</p>
               <p><strong>Average Discount Rate:</strong> ${instData.avgDiscountRate || 0}%</p>
@@ -1131,96 +1439,28 @@ async function generateReportHtml() {
               <p><strong>Bond Equivalent Yield:</strong> ${instData.bondEquivalentYield || 0}%</p>
               <p><strong>Average Days to Maturity:</strong> ${instData.avgDaysToMaturity || 0} days</p>`
     }
-    html += `</div>`
-    // Detailed metrics table
-    html += `<h3>Detailed Metrics</h3>
-    <table>
-      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-      <tbody>`
+    html += `</div><h3>Detailed Metrics</h3></table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
     for (const [key, val] of Object.entries(instData)) {
-      // Skip internal fields
       if (key === 'completed' || key === 'timestamp') continue
       html += `<tr><td>${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
     }
     html += `</tbody></table>`
   }
 
-  // Methodology with real formulas (displayed as LaTeX-style)
   html += `<div class="summary-text">
     <h3>Methodology</h3>
     <p>The valuation of fixed income instruments is based on the discounted cash flow (DCF) method using the yield curve derived from FRED data.</p>
-    <p>For money market instruments, the conventional pricing formula was applied:</p>
-    <p class="formula">Fair value = <sup>F</sup>&frasl;<sub>1 + r·t/365</sub></p>
-    <p>For bonds, the present value of future cash flows is given by:</p>
-    <p class="formula">Fair value = Σ<sub>t=1</sub><sup>n</sup> <sup>C</sup>&frasl;<sub>(1+y)<sup>t</sup></sub> + <sup>FV</sup>&frasl;<sub>(1+y)<sup>n</sup></sub></p>
+    <p class="formula">For money market instruments: Fair value = <sup>F</sup>&frasl;<sub>1 + r·t/365</sub></p>
+    <p class="formula">For bonds: Fair value = Σ<sub>t=1</sub><sup>n</sup> <sup>C</sup>&frasl;<sub>(1+y)<sup>t</sup></sub> + <sup>FV</sup>&frasl;<sub>(1+y)<sup>n</sup></sub></p>
     <p>All calculations assume a 365‑day count convention and simple interest for money market instruments.</p>
     <p><strong>Sources:</strong> Federal Reserve Economic Data (FRED), Damodaran Country Risk Premiums, Bloomberg OIS SOFR rates.</p>
-  </div>`
-
-  html += `<div class="footer">Generated by DuraCapital Platform – For internal use only.</div></body></html>`
+  </div>
+  <div class="footer">
+    <p>Date Generated: ${report.date}</p>
+    <p>Generated by: DuraCapital Platform</p>
+  </div>
+  </div></body></html>`
   return html
-}
-
-async function previewReport() {
-  const html = await generateReportHtml()
-  if (html) {
-    reportPreviewHtml.value = html
-    reportPreviewDialog.value = true
-  }
-}
-
-async function downloadFromPreview(format) {
-  if (!reportPreviewHtml.value) return
-  const filename = `combined_report_${Date.now()}`
-  if (format === 'html') {
-    downloadBlob(reportPreviewHtml.value, `${filename}.html`, 'text/html')
-  } else if (format === 'pdf') {
-    const win = window.open()
-    win.document.write(reportPreviewHtml.value)
-    win.print()
-  } else if (format === 'word') {
-    downloadBlob(reportPreviewHtml.value, `${filename}.doc`, 'application/msword')
-  }
-}
-
-async function downloadCombinedReport(format) {
-  const html = await generateReportHtml()
-  if (!html) return
-  const filename = `combined_report_${Date.now()}`
-  if (format === 'json') {
-    const report = reportPreviewData.value
-    downloadBlob(JSON.stringify(report, null, 2), `${filename}.json`, 'application/json')
-  } else if (format === 'csv') {
-    const report = reportPreviewData.value
-    let csvRows = [['Instrument', 'Metric', 'Value']]
-    for (const inst of report.instruments) {
-      for (const [key, val] of Object.entries(inst.calculations)) {
-        if (key === 'completed' || key === 'timestamp') continue
-        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
-      }
-    }
-    const csv = csvRows.map(row => row.join(',')).join('\n')
-    downloadBlob(csv, `${filename}.csv`, 'text/csv')
-  } else if (format === 'html') {
-    downloadBlob(html, `${filename}.html`, 'text/html')
-  } else if (format === 'pdf') {
-    const win = window.open()
-    win.document.write(html)
-    win.print()
-  } else if (format === 'word') {
-    downloadBlob(html, `${filename}.doc`, 'application/msword')
-  } else if (format === 'excel') {
-    const report = reportPreviewData.value
-    let csvRows = [['Instrument', 'Metric', 'Value']]
-    for (const inst of report.instruments) {
-      for (const [key, val] of Object.entries(inst.calculations)) {
-        if (key === 'completed' || key === 'timestamp') continue
-        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
-      }
-    }
-    const csv = csvRows.map(row => row.join(',')).join('\n')
-    downloadBlob(csv, `${filename}.xls`, 'application/vnd.ms-excel')
-  }
 }
 
 function downloadBlob(content, filename, mimeType) {
@@ -1233,7 +1473,7 @@ function downloadBlob(content, filename, mimeType) {
   URL.revokeObjectURL(url)
 }
 
-// ========== EXCEL VIEWER ==========
+// Excel viewer functions
 const showExcelDialog = ref(false)
 const excelData = ref([])
 const excelColumns = ref([])
@@ -1248,10 +1488,10 @@ function exportToCSV() {
   const headers = excelColumns.value
   const rows = excelData.value.map(row => headers.map(h => `"${String(row[h] || '').replace(/"/g, '""')}"`).join(','))
   const csv = [headers.join(','), ...rows].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${excelDialogTitle.value.replace(/ /g, '_')}_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url)
+  downloadBlob(csv, `${excelDialogTitle.value.replace(/ /g, '_')}_${Date.now()}.csv`, 'text/csv')
 }
 function exportToJSON() {
-  const blob = new Blob([JSON.stringify(excelData.value, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${excelDialogTitle.value.replace(/ /g, '_')}_${Date.now()}.json`; a.click(); URL.revokeObjectURL(url)
+  downloadBlob(JSON.stringify(excelData.value, null, 2), `${excelDialogTitle.value.replace(/ /g, '_')}_${Date.now()}.json`, 'application/json')
 }
 function saveToSession() { saveSessionData(); alert('Data saved to session!') }
 
@@ -1385,7 +1625,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* ========== All original styles – unchanged ========== */
+/* ========== All original styles (unchanged) ========== */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
@@ -1617,13 +1857,5 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   text-align: center;
   color: #666;
   font-size: 12px;
-}
-.report-preview-content {
-  padding: 0;
-}
-.report-preview-content iframe {
-  width: 100%;
-  height: 80vh;
-  border: none;
 }
 </style>
