@@ -414,7 +414,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== REPORTS TAB ==================== -->
+        <!-- ==================== REPORTS TAB (with Preview Report button) ==================== -->
         <div v-if="activeTab === 'reports'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-file-pdf</v-icon> Generate Combined Report</v-card-title>
@@ -473,6 +473,8 @@
                 </div>
 
                 <div class="report-actions">
+                  <!-- New Preview Report button -->
+                  <button class="btn-preview" @click="previewReport">Preview Report</button>
                   <button class="btn-json" @click="downloadCombinedReport('json')">JSON</button>
                   <button class="btn-csv" @click="downloadCombinedReport('csv')">CSV</button>
                   <button class="btn-html" @click="downloadCombinedReport('html')">HTML</button>
@@ -518,6 +520,23 @@
           </div>
         </v-card-text>
         <v-card-actions><v-spacer></v-spacer><button class="btn-secondary" @click="closeExcelDialog">Close</button></v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Report Preview Dialog (Fullscreen) -->
+    <v-dialog v-model="reportPreviewDialog" max-width="90%" fullscreen hide-overlay>
+      <v-card>
+        <v-card-title class="excel-dialog-title">Report Preview <v-spacer></v-spacer><button class="btn-close-dialog" @click="reportPreviewDialog = false">✕</button></v-card-title>
+        <v-card-text class="report-preview-content" style="padding:0;">
+          <iframe :srcdoc="reportPreviewHtml" frameborder="0" style="width:100%; height:80vh;"></iframe>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="reportPreviewDialog = false">Close</button>
+          <button class="btn-primary" @click="downloadFromPreview('html')">Download HTML</button>
+          <button class="btn-pdf" @click="downloadFromPreview('pdf')">Download PDF</button>
+          <button class="btn-word" @click="downloadFromPreview('word')">Download Word</button>
+        </v-card-actions>
       </v-card>
     </v-dialog>
   </FixedLayout>
@@ -1122,7 +1141,7 @@ function calculateMetrics() {
   updateSessionCompletion()
 }
 
-// ========== REPORT LOGIC (ENHANCED with cover page, A4, background, logo, footer) ==========
+// ========== REPORT LOGIC (ENHANCED with cover page, A4, background, logo, footer, and preview) ==========
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
@@ -1193,11 +1212,16 @@ function formatMetricValue(key, value) {
   return value
 }
 
-async function downloadCombinedReport(format) {
+// Report preview dialog state
+const reportPreviewDialog = ref(false)
+const reportPreviewHtml = ref('')
+
+// Function to generate the full HTML report (used for both preview and download)
+async function generateReportHtml() {
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
     alert('No data available for the selected instruments.')
-    return
+    return null
   }
   let chartImageBase64 = ''
   if (yieldCurveChart.value && chartData.value.datasets.length) {
@@ -1205,48 +1229,14 @@ async function downloadCombinedReport(format) {
       chartImageBase64 = yieldCurveChart.value.toDataURL('image/png')
     } catch (err) { console.warn(err) }
   }
-  const filename = `combined_report_${Date.now()}`
-  const htmlContent = generateHtmlReport(report, chartImageBase64)
-  if (format === 'json') {
-    downloadBlob(JSON.stringify(report, null, 2), `${filename}.json`, 'application/json')
-  } else if (format === 'csv') {
-    let csvRows = [['Instrument', 'Metric', 'Value']]
-    for (const inst of report.instruments) {
-      for (const [key, val] of Object.entries(inst.calculations)) {
-        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
-      }
-    }
-    const csv = csvRows.map(row => row.join(',')).join('\n')
-    downloadBlob(csv, `${filename}.csv`, 'text/csv')
-  } else if (format === 'html') {
-    downloadBlob(htmlContent, `${filename}.html`, 'text/html')
-  } else if (format === 'pdf') {
-    const win = window.open()
-    win.document.write(htmlContent)
-    win.print()
-  } else if (format === 'word') {
-    downloadBlob(htmlContent, `${filename}.doc`, 'application/msword')
-  } else if (format === 'excel') {
-    let csvRows = [['Instrument', 'Metric', 'Value']]
-    for (const inst of report.instruments) {
-      for (const [key, val] of Object.entries(inst.calculations)) {
-        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
-      }
-    }
-    const csv = csvRows.map(row => row.join(',')).join('\n')
-    downloadBlob(csv, `${filename}.xls`, 'application/vnd.ms-excel')
-  }
-}
+  const backgroundImageUrl = '/background%20report%201.webp'   // your background image in public folder
+  const logoHtml = `<img src="/DuraCapital%20logo.png" alt="DuraCapital Logo" style="height:70px;">` // adjust logo filename as needed
 
-function generateHtmlReport(report, chartImageBase64) {
-  // Calculate totals
   let totalPortfolioValue = 0, totalInstrumentCount = 0
   for (const inst of report.instruments) {
     totalPortfolioValue += parseFloat(inst.calculations.totalValue) || 0
     totalInstrumentCount += parseInt(inst.calculations.instrumentCount) || 0
   }
-  const backgroundImageUrl = '/background%20report%201.webp'   // your background image in public folder
-  const logoHtml = `<img src="/DuraCapital%20logo.png" alt="DuraCapital Logo" style="height:70px;">` // adjust logo filename as needed
 
   let html = `<!DOCTYPE html>
   <html>
@@ -1461,6 +1451,64 @@ function generateHtmlReport(report, chartImageBase64) {
   </div>
   </div></body></html>`
   return html
+}
+
+// Preview report: generate HTML and show in dialog
+async function previewReport() {
+  const html = await generateReportHtml()
+  if (html) {
+    reportPreviewHtml.value = html
+    reportPreviewDialog.value = true
+  }
+}
+
+// Download from preview dialog
+async function downloadFromPreview(format) {
+  if (!reportPreviewHtml.value) return
+  const filename = `combined_report_${Date.now()}`
+  if (format === 'html') downloadBlob(reportPreviewHtml.value, `${filename}.html`, 'text/html')
+  else if (format === 'pdf') { const win = window.open(); win.document.write(reportPreviewHtml.value); win.print() }
+  else if (format === 'word') downloadBlob(reportPreviewHtml.value, `${filename}.doc`, 'application/msword')
+}
+
+async function downloadCombinedReport(format) {
+  const html = await generateReportHtml()
+  if (!html) return
+  const filename = `combined_report_${Date.now()}`
+  if (format === 'json') {
+    const report = reportPreviewData.value
+    downloadBlob(JSON.stringify(report, null, 2), `${filename}.json`, 'application/json')
+  } else if (format === 'csv') {
+    const report = reportPreviewData.value
+    let csvRows = [['Instrument', 'Metric', 'Value']]
+    for (const inst of report.instruments) {
+      for (const [key, val] of Object.entries(inst.calculations)) {
+        if (key === 'completed' || key === 'timestamp') continue
+        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
+      }
+    }
+    const csv = csvRows.map(row => row.join(',')).join('\n')
+    downloadBlob(csv, `${filename}.csv`, 'text/csv')
+  } else if (format === 'html') {
+    downloadBlob(html, `${filename}.html`, 'text/html')
+  } else if (format === 'pdf') {
+    const win = window.open()
+    win.document.write(html)
+    win.print()
+  } else if (format === 'word') {
+    downloadBlob(html, `${filename}.doc`, 'application/msword')
+  } else if (format === 'excel') {
+    const report = reportPreviewData.value
+    let csvRows = [['Instrument', 'Metric', 'Value']]
+    for (const inst of report.instruments) {
+      for (const [key, val] of Object.entries(inst.calculations)) {
+        if (key === 'completed' || key === 'timestamp') continue
+        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
+      }
+    }
+    const csv = csvRows.map(row => row.join(',')).join('\n')
+    downloadBlob(csv, `${filename}.xls`, 'application/vnd.ms-excel')
+  }
 }
 
 function downloadBlob(content, filename, mimeType) {
@@ -1747,6 +1795,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .report-value { font-weight: 500; }
 .preview-empty { text-align: center; padding: 40px; color: #999; }
 .report-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px; }
+.btn-preview { background: #673AB7; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .btn-json, .btn-csv, .btn-html, .btn-pdf, .btn-word, .btn-excel, .btn-save { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; color: white; }
 .btn-json { background: #607d8b; }
 .btn-csv { background: #4caf50; }
@@ -1857,5 +1906,13 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   text-align: center;
   color: #666;
   font-size: 12px;
+}
+.report-preview-content {
+  padding: 0;
+}
+.report-preview-content iframe {
+  width: 100%;
+  height: 80vh;
+  border: none;
 }
 </style>
