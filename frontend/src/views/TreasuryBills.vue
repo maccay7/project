@@ -40,7 +40,7 @@
 
       <!-- Content based on active tab -->
       <div class="tab-content">
-        <!-- ==================== UPLOAD TAB ==================== -->
+        <!-- ==================== UPLOAD TAB (with history) ==================== -->
         <div v-if="activeTab === 'upload'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-upload</v-icon> Upload {{ instrumentName }} Dataset</v-card-title>
@@ -59,6 +59,19 @@
                 <button class="remove-btn" @click="removeFile">×</button>
                 <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData.length">Review Excel</button>
                 <button class="btn-mapping" @click="autoMatchColumns" :disabled="!rawData.length">Map Columns</button>
+              </div>
+
+              <!-- Upload History Section -->
+              <div v-if="uploadHistory.length" class="upload-history">
+                <h4>📁 Upload History ({{ uploadHistory.length }} files)</h4>
+                <div class="history-list">
+                  <div v-for="(item, idx) in uploadHistory" :key="idx" class="history-item" @click="loadHistoryFile(item)">
+                    <v-icon small>mdi-file-excel</v-icon>
+                    <span>{{ item.name }}</span>
+                    <small>{{ new Date(item.date).toLocaleString() }}</small>
+                    <button class="btn-delete-history" @click.stop="deleteHistoryItem(idx)">🗑️</button>
+                  </div>
+                </div>
               </div>
 
               <div v-if="rawData.length" class="excel-preview-section">
@@ -552,6 +565,48 @@ const router = useRouter()
 const route = useRoute()
 const activeSession = ref(null)
 
+// ========== UPLOAD HISTORY ==========
+const uploadHistory = ref([])
+
+function loadUploadHistory() {
+  const key = `${instrumentType.value}_upload_history`
+  const saved = localStorage.getItem(key)
+  uploadHistory.value = saved ? JSON.parse(saved) : []
+}
+
+function saveUploadHistory() {
+  const key = `${instrumentType.value}_upload_history`
+  localStorage.setItem(key, JSON.stringify(uploadHistory.value))
+}
+
+function addToHistory(filename, data) {
+  // Avoid duplicate within 5 seconds
+  const existing = uploadHistory.value.find(h => h.name === filename && (Date.now() - h.date) < 5000)
+  if (existing) return
+  uploadHistory.value.unshift({
+    name: filename,
+    date: Date.now(),
+    data: JSON.stringify(data)
+  })
+  if (uploadHistory.value.length > 10) uploadHistory.value.pop()
+  saveUploadHistory()
+}
+
+function loadHistoryFile(item) {
+  if (confirm(`Load ${item.name}? Current unsaved data will be lost.`)) {
+    const data = JSON.parse(item.data)
+    rawData.value = data
+    uploadedFile.value = { name: item.name, size: 0 }
+    saveSessionData()
+    alert(`Loaded ${item.name}. You can now go to Cleaning tab.`)
+  }
+}
+
+function deleteHistoryItem(idx) {
+  uploadHistory.value.splice(idx, 1)
+  saveUploadHistory()
+}
+
 // ========== PERSISTENCE ==========
 function refreshPage() {
   rawData.value = []
@@ -820,6 +875,7 @@ async function readFileData(file) {
       data = XLSX.utils.sheet_to_json(sheet)
     }
     rawData.value = data
+    addToHistory(file.name, data)   // store in history
     saveSessionData()
     if (missingColumns.value.length) autoMatchColumns()
   } catch(err) { console.error(err); alert('Error reading file') }
@@ -1127,7 +1183,7 @@ function calculateMetrics() {
   updateSessionCompletion()
 }
 
-// ========== REPORT LOGIC ==========
+// ========== REPORT LOGIC (LIVE FRED DATA, ESCAPED TAGS) ==========
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
@@ -1238,7 +1294,6 @@ function buildMethodologySection(selectedInstrumentNames) {
   return methods.join('')
 }
 
-// Map instrument type to FRED series (same as default in Visualizations tab)
 const instrumentFredSeries = {
   'Money Market': 'DTB3',
   'Bonds': 'DGS10',
@@ -1391,7 +1446,7 @@ async function generateReportHtml() {
               <p><strong>Bond Equivalent Yield:</strong> ${instData.bondEquivalentYield || 0}%</p>
               <p><strong>Average Days to Maturity:</strong> ${instData.avgDaysToMaturity || 0} days</p>`
     }
-    html += `</div><h3>Detailed Metrics</h3><table><thead><tr><th>Metric</th><th>Value</th><tr></thead><tbody>`
+    html += `</div><h3>Detailed Metrics</h3><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
     for (const [key, val] of Object.entries(instData)) {
       if (key === 'completed' || key === 'timestamp') continue
       html += `<tr><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
@@ -1683,7 +1738,11 @@ function checkAndReset() {
     }
   }
 }
-onMounted(() => { checkAndReset(); window.addEventListener('storage', () => checkAndReset()) })
+onMounted(() => { 
+  checkAndReset()
+  loadUploadHistory()
+  window.addEventListener('storage', () => checkAndReset())
+})
 onBeforeUnmount(() => { window.removeEventListener('storage', () => checkAndReset()) })
 watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
@@ -1931,4 +1990,10 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   height: 80vh;
   border: none;
 }
-</style>s
+.upload-history { margin-top: 20px; padding: 15px; background: #f8f9ff; border-radius: 12px; }
+.history-list { max-height: 200px; overflow-y: auto; }
+.history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s; }
+.history-item:hover { background: #e8ecf1; }
+.history-item small { font-size: 11px; color: #666; margin-left: auto; }
+.btn-delete-history { background: none; border: none; cursor: pointer; color: #f44336; font-size: 16px; }
+</style>
