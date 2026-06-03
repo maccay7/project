@@ -11,14 +11,24 @@ from routes.calculations import calculations_routes
 from routes.upload import upload_routes
 from routes.settings import settings_routes
 from routes.fred import fred_routes
+from routes.sessions import sessions_routes
 
 app = Flask(__name__)
 
-CORS(app, 
-     origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://192.168.0.125:3000"],
-     supports_credentials=True,
-     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://192.168.0.125:3000",
+    "http://192.168.100.4:3001"
+]
+
+CORS(app,
+    origins=allowed_origins,
+    supports_credentials=True,
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 auth_routes(app)
 dashboard_routes(app)
@@ -26,6 +36,7 @@ calculations_routes(app)
 upload_routes(app)
 settings_routes(app)
 fred_routes(app)
+sessions_routes(app)
 
 @app.route('/')
 def home():

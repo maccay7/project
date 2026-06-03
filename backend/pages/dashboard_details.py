@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 from utils.db import get_db
 
@@ -97,13 +98,20 @@ def get_yield_curve(instrument_type='all'):
     if not FRED_API_KEY:
         return {'labels': [], 'current': []}
 
-    series_map = {
-        'treasury_bills': 'TB3MS',
-        'bonds': 'DGS10',
-        'money_market': 'DFF',
-        'all': 'DGS10'
-    }
-    series_id = series_map.get(instrument_type, 'DGS10')
+    # Series mapping should be provided via environment to avoid hardcoding.
+    # Example: FRED_DEFAULT_SERIES_MAP='{ "bonds": "DGS10", "money_market": "DTB3", "tbills": "DTB3", "all": "DGS10" }'
+    series_map = {}
+    map_json = os.environ.get('FRED_DEFAULT_SERIES_MAP')
+    if map_json:
+        try:
+            series_map = json.loads(map_json)
+        except Exception:
+            series_map = {}
+
+    series_id = series_map.get(instrument_type) or series_map.get('all')
+    if not series_id:
+        # No configured default series for this instrument type
+        return {'labels': [], 'current': []}
     params = {
         'series_id': series_id,
         'api_key': FRED_API_KEY,

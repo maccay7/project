@@ -291,4 +291,5 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             'effectiveYield': round(avg_rate, 2)
         })
     
+    result['calculations'] = processed
     return result

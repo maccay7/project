@@ -37,12 +37,14 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 CREATE TABLE IF NOT EXISTS calculations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     instrument_type ENUM('yield_curve', 'bond_pricing', 'money_market', 'treasury_analysis') NOT NULL,
+    dataset_id VARCHAR(64),
     input_data JSON,
     result_data JSON,
     calculation_status ENUM('pending', 'processing', 'completed', 'failed') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP NULL,
     INDEX (instrument_type),
+    INDEX (dataset_id),
     INDEX (calculation_status),
     INDEX (created_at)
 );
