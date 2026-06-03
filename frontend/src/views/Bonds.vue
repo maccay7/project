@@ -150,7 +150,6 @@
                   <h3>Cleaning Filters (select any combination)</h3>
                   <div class="filter-scroll-container">
                     <div class="options-list">
-                      <!-- full list of cleaning options (same as original) -->
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeDuplicates"> Remove duplicate rows</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingNumeric"> Fill missing numeric with:
                         <select v-model="cleaningOptions.fillMethod"><option value="zero">Zero</option><option value="mean">Mean</option><option value="median">Median</option></select>
@@ -414,7 +413,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== REPORTS TAB (with Preview Report button) ==================== -->
+        <!-- ==================== REPORTS TAB ==================== -->
         <div v-if="activeTab === 'reports'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-file-pdf</v-icon> Generate Combined Report</v-card-title>
@@ -473,7 +472,6 @@
                 </div>
 
                 <div class="report-actions">
-                  <!-- New Preview Report button -->
                   <button class="btn-preview" @click="previewReport">Preview Report</button>
                   <button class="btn-json" @click="downloadCombinedReport('json')">JSON</button>
                   <button class="btn-csv" @click="downloadCombinedReport('csv')">CSV</button>
@@ -549,13 +547,12 @@ import FixedLayout from '@/components/FixedLayout.vue'
 import * as XLSX from 'xlsx'
 import Chart from 'chart.js/auto'
 import axios from 'axios'
-import html2canvas from 'html2canvas'
 
 const router = useRouter()
 const route = useRoute()
 const activeSession = ref(null)
 
-// ========== PERSISTENCE (same as original) ==========
+// ========== PERSISTENCE ==========
 function refreshPage() {
   rawData.value = []
   cleanedData.value = []
@@ -579,26 +576,16 @@ function refreshPage() {
 
 function loadSavedData() {
   if (!activeSession.value) return false
-  const uploadCompleted = getTabStatus('upload')
-  if (!uploadCompleted) {
-    const key = `${instrumentType.value}_session_${activeSession.value.id}`
-    localStorage.removeItem(`${key}_raw`)
-    localStorage.removeItem(`${key}_clean`)
-    localStorage.removeItem(`${key}_calc`)
-    localStorage.removeItem(`${instrumentType.value}_uploaded_file_name`)
-    return false
-  }
   const key = `${instrumentType.value}_session_${activeSession.value.id}`
   const savedRaw = localStorage.getItem(`${key}_raw`)
   const savedClean = localStorage.getItem(`${key}_clean`)
   const savedCalc = localStorage.getItem(`${key}_calc`)
   const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
-  const hasSaved = savedRaw || savedClean || savedCalc
-  if (!hasSaved) return false
-  if (savedRaw) rawData.value = JSON.parse(savedRaw)
-  if (savedClean) cleanedData.value = JSON.parse(savedClean)
-  if (savedCalc) calculations.value = JSON.parse(savedCalc)
-  if (savedFileName) uploadedFile.value = { name: savedFileName, size: 0 }
+  let loaded = false
+  if (savedRaw) { rawData.value = JSON.parse(savedRaw); loaded = true }
+  if (savedClean) { cleanedData.value = JSON.parse(savedClean); loaded = true }
+  if (savedCalc) { calculations.value = JSON.parse(savedCalc); loaded = true }
+  if (savedFileName) { uploadedFile.value = { name: savedFileName, size: 0 }; loaded = true }
   if (cleanedData.value.length && rawData.value.length) {
     cleaningStats.value = {
       totalRows: rawData.value.length,
@@ -607,7 +594,7 @@ function loadSavedData() {
       fixedMissing: 0
     }
   }
-  return true
+  return loaded
 }
 
 function saveSessionData() {
@@ -889,7 +876,6 @@ async function uploadData() {
 function previewCleanedData() {
   if (!rawData.value.length) return
   let data = JSON.parse(JSON.stringify(rawData.value))
-  // Apply all cleaning steps (same as original)
   if (cleaningOptions.value.removeDuplicates) {
     const seen = new Set()
     data = data.filter(row => {
@@ -1141,23 +1127,24 @@ function calculateMetrics() {
   updateSessionCompletion()
 }
 
-// ========== REPORT LOGIC (ENHANCED with cover page, A4, background, logo, footer, and preview) ==========
+// ========== REPORT LOGIC ==========
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
 
 function getInstrumentData(instrumentId) {
-  if (!activeSession.value) return null
-  if (activeSession.value.instrumentData && activeSession.value.instrumentData[instrumentId]) {
+  if (activeSession.value && activeSession.value.instrumentData && activeSession.value.instrumentData[instrumentId]) {
     return activeSession.value.instrumentData[instrumentId]
   }
-  const key = `${instrumentId}_session_${activeSession.value.id}`
-  const savedCalc = localStorage.getItem(`${key}_calc`)
-  if (savedCalc) {
-    const data = JSON.parse(savedCalc)
-    if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
-    activeSession.value.instrumentData[instrumentId] = data
-    return data
+  if (activeSession.value) {
+    const key = `${instrumentId}_session_${activeSession.value.id}`
+    const savedCalc = localStorage.getItem(`${key}_calc`)
+    if (savedCalc) {
+      const data = JSON.parse(savedCalc)
+      if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
+      activeSession.value.instrumentData[instrumentId] = data
+      return data
+    }
   }
   return null
 }
@@ -1166,15 +1153,15 @@ const reportPreviewData = computed(() => {
   const instrumentsData = []
   if (selectedInstruments.value.moneyMarket) {
     const data = getInstrumentData('money-market')
-    if (data) instrumentsData.push({ name: 'Money Market', calculations: data })
+    if (data && Object.keys(data).length) instrumentsData.push({ name: 'Money Market', calculations: data })
   }
   if (selectedInstruments.value.bonds) {
     const data = getInstrumentData('bonds')
-    if (data) instrumentsData.push({ name: 'Bonds', calculations: data })
+    if (data && Object.keys(data).length) instrumentsData.push({ name: 'Bonds', calculations: data })
   }
   if (selectedInstruments.value.tbills) {
     const data = getInstrumentData('tbills')
-    if (data) instrumentsData.push({ name: 'T-Bills', calculations: data })
+    if (data && Object.keys(data).length) instrumentsData.push({ name: 'T-Bills', calculations: data })
   }
   return {
     session: activeSession.value?.name || 'No session',
@@ -1212,25 +1199,91 @@ function formatMetricValue(key, value) {
   return value
 }
 
-// Report preview dialog state
 const reportPreviewDialog = ref(false)
 const reportPreviewHtml = ref('')
 
-// Function to generate the full HTML report (used for both preview and download)
+function buildMethodologySection(selectedInstrumentNames) {
+  let methods = []
+  if (selectedInstrumentNames.includes('Money Market')) {
+    methods.push(`
+      <div class="methodology-card">
+        <h4>Money Market Instruments</h4>
+        <p class="formula">Fair value = <sup>F</sup> &frasl; <sub>1 + r·t/365</sub></p>
+        <p>Where: <strong>F</strong> = Face value, <strong>r</strong> = annualized interest rate (%), <strong>t</strong> = days to maturity.</p>
+        <p>Simple interest convention (365 days/year). Weighted average rate = Σ (Rate × Amount) / Σ Amount.</p>
+      </div>
+    `)
+  }
+  if (selectedInstrumentNames.includes('Bonds')) {
+    methods.push(`
+      <div class="methodology-card">
+        <h4>Bonds</h4>
+        <p class="formula">Fair value = Σ<sub>t=1</sub><sup>n</sup> <sup>C</sup> &frasl; <sub>(1+y)<sup>t</sup></sub> + <sup>FV</sup> &frasl; <sub>(1+y)<sup>n</sup></sub></p>
+        <p>Where: <strong>C</strong> = annual coupon payment (CouponRate × FaceValue), <strong>y</strong> = yield to maturity (%), <strong>FV</strong> = face value, <strong>n</strong> = years to maturity.</p>
+        <p>Duration = Σ (t × PV(C<sub>t</sub>)) / Price. Approximated using Macaulay duration.</p>
+      </div>
+    `)
+  }
+  if (selectedInstrumentNames.includes('T-Bills')) {
+    methods.push(`
+      <div class="methodology-card">
+        <h4>Treasury Bills (T‑Bills)</h4>
+        <p class="formula">Discount amount = Face value × (Discount rate / 100) × (Days to maturity / 360)</p>
+        <p class="formula">Effective yield = (Face value / Price − 1) × (365 / Days to maturity) × 100</p>
+        <p>Bank discount basis (360 days/year) for discount rate; bond equivalent yield uses 365 days.</p>
+      </div>
+    `)
+  }
+  if (methods.length === 0) return '<p>No methodology available for the selected instruments.</p>'
+  return methods.join('')
+}
+
+// Map instrument type to FRED series (same as default in Visualizations tab)
+const instrumentFredSeries = {
+  'Money Market': 'DTB3',
+  'Bonds': 'DGS10',
+  'T-Bills': 'DTB3'
+}
+
+async function fetchFredSeriesData(seriesId, limit = 30) {
+  try {
+    const response = await axios.get(`http://localhost:5000/api/fred/series/${seriesId}`, {
+      params: { limit, sort_order: 'desc' }
+    })
+    if (response.data.success && response.data.data) {
+      const observations = response.data.data
+      const reversed = [...observations].reverse()
+      const labels = reversed.map(obs => obs.date)
+      const values = reversed.map(obs => obs.value)
+      return { labels, values }
+    }
+    return null
+  } catch (err) {
+    console.error(`Failed to fetch FRED series ${seriesId}:`, err)
+    return null
+  }
+}
+
 async function generateReportHtml() {
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
     alert('No data available for the selected instruments.')
     return null
   }
-  let chartImageBase64 = ''
-  if (yieldCurveChart.value && chartData.value.datasets.length) {
-    try {
-      chartImageBase64 = yieldCurveChart.value.toDataURL('image/png')
-    } catch (err) { console.warn(err) }
-  }
-  const backgroundImageUrl = '/background%20report%201.webp'   // your background image in public folder
-  const logoHtml = `<img src="/DuraCapital%20logo.png" alt="DuraCapital Logo" style="height:70px;">` // adjust logo filename as needed
+
+  const chartDataMap = {}
+  await Promise.all(report.instruments.map(async (inst) => {
+    const seriesId = instrumentFredSeries[inst.name]
+    if (seriesId) {
+      const data = await fetchFredSeriesData(seriesId, 30)
+      if (data && data.labels.length) chartDataMap[inst.name] = data
+    }
+  }))
+
+  const origin = window.location.origin
+  const backgroundImageUrl = `${origin}/background%20report%201.webp`
+  const logoUrl = `${origin}/DuraCapital%20logo.png`
+  const logoHtml = `<img src="${logoUrl}" alt="DuraCapital Logo" style="height:70px;" onerror="this.style.display='none'">`
 
   let totalPortfolioValue = 0, totalInstrumentCount = 0
   for (const inst of report.instruments) {
@@ -1238,37 +1291,19 @@ async function generateReportHtml() {
     totalInstrumentCount += parseInt(inst.calculations.instrumentCount) || 0
   }
 
+  const instrumentNames = report.instruments.map(i => i.name)
+  const methodologyHtml = buildMethodologySection(instrumentNames)
+
   let html = `<!DOCTYPE html>
   <html>
   <head>
     <meta charset="UTF-8">
     <title>Portfolio Report - ${report.session}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"><\/script>
     <style>
-      @page {
-        size: A4;
-        margin: 1.5cm;
-      }
-      @media print {
-        body {
-          margin: 0;
-          padding: 0;
-        }
-        .cover-page {
-          page-break-after: always;
-          height: 100vh;
-        }
-        .no-break {
-          page-break-inside: avoid;
-        }
-      }
-      body {
-        font-family: 'Arial', sans-serif;
-        margin: 0;
-        padding: 0;
-        line-height: 1.5;
-        color: #333;
-        background: white;
-      }
+      @page { size: A4; margin: 0; }
+      @media print { body { margin: 0; padding: 0; } .cover-page { page-break-after: always; height: 100vh; } .chart-container { page-break-inside: avoid; } }
+      body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; line-height: 1.5; color: #333; background: white; }
       .cover-page {
         position: relative;
         height: 100vh;
@@ -1280,100 +1315,35 @@ async function generateReportHtml() {
         justify-content: center;
         align-items: center;
         text-align: center;
-        color: white;
-      }
-      .cover-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        z-index: 1;
-      }
-      .cover-content {
-        position: relative;
-        z-index: 2;
-        padding: 20px;
-      }
-      .session-name {
-        font-size: 56px;
-        font-weight: 700;
-        letter-spacing: 2px;
-        text-shadow: 2px 2px 8px rgba(0,0,0,0.7);
-        margin: 30px 0;
-        font-family: 'Georgia', serif;
-      }
-      .logo-cover {
-        margin-bottom: 30px;
-      }
-      .report-content {
-        padding: 20px 30px;
-        max-width: 1000px;
-        margin: 0 auto;
-      }
-      h1 {
-        color: #0B2044;
-        font-size: 28px;
-        border-bottom: 2px solid #0B2044;
-        padding-bottom: 10px;
-      }
-      h2 {
-        color: #1E88E5;
-        margin-top: 30px;
-        font-size: 22px;
-      }
-      h3 {
-        color: #0B2044;
-        margin-top: 20px;
-        font-size: 18px;
-      }
-      table {
-        border-collapse: collapse;
-        width: 100%;
-        margin-bottom: 20px;
-      }
-      th, td {
-        border: 1px solid #ddd;
-        padding: 8px;
-        text-align: left;
-      }
-      th {
-        background: #0B2044;
-        color: white;
-      }
-      .summary-text {
-        background: #f8f9ff;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-      }
-      .metric-highlight {
-        font-weight: bold;
         color: #0B2044;
       }
-      .formula {
-        font-family: monospace;
-        background: #f0f0f0;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 1.1em;
-      }
-      .footer {
-        margin-top: 40px;
-        font-size: 12px;
-        color: #666;
-        text-align: center;
-        border-top: 1px solid #eee;
-        padding-top: 20px;
-      }
-    </style>
-  </head>
+      .cover-content { position: relative; z-index: 2; padding: 20px; background: rgba(255,255,255,0.7); border-radius: 16px; max-width: 80%; }
+      .session-name { font-size: 56px; font-weight: 700; letter-spacing: 2px; text-shadow: 2px 2px 8px rgba(255,255,255,0.8); margin: 20px 0 10px; font-family: 'Georgia', serif; color: #0B2044; }
+      .valuation-title { font-size: 24px; font-weight: 500; margin-bottom: 20px; color: #1E88E5; }
+      .logo-cover { margin-bottom: 20px; }
+      .report-content { padding: 20px 30px; max-width: 1000px; margin: 0 auto; }
+      h1 { color: #0B2044; font-size: 28px; border-bottom: 2px solid #0B2044; padding-bottom: 10px; }
+      h2 { color: #1E88E5; margin-top: 30px; font-size: 22px; }
+      h3 { color: #0B2044; margin-top: 20px; font-size: 18px; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+      th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+      th { background: #0B2044; color: white; }
+      .summary-text { background: #f8f9ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+      .metric-highlight { font-weight: bold; color: #0B2044; }
+      .formula { font-family: monospace; background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 1.1em; margin: 10px 0; }
+      .methodology-card { background: #f8f9ff; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+      .methodology-card h4 { margin-top: 0; color: #0B2044; }
+      .footer { margin-top: 40px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }
+      .chart-container { margin: 20px 0; text-align: center; }
+      canvas { max-width: 100%; height: auto; background: #f8f9ff; border-radius: 8px; padding: 10px; }
+      .chart-caption { font-size: 12px; color: #666; margin-top: 5px; }
+    <\/style>
+  <\/head>
   <body>
     <div class="cover-page">
-      <div class="cover-overlay"></div>
       <div class="cover-content">
         <div class="logo-cover">${logoHtml}</div>
+        <div class="valuation-title">Valuation Assessment Report</div>
         <div class="session-name">${report.session}</div>
       </div>
     </div>
@@ -1392,14 +1362,6 @@ async function generateReportHtml() {
           <li>Treasury bills are low-risk government securities with shorter maturities.</li>
         </ul>
       </div>`
-
-  if (chartImageBase64) {
-    html += `<div class="summary-text">
-      <h3>Yield Curve Analysis (FRED)</h3>
-      <img src="${chartImageBase64}" alt="Yield Curve Chart" style="max-width:100%; border:1px solid #ccc;" />
-      <p>Figure 1: Latest yield curve from Federal Reserve Economic Data (FRED). This curve is used as a benchmark for discounting future cash flows.</p>
-    </div>`
-  }
 
   for (const inst of report.instruments) {
     const instData = inst.calculations
@@ -1429,31 +1391,86 @@ async function generateReportHtml() {
               <p><strong>Bond Equivalent Yield:</strong> ${instData.bondEquivalentYield || 0}%</p>
               <p><strong>Average Days to Maturity:</strong> ${instData.avgDaysToMaturity || 0} days</p>`
     }
-    html += `</div><h3>Detailed Metrics</h3></table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+    html += `</div><h3>Detailed Metrics</h3><table><thead><tr><th>Metric</th><th>Value</th><tr></thead><tbody>`
     for (const [key, val] of Object.entries(instData)) {
       if (key === 'completed' || key === 'timestamp') continue
-      html += `<tr><td>${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
+      html += `<tr><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
     }
     html += `</tbody></table>`
+
+    const chartData = chartDataMap[inst.name]
+    if (chartData && chartData.labels && chartData.labels.length) {
+      const chartId = `chart-${inst.name.replace(/\s/g, '')}`
+      html += `
+      <div class="summary-text">
+        <h3>Yield Curve Analysis – ${inst.name}</h3>
+        <div class="chart-container">
+          <canvas id="${chartId}" width="800" height="400" style="max-width:100%; height:auto;"></canvas>
+          <div class="chart-caption">Source: Federal Reserve Economic Data (FRED) – ${inst.name === 'Bonds' ? '10-Year Treasury Rate' : '3-Month Treasury Bill'}</div>
+        </div>
+        <p>This chart shows the latest market yield curve used as a benchmark for discounting cash flows of ${inst.name} instruments.</p>
+        <script>
+          (function() {
+            const ctx = document.getElementById('${chartId}').getContext('2d');
+            new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels: ${JSON.stringify(chartData.labels)},
+                datasets: [{
+                  label: 'Yield (%)',
+                  data: ${JSON.stringify(chartData.values)},
+                  borderColor: '#0B2044',
+                  backgroundColor: 'rgba(11,32,68,0.1)',
+                  tension: 0.1,
+                  fill: true
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                  tooltip: { callbacks: { label: function(context) { return 'Yield: ' + context.raw + '%'; } } },
+                  legend: { position: 'top' }
+                },
+                scales: {
+                  y: { title: { display: true, text: 'Percent (%)' }, ticks: { callback: function(val) { return val + '%'; } } },
+                  x: { title: { display: true, text: 'Date' }, ticks: { maxRotation: 45, autoSkip: true } }
+                }
+              }
+            });
+          })();
+        <\/script>
+      </div>`
+    } else {
+      html += `
+      <div class="summary-text graph-placeholder">
+        <h3>Yield Curve Analysis – ${inst.name}</h3>
+        <div class="placeholder-chart">
+          <svg width="100%" height="200" viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg">
+            <rect width="100%" height="100%" fill="#f8f9ff" stroke="#ccc" stroke-width="1"/>
+            <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-size="14">Yield curve data not available. Please check your FRED API connection.</text>
+            <line x1="50" y1="180" x2="750" y2="180" stroke="#aaa" stroke-width="1"/>
+            <line x1="50" y1="20" x2="50" y2="180" stroke="#aaa" stroke-width="1"/>
+          </svg>
+        </div>
+        <p>Market data could not be loaded for ${inst.name}. Ensure your backend FRED API is running at http://localhost:5000 and try again.</p>
+      </div>`
+    }
   }
 
   html += `<div class="summary-text">
     <h3>Methodology</h3>
-    <p>The valuation of fixed income instruments is based on the discounted cash flow (DCF) method using the yield curve derived from FRED data.</p>
-    <p class="formula">For money market instruments: Fair value = <sup>F</sup>&frasl;<sub>1 + r·t/365</sub></p>
-    <p class="formula">For bonds: Fair value = Σ<sub>t=1</sub><sup>n</sup> <sup>C</sup>&frasl;<sub>(1+y)<sup>t</sup></sub> + <sup>FV</sup>&frasl;<sub>(1+y)<sup>n</sup></sub></p>
-    <p>All calculations assume a 365‑day count convention and simple interest for money market instruments.</p>
+    ${methodologyHtml}
     <p><strong>Sources:</strong> Federal Reserve Economic Data (FRED), Damodaran Country Risk Premiums, Bloomberg OIS SOFR rates.</p>
   </div>
   <div class="footer">
     <p>Date Generated: ${report.date}</p>
     <p>Generated by: DuraCapital Platform</p>
   </div>
-  </div></body></html>`
+  <\/div><\/body><\/html>`
   return html
 }
 
-// Preview report: generate HTML and show in dialog
 async function previewReport() {
   const html = await generateReportHtml()
   if (html) {
@@ -1462,7 +1479,6 @@ async function previewReport() {
   }
 }
 
-// Download from preview dialog
 async function downloadFromPreview(format) {
   if (!reportPreviewHtml.value) return
   const filename = `combined_report_${Date.now()}`
@@ -1521,7 +1537,7 @@ function downloadBlob(content, filename, mimeType) {
   URL.revokeObjectURL(url)
 }
 
-// Excel viewer functions
+// ========== EXCEL VIEWER ==========
 const showExcelDialog = ref(false)
 const excelData = ref([])
 const excelColumns = ref([])
@@ -1543,7 +1559,7 @@ function exportToJSON() {
 }
 function saveToSession() { saveSessionData(); alert('Data saved to session!') }
 
-// ========== FRED API INTEGRATION ==========
+// ========== FRED API INTEGRATION for visualizations tab ==========
 const fredLoading = ref(false)
 const fredError = ref('')
 const selectedSeries = ref('')
@@ -1673,7 +1689,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* ========== All original styles (unchanged) ========== */
+/* All original styles – unchanged. */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
