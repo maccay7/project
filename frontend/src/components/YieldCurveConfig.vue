@@ -199,7 +199,7 @@
             v-model="config.fredSeriesId"
             variant="outlined"
             density="compact"
-            placeholder="e.g., DGS10 for 10-Year Treasury"
+            placeholder="Enter FRED series ID (e.g., DGS10)"
             hint="FRED series ID for yield curve data"
           ></v-text-field>
         </v-col>
@@ -337,7 +337,7 @@ const defaultConfig: YieldCurveConfig = {
   minYield: 0,
   maxYield: 15,
   smoothingFactor: 0.5,
-  fredSeriesId: 'DGS10',
+  fredSeriesId: '',
   updateFrequency: 'Daily',
   taxRate: 0,
   inflationExpectation: 2.0,
@@ -351,31 +351,26 @@ const selectedPreset = ref<string>('custom')
 const countryDefaults: Record<string, Partial<YieldCurveConfig>> = {
   'United States': {
     currency: 'USD',
-    fredSeriesId: 'DGS10',
     dayCountConvention: 'Actual/365',
     taxRate: 0
   },
   'United Kingdom': {
     currency: 'GBP',
-    fredSeriesId: 'GB10YR',
     dayCountConvention: 'Actual/365',
     taxRate: 0
   },
   'Germany': {
     currency: 'EUR',
-    fredSeriesId: 'GB10YR',
     dayCountConvention: '30/360',
     taxRate: 0
   },
   'Japan': {
     currency: 'JPY',
-    fredSeriesId: 'JP10YR',
     dayCountConvention: 'Actual/365',
     taxRate: 0
   },
   'Canada': {
     currency: 'CAD',
-    fredSeriesId: 'CAN10YR',
     dayCountConvention: 'Actual/365',
     taxRate: 0
   }
@@ -390,7 +385,6 @@ const presets: Preset[] = [
       country: 'United States',
       currency: 'USD',
       curveType: 'Nelson-Siegel',
-      fredSeriesId: 'DGS10',
       dayCountConvention: 'Actual/365'
     }
   },
@@ -401,7 +395,6 @@ const presets: Preset[] = [
       country: 'United Kingdom',
       currency: 'GBP',
       curveType: 'Nelson-Siegel-Svensson',
-      fredSeriesId: 'GB10YR',
       dayCountConvention: 'Actual/365'
     }
   },
@@ -412,7 +405,6 @@ const presets: Preset[] = [
       country: 'Germany',
       currency: 'EUR',
       curveType: 'Nelson-Siegel',
-      fredSeriesId: 'GB10YR',
       dayCountConvention: '30/360'
     }
   },
@@ -423,7 +415,6 @@ const presets: Preset[] = [
       country: 'Japan',
       currency: 'JPY',
       curveType: 'Nelson-Siegel',
-      fredSeriesId: 'JP10YR',
       dayCountConvention: 'Actual/365'
     }
   }

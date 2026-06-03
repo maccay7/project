@@ -135,6 +135,8 @@ const fileBase64 = ref('')
 const dataset = ref([])
 const headers = ref([])
 const savedDatasets = ref([])
+const selectedDatasetId = ref(null)
+const selectedDatasetName = ref('')
 
 // Computed
 const hasFile = computed(() => uploadedFile.value !== null)
@@ -159,13 +161,13 @@ async function saveDataset(name) {
       name,
       file_base64: fileBase64.value || '',
       sheet_names: headers.value || [],
-      upload_id: null
+      upload_id: selectedDatasetId.value || null
     }
     if (dataset.value && dataset.value.length) payload.data = dataset.value
-    const res = await datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, dataset.value || null, headers.value || null)
+    const res = await datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, payload.data || null, headers.value || null)
     if (res && res.success) {
-      // persist current dataset id for other pages (reports, cleaning)
-      try { localStorage.setItem('currentDataset', JSON.stringify({ id: res.data.id, name: res.data.name })) } catch (e) {}
+      selectedDatasetId.value = res.data.id
+      selectedDatasetName.value = res.data.name
       await loadSavedDatasets()
       return true
     }
@@ -193,8 +195,8 @@ async function loadDataset(idx) {
       else if (data.data) { dataset.value = data.data; fileBase64.value = '' }
       if (data.headers) headers.value = data.headers
       uploadedFile.value = { name: data.name }
-      // remember selected dataset id for reporting/done
-      try { localStorage.setItem('currentDataset', JSON.stringify({ id: data.id, name: data.name })) } catch (e) {}
+      selectedDatasetId.value = data.id
+      selectedDatasetName.value = data.name
       showPreview.value = true
     }
   } catch (err) { console.error('Load dataset error', err) }
@@ -271,17 +273,20 @@ async function loadExcel() {
 }
 
 // Go to cleaning
-function goToClean() {
+async function goToClean() {
   if (!dataset.value.length && !fileBase64.value) {
     alert('Load data first')
     return
   }
-  localStorage.setItem('cleaningDataset', JSON.stringify({
-    fullDataset: dataset.value,
-    excelFileBase64: fileBase64.value,
-    previewHeaders: headers.value
-  }))
-  router.push('/cleaning')
+  if (!selectedDatasetId.value) {
+    const name = uploadedFile.value?.name?.replace(/\.[^/.]+$/, '') || `Dataset-${Date.now()}`
+    const saved = await saveDataset(name)
+    if (!saved) {
+      alert('Unable to save dataset before cleaning')
+      return
+    }
+  }
+  router.push({ name: 'cleaning', query: { dataset_id: selectedDatasetId.value } })
 }
 
 onMounted(() => { loadSavedDatasets() })

@@ -71,6 +71,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import FixedLayout from '@/components/FixedLayout.vue'
+import sessionManager from '@/services/sessionManager.js'
 
 const activeSession = ref(null)
 const instruments = ref([])
@@ -82,8 +83,21 @@ function formatNumber(num) {
 }
 
 function loadSummary() {
-  const session = localStorage.getItem('active_session')
-  if (session) activeSession.value = JSON.parse(session)
+  // Resolve active session from localStorage or backend via sessionManager
+  let resolved = null
+  const saved = localStorage.getItem('active_session')
+  if (saved) {
+    try {
+      const sid = JSON.parse(saved).id
+      resolved = sessionManager.getSession(sid) || JSON.parse(saved)
+    } catch (e) {
+      resolved = JSON.parse(saved)
+    }
+  } else {
+    const all = sessionManager.getAllSessions() || []
+    resolved = all.length ? all[0] : null
+  }
+  if (resolved) activeSession.value = resolved
 
   const templates = [
     { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', rateLabel: 'Avg Interest Rate', interestLabel: 'Total Interest' },
@@ -96,9 +110,18 @@ function loadSummary() {
     if (activeSession.value && activeSession.value.instrumentData && activeSession.value.instrumentData[template.id]) {
       data = activeSession.value.instrumentData[template.id]
     } else {
-      const key = `${template.id}_session_${activeSession.value?.id || ''}_calc`
-      const savedCalc = localStorage.getItem(key)
-      if (savedCalc) data = JSON.parse(savedCalc)
+      // Prefer backend session payloads when available
+      if (activeSession.value && activeSession.value.id) {
+        const s = sessionManager.getSession(activeSession.value.id)
+        if (s && s.payload && s.payload.instrumentData && s.payload.instrumentData[template.id]) {
+          data = s.payload.instrumentData[template.id]
+        }
+      }
+      if (!data) {
+        const key = `${template.id}_session_${activeSession.value?.id || ''}_calc`
+        const savedCalc = localStorage.getItem(key)
+        if (savedCalc) data = JSON.parse(savedCalc)
+      }
     }
 
     let avgRate = null

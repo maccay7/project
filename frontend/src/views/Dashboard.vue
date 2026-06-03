@@ -207,6 +207,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { sessionManager } from '@/services/sessionManager.js'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -246,11 +247,9 @@ function goToSettings() {
 
 // Logout without deleting sessions list
 function handleLogout() {
-  const savedSessions = localStorage.getItem('sessions_list')
-  localStorage.clear()
-  if (savedSessions) {
-    localStorage.setItem('sessions_list', savedSessions)
-  }
+  // clear auth but keep sessions managed by sessionManager
+  localStorage.removeItem('auth_token')
+  localStorage.removeItem('user')
   sessionStorage.clear()
   window.location.href = '/login'
 }
@@ -259,37 +258,30 @@ function loadExistingSession(sessionId) {
   const session = sessions.value.find(s => s.id === sessionId)
   if (session) {
     activeSession.value = session
-    localStorage.setItem('active_session', JSON.stringify(session))
+    // update the active session cache via sessionManager
+    sessionManager.updateSession(session.id, session)
   }
 }
 
 function createNewSession() {
   if (!newSessionName.value.trim()) return
-  
-  const newSession = {
-    id: Date.now().toString(),
-    name: newSessionName.value.trim(),
-    date: new Date().toLocaleString(),
-    status: 'in-progress',
-    instrumentCount: 0,
-    totalValue: 0,
-    instrumentData: {}
-  }
-  sessions.value.unshift(newSession)
-  activeSession.value = newSession
-  localStorage.setItem('sessions_list', JSON.stringify(sessions.value))
-  localStorage.setItem('active_session', JSON.stringify(newSession))
+  // create via sessionManager to persist to backend (falls back to localStorage)
+  const created = sessionManager.createSession('')
+  // override name provided by user
+  sessionManager.updateSession(created.id, { name: newSessionName.value.trim() })
+  // refresh local list and set active
+  sessions.value = sessionManager.getAllSessions()
+  activeSession.value = sessionManager.getSession(created.id) || created
+  // active session now tracked via sessionManager
   newSessionName.value = ''
 }
 
 function deleteSession(sessionId) {
   if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
-    sessions.value = sessions.value.filter(s => s.id !== sessionId)
-    localStorage.setItem('sessions_list', JSON.stringify(sessions.value))
-    
+    sessions.value = sessionManager.getAllSessions().filter(s => s.id !== sessionId)
+    sessionManager.deleteSession(sessionId)
     if (activeSession.value && activeSession.value.id === sessionId) {
       activeSession.value = null
-      localStorage.removeItem('active_session')
     }
   }
 }
@@ -303,17 +295,10 @@ function goToInstrument(instrumentId) {
 }
 
 function loadSessions() {
-  const saved = localStorage.getItem('sessions_list')
-  if (saved) {
-    sessions.value = JSON.parse(saved)
-  } else {
-    sessions.value = []
-  }
-  
-  const active = localStorage.getItem('active_session')
-  if (active) {
-    activeSession.value = JSON.parse(active)
-  }
+  sessions.value = sessionManager.getAllSessions()
+  // prefer sessionManager's active session if present
+  const all = sessions.value
+  if (all && all.length) activeSession.value = all[0]
 }
 
 onMounted(() => {

@@ -85,7 +85,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { dataAPI } from '../services/api'
-import { sessionManager } from '../utils/sessionManager'
+import api from '../services/api'
+import sessionManager from '@/services/sessionManager.js'
 import * as XLSX from 'xlsx'
 import Chart from 'chart.js/auto'
 
@@ -175,19 +176,29 @@ async function calculate() {
   finally { calculating.value = false }
 }
 
-// Visualize - draw yield curve (using sample data)
-function drawYieldCurve() {
+// Visualize - draw yield curve (fetch from backend FRED endpoint)
+async function drawYieldCurve() {
   if (!yieldCanvas.value) return
   if (yieldChart) yieldChart.destroy()
-  const ctx = yieldCanvas.value.getContext('2d')
-  yieldChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
-      datasets: [{ label: 'Yield Curve', data: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1], borderColor: '#0B2A44', fill: true }]
-    },
-    options: { responsive: true, maintainAspectRatio: false }
-  })
+  try {
+    const res = await api.fredAPI.getYieldCurve(instrument)
+    const labels = (res && res.success && res.data && res.data.labels) ? res.data.labels : ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y']
+    const values = (res && res.success && res.data && res.data.current) ? res.data.current : [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1]
+    const ctx = yieldCanvas.value.getContext('2d')
+    yieldChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets: [{ label: 'Yield Curve', data: values, borderColor: '#0B2A44', fill: true }] },
+      options: { responsive: true, maintainAspectRatio: false }
+    })
+  } catch (err) {
+    console.error('Failed to load yield curve from backend, using sample data', err)
+    const ctx = yieldCanvas.value.getContext('2d')
+    yieldChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'], datasets: [{ label: 'Yield Curve', data: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1], borderColor: '#0B2A44', fill: true }] },
+      options: { responsive: true, maintainAspectRatio: false }
+    })
+  }
 }
 watch(currentStep, (step) => { if (step === 'visualize') setTimeout(drawYieldCurve, 100) })
 

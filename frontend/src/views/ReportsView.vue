@@ -108,12 +108,14 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
 import * as XLSX from 'xlsx'
+import { calculationsAPI } from '../services/api'
 
 const router = useRouter()
+const route = useRoute()
 
 // State
 const calcData = ref([])
@@ -138,17 +140,24 @@ const kpiStats = computed(() => [
   { title: 'Export', value: 'Excel (.xlsx)', icon: 'mdi-file-excel', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' }
 ])
 
-// Load data from calculations page
-function loadData() {
+// Load data from the latest calculation for the selected dataset
+async function loadData() {
   try {
-    const stored = localStorage.getItem('calculations')
-    if (!stored) {
-      alert('No calculation data found. Please run calculations first.')
+    const datasetId = route.query.dataset_id
+    if (!datasetId) {
+      alert('No dataset selected. Please navigate from Visualizations or Calculations page.')
       return
     }
-    const data = JSON.parse(stored)
+
+    const res = await calculationsAPI.getLatest(datasetId)
+    if (!res || !res.success) {
+      alert('No calculation data found for this dataset. Please run calculations first.')
+      return
+    }
+
+    const data = res.data.result_data || {}
     calcData.value = data.calculations || []
-    instrumentType.value = data.instrumentType || 'Money Market'
+    instrumentType.value = res.data.instrument_type || 'Money Market'
     alert(`Loaded ${calcData.value.length} records`)
   } catch (err) {
     console.error(err)
@@ -253,18 +262,17 @@ async function generateExcel() {
 
 // Reset all
 function finishAndReset() {
-  if (confirm('Complete & Reset? This will clear all data.')) {
-    localStorage.clear()
+  if (confirm('Complete & Reset?')) {
+    calcData.value = []
+    instrumentType.value = ''
+    sections.value.forEach(s => s.selected = true)
     router.push('/upload')
   }
 }
 
 onMounted(() => {
-  const stored = localStorage.getItem('calculations')
-  if (stored) {
-    const data = JSON.parse(stored)
-    calcData.value = data.calculations || []
-    instrumentType.value = data.instrumentType || 'Money Market'
+  if (route.query.dataset_id) {
+    loadData()
   }
 })
 </script>

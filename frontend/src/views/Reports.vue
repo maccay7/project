@@ -76,6 +76,7 @@ import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import { datasetAPI } from '@/services/api'
+import sessionManager from '@/services/sessionManager.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -92,7 +93,20 @@ function selectReportType(type) {
 
 function generatePreview() {
   const reportType = localStorage.getItem('report_type') || selectedType.value
-  const session = JSON.parse(localStorage.getItem('active_session') || '{}')
+  // Prefer active_session from localStorage, otherwise pick first session from sessionManager
+  let session = {}
+  try {
+    const saved = localStorage.getItem('active_session')
+    if (saved) {
+      const sid = JSON.parse(saved).id
+      session = sessionManager.getSession(sid) || JSON.parse(saved)
+    } else {
+      const all = sessionManager.getAllSessions() || []
+      session = all.length ? all[0] : {}
+    }
+  } catch (e) {
+    session = {}
+  }
 
   if (reportType === 'current') {
     previewData.value = {
@@ -134,6 +148,28 @@ function handleDatasetUpdate(updatedData) {
 async function loadDatasetPreview() {
   showDatasetPreview.value = true
   try {
+    // Prefer dataset from active session payload
+    let session = null
+    try {
+      const saved = localStorage.getItem('active_session')
+      if (saved) {
+        const sid = JSON.parse(saved).id
+        session = sessionManager.getSession(sid) || JSON.parse(saved)
+      } else {
+        const all = sessionManager.getAllSessions() || []
+        session = all.length ? all[0] : null
+      }
+    } catch (e) { session = null }
+
+    if (session && session.payload && session.payload.instrumentData) {
+      const inst = session.payload.instrumentData[route.query.instrument]
+      if (inst && inst.data) {
+        dataset.value = { id: null, name: inst.name || 'Session Dataset', data: inst.data, instrument_type: route.query.instrument }
+        generatePreview()
+        return
+      }
+    }
+
     const current = JSON.parse(localStorage.getItem('currentDataset') || '{}')
     if (current.id) {
       const res = await datasetAPI.load(current.id)
@@ -160,8 +196,15 @@ async function loadDatasetPreview() {
 
 async function markDone() {
   try {
-    const current = JSON.parse(localStorage.getItem('currentDataset') || '{}')
-    const id = current.id
+    let id = null
+    if (dataset.value && dataset.value.id) id = dataset.value.id
+    else {
+      // try session payload
+      const saved = localStorage.getItem('active_session')
+      let session = null
+      try { session = saved ? (sessionManager.getSession(JSON.parse(saved).id) || JSON.parse(saved)) : (sessionManager.getAllSessions()[0] || null) } catch(e) { session = null }
+      if (session && session.payload && session.payload.datasetId) id = session.payload.datasetId
+    }
     if (!id) return alert('No current dataset selected')
     const res = await datasetAPI.markDone(id)
     if (res && res.success) {

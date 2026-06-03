@@ -84,14 +84,16 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, nextTick, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
+import api from '@/services/api.js'
 import { Chart, registerables } from 'chart.js'
 
 Chart.register(...registerables)
 
 const router = useRouter()
+const route = useRoute()
 
 // State
 const hasData = ref(false)
@@ -112,27 +114,30 @@ const kpiStats = ref([
   { title: 'Data Source', value: 'FRED API', icon: 'mdi-api', color: 'rgba(255,193,7,0.1)', iconColor: '#FFC107' }
 ])
 
-// Load data from calculations page
+// Load data from the latest calculation for the selected dataset
 async function loadData() {
   try {
-    const stored = localStorage.getItem('calculations')
-    if (!stored) {
-      alert('No calculation data found. Run calculations first on the Calculations page.')
+    const datasetId = route.query.dataset_id
+    if (!datasetId) {
+      alert('No dataset selected. Please navigate from Calculations or Upload page.')
       return
     }
-    
-    calcData.value = JSON.parse(stored)
-    hasData.value = true
-    
-    // Update KPI cards
+
+    const res = await api.calculationsAPI.getLatest(datasetId)
+    if (!res || !res.success) {
+      alert('No calculation data found for this dataset. Run calculations first.')
+      return
+    }
+
+    calcData.value = res.data.result_data || {}
     const calculations = calcData.value.calculations || []
+    hasData.value = true
+
     kpiStats.value[0].value = calculations.length
-    kpiStats.value[1].value = calcData.value.instrumentType || 'Money Market'
+    kpiStats.value[1].value = res.data.instrument_type || 'Money Market'
     kpiStats.value[2].value = getAvgYield(calculations) + '%'
-    
-    // Render chart
+
     await loadYieldCurve()
-    
     console.log(`Loaded ${calculations.length} records`)
   } catch (err) {
     console.error(err)
@@ -161,25 +166,23 @@ function clearData() {
 // Load yield curve from backend
 async function loadYieldCurve() {
   try {
-    const res = await fetch('http://localhost:5000/api/fred-yield-curve')
-    const data = await res.json()
-    
-    if (data.success && data.data) {
+    // Determine instrument type from latest calculation data
+    const instTypeRaw = (calcData.value && calcData.value.instrument_type) || kpiStats.value[1].value || 'all'
+    // Map display names to API instrument types if necessary
+    const map = { 'Money Market': 'money-market', 'Bonds': 'bonds', 'T-Bills': 'tbills', 'money-market': 'money-market', 'tbills': 'tbills' }
+    const instParam = map[instTypeRaw] || instTypeRaw || 'all'
+    const data = await api.fredAPI.getYieldCurve(instParam)
+    if (data && data.success && data.data && data.data.labels && data.data.labels.length) {
       yieldData.value = data.data
     } else {
-      yieldData.value = {
-        labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
-        current: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1]
-      }
+      // final fallback
+      yieldData.value = { labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'], current: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1] }
     }
     await nextTick()
     renderYieldChart()
   } catch (err) {
-    console.error(err)
-    yieldData.value = {
-      labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'],
-      current: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1]
-    }
+    console.error('Yield curve load error:', err)
+    yieldData.value = { labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'], current: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1] }
     renderYieldChart()
   }
 }
@@ -221,8 +224,19 @@ function renderYieldChart() {
 
 // Navigate to reports
 function goToReports() {
-  router.push('/reports')
+  const datasetId = route.query.dataset_id
+  if (!datasetId) {
+    alert('Dataset reference missing. Please run calculations first.')
+    return
+  }
+  router.push({ name: 'reports', query: { dataset_id: datasetId } })
 }
+
+onMounted(() => {
+  if (route.query.dataset_id) {
+    loadData()
+  }
+})
 </script>
 
 <style scoped>

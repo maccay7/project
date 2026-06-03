@@ -560,6 +560,8 @@ import FixedLayout from '@/components/FixedLayout.vue'
 import * as XLSX from 'xlsx'
 import Chart from 'chart.js/auto'
 import axios from 'axios'
+import api from '@/services/api.js'
+import sessionManager from '@/services/sessionManager.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -621,26 +623,61 @@ function refreshPage() {
   showMappingDialog.value = false
   activeTab.value = 'upload'
   if (activeSession.value) {
-    const key = `${instrumentType.value}_session_${activeSession.value.id}`
-    localStorage.removeItem(`${key}_raw`)
-    localStorage.removeItem(`${key}_clean`)
-    localStorage.removeItem(`${key}_calc`)
-    localStorage.removeItem(`${instrumentType.value}_uploaded_file_name`)
+    // clear session data on refresh
+    const sid = activeSession.value.id
+    sessionManager.updateSession(sid, { data: [], cleanedData: [], calculations: {}, uploaded_file_name: null })
   }
 }
 
-function loadSavedData() {
+async function loadSavedData() {
+  // Prefer dataset_id from route (backend persistence)
+  const datasetId = route.query.dataset_id
+  if (datasetId) {
+    try {
+      const res = await api.datasetAPI.load(datasetId)
+      if (res && res.success && res.data) {
+        const last = res.data
+        rawData.value = last.data || []
+        cleanedData.value = last.data || []
+        calculations.value = {}
+        uploadedFile.value = { name: last.name || '', size: 0 }
+        cleaningStats.value = {
+          totalRows: rawData.value.length,
+          validRows: cleanedData.value.length,
+          removedRows: rawData.value.length - cleanedData.value.length,
+          fixedMissing: 0
+        }
+        return true
+      }
+    } catch (err) {
+      console.error('Backend dataset load failed, falling back to localStorage', err)
+    }
+  }
+
   if (!activeSession.value) return false
-  const key = `${instrumentType.value}_session_${activeSession.value.id}`
-  const savedRaw = localStorage.getItem(`${key}_raw`)
-  const savedClean = localStorage.getItem(`${key}_clean`)
-  const savedCalc = localStorage.getItem(`${key}_calc`)
-  const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
+  const sid = activeSession.value.id
   let loaded = false
-  if (savedRaw) { rawData.value = JSON.parse(savedRaw); loaded = true }
-  if (savedClean) { cleanedData.value = JSON.parse(savedClean); loaded = true }
-  if (savedCalc) { calculations.value = JSON.parse(savedCalc); loaded = true }
-  if (savedFileName) { uploadedFile.value = { name: savedFileName, size: 0 }; loaded = true }
+  const s = sessionManager.getSession(sid)
+  if (s && s.payload) {
+    if (s.payload.data && s.payload.data.length) { rawData.value = s.payload.data; loaded = true }
+    if (s.payload.cleanedData && s.payload.cleanedData.length) { cleanedData.value = s.payload.cleanedData; loaded = true }
+    if (s.payload.calculations) { calculations.value = s.payload.calculations; loaded = true }
+    if (s.payload.uploaded_file_name) { uploadedFile.value = { name: s.payload.uploaded_file_name, size: 0 }; loaded = true }
+  }
+
+  // fallback to old localStorage keys for compatibility
+  if (!loaded) {
+    const key = `${instrumentType.value}_session_${sid}`
+    const savedRaw = localStorage.getItem(`${key}_raw`)
+    const savedClean = localStorage.getItem(`${key}_clean`)
+    const savedCalc = localStorage.getItem(`${key}_calc`)
+    const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
+    if (savedRaw) { rawData.value = JSON.parse(savedRaw); loaded = true }
+    if (savedClean) { cleanedData.value = JSON.parse(savedClean); loaded = true }
+    if (savedCalc) { calculations.value = JSON.parse(savedCalc); loaded = true }
+    if (savedFileName) { uploadedFile.value = { name: savedFileName, size: 0 }; loaded = true }
+  }
+
   if (cleanedData.value.length && rawData.value.length) {
     cleaningStats.value = {
       totalRows: rawData.value.length,
@@ -653,13 +690,31 @@ function loadSavedData() {
 }
 
 function saveSessionData() {
+  // If dataset_id provided, persist cleaned data to backend
+  const datasetId = route.query.dataset_id
+  if (datasetId) {
+    const payload = {
+      name: uploadedFile.value?.name || `${instrumentType.value}_${Date.now()}`,
+      file_base64: '',
+      sheet_names: [],
+      upload_id: datasetId,
+      data: cleanedData.value.length ? cleanedData.value : rawData.value,
+      headers: Object.keys((cleanedData.value[0] || rawData.value[0]) || {})
+    }
+    api.datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, payload.data, payload.headers, instrumentType.value)
+    // also persist last tab to session when possible (fallback to localStorage)
+    if (activeSession.value) sessionManager.updateSession(activeSession.value.id, { last_tab: activeTab.value })
+    else localStorage.setItem(`instrument_${instrumentType.value}_last_tab`, activeTab.value)
+    return
+  }
+
   if (!activeSession.value) return
-  const key = `${instrumentType.value}_session_${activeSession.value.id}`
-  if (rawData.value.length) localStorage.setItem(`${key}_raw`, JSON.stringify(rawData.value))
-  if (cleanedData.value.length) localStorage.setItem(`${key}_clean`, JSON.stringify(cleanedData.value))
-  if (Object.keys(calculations.value).length) localStorage.setItem(`${key}_calc`, JSON.stringify(calculations.value))
-  if (uploadedFile.value?.name) localStorage.setItem(`${instrumentType.value}_uploaded_file_name`, uploadedFile.value.name)
-  localStorage.setItem(`instrument_${instrumentType.value}_last_tab`, activeTab.value)
+  const sid = activeSession.value.id
+  if (rawData.value.length) sessionManager.updateSessionData(sid, 'data', rawData.value, rawData.value.length)
+  if (cleanedData.value.length) sessionManager.updateSessionData(sid, 'cleanedData', cleanedData.value, cleanedData.value.length)
+  if (Object.keys(calculations.value).length) sessionManager.updateSessionData(sid, 'calculations', calculations.value, calculations.value.instrumentCount || 0)
+  if (uploadedFile.value?.name) sessionManager.updateSession(sid, { uploaded_file_name: uploadedFile.value.name })
+  sessionManager.updateSession(sid, { last_tab: activeTab.value })
 }
 
 function updateSessionCompletion() {
@@ -678,11 +733,8 @@ function updateSessionCompletion() {
   activeSession.value.totalValue = total
   activeSession.value.instrumentCount = count
   if (count === 3) activeSession.value.status = 'completed'
-  localStorage.setItem('active_session', JSON.stringify(activeSession.value))
-  const sessionsList = JSON.parse(localStorage.getItem('sessions_list') || '[]')
-  const idx = sessionsList.findIndex(s => s.id === activeSession.value.id)
-  if (idx !== -1) sessionsList[idx] = activeSession.value
-  localStorage.setItem('sessions_list', JSON.stringify(sessionsList))
+  // persist updated session metadata to backend (and local cache)
+  sessionManager.updateSession(activeSession.value.id, activeSession.value)
 }
 
 // ========== Instrument info ==========
@@ -725,61 +777,30 @@ const fixedValuesTracker = ref(new Map())
 const calculations = ref({})
 const cleaningStats = ref({ totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 })
 
+// Simplified cleaning options – fewer choices makes the code easier to follow for beginners
 const cleaningOptions = ref({
   removeDuplicates: true,
-  fillMissingNumeric: true,
-  fillMethod: 'mean',
-  fillMissingText: true,
-  dropRowsWithMissing: false,
   trimWhitespace: true,
   convertToNumbers: true,
-  removeOutliers: false,
-  standardizeDates: false,
-  removeSpecialChars: false,
-  changeCase: false,
-  caseType: 'none',
-  fillWithCustom: false,
-  customFillValue: '',
-  removeColumnsAllMissing: false,
-  capOutliers: false,
-  removeRowsSpecificColumnEmpty: false,
-  specificColumn: '',
-  standardizeNumericRange: false,
-  removeEmptyRows: false,
-  fillForward: false,
-  fillBackward: false
+  fillMissingNumeric: true,
+  fillMethod: 'mean',
+  fillMissingText: true
 })
 
+// Keep a compact set of required columns per instrument for beginners
 const requiredColumns = computed(() => {
-  if (instrumentType.value === 'money-market') {
-    return ['Date', 'Instrument', 'Rate', 'Amount', 'MaturityDate', 'DaysToMaturity', 'Principal', 'InterestRate', 'DiscountRate', 'Price', 'FaceValue']
-  } else if (instrumentType.value === 'bonds') {
-    return ['Date', 'BondName', 'CouponRate', 'FaceValue', 'Yield', 'MaturityDate', 'IssueDate', 'Frequency', 'Price', 'AccruedInterest', 'DaysToMaturity', 'RedemptionValue']
-  } else {
-    return ['Date', 'TBillName', 'DiscountRate', 'FaceValue', 'MaturityDate', 'DaysToMaturity', 'IssueDate', 'Price', 'Yield']
-  }
+  if (instrumentType.value === 'money-market') return ['Date', 'Rate', 'Amount', 'MaturityDate']
+  if (instrumentType.value === 'bonds') return ['Date', 'CouponRate', 'FaceValue', 'Yield', 'MaturityDate']
+  return ['Date', 'DiscountRate', 'FaceValue', 'MaturityDate']
 })
 
+// A short list of common column name variations used for automatic mapping
 const columnVariations = {
-  Date: ['Date', 'date', 'DATE', 'Transaction Date', 'Trade Date', 'Settlement Date', 'Value Date', 'Start Date', 'Issue Date'],
-  Instrument: ['Instrument', 'instrument', 'INSTRUMENT', 'Security', 'Security Name', 'Name', 'Description', 'Asset'],
-  Rate: ['Rate', 'rate', 'RATE', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Yield', 'Return', 'APR'],
-  Amount: ['Amount', 'amount', 'AMOUNT', 'Face Value', 'FaceValue', 'Value', 'Price', 'Notional', 'Principal', 'Investment'],
-  MaturityDate: ['MaturityDate', 'Maturity Date', 'Maturity', 'Matures', 'End Date', 'Due Date', 'Expiry Date'],
-  DaysToMaturity: ['DaysToMaturity', 'Days to Maturity', 'Tenor', 'Days', 'Term', 'Duration Days'],
-  Principal: ['Principal', 'Amount', 'Face Value', 'Notional', 'Investment Amount'],
-  InterestRate: ['InterestRate', 'Interest Rate', 'Rate', 'Coupon', 'Yield'],
-  DiscountRate: ['DiscountRate', 'Discount Rate', 'discount', 'Rate'],
-  Price: ['Price', 'price', 'PRICE', 'Market Price', 'Current Price', 'Purchase Price', 'Bid Price', 'Ask Price'],
-  FaceValue: ['FaceValue', 'Face Value', 'Face', 'Value', 'Amount', 'Principal', 'Par Value', 'Nominal'],
-  BondName: ['BondName', 'Bond Name', 'bond', 'BOND', 'Security', 'Issuer', 'Description', 'Name'],
-  CouponRate: ['CouponRate', 'Coupon Rate', 'coupon', 'Rate', 'Interest Rate', 'Annual Coupon'],
-  Yield: ['Yield', 'yield', 'YIELD', 'Yield to Maturity', 'YTM', 'Return', 'Effective Yield'],
-  IssueDate: ['IssueDate', 'Issue Date', 'Issued', 'Issuance Date', 'Start Date'],
-  Frequency: ['Frequency', 'Payment Frequency', 'Coupon Frequency', 'Period', 'SemiAnnual', 'Quarterly', 'Annual'],
-  AccruedInterest: ['AccruedInterest', 'Accrued Interest', 'Accrued', 'Interest Accrued'],
-  RedemptionValue: ['RedemptionValue', 'Redemption Value', 'Call Value', 'Maturity Value'],
-  TBillName: ['TBillName', 'T-Bill Name', 'TBill', 'T Bill', 'Security', 'Instrument', 'Treasury Bill']
+  Date: ['date', 'transaction date', 'trade date', 'value date'],
+  Rate: ['rate', 'interest rate', 'coupon rate', 'yield'],
+  Amount: ['amount', 'face value', 'notional', 'principal'],
+  MaturityDate: ['maturity', 'maturity date', 'due date'],
+  FaceValue: ['facevalue', 'face value', 'par value']
 }
 
 // Preview helpers
@@ -855,30 +876,22 @@ const fileInput = ref(null)
 function handleFileUpload(e) { const file = e.target.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 function handleDrop(e) { const file = e.dataTransfer.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 async function readFileData(file) {
-  const ext = file.name.split('.').pop().toLowerCase()
-  let data = []
+  // Use XLSX to parse both CSV and Excel – keeps the code short and consistent
   try {
-    if (ext === 'csv') {
-      const text = await file.text()
-      const lines = text.split('\n')
-      const headers = lines[0].split(',').map(h => h.trim())
-      data = lines.slice(1).filter(l=>l.trim()).map(line => {
-        const vals = line.split(',')
-        const row = {}
-        headers.forEach((h,i) => { row[h] = vals[i] ? vals[i].trim() : '' })
-        return row
-      })
-    } else {
-      const buffer = await file.arrayBuffer()
-      const workbook = XLSX.read(buffer)
-      const sheet = workbook.Sheets[workbook.SheetNames[0]]
-      data = XLSX.utils.sheet_to_json(sheet)
-    }
-    rawData.value = data
-    addToHistory(file.name, data)   // store in history
+    let content
+    const ext = file.name.split('.').pop().toLowerCase()
+    if (ext === 'csv') content = await file.text()
+    else content = await file.arrayBuffer()
+    const workbook = XLSX.read(content, { type: ext === 'csv' ? 'string' : 'array' })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    rawData.value = XLSX.utils.sheet_to_json(sheet) || []
+    addToHistory(file.name, rawData.value)
     saveSessionData()
     if (missingColumns.value.length) autoMatchColumns()
-  } catch(err) { console.error(err); alert('Error reading file') }
+  } catch (err) {
+    console.error(err)
+    alert('Error reading file')
+  }
 }
 function removeFile() {
   uploadedFile.value = null
@@ -1244,15 +1257,16 @@ function formatMetricName(key) {
   }
   return names[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
 }
+// Simple formatter: currency-like keys get $ prefix; rate-like keys get % suffix
 function formatMetricValue(key, value) {
-  if (typeof value === 'number') {
-    if (key.includes('Value') || key.includes('Price') || key.includes('Interest') || key.includes('Income') || key.includes('Discount') || key.includes('Principal') || key.includes('Investment'))
-      return `$${value.toLocaleString()}`
-    if (key.includes('Rate') || key.includes('Yield') || key.includes('Coupon') || key.includes('Discount'))
-      return `${value}%`
-    return value.toLocaleString()
+  if (value === undefined || value === null) return '-'
+  if (!isNaN(Number(value))) {
+    const num = Number(value)
+    if (/value|price|interest|income|discount|principal|investment/i.test(key)) return `$${num.toLocaleString()}`
+    if (/rate|yield|coupon|discount/i.test(key)) return `${num}%`
+    return num.toLocaleString()
   }
-  return value
+  return String(value)
 }
 
 const reportPreviewDialog = ref(false)
@@ -1300,23 +1314,13 @@ const instrumentFredSeries = {
   'T-Bills': 'DTB3'
 }
 
+// Small wrapper to get series data via central API client
 async function fetchFredSeriesData(seriesId, limit = 30) {
-  try {
-    const response = await axios.get(`http://localhost:5000/api/fred/series/${seriesId}`, {
-      params: { limit, sort_order: 'desc' }
-    })
-    if (response.data.success && response.data.data) {
-      const observations = response.data.data
-      const reversed = [...observations].reverse()
-      const labels = reversed.map(obs => obs.date)
-      const values = reversed.map(obs => obs.value)
-      return { labels, values }
-    }
-    return null
-  } catch (err) {
-    console.error(`Failed to fetch FRED series ${seriesId}:`, err)
-    return null
-  }
+  const res = await api.fredAPI.getSeries(seriesId, limit, 'desc')
+  if (!res || !res.success) return null
+  const obs = res.data || []
+  const reversed = [...obs].reverse()
+  return { labels: reversed.map(o => o.date), values: reversed.map(o => o.value) }
 }
 
 async function generateReportHtml() {
@@ -1328,10 +1332,15 @@ async function generateReportHtml() {
 
   const chartDataMap = {}
   await Promise.all(report.instruments.map(async (inst) => {
-    const seriesId = instrumentFredSeries[inst.name]
-    if (seriesId) {
-      const data = await fetchFredSeriesData(seriesId, 30)
-      if (data && data.labels.length) chartDataMap[inst.name] = data
+    const map = { 'Money Market': 'money-market', 'Bonds': 'bonds', 'T-Bills': 'tbills' }
+    const instParam = map[inst.name] || 'all'
+    try {
+      const res = await api.fredAPI.getYieldCurve(instParam)
+      if (res && res.success && res.data && res.data.labels && res.data.labels.length) {
+        chartDataMap[inst.name] = { labels: res.data.labels, values: res.data.current }
+      }
+    } catch (err) {
+      console.error('Failed to fetch yield curve for', inst.name, err)
     }
   }))
 
@@ -1623,29 +1632,9 @@ let chartInstance = null
 const chartData = ref({ labels: [], datasets: [] })
 const currentMarketRate = ref(null)
 
-const seriesByInstrument = {
-  'money-market': {
-    'DTB3': '3-Month Treasury Bill',
-    'DTB6': '6-Month Treasury Bill',
-    'DGS1': '1-Year Treasury Rate',
-    'DGS2': '2-Year Treasury Rate'
-  },
-  'bonds': {
-    'DGS2': '2-Year Treasury Rate',
-    'DGS5': '5-Year Treasury Rate',
-    'DGS10': '10-Year Treasury Rate',
-    'DGS30': '30-Year Treasury Rate',
-    'T10Y2Y': '10Y-2Y Spread'
-  },
-  'tbills': {
-    'DTB3': '3-Month Treasury Bill',
-    'DTB6': '6-Month Treasury Bill',
-    'DGS1': '1-Year Treasury Rate'
-  }
-}
-
+const fredCategories = ref({})
 const availableSeries = computed(() => {
-  return seriesByInstrument[instrumentType.value] || seriesByInstrument['tbills']
+  return fredCategories.value.interest_rates || {}
 })
 const selectedSeriesLabel = computed(() => availableSeries.value[selectedSeries.value] || selectedSeries.value)
 const portfolioAvgRate = computed(() => {
@@ -1662,13 +1651,10 @@ async function fetchFredData() {
   }
   fredLoading.value = true
   fredError.value = ''
-  const BACKEND_URL = 'http://localhost:5000'
   try {
-    const response = await axios.get(`${BACKEND_URL}/api/fred/series/${selectedSeries.value}`, {
-      params: { limit: 365, sort_order: 'desc' }
-    })
-    if (!response.data.success) throw new Error(response.data.error || 'Failed to fetch FRED data')
-    const observations = response.data.data || []
+    const result = await api.fredAPI.getSeries(selectedSeries.value, 365, 'desc')
+    if (!result || !result.success) throw new Error(result?.error || 'Failed to fetch FRED data')
+    const observations = result.data || []
     if (observations.length === 0) throw new Error('No data returned for this series')
     const reversed = [...observations].reverse()
     const labels = reversed.map(obs => obs.date)
@@ -1719,29 +1705,50 @@ watch(() => chartData.value.datasets.length, async (newLen) => {
 let lastInstrument = ''
 let lastSessionId = ''
 function checkAndReset() {
-  const savedSession = localStorage.getItem('active_session')
-  const currentSessionId = savedSession ? JSON.parse(savedSession).id : null
+  const savedSessionRaw = localStorage.getItem('active_session')
+  let currentSessionId = null
+  if (savedSessionRaw) {
+    try { currentSessionId = JSON.parse(savedSessionRaw).id } catch (e) { currentSessionId = null }
+  } else {
+    const all = sessionManager.getAllSessions() || []
+    if (all.length) currentSessionId = all[0].id
+  }
   const currentInstrument = instrumentType.value
   if (currentInstrument !== lastInstrument || currentSessionId !== lastSessionId) {
     lastInstrument = currentInstrument
     lastSessionId = currentSessionId
-    if (savedSession) activeSession.value = JSON.parse(savedSession)
-    else activeSession.value = null
+    if (currentSessionId) {
+      const s = sessionManager.getSession(currentSessionId)
+      activeSession.value = s || (savedSessionRaw ? JSON.parse(savedSessionRaw) : null)
+    } else {
+      activeSession.value = null
+    }
     const loaded = loadSavedData()
     if (!loaded) {
       refreshPage()
       activeTab.value = 'upload'
     } else {
-      const savedTab = localStorage.getItem(`instrument_${instrumentType.value}_last_tab`)
+      const savedTab = sessionManager.getSession(activeSession.value?.id)?.payload?.last_tab || localStorage.getItem(`instrument_${instrumentType.value}_last_tab`)
       if (savedTab && steps.some(s => s.tab === savedTab)) activeTab.value = savedTab
       else activeTab.value = 'upload'
     }
   }
 }
-onMounted(() => { 
+onMounted(async () => { 
   checkAndReset()
   loadUploadHistory()
   window.addEventListener('storage', () => checkAndReset())
+  // Load available FRED series from backend (avoid hardcoded series)
+  try {
+    const res = await api.fredAPI.getCategories()
+    if (res && res.success && res.categories) {
+      fredCategories.value = res.categories
+      const first = Object.keys(fredCategories.value.interest_rates || {})[0]
+      if (first && !selectedSeries.value) selectedSeries.value = first
+    }
+  } catch (err) {
+    console.error('Failed to load FRED categories:', err)
+  }
 })
 onBeforeUnmount(() => { window.removeEventListener('storage', () => checkAndReset()) })
 watch(() => route.params.type, () => checkAndReset(), { immediate: true })

@@ -57,8 +57,10 @@ export const dashboardAPI = {
 
 // ========== CALCULATIONS ==========
 export const calculationsAPI = {
-  execute: (type, data = [], params = {}) => callAPI('/api/calculations/execute', 'POST', { instrument_type: type, data, params }),
-  getHistory: () => callAPI('/api/calculations/history')
+  execute: (type, data = [], params = {}, datasetId = null) =>
+    callAPI('/api/calculate', 'POST', { instrument_type: type, data, params, dataset_id: datasetId }),
+  getHistory: () => callAPI('/api/calculations/history'),
+  getLatest: (datasetId) => callAPI(`/api/calculations/latest?dataset_id=${encodeURIComponent(datasetId)}`)
 }
 
 // ========== USER ==========
@@ -87,7 +89,7 @@ export const dataAPI = {
     return await callAPI('/api/upload', 'POST', formData, true)
   },
   clean: (data, options) => callAPI('/api/clean', 'POST', { data, options }),
-  calculate: (data, type, params) => callAPI('/api/calculate', 'POST', { data, instrument_type: type, params }),
+  calculate: (data, type, params, datasetId = null) => callAPI('/api/calculate', 'POST', { data, instrument_type: type, params, dataset_id: datasetId }),
   deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { upload_id: id })
 }
 
@@ -110,6 +112,14 @@ export const fredAPI = {
     callAPI(`/api/fred-yield-curve?instrument_type=${instrumentType}`)
 }
 
+// ========== SESSIONS ==========
+export const sessionsAPI = {
+  save: (session) => callAPI('/api/sessions/save', 'POST', session),
+  get: (session_id) => callAPI('/api/sessions/get', 'POST', { session_id }),
+  list: () => callAPI('/api/sessions/list', 'GET'),
+  delete: (session_id) => callAPI('/api/sessions/delete', 'POST', { session_id })
+}
+
 // ========== EXPORT ALL ==========
 export default {
   authAPI,
@@ -119,5 +129,6 @@ export default {
   systemAPI,
   dataAPI,
   datasetAPI,
-  fredAPI
+  fredAPI,
+  sessionsAPI
 }

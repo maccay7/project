@@ -170,12 +170,13 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
-import { dataAPI } from '../services/api'
+import { dataAPI, datasetAPI } from '../services/api'
 
 const router = useRouter()
+const route = useRoute()
 
 // Data
 const dataset = ref(null)
@@ -214,13 +215,13 @@ const kpiStats = computed(() => {
 // Load data from Upload page using dataset API
 async function loadData() {
   try {
-    const current = JSON.parse(localStorage.getItem('currentDataset') || '{}')
-    const id = current.id
-    if (!id) return alert('No dataset selected. Load from Upload page first.')
-    const res = await fetch('/api/load-dataset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: id }) })
-    const json = await res.json()
-    if (!json.success) return alert('Failed to load dataset')
-    const last = json.data
+    const datasetId = route.query.dataset_id
+    if (!datasetId) return alert('No dataset selected. Load from Upload page first.')
+
+    const res = await datasetAPI.load(datasetId)
+    if (!res || !res.success) return alert('Failed to load dataset')
+
+    const last = res.data
     dataset.value = {
       name: last.name,
       data: last.data || [],
@@ -333,11 +334,8 @@ async function completeProcess() {
       headers: sheetNames.value || [],
       instrument_type: dataset.value.instrumentType || null
     }
-    const res = await fetch('/api/save-dataset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-    const json = await res.json()
-    if (json.success) {
-      // remember current dataset for other pages
-      try { localStorage.setItem('currentDataset', JSON.stringify({ id: json.data.id, name: json.data.name })) } catch (e) {}
+    const res = await datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, payload.data, payload.headers, payload.instrument_type)
+    if (res && res.success) {
       alert('Process completed! Cleaned data saved to datasets')
     } else {
       alert('Failed to save cleaned data')
@@ -351,11 +349,16 @@ async function completeProcess() {
 // Go to calculations
 function goToCalculations() {
   if (!results.value) return alert('Please clean data first')
-  localStorage.setItem('cleanedData', JSON.stringify({ ...dataset.value, cleaningResults: results.value }))
-  router.push('/calculations')
+  const datasetId = route.query.dataset_id
+  if (!datasetId) return alert('Cannot proceed without dataset reference')
+  router.push({ name: 'calculations', query: { dataset_id: datasetId } })
 }
 
-onMounted(() => console.log('Click "Load Dataset" to begin'))
+onMounted(() => {
+  if (route.query.dataset_id) {
+    loadData()
+  }
+})
 </script>
 
 <style scoped>

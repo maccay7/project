@@ -172,11 +172,12 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
-import { dataAPI } from '../services/api'
+import { dataAPI, datasetAPI, calculationsAPI } from '../services/api'
 
 const router = useRouter()
+const route = useRoute()
 
 // State
 const hasData = ref(false)
@@ -210,30 +211,31 @@ function formatNumber(num) {
   return num.toLocaleString()
 }
 
-// Load data from localStorage (from cleaning page)
+// Load data from the saved dataset and calculate
 async function loadData() {
   try {
-    let stored = localStorage.getItem('finalCleanedData')
-    if (!stored) stored = localStorage.getItem('cleanedData')
-    if (!stored) stored = localStorage.getItem('currentDataset')
-    
-    if (!stored) {
-      alert('No dataset found. Please clean data first on the Cleaning page.')
+    const datasetId = route.query.dataset_id
+    if (!datasetId) {
+      alert('No dataset selected. Please select a dataset from Upload/Cleaning.')
       return
     }
-    
-    const dataset = JSON.parse(stored)
-    const dataArray = dataset.data || dataset.fullDataset || []
-    
+
+    const res = await datasetAPI.load(datasetId)
+    if (!res || !res.success) {
+      alert('Failed to load dataset')
+      return
+    }
+
+    const dataset = res.data || {}
+    const dataArray = dataset.data || []
     if (!dataArray.length) {
       alert('Dataset is empty')
       return
     }
-    
+
     rawData.value = dataArray
-    await runCalculations(dataArray)
+    await runCalculations(dataArray, datasetId)
     hasData.value = true
-    
   } catch (err) {
     console.error(err)
     alert('Error loading dataset')
@@ -241,23 +243,19 @@ async function loadData() {
 }
 
 // Run calculations via backend API
-async function runCalculations(dataArray) {
+async function runCalculations(dataArray, datasetId = null) {
   try {
     const instrumentType = detectInstrumentType(dataArray)
-    const response = await dataAPI.calculate(dataArray, instrumentType, {})
-    
-    if (response.success && response.calculations) {
-      calculations.value = response.calculations
-      
-      updateTreasuryDisplay(response.calculations)
-      updateBondDisplay(response.calculations)
-      updateMoneyDisplay(response.calculations)
-      
-      localStorage.setItem('calculations', JSON.stringify({
-        success: true,
-        calculations: response.calculations,
-        instrumentType: instrumentType
-      }))
+    const response = await dataAPI.calculate(dataArray, instrumentType, {}, datasetId)
+
+    if (response.success && response.data) {
+      const result = response.data
+      calculations.value = result.calculations || []
+      updateTreasuryDisplay(calculations.value)
+      updateBondDisplay(calculations.value)
+      updateMoneyDisplay(calculations.value)
+    } else {
+      alert('Calculation failed')
     }
   } catch (err) {
     console.error('Calculation error:', err)
@@ -348,11 +346,18 @@ function clearAll() {
 
 // Navigate to visualizations
 function goToVisuals() {
-  router.push('/visualizations')
+  const datasetId = route.query.dataset_id
+  if (!datasetId) {
+    alert('Dataset reference missing. Please load a dataset first.')
+    return
+  }
+  router.push({ name: 'visualizations', query: { dataset_id: datasetId } })
 }
 
 onMounted(() => {
-  console.log('Calculations page ready. Click "Load Dataset" to begin.')
+  if (route.query.dataset_id) {
+    loadData()
+  }
 })
 </script>
 

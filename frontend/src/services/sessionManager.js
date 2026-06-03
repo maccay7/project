@@ -1,13 +1,23 @@
 // utils/sessionManager.js
 
+import api from './api.js'
+
 const STORAGE_KEY = 'duracapital_sessions'
 
 export const sessionManager = {
-  // Get all sessions
+  // Get all sessions (returns local copy immediately, synchronizes from backend in background)
   getAllSessions() {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
-      return stored ? JSON.parse(stored) : []
+      const local = stored ? JSON.parse(stored) : []
+      // fetch remote list and update localStorage in background
+      api.sessionsAPI.list().then(res => {
+        if (res && res.success && Array.isArray(res.data)) {
+          const mapped = res.data.map(r => ({ id: r.session_id, name: r.name, instrument: r.instrument, status: r.status, created_at: r.created_at }))
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(mapped))
+        }
+      }).catch(() => {})
+      return local
     } catch (err) {
       console.error('Error loading sessions:', err)
       return []
@@ -17,7 +27,19 @@ export const sessionManager = {
   // Get single session by ID
   getSession(id) {
     const sessions = this.getAllSessions()
-    return sessions.find(s => s.id === id)
+    const local = sessions.find(s => s.id === id)
+    // try backend and update local copy asynchronously
+    api.sessionsAPI.get(id).then(res => {
+      if (res && res.success && res.data) {
+        const sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
+        const idx = sessions.findIndex(s => s.id === id)
+        const payload = { id: res.data.session_id, name: res.data.name, instrument: res.data.instrument, payload: res.data.payload, status: res.data.status, created_at: res.data.created_at }
+        if (idx !== -1) sessions[idx] = payload
+        else sessions.unshift(payload)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+      }
+    }).catch(() => {})
+    return local
   },
 
   // Create new session
@@ -37,6 +59,8 @@ export const sessionManager = {
     }
     sessions.unshift(newSession)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+    // persist to backend asynchronously
+    api.sessionsAPI.save({ id: newSession.id, name: newSession.name, instrument: newSession.instrument, payload: newSession, status: newSession.status }).catch(() => {})
     return newSession
   },
 
@@ -47,6 +71,8 @@ export const sessionManager = {
     if (index !== -1) {
       sessions[index] = { ...sessions[index], ...updates, timestamp: Date.now() }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+      // persist to backend
+      api.sessionsAPI.save({ id: sessions[index].id, name: sessions[index].name, instrument: sessions[index].instrument, payload: sessions[index], status: sessions[index].status }).catch(() => {})
       return sessions[index]
     }
     return null
@@ -58,13 +84,15 @@ export const sessionManager = {
     if (dataType === 'data') updates.status = 'upload'
     if (dataType === 'cleanedData') updates.status = 'cleaned'
     if (dataType === 'calculations') updates.status = 'calculated'
-    return this.updateSession(id, updates)
+    const updated = this.updateSession(id, updates)
+    return updated
   },
 
   // Delete session
   deleteSession(id) {
     const sessions = this.getAllSessions().filter(s => s.id !== id)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+    api.sessionsAPI.delete(id).catch(() => {})
   },
 
   // Clear all sessions
