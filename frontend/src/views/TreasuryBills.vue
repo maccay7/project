@@ -297,6 +297,18 @@
                   </div>
                 </div>
 
+                <div v-if="calculations.fred?.benchmark_rate" class="comparison-card fred-calc-card">
+                  <div class="comparison-item">
+                    <span class="comparison-label">FRED market benchmark ({{ calculations.fred.series_label }}):</span>
+                    <span class="comparison-value market">{{ calculations.fred.benchmark_rate }}%</span>
+                  </div>
+                  <div class="comparison-item">
+                    <span class="comparison-label">Spread vs your portfolio:</span>
+                    <span class="comparison-value">{{ calculations.fred.spread_vs_market }}%</span>
+                  </div>
+                  <small class="fred-meta">{{ calculations.fred.country }} · {{ calculations.fred.currency }} · {{ calculations.fred.maturity }} · FRED API</small>
+                </div>
+
                 <div class="calculations-section">
                   <h3>{{ instrumentName }} Calculations</h3>
                   <div class="calculations-grid">
@@ -358,12 +370,22 @@
                 </div>
               </div>
 
-              <div class="chart-controls">
+              <div class="chart-controls fred-filters-row">
+                <select v-model="fredFilters.country" class="series-select" @change="onFredFilterChange('country')">
+                  <option v-for="c in countryItems" :key="c.code" :value="c.code">{{ c.name }}</option>
+                </select>
+                <select v-model="fredFilters.currency" class="series-select" @change="onFredFilterChange('currency')">
+                  <option v-for="c in currencyItems" :key="c.code" :value="c.code">{{ c.name }}</option>
+                </select>
+                <select v-model="fredFilters.maturity" class="series-select" @change="onFredFilterChange('maturity')">
+                  <option v-for="m in maturityItems" :key="m.code" :value="m.code">{{ m.name }}</option>
+                </select>
                 <select v-model="selectedSeries" @change="fetchFredData" class="series-select">
                   <option v-for="(label, id) in availableSeries" :key="id" :value="id">{{ label }}</option>
                 </select>
                 <button class="btn-secondary" @click="fetchFredData" :disabled="fredLoading">Refresh</button>
               </div>
+              <p class="fred-hint">FRED US Treasury benchmarks — used for calculations and charts.</p>
 
               <div v-if="fredLoading" class="loading-container">
                 <v-icon size="48" class="spin">mdi-loading</v-icon>
@@ -374,7 +396,7 @@
                 <p>{{ fredError }}</p>
                 <button class="btn-primary" @click="fetchFredData">Retry</button>
               </div>
-              <div v-else-if="chartData.datasets.length" class="chart-container">
+              <div v-else-if="chartData.datasets.length" class="chart-container chart-container--fred">
                 <canvas ref="yieldCurveChart"></canvas>
                 <div class="chart-footer">
                   <small>Source: Federal Reserve Economic Data (FRED) – {{ selectedSeriesLabel }}</small>
@@ -562,6 +584,7 @@ import Chart from 'chart.js/auto'
 import axios from 'axios'
 import api from '@/services/api.js'
 import sessionManager from '@/services/sessionManager.js'
+import { useFredMarket } from '@/composables/useFredMarket'
 
 const router = useRouter()
 const route = useRoute()
@@ -1135,7 +1158,7 @@ async function applyCleaningOnly() {
 }
 
 // ========== CALCULATIONS ==========
-function calculateMetrics() {
+async function calculateMetrics() {
   if (!cleanedData.value.length) return
   if (instrumentType.value === 'money-market') {
     const totalValue = cleanedData.value.reduce((s,row) => s + (parseFloat(row.Amount)||0), 0)
@@ -1192,6 +1215,8 @@ function calculateMetrics() {
       avgDaysToMaturity: 91
     }
   }
+  fredFilters.value.maturity = defaultMaturityForInstrument()
+  await enrichCalculationsWithFred()
   saveSessionData()
   updateSessionCompletion()
 }
@@ -1332,12 +1357,16 @@ async function generateReportHtml() {
 
   const chartDataMap = {}
   await Promise.all(report.instruments.map(async (inst) => {
-    const map = { 'Money Market': 'money-market', 'Bonds': 'bonds', 'T-Bills': 'tbills' }
+    const map = { 'Money Market': 'money_market', 'Bonds': 'bonds', 'T-Bills': 'treasury_bills', 'Treasury Bills': 'treasury_bills' }
     const instParam = map[inst.name] || 'all'
     try {
       const res = await api.fredAPI.getYieldCurve(instParam)
       if (res && res.success && res.data && res.data.labels && res.data.labels.length) {
-        chartDataMap[inst.name] = { labels: res.data.labels, values: res.data.current }
+        chartDataMap[inst.name] = {
+          labels: res.data.labels,
+          values: res.data.current,
+          datasets: res.data.datasets || [{ label: inst.name, data: res.data.current, borderColor: '#0B2044' }]
+        }
       }
     } catch (err) {
       console.error('Failed to fetch yield curve for', inst.name, err)
@@ -1480,14 +1509,7 @@ async function generateReportHtml() {
               type: 'line',
               data: {
                 labels: ${JSON.stringify(chartData.labels)},
-                datasets: [{
-                  label: 'Yield (%)',
-                  data: ${JSON.stringify(chartData.values)},
-                  borderColor: '#0B2044',
-                  backgroundColor: 'rgba(11,32,68,0.1)',
-                  tension: 0.1,
-                  fill: true
-                }]
+                datasets: ${JSON.stringify(chartData.datasets || [{ label: 'Yield (%)', data: chartData.values, borderColor: '#0B2044' }])}
               },
               options: {
                 responsive: true,
@@ -1623,7 +1645,37 @@ function exportToJSON() {
 }
 function saveToSession() { saveSessionData(); alert('Data saved to session!') }
 
-// ========== FRED API INTEGRATION for visualizations tab ==========
+// ========== FRED (calculations + visualizations) ==========
+const { fredFilters, filterOptions, countryItems, currencyItems, maturityItems, loadFilterOptions, onCountryChange, seriesIdForMaturity, fetchBenchmark } = useFredMarket('3M')
+
+function defaultMaturityForInstrument() {
+  if (instrumentType.value === 'bonds') return '10Y'
+  if (instrumentType.value === 'money-market') return '1Y'
+  return '3M'
+}
+
+async function enrichCalculationsWithFred() {
+  try {
+    const bench = await fetchBenchmark(instrumentType.value)
+    if (bench?.benchmark_rate != null) {
+      const portfolio = parseFloat(portfolioAvgRate.value) || 0
+      calculations.value = {
+        ...calculations.value,
+        fred: { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2), portfolio_rate: portfolio }
+      }
+    }
+  } catch (e) {
+    console.error('FRED benchmark', e)
+  }
+}
+
+async function onFredFilterChange(field) {
+  if (field === 'country') onCountryChange()
+  selectedSeries.value = await seriesIdForMaturity()
+  if (activeTab.value === 'visualizations') fetchFredData()
+  if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
+}
+
 const fredLoading = ref(false)
 const fredError = ref('')
 const selectedSeries = ref('')
@@ -1661,7 +1713,7 @@ async function fetchFredData() {
     const values = reversed.map(obs => obs.value)
     if (observations.length > 0) currentMarketRate.value = observations[0].value
     chartData.value = { labels, datasets: [{ label: selectedSeriesLabel.value, data: values, borderColor: '#0B2044', backgroundColor: 'rgba(11,32,68,0.1)', tension: 0.1, fill: true }] }
-    await nextTick()
+    await waitForChartCanvas()
     renderChart()
   } catch (err) {
     console.error(err)
@@ -1671,8 +1723,16 @@ async function fetchFredData() {
   }
 }
 
+async function waitForChartCanvas() {
+  for (let i = 0; i < 8; i++) {
+    await nextTick()
+    if (yieldCurveChart.value) return true
+  }
+  return false
+}
+
 function renderChart() {
-  if (!yieldCurveChart.value) return
+  if (!yieldCurveChart.value || !chartData.value.datasets.length) return
   if (chartInstance) chartInstance.destroy()
   const ctx = yieldCurveChart.value.getContext('2d')
   chartInstance = new Chart(ctx, {
@@ -1680,7 +1740,7 @@ function renderChart() {
     data: chartData.value,
     options: {
       responsive: true,
-      maintainAspectRatio: true,
+      maintainAspectRatio: false,
       plugins: { tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.raw}%` } }, legend: { position: 'top' } },
       scales: { y: { title: { display: true, text: 'Percent (%)' }, ticks: { callback: (val) => val + '%' } }, x: { title: { display: true, text: 'Date' }, ticks: { maxRotation: 45, autoSkip: true } } }
     }
@@ -1694,11 +1754,19 @@ watch(() => instrumentType.value, () => {
     if (activeTab.value === 'visualizations') fetchFredData()
   }
 }, { immediate: true })
-watch(() => activeTab.value, (newTab) => {
-  if (newTab === 'visualizations' && hasCleanedData.value) fetchFredData()
+watch(() => activeTab.value, async (newTab) => {
+  if (newTab !== 'visualizations' || !hasCleanedData.value) return
+  if (!chartData.value.datasets.length) await fetchFredData()
+  else {
+    await waitForChartCanvas()
+    renderChart()
+  }
 })
 watch(() => chartData.value.datasets.length, async (newLen) => {
-  if (newLen > 0 && activeTab.value === 'visualizations') { await nextTick(); renderChart() }
+  if (newLen > 0 && activeTab.value === 'visualizations') {
+    await waitForChartCanvas()
+    renderChart()
+  }
 })
 
 // ========== Force refresh on instrument or session change ==========
@@ -1738,17 +1806,19 @@ onMounted(async () => {
   checkAndReset()
   loadUploadHistory()
   window.addEventListener('storage', () => checkAndReset())
-  // Load available FRED series from backend (avoid hardcoded series)
+  fredFilters.value.maturity = defaultMaturityForInstrument()
+  await loadFilterOptions()
   try {
     const res = await api.fredAPI.getCategories()
     if (res && res.success && res.categories) {
       fredCategories.value = res.categories
-      const first = Object.keys(fredCategories.value.interest_rates || {})[0]
-      if (first && !selectedSeries.value) selectedSeries.value = first
+      selectedSeries.value = (await seriesIdForMaturity())
+        || Object.keys(fredCategories.value.interest_rates || {})[0]
     }
   } catch (err) {
     console.error('Failed to load FRED categories:', err)
   }
+  if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
 })
 onBeforeUnmount(() => { window.removeEventListener('storage', () => checkAndReset()) })
 watch(() => route.params.type, () => checkAndReset(), { immediate: true })
@@ -1983,6 +2053,19 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .chart-container {
   margin-top: 20px;
 }
+.chart-container--fred {
+  position: relative;
+  height: 400px;
+  width: 100%;
+}
+.chart-container--fred canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+.fred-filters-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.fred-hint { font-size: 12px; color: #666; margin: 8px 0 0; }
+.fred-calc-card { margin: 16px 0; }
+.fred-meta { display: block; margin-top: 8px; color: #666; font-size: 12px; }
 .chart-footer {
   margin-top: 10px;
   text-align: center;

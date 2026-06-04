@@ -59,12 +59,18 @@
 
       <div class="preview-section" v-if="previewData">
         <h3>Report Preview</h3>
+        <v-alert v-if="reportError" type="warning" density="compact" class="mb-3">{{ reportError }}</v-alert>
         <div class="preview-content">
           <pre>{{ JSON.stringify(previewData, null, 2) }}</pre>
         </div>
-        <button class="btn-primary" @click="downloadReport">
-          <v-icon>mdi-download</v-icon> Download Report
-        </button>
+        <div class="download-row">
+          <button class="btn-primary" @click="downloadReport('html')">
+            <v-icon>mdi-download</v-icon> Download HTML (with charts)
+          </button>
+          <button class="btn-secondary" @click="downloadReport('json')">
+            <v-icon>mdi-code-json</v-icon> Download JSON
+          </button>
+        </div>
       </div>
     </div>
   </FixedLayout>
@@ -75,7 +81,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import ExcelViewer from '@/components/ExcelViewer.vue'
-import { datasetAPI } from '@/services/api'
+import { datasetAPI, fredAPI } from '@/services/api'
 import sessionManager from '@/services/sessionManager.js'
 
 const router = useRouter()
@@ -83,6 +89,8 @@ const route = useRoute()
 
 const selectedType = ref('current')
 const previewData = ref(null)
+const yieldCurveData = ref(null)
+const reportError = ref('')
 const dataset = ref(null)
 const showDatasetPreview = ref(false)
 
@@ -91,7 +99,24 @@ function selectReportType(type) {
   generatePreview()
 }
 
-function generatePreview() {
+async function loadFredForReport() {
+  reportError.value = ''
+  try {
+    const res = await fredAPI.getYieldCurve('all')
+    if (res?.success && res.data?.datasets?.length) {
+      yieldCurveData.value = res.data
+    } else {
+      reportError.value = 'FRED yield data not available. Check backend .env FRED_API_KEY.'
+      yieldCurveData.value = null
+    }
+  } catch (e) {
+    reportError.value = e.message || 'Failed to load FRED data'
+    yieldCurveData.value = null
+  }
+}
+
+async function generatePreview() {
+  await loadFredForReport()
   const reportType = localStorage.getItem('report_type') || selectedType.value
   // Prefer active_session from localStorage, otherwise pick first session from sessionManager
   let session = {}
@@ -130,12 +155,54 @@ function generatePreview() {
   }
 }
 
-function downloadReport() {
-  const blob = new Blob([JSON.stringify(previewData.value, null, 2)], { type: 'application/json' })
+function buildReportHtml() {
+  const yc = yieldCurveData.value
+  const chartBlock = yc?.datasets?.length
+    ? `<h2>Yield Curves (FRED)</h2><canvas id="fredChart" height="120"></canvas>
+       <script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>
+       <script>
+         const ctx = document.getElementById('fredChart').getContext('2d');
+         new Chart(ctx, {
+           type: 'line',
+           data: {
+             labels: ${JSON.stringify(yc.labels)},
+             datasets: ${JSON.stringify(yc.datasets.map(d => ({
+               label: d.label,
+               data: d.data,
+               borderColor: d.borderColor || '#0B2044',
+               tension: 0.35
+             })))}
+           },
+           options: { responsive: true, plugins: { legend: { position: 'top' } } }
+         });
+       <\/script>`
+    : '<p><em>FRED yield curves not loaded.</em></p>'
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>DuraCapital Report</title>
+    <style>body{font-family:Arial,sans-serif;margin:40px;color:#333}h1{color:#0B2044}
+    pre{background:#f5f5f5;padding:16px;border-radius:8px;overflow:auto}</style></head><body>
+    <h1>DuraCapital Report</h1><p>Generated: ${new Date().toLocaleString()}</p>
+    ${chartBlock}
+    <h2>Report Data</h2><pre>${JSON.stringify(previewData.value, null, 2)}</pre>
+    </body></html>`
+}
+
+function downloadReport(format = 'html') {
+  if (format === 'json') {
+    const blob = new Blob([JSON.stringify({ ...previewData.value, yieldCurve: yieldCurveData.value }, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `report_${Date.now()}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    return
+  }
+  const blob = new Blob([buildReportHtml()], { type: 'text/html' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `report_${Date.now()}.json`
+  a.download = `report_${Date.now()}.html`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -335,6 +402,26 @@ onMounted(() => {
 
 .btn-primary {
   background: linear-gradient(135deg, #0B2044, #1E88E5);
+  color: white;
+  border: none;
+  padding: 12px 28px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.download-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-secondary {
+  background: #1E88E5;
   color: white;
   border: none;
   padding: 12px 28px;

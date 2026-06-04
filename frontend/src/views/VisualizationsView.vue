@@ -53,8 +53,69 @@
             <v-icon class="title-icon">mdi-chart-line</v-icon> Yield Curve (FRED API)
           </v-card-title>
           <v-card-text>
+            <v-row class="mb-3">
+              <v-col cols="12" md="3">
+                <v-select
+                  v-model="selectedInstrument"
+                  :items="instrumentOptions"
+                  label="Instrument"
+                  density="compact"
+                  @update:model-value="loadYieldCurve"
+                />
+              </v-col>
+              <v-col cols="12" md="3">
+                <v-select
+                  v-model="fredFilters.country"
+                  :items="countryItems"
+                  item-title="name"
+                  item-value="code"
+                  label="Country / region"
+                  density="compact"
+                  @update:model-value="() => { onCountryChange(); loadYieldCurve() }"
+                />
+              </v-col>
+              <v-col cols="12" md="3">
+                <v-select
+                  v-model="fredFilters.currency"
+                  :items="currencyItems"
+                  item-title="name"
+                  item-value="code"
+                  label="Currency"
+                  density="compact"
+                  @update:model-value="loadYieldCurve"
+                />
+              </v-col>
+              <v-col cols="12" md="3">
+                <v-select
+                  v-model="fredFilters.maturity"
+                  :items="maturityItems"
+                  item-title="name"
+                  item-value="code"
+                  label="Benchmark maturity"
+                  density="compact"
+                  @update:model-value="loadYieldCurve"
+                />
+              </v-col>
+            </v-row>
+            <p class="fred-note mb-2">
+              Market data from FRED — {{ fredFilters.country }} ({{ fredFilters.currency }}). Non-US countries use government bond yields available on FRED.
+            </p>
+            <v-alert v-if="yieldError" type="warning" density="compact" class="mb-3">{{ yieldError }}</v-alert>
             <div class="chart-container">
               <canvas ref="yieldCanvas"></canvas>
+            </div>
+          </v-card-text>
+        </v-card>
+
+        <!-- Compare all instruments -->
+        <v-card class="chart-card">
+          <v-card-title class="card-title">
+            <v-icon class="title-icon">mdi-chart-multiline</v-icon> Instrument Comparison (FRED)
+          </v-card-title>
+          <v-card-text>
+            <p class="mb-3">Compare Treasury Bills, Bonds, and Money Market on the same chart.</p>
+            <div class="chart-container">
+              <canvas ref="compareCanvas"></canvas>
             </div>
           </v-card-text>
         </v-card>
@@ -88,6 +149,7 @@ import { ref, nextTick, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import api from '@/services/api.js'
+import { useFredMarket } from '@/composables/useFredMarket'
 import { Chart, registerables } from 'chart.js'
 
 Chart.register(...registerables)
@@ -99,12 +161,21 @@ const route = useRoute()
 const hasData = ref(false)
 const calcData = ref(null)
 const yieldData = ref(null)
+const yieldError = ref('')
+const selectedInstrument = ref('all')
+const instrumentOptions = [
+  { title: 'All Instruments', value: 'all' },
+  { title: 'Treasury Bills', value: 'treasury_bills' },
+  { title: 'Bonds', value: 'bonds' },
+  { title: 'Money Market', value: 'money_market' }
+]
 
-// Canvas refs
+const { fredFilters, countryItems, currencyItems, maturityItems, loadFilterOptions, onCountryChange } = useFredMarket('1Y')
+
 const yieldCanvas = ref(null)
-
-// Chart instances
+const compareCanvas = ref(null)
 let yieldChart = null
+let compareChart = null
 
 // KPI Stats
 const kpiStats = ref([
@@ -134,10 +205,14 @@ async function loadData() {
     hasData.value = true
 
     kpiStats.value[0].value = calculations.length
-    kpiStats.value[1].value = res.data.instrument_type || 'Money Market'
-    kpiStats.value[2].value = getAvgYield(calculations) + '%'
+    const inst = (res.data.instrument_type || 'money_market').toLowerCase().replace('-', '_')
+    kpiStats.value[1].value = inst.replace('_', ' ')
+    selectedInstrument.value = inst
+    kpiStats.value[2].value = (calcData.value.fred?.benchmark_rate ?? getAvgYield(calculations)) + '%'
+    if (calcData.value.fred?.maturity) fredFilters.value.maturity = calcData.value.fred.maturity
 
     await loadYieldCurve()
+    await loadComparisonChart()
     console.log(`Loaded ${calculations.length} records`)
   } catch (err) {
     console.error(err)
@@ -159,67 +234,120 @@ function clearData() {
     hasData.value = false
     calcData.value = null
     if (yieldChart) { yieldChart.destroy(); yieldChart = null }
+    if (compareChart) { compareChart.destroy(); compareChart = null }
     alert('Data cleared')
   }
 }
 
-// Load yield curve from backend
+function chartDatasets(payload) {
+  if (payload.datasets && payload.datasets.length) {
+    return payload.datasets.map(d => ({
+      label: d.label,
+      data: d.data,
+      maturities: d.maturities || payload.labels,
+      borderColor: d.borderColor || '#0B2044',
+      backgroundColor: 'rgba(11, 42, 68, 0.08)',
+      borderWidth: 2,
+      fill: false,
+      tension: 0.35
+    }))
+  }
+  return [{
+    label: 'Yield Curve',
+    data: payload.current || [],
+    borderColor: '#0B2044',
+    backgroundColor: 'rgba(11, 42, 68, 0.1)',
+    borderWidth: 2,
+    fill: true,
+    tension: 0.35
+  }]
+}
+
 async function loadYieldCurve() {
+  yieldError.value = ''
   try {
-    // Determine instrument type from latest calculation data
-    const instTypeRaw = (calcData.value && calcData.value.instrument_type) || kpiStats.value[1].value || 'all'
-    // Map display names to API instrument types if necessary
-    const map = { 'Money Market': 'money-market', 'Bonds': 'bonds', 'T-Bills': 'tbills', 'money-market': 'money-market', 'tbills': 'tbills' }
-    const instParam = map[instTypeRaw] || instTypeRaw || 'all'
-    const data = await api.fredAPI.getYieldCurve(instParam)
-    if (data && data.success && data.data && data.data.labels && data.data.labels.length) {
-      yieldData.value = data.data
+    const res = await api.fredAPI.getYieldCurve(
+      selectedInstrument.value,
+      fredFilters.value.country,
+      fredFilters.value.currency
+    )
+    if (res?.success && res.data?.labels?.length) {
+      yieldData.value = res.data
     } else {
-      // final fallback
-      yieldData.value = { labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'], current: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1] }
+      yieldError.value = res?.data?.error || 'No FRED data. Check API key in backend .env'
+      yieldData.value = null
     }
     await nextTick()
     renderYieldChart()
   } catch (err) {
-    console.error('Yield curve load error:', err)
-    yieldData.value = { labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'], current: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1] }
-    renderYieldChart()
+    yieldError.value = err.message || 'Failed to load FRED data'
+    console.error(err)
   }
 }
 
-// Render yield curve chart
 function renderYieldChart() {
   if (!yieldCanvas.value || !yieldData.value) return
   if (yieldChart) yieldChart.destroy()
-  
   const ctx = yieldCanvas.value.getContext('2d')
   yieldChart = new Chart(ctx, {
     type: 'line',
-    data: {
-      labels: yieldData.value.labels,
-      datasets: [{
-        label: 'Yield Curve',
-        data: yieldData.value.current,
-        borderColor: '#0B2A44',
-        backgroundColor: 'rgba(11, 42, 68, 0.1)',
-        borderWidth: 2,
-        fill: true,
-        tension: 0.4
-      }]
-    },
+    data: { labels: yieldData.value.labels, datasets: chartDatasets(yieldData.value) },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
         legend: { position: 'top' },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.raw}%` } }
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const m = ctx.dataset.maturities?.[ctx.dataIndex] || ctx.label
+              return `${m}: ${ctx.raw}%`
+            }
+          }
+        }
       },
       scales: {
-        y: { title: { display: true, text: 'Yield (%)' }, beginAtZero: true },
+        y: { title: { display: true, text: 'Yield (%)' } },
         x: { title: { display: true, text: 'Maturity' } }
       }
     }
   })
+}
+
+async function loadComparisonChart() {
+  try {
+    const res = await api.fredAPI.getYieldCurve('all', fredFilters.value.country, fredFilters.value.currency)
+    if (!res?.success || !res.data?.datasets?.length) return
+    await nextTick()
+    if (compareChart) compareChart.destroy()
+    const ctx = compareCanvas.value?.getContext('2d')
+    if (!ctx) return
+    compareChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: res.data.labels, datasets: chartDatasets(res.data) },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const m = ctx.dataset.maturities?.[ctx.dataIndex] || ''
+                return `${ctx.dataset.label} ${m}: ${ctx.raw}%`
+              }
+            }
+          }
+        },
+        scales: {
+          y: { title: { display: true, text: 'Yield (%)' } },
+          x: { title: { display: true, text: 'Tenor rank (hover for maturity)' } }
+        }
+      }
+    })
+  } catch (err) {
+    console.error('Comparison chart error:', err)
+  }
 }
 
 // Navigate to reports
@@ -232,10 +360,9 @@ function goToReports() {
   router.push({ name: 'reports', query: { dataset_id: datasetId } })
 }
 
-onMounted(() => {
-  if (route.query.dataset_id) {
-    loadData()
-  }
+onMounted(async () => {
+  await loadFilterOptions()
+  if (route.query.dataset_id) loadData()
 })
 </script>
 
@@ -256,6 +383,7 @@ onMounted(() => {
 .card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
 .title-icon { margin-right: 8px; }
 
+.fred-note { font-size: 13px; color: #666; }
 .chart-container { height: 400px; position: relative; padding: 16px; }
 
 .kpi-card { height: 120px; border-radius: 12px; transition: 0.2s; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }

@@ -108,14 +108,32 @@ export const fredAPI = {
   getSeries: (seriesId, limit = 365, sortOrder = 'desc') =>
     callAPI(`/api/fred/series/${seriesId}?limit=${limit}&sort_order=${sortOrder}`),
   getCategories: () => callAPI('/api/fred/categories'),
-  getYieldCurve: (instrumentType = 'all') =>
-    callAPI(`/api/fred-yield-curve?instrument_type=${instrumentType}`)
+  getYieldCurve: (instrumentType = 'all', country = 'US', currency = 'USD') =>
+    callAPI(
+      `/api/fred-yield-curve?instrument_type=${encodeURIComponent(instrumentType)}&country=${country}&currency=${currency}`
+    ),
+  getFilters: () => callAPI('/api/fred/filters'),
+  getBenchmark: (instrumentType, maturity = '1Y', country = 'US', currency = 'USD') =>
+    callAPI(
+      `/api/fred/benchmark?instrument_type=${encodeURIComponent(instrumentType)}&maturity=${maturity}&country=${country}&currency=${currency}`
+    ),
+  getSeriesByMaturity: (maturity, country = 'US') =>
+    callAPI(`/api/fred/series-by-maturity?maturity=${maturity}&country=${country}`)
 }
 
 // ========== SESSIONS ==========
 export const sessionsAPI = {
   save: (session) => callAPI('/api/sessions/save', 'POST', session),
-  get: (session_id) => callAPI('/api/sessions/get', 'POST', { session_id }),
+  get: async (session_id) => {
+    try {
+      return await callAPI('/api/sessions/get', 'POST', { session_id })
+    } catch (e) {
+      if (e.message === 'Not found' || e.message?.includes('not found')) {
+        return { success: true, data: null }
+      }
+      throw e
+    }
+  },
   list: () => callAPI('/api/sessions/list', 'GET'),
   delete: (session_id) => callAPI('/api/sessions/delete', 'POST', { session_id })
 }
