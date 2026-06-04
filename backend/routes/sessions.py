@@ -136,7 +136,8 @@ def sessions_routes(app):
             cursor.close()
             conn.close()
             if not row:
-                return jsonify({'success': False, 'message': 'Not found'}), 404
+                # Local-only session (not saved to DB yet) — avoid 404 noise in browser
+                return jsonify({'success': True, 'data': None, 'message': 'Session not in database yet'}), 200
             try:
                 payload = json.loads(row.get('payload') or '{}')
             except Exception:

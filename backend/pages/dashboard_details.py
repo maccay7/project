@@ -90,54 +90,12 @@ def get_dashboard_charts():
         return {'labels': [], 'values': []}
 
 
-def get_yield_curve(instrument_type='all'):
-    """
-    Fetches real yield curve data from FRED API.
-    Returns empty arrays if no data or API key missing.
-    """
-    if not FRED_API_KEY:
-        return {'labels': [], 'current': []}
-
-    # Series mapping should be provided via environment to avoid hardcoding.
-    # Example: FRED_DEFAULT_SERIES_MAP='{ "bonds": "DGS10", "money_market": "DTB3", "tbills": "DTB3", "all": "DGS10" }'
-    series_map = {}
-    map_json = os.environ.get('FRED_DEFAULT_SERIES_MAP')
-    if map_json:
-        try:
-            series_map = json.loads(map_json)
-        except Exception:
-            series_map = {}
-
-    series_id = series_map.get(instrument_type) or series_map.get('all')
-    if not series_id:
-        # No configured default series for this instrument type
-        return {'labels': [], 'current': []}
-    params = {
-        'series_id': series_id,
-        'api_key': FRED_API_KEY,
-        'file_type': 'json',
-        'sort_order': 'desc',
-        'limit': 7
-    }
-
+def get_yield_curve(instrument_type='all', country='US', currency='USD'):
+    """Fetch yield curves from FRED (one instrument or all three)."""
+    from utils.fred_config import build_yield_curve_response, FRED_KEY
+    if not FRED_KEY:
+        return {'labels': [], 'current': [], 'datasets': [], 'error': 'FRED API key missing'}
     try:
-        response = requests.get(FRED_URL, params=params, timeout=10)
-        response.raise_for_status()
-        payload = response.json()
-        observations = payload.get('observations', [])
-        if not observations:
-            return {'labels': [], 'current': []}
-        # Take only up to 7 observations
-        observations = observations[:7]
-        labels = [obs.get('date', '') for obs in observations]
-        current = []
-        for obs in observations:
-            value = obs.get('value', '')
-            try:
-                current.append(float(value))
-            except (ValueError, TypeError):
-                current.append(0.0)
-        # Reverse to have ascending order (oldest to newest)
-        return {'labels': labels[::-1], 'current': current[::-1]}
-    except Exception:
-        return {'labels': [], 'current': []}
+        return build_yield_curve_response(instrument_type, country, currency)
+    except Exception as err:
+        return {'labels': [], 'current': [], 'datasets': [], 'error': str(err)}

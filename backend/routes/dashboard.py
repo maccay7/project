@@ -31,4 +31,6 @@ def dashboard_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
         instrument_type = request.args.get('instrument_type', 'all')
-        return jsonify({'success': True, 'data': get_yield_curve(instrument_type)})
+        country = request.args.get('country', 'US')
+        currency = request.args.get('currency', 'USD')
+        return jsonify({'success': True, 'data': get_yield_curve(instrument_type, country, currency)})

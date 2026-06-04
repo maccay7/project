@@ -2,6 +2,11 @@ import os
 import requests
 from flask import request, jsonify
 from dotenv import load_dotenv
+from utils.fred_config import (
+    build_filter_options,
+    get_market_benchmark,
+    series_for_country,
+)
 
 load_dotenv()
 
@@ -67,3 +72,42 @@ def fred_routes(app):
             }
         }
         return jsonify({'success': True, 'categories': categories})
+
+    @app.route('/api/fred/filters', methods=['GET', 'OPTIONS'])
+    def fred_filters():
+        if request.method == 'OPTIONS':
+            return '', 200
+        return jsonify({'success': True, 'data': build_filter_options()})
+
+    @app.route('/api/fred/benchmark', methods=['GET', 'OPTIONS'])
+    def fred_benchmark():
+        if request.method == 'OPTIONS':
+            return '', 200
+        if not FRED_API_KEY:
+            return jsonify({'success': False, 'error': 'FRED API key not configured'}), 500
+        inst = request.args.get('instrument_type', 'money_market')
+        maturity = request.args.get('maturity', '1Y')
+        country = request.args.get('country', 'US')
+        currency = request.args.get('currency', 'USD')
+        data = get_market_benchmark(inst, maturity, country, currency)
+        if data.get('error'):
+            return jsonify({'success': False, 'error': data['error'], 'data': data}), 400
+        if data.get('benchmark_rate') is None:
+            return jsonify({'success': False, 'error': 'No FRED data for this series', 'data': data}), 404
+        return jsonify({'success': True, 'data': data})
+
+    @app.route('/api/fred/series-by-maturity', methods=['GET', 'OPTIONS'])
+    def fred_series_by_maturity():
+        if request.method == 'OPTIONS':
+            return '', 200
+        maturity = request.args.get('maturity', '1Y')
+        country = request.args.get('country', 'US')
+        series_id, label, used_mat, _, _, note = series_for_country(country, maturity)
+        return jsonify({
+            'success': True,
+            'series_id': series_id,
+            'label': label,
+            'maturity': used_mat,
+            'country': country.upper(),
+            'note': note,
+        })

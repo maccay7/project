@@ -107,8 +107,13 @@ def calculations_routes(app):
             return jsonify({'success': False, 'message': 'Data must be an array'}), 400
         inst_type = normalize_instrument_type(instrument_type)
         dataset_id = payload.get('dataset_id')
+        country = payload.get('country', 'US')
+        currency = payload.get('currency', 'USD')
+        maturity = payload.get('maturity', '1Y')
         try:
             result = calculate_data(data, inst_type)
+            from utils.fred_config import attach_fred_to_calculation
+            attach_fred_to_calculation(result, inst_type, maturity, country, currency)
             save_calculation(instrument_type, data, result, dataset_id)
             return jsonify({'success': True, 'data': result})
         except Exception as e:
@@ -139,8 +144,13 @@ def calculations_routes(app):
         data = payload.get('data', [])
         instrument_type = normalize_instrument_type(payload.get('instrument_type', 'tbills'))
         dataset_id = payload.get('dataset_id')
+        country = payload.get('country', 'US')
+        currency = payload.get('currency', 'USD')
+        maturity = payload.get('maturity', '1Y')
         try:
             result = calculate_data(data, instrument_type)
+            from utils.fred_config import attach_fred_to_calculation
+            attach_fred_to_calculation(result, instrument_type, maturity, country, currency)
             save_calculation(instrument_type, data, result, dataset_id)
             return jsonify({'success': True, 'data': result})
         except Exception as e:
