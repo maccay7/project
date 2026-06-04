@@ -106,17 +106,21 @@ def build_filter_options():
             'name': info['name'],
             'currency': info['currency'],
             'maturities': [
-                {'code': m, 'name': info['series'][m][1]}
+                {'code': m, 'name': f'{m} – {info["series"][m][1]}'}
                 for m in info['series']
             ],
         })
     currencies = []
     seen = set()
-    for info in COUNTRY_DATA.values():
-        c = info['currency']
+    extra = ['USD', 'EUR', 'GBP', 'ZAR', 'JPY', 'CAD', 'AUD', 'BRL', 'INR', 'MXN', 'CNY', 'CHF', 'NGN', 'KES']
+    for c in extra:
         if c not in seen:
             seen.add(c)
             currencies.append({'code': c, 'name': c})
+    for info in COUNTRY_DATA.values():
+        if info['currency'] not in seen:
+            seen.add(info['currency'])
+            currencies.append({'code': info['currency'], 'name': info['currency']})
     return {
         'countries': countries,
         'currencies': currencies,
@@ -136,8 +140,22 @@ def normalize_type(instrument_type):
     return t
 
 
+def resolve_country_input(country):
+    """Match code or country name (typed search)."""
+    raw = (country or 'US').strip()
+    key = raw.upper()
+    if key in COUNTRY_DATA:
+        return key
+    low = raw.lower()
+    for code, info in COUNTRY_DATA.items():
+        if info['name'].lower() == low or low in info['name'].lower():
+            return code
+    return key if len(key) == 2 else None
+
+
 def get_country(country_code):
-    return COUNTRY_DATA.get((country_code or 'US').upper(), COUNTRY_DATA['US'])
+    resolved = resolve_country_input(country_code) or 'US'
+    return COUNTRY_DATA.get(resolved, COUNTRY_DATA['US'])
 
 
 def series_for_country(country, maturity):
@@ -191,7 +209,15 @@ def latest_value(series_id):
 def get_market_benchmark(instrument_type, maturity=None, country='US', currency='USD'):
     key = normalize_type(instrument_type)
     mat = (maturity or DEFAULT_BENCHMARK.get(key, '10Y')).upper()
-    c = get_country(country)
+    resolved = resolve_country_input(country)
+    if not resolved or resolved not in COUNTRY_DATA:
+        return {
+            'error': f'Country "{country}" not in FRED catalog. Choose from the list or use US, GB, ZA, etc.',
+            'country': country,
+            'currency': currency,
+        }
+    c = COUNTRY_DATA[resolved]
+    country = resolved
 
     if currency.upper() != c['currency']:
         return {
