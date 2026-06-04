@@ -1,67 +1,78 @@
 <template>
   <FixedLayout>
     <div class="summary-page">
-      <div class="page-header">
-        <div class="header-title">
+      <div class="page-header hero-header">
+        <div>
           <h1>Portfolio Summary</h1>
-          <div class="session-name" v-if="activeSession">{{ activeSession.name }}</div>
-          <div v-else class="session-name warning">No active session</div>
+          <p class="subtitle">Consolidated valuation across Money Market, Bonds, and T-Bills</p>
+          <div class="session-chip" v-if="activeSession">
+            <v-icon size="16">mdi-folder-account</v-icon> {{ activeSession.name }}
+          </div>
+          <div v-else class="session-chip warn">No active session — open Dashboard first</div>
+        </div>
+        <div class="grand-pill">
+          <span class="pill-label">Total portfolio</span>
+          <span class="pill-amount">${{ formatNumber(grandTotal) }}</span>
+          <span class="pill-sub">{{ totalInstruments }} instruments · {{ completedCount }}/3 classes done</span>
         </div>
       </div>
-      <div class="section-header">
-        <v-icon color="#0B2044" size="20">mdi-chart-areaspline</v-icon>
-        <h2>Instrument Breakdown</h2>
+
+      <div class="kpi-strip">
+        <div class="kpi-mini" v-for="k in quickKpis" :key="k.label">
+          <v-icon size="20" :color="k.color">{{ k.icon }}</v-icon>
+          <div>
+            <span class="kpi-mini-val">{{ k.value }}</span>
+            <span class="kpi-mini-lbl">{{ k.label }}</span>
+          </div>
+        </div>
       </div>
+
+      <div class="section-header">
+        <v-icon color="#0B2044" size="22">mdi-chart-areaspline</v-icon>
+        <h2>Instrument breakdown</h2>
+      </div>
+
       <div class="summary-cards">
         <div class="summary-card" v-for="inst in instruments" :key="inst.id">
-          <div class="card-icon" :style="{ background: inst.gradient }">
-            <v-icon size="28" color="white">{{ inst.icon }}</v-icon>
-          </div>
-          <div class="card-content">
+          <div class="card-top" :style="{ background: inst.gradient }">
+            <v-icon size="32" color="white">{{ inst.icon }}</v-icon>
             <h3>{{ inst.name }}</h3>
-            <div class="card-stats">
-              <div class="stat-item">
-                <div class="stat-label">Total Value</div>
-                <div class="stat-value">${{ formatNumber(inst.value) }}</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-label">Count</div>
-                <div class="stat-value">{{ inst.count }}</div>
-              </div>
-              <div class="stat-item" v-if="inst.avgRate !== null">
-                <div class="stat-label">{{ inst.rateLabel }}</div>
-                <div class="stat-value">{{ inst.avgRate }}%</div>
-              </div>
-              <div class="stat-item" v-if="inst.weightedAvg !== null">
-                <div class="stat-label">Weighted Avg</div>
-                <div class="stat-value">{{ inst.weightedAvg }}%</div>
-              </div>
-              <div class="stat-item" v-if="inst.totalInterest !== null">
-                <div class="stat-label">{{ inst.interestLabel }}</div>
-                <div class="stat-value">${{ formatNumber(inst.totalInterest) }}</div>
-              </div>
+          </div>
+          <div class="card-body">
+            <div class="stat-row highlight">
+              <span>Total value</span>
+              <strong>${{ formatNumber(inst.value) }}</strong>
             </div>
-            <div v-if="inst.completed" class="status-badge completed">
-              <v-icon size="12">mdi-check-circle</v-icon> Completed
+            <div class="stat-row">
+              <span>Count</span>
+              <strong>{{ inst.count }}</strong>
             </div>
-            <div v-else-if="inst.value > 0" class="status-badge in-progress">
-              <v-icon size="12">mdi-progress-clock</v-icon> In Progress
+            <div class="stat-row" v-if="inst.avgRate !== null">
+              <span>{{ inst.rateLabel }}</span>
+              <strong>{{ inst.avgRate }}%</strong>
             </div>
-            <div v-else class="status-badge pending">
-              <v-icon size="12">mdi-clock-outline</v-icon> Not Started
+            <div class="stat-row" v-if="inst.fredBench != null">
+              <span>FRED benchmark</span>
+              <strong>{{ inst.fredBench }}%</strong>
             </div>
+            <div class="status-badge" :class="inst.statusClass">
+              <v-icon size="14">{{ inst.statusIcon }}</v-icon> {{ inst.statusText }}
+            </div>
+            <button class="btn-open-inst" @click="openInstrument(inst.id)">Open workflow →</button>
           </div>
         </div>
       </div>
-      <div class="grand-total-card">
-        <div class="grand-total-content">
-          <div class="grand-total-left">
-            <h2>Grand Total</h2>
-            <p>Combined value of all instruments</p>
-          </div>
-          <div class="grand-total-right">
-            <div class="grand-total-amount">${{ formatNumber(grandTotal) }}</div>
-          </div>
+
+      <div class="action-buttons">
+        <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
+        <button class="btn-primary" @click="goToReport">Continue to Report →</button>
+      </div>
+
+      <div class="workflow-card">
+        <h3><v-icon size="20">mdi-progress-check</v-icon> Session workflow</h3>
+        <p class="wf-hint">Each instrument saves upload, clean, calculate, and visualize steps to your session in the database.</p>
+        <div class="workflow-steps">
+          <span v-for="step in workflowSteps" :key="step" class="wf" :class="{ done: stepDone(step) }">{{ step }}</span>
         </div>
       </div>
     </div>
@@ -70,122 +81,137 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import sessionManager from '@/services/sessionManager.js'
 
+const router = useRouter()
 const activeSession = ref(null)
 const instruments = ref([])
 
 const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
+const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
+const completedCount = computed(() => instruments.value.filter(i => i.completed).length)
 
-function formatNumber(num) {
-  return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const quickKpis = computed(() => [
+  { label: 'Asset classes', value: `${completedCount.value}/3`, icon: 'mdi-layers-triple', color: '#0B2044' },
+  { label: 'Session status', value: activeSession.value?.status === 'completed' ? 'Complete' : 'In progress', icon: 'mdi-folder-check', color: '#1E88E5' },
+  { label: 'Last updated', value: lastUpdatedLabel.value, icon: 'mdi-clock-outline', color: '#4CAF50' }
+])
+
+const lastUpdatedLabel = computed(() => {
+  const wfs = activeSession.value?.instrumentWorkflow || {}
+  const dates = Object.values(wfs).map(w => w.saved_at).filter(Boolean)
+  if (!dates.length) return '—'
+  return new Date(Math.max(...dates.map(d => new Date(d).getTime()))).toLocaleDateString()
+})
+
+const workflowSteps = ['Upload', 'Clean', 'Calculate', 'Visualize', 'Report']
+
+function stepDone(step) {
+  return completedCount.value > 0
 }
 
-function loadSummary() {
-  // Resolve active session from localStorage or backend via sessionManager
-  let resolved = null
-  const saved = localStorage.getItem('active_session')
-  if (saved) {
-    try {
-      const sid = JSON.parse(saved).id
-      resolved = sessionManager.getSession(sid) || JSON.parse(saved)
-    } catch (e) {
-      resolved = JSON.parse(saved)
-    }
-  } else {
-    const all = sessionManager.getAllSessions() || []
-    resolved = all.length ? all[0] : null
+function formatNumber(num) {
+  return (num || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function openInstrument(id) {
+  if (!activeSession.value) {
+    alert('Select a session on the Dashboard first')
+    router.push('/dashboard')
+    return
   }
-  if (resolved) activeSession.value = resolved
+  router.push({ path: `/instrument/${id}`, query: { session: activeSession.value.id } })
+}
+
+function goToDashboard() {
+  router.push('/dashboard')
+}
+
+function goToReport() {
+  if (!activeSession.value) {
+    alert('No active session')
+    return
+  }
+  router.push({ path: '/instrument/money-market', query: { session: activeSession.value.id, tab: 'reports' } })
+}
+
+async function loadSummary() {
+  const aid = sessionManager.getActiveSessionId()
+  if (aid) {
+    await sessionManager.loadSessionFromDb(aid)
+    activeSession.value = sessionManager.getSession(aid)
+  } else {
+    const all = sessionManager.getAllSessions()
+    activeSession.value = all[0] || null
+  }
 
   const templates = [
-    { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', rateLabel: 'Avg Interest Rate', interestLabel: 'Total Interest' },
-    { id: 'bonds', name: 'Bonds', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', rateLabel: 'Avg Coupon Rate', interestLabel: 'Annual Income' },
-    { id: 'tbills', name: 'T-Bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', rateLabel: 'Avg Discount Rate', interestLabel: 'Total Discount' }
+    { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', rateLabel: 'Avg interest rate' },
+    { id: 'bonds', name: 'Bonds', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', rateLabel: 'Avg coupon' },
+    { id: 'tbills', name: 'T-Bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', rateLabel: 'Avg discount' }
   ]
 
   instruments.value = templates.map(template => {
-    let data = null
-    if (activeSession.value && activeSession.value.instrumentData && activeSession.value.instrumentData[template.id]) {
-      data = activeSession.value.instrumentData[template.id]
-    } else {
-      // Prefer backend session payloads when available
-      if (activeSession.value && activeSession.value.id) {
-        const s = sessionManager.getSession(activeSession.value.id)
-        if (s && s.payload && s.payload.instrumentData && s.payload.instrumentData[template.id]) {
-          data = s.payload.instrumentData[template.id]
-        }
-      }
-      if (!data) {
-        const key = `${template.id}_session_${activeSession.value?.id || ''}_calc`
-        const savedCalc = localStorage.getItem(key)
-        if (savedCalc) data = JSON.parse(savedCalc)
-      }
-    }
-
-    let avgRate = null
-    let weightedAvg = null
-    let totalInterest = null
-    if (data) {
-      if (template.id === 'money-market') {
-        avgRate = data.avgRate
-        weightedAvg = data.weightedAvgRate
-        totalInterest = data.totalInterest
-      } else if (template.id === 'bonds') {
-        avgRate = data.avgCouponRate
-        weightedAvg = data.weightedAvgCoupon
-        totalInterest = data.totalAnnualIncome
-      } else if (template.id === 'tbills') {
-        avgRate = data.avgDiscountRate
-        weightedAvg = data.weightedAvgDiscount
-        totalInterest = data.totalDiscount
-      }
-    }
-
+    const wf = activeSession.value ? sessionManager.getInstrumentWorkflow(activeSession.value.id, template.id) : null
+    const calc = wf?.calculations || activeSession.value?.instrumentData?.[template.id] || {}
+    const completed = !!wf?.calculations?.totalValue || !!calc.completed
+    const value = parseFloat(calc.totalValue) || 0
     return {
       ...template,
-      value: data?.totalValue || 0,
-      count: data?.instrumentCount || 0,
-      completed: data?.completed || false,
-      avgRate: avgRate !== undefined && avgRate !== null ? parseFloat(avgRate).toFixed(2) : null,
-      weightedAvg: weightedAvg !== undefined && weightedAvg !== null ? parseFloat(weightedAvg).toFixed(2) : null,
-      totalInterest: totalInterest !== undefined && totalInterest !== null ? parseFloat(totalInterest) : null
+      value,
+      count: calc.instrumentCount || 0,
+      avgRate: calc.avgRate || calc.avgCouponRate || calc.avgDiscountRate || null,
+      fredBench: calc.fred?.benchmark_rate ?? null,
+      completed,
+      statusClass: completed ? 'completed' : value > 0 ? 'in-progress' : 'pending',
+      statusText: completed ? 'Completed' : value > 0 ? 'In progress' : 'Not started',
+      statusIcon: completed ? 'mdi-check-circle' : value > 0 ? 'mdi-progress-clock' : 'mdi-clock-outline'
     }
   })
 }
 
-onMounted(() => { loadSummary() })
+onMounted(loadSummary)
 </script>
 
 <style scoped>
-.summary-page { padding: 30px; max-width: 1200px; margin: 0 auto; }
-.page-header { margin-bottom: 30px; }
-.header-title h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin: 0 0 12px 0; }
-.session-name { font-size: 18px; font-weight: 700; color: #0B2044; background: linear-gradient(135deg, #f8f9ff, #fff); padding: 8px 20px; border-radius: 30px; display: inline-block; border: 1px solid rgba(11,32,68,0.1); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.session-name.warning { background: #FFF3E0; color: #E65100; border-color: #FFE0B2; }
-.section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; margin-top: 30px; }
-.section-header h2 { color: #0B2044; font-size: 18px; font-weight: 600; margin: 0; }
-.summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 30px; }
-.summary-card { background: white; border-radius: 16px; padding: 20px; display: flex; gap: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); transition: all 0.3s; position: relative; overflow: hidden; }
-.summary-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2044, #1E88E5); transform: scaleX(0); transition: transform 0.3s ease; }
-.summary-card:hover::before { transform: scaleX(1); }
-.summary-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.1); }
-.card-icon { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.card-content { flex: 1; }
-.card-content h3 { color: #0B2044; font-size: 16px; font-weight: 600; margin-bottom: 12px; }
-.card-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 12px; margin-bottom: 12px; }
-.stat-item { text-align: center; }
-.stat-label { font-size: 10px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-value { font-size: 16px; font-weight: 700; color: #0B2044; }
-.status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 600; }
-.status-badge.completed { background: #E8F5E9; color: #4CAF50; }
-.status-badge.in-progress { background: #FFF3E0; color: #FF9800; }
-.status-badge.pending { background: #f5f5f5; color: #999; }
-.grand-total-card { background: linear-gradient(135deg, #0B2044, #1a3a6e); border-radius: 20px; padding: 30px; margin-bottom: 30px; color: white; }
-.grand-total-content { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
-.grand-total-left h2 { font-size: 20px; font-weight: 700; margin-bottom: 5px; }
-.grand-total-left p { opacity: 0.8; font-size: 13px; }
-.grand-total-amount { font-size: 36px; font-weight: 800; }
-@media (max-width: 900px) { .summary-cards { grid-template-columns: 1fr; gap: 16px; } .grand-total-content { flex-direction: column; text-align: center; } }
+.summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
+.hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
+.hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
+.subtitle { color: #666; margin: 0; }
+.session-chip { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 6px 12px; background: #e8ecf1; border-radius: 20px; font-size: 13px; }
+.session-chip.warn { background: #fff3e0; color: #e65100; }
+.grand-pill { text-align: right; padding: 20px 28px; background: linear-gradient(135deg, #0B2044, #1E88E5); border-radius: 14px; color: white; box-shadow: 0 8px 24px rgba(11,32,68,0.2); }
+.pill-label { display: block; font-size: 12px; opacity: 0.9; }
+.pill-amount { font-size: 30px; font-weight: 700; display: block; }
+.pill-sub { font-size: 12px; opacity: 0.85; }
+.kpi-strip { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }
+.kpi-mini { display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); flex: 1; min-width: 160px; }
+.kpi-mini-val { display: block; font-weight: 700; color: #0B2044; font-size: 16px; }
+.kpi-mini-lbl { font-size: 12px; color: #666; }
+.section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.section-header h2 { color: #0B2044; margin: 0; font-size: 20px; }
+.summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+.summary-card { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(11,32,68,0.1); background: white; }
+.card-top { padding: 20px; color: white; display: flex; align-items: center; gap: 12px; }
+.card-top h3 { margin: 0; font-size: 18px; }
+.card-body { padding: 16px; }
+.stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 14px; }
+.stat-row.highlight strong { color: #0B2044; font-size: 16px; }
+.status-badge { margin-top: 12px; padding: 8px 12px; border-radius: 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+.status-badge.completed { background: #e8f5e9; color: #2e7d32; }
+.status-badge.in-progress { background: #e3f2fd; color: #1565c0; }
+.status-badge.pending { background: #f5f5f5; color: #757575; }
+.btn-open-inst { margin-top: 12px; width: 100%; padding: 10px; background: #0B2044; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.btn-open-inst:hover { background: #1a3a6e; }
+.action-buttons { display: flex; gap: 16px; justify-content: center; margin-top: 32px; }
+.btn-primary, .btn-secondary { padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; }
+.btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; }
+.btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; }
+.workflow-card { margin-top: 32px; padding: 24px; background: linear-gradient(135deg, #f8f9ff, #fff); border-radius: 12px; border: 1px solid #e8ecf1; }
+.wf-hint { color: #666; font-size: 13px; margin: 8px 0 16px; }
+.workflow-steps { display: flex; gap: 12px; flex-wrap: wrap; }
+.wf { padding: 8px 16px; border-radius: 20px; background: #e0e0e0; font-size: 13px; }
+.wf.done { background: #0B2044; color: white; }
 </style>

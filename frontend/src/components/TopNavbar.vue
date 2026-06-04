@@ -3,8 +3,8 @@
     <div class="logo-area">
       <div class="logo-placeholder">
         <img 
-          src="/DuraCapital logo.png" 
-          alt="DuraCapital Logo" 
+          src="/DataStudio-logo.jpeg" 
+          alt="DataStudio Logo" 
           class="navbar-logo"
           @error="e => e.target.style.display = 'none'"
         />
@@ -68,7 +68,8 @@ function handleLogout() {
 
 .navbar-logo {
   width: 180px;
-  height: 200px;
+  max-height: 48px;
+  height: auto;
   object-fit: contain;
   border-radius: 8px;
 }

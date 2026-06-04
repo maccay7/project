@@ -52,16 +52,7 @@
                 <small>Supported: CSV, Excel files</small>
               </div>
 
-              <div v-if="uploadedFile" class="file-info">
-                <v-icon>mdi-file-excel</v-icon>
-                <span>{{ uploadedFile.name }}</span>
-                <span class="file-size">{{ fileSize }}</span>
-                <button class="remove-btn" @click="removeFile">×</button>
-                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData.length">Review Excel</button>
-                <button class="btn-mapping" @click="autoMatchColumns" :disabled="!rawData.length">Map Columns</button>
-              </div>
-
-              <!-- Upload History Section -->
+              <!-- Upload History Section (moved here) -->
               <div v-if="uploadHistory.length" class="upload-history">
                 <h4>📁 Upload History ({{ uploadHistory.length }} files)</h4>
                 <div class="history-list">
@@ -74,33 +65,20 @@
                 </div>
               </div>
 
+              <div v-if="uploadedFile" class="file-info">
+                <v-icon>mdi-file-excel</v-icon>
+                <span>{{ uploadedFile.name }}</span>
+                <span class="file-size">{{ fileSize }}</span>
+                <button class="remove-btn" @click="removeFile">×</button>
+                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData.length">Review Excel</button>
+                <button class="btn-mapping" @click="autoMatchColumns" :disabled="!rawData.length">Map Columns</button>
+              </div>
+
               <div v-if="rawData.length" class="excel-preview-section">
-                <h4>File Preview:</h4>
-                <div class="preview-toolbar">
-                  <span class="preview-info">{{ rawData.length }} rows × {{ Object.keys(rawData[0] || {}).length }} columns</span>
-                  <div class="preview-controls">
-                    <button @click="previewStartRow = Math.max(0, previewStartRow - 10)" :disabled="previewStartRow === 0" class="preview-btn">← Previous</button>
-                    <span>Rows {{ previewStartRow + 1 }} - {{ Math.min(previewEndRow, rawData.length) }}</span>
-                    <button @click="previewStartRow = Math.min(rawData.length - previewRows, previewStartRow + 10)" :disabled="previewEndRow >= rawData.length" class="preview-btn">Next →</button>
-                    <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
-                  </div>
-                </div>
-                <div class="table-wrapper">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th v-for="col in previewColumnsList" :key="col">{{ col }}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="(row, idx) in paginatedPreviewData" :key="idx">
-                        <td class="row-number">{{ previewStartRow + idx + 1 }}</td>
-                        <td v-for="col in previewColumnsList" :key="col">{{ formatCellValue(row[col]) }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                <h4>File Preview (Excel)</h4>
+                <p class="preview-info">{{ rawData.length }} rows — edit cells below like Excel</p>
+                <ExcelViewer :data="rawData" :headers="uploadPreviewHeaders" @data-update="onRawExcelUpdate" />
+                <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
               </div>
 
               <!-- Column Mapping Dialog -->
@@ -163,6 +141,7 @@
                   <h3>Cleaning Filters (select any combination)</h3>
                   <div class="filter-scroll-container">
                     <div class="options-list">
+                      <!-- Full list of cleaning options – same as your original -->
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeDuplicates"> Remove duplicate rows</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingNumeric"> Fill missing numeric with:
                         <select v-model="cleaningOptions.fillMethod"><option value="zero">Zero</option><option value="mean">Mean</option><option value="median">Median</option></select>
@@ -199,23 +178,11 @@
 
                 <div v-if="previewData.length" class="preview-section">
                   <h4>Preview of Cleaned Data ({{ previewData.length }} rows)</h4>
-                  <div class="table-wrapper">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th v-for="col in previewColumnsListClean" :key="col">{{ col }}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr v-for="(row, idx) in previewData.slice(0,10)" :key="idx">
-                          <td class="row-number">{{ idx+1 }}</td>
-                          <td v-for="col in previewColumnsListClean" :key="col">{{ formatCellValue(row[col]) }}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                  <p v-if="previewData.length > 10" class="preview-note">Showing first 10 rows</p>
+                  <ExcelViewer :data="previewData" :headers="cleanPreviewHeaders" @data-update="onCleanPreviewUpdate" />
+                </div>
+                <div v-if="cleanedData.length && !previewData.length" class="preview-section">
+                  <h4>Cleaned dataset</h4>
+                  <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
                 </div>
 
                 <div v-if="cleanedData.length" class="highlight-box">
@@ -304,9 +271,12 @@
                   </div>
                   <div class="comparison-item">
                     <span class="comparison-label">Spread vs your portfolio:</span>
-                    <span class="comparison-value">{{ calculations.fred.spread_vs_market }}%</span>
+                    <span class="comparison-value" :class="(calculations.fred.spread_vs_market || 0) >= 0 ? 'negative' : 'positive'">
+                      {{ calculations.fred.spread_vs_market }}%
+                    </span>
                   </div>
-                  <small class="fred-meta">{{ calculations.fred.country }} · {{ calculations.fred.currency }} · {{ calculations.fred.maturity }} · FRED API</small>
+                  <small class="fred-meta">{{ calculations.fred.country_name || calculations.fred.country }} · {{ calculations.fred.currency }} · {{ calculations.fred.maturity }} · FRED</small>
+                  <small v-if="calculations.fred.note" class="fred-meta">{{ calculations.fred.note }}</small>
                 </div>
 
                 <div class="calculations-section">
@@ -351,7 +321,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== VISUALIZATIONS TAB ==================== -->
+        <!-- ==================== VISUALIZATIONS TAB (FIXED) ==================== -->
         <div v-if="activeTab === 'visualizations'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-chart-line</v-icon> {{ instrumentName }} – Market Yield Curves</v-card-title>
@@ -370,22 +340,14 @@
                 </div>
               </div>
 
-              <div class="chart-controls fred-filters-row">
-                <select v-model="fredFilters.country" class="series-select" @change="onFredFilterChange('country')">
-                  <option v-for="c in countryItems" :key="c.code" :value="c.code">{{ c.name }}</option>
-                </select>
-                <select v-model="fredFilters.currency" class="series-select" @change="onFredFilterChange('currency')">
-                  <option v-for="c in currencyItems" :key="c.code" :value="c.code">{{ c.name }}</option>
-                </select>
-                <select v-model="fredFilters.maturity" class="series-select" @change="onFredFilterChange('maturity')">
-                  <option v-for="m in maturityItems" :key="m.code" :value="m.code">{{ m.name }}</option>
-                </select>
-                <select v-model="selectedSeries" @change="fetchFredData" class="series-select">
-                  <option v-for="(label, id) in availableSeries" :key="id" :value="id">{{ label }}</option>
-                </select>
-                <button class="btn-secondary" @click="fetchFredData" :disabled="fredLoading">Refresh</button>
+              <div class="fred-layout">
+                <FredFiltersPanel
+                  :filters="fredFilters"
+                  :filter-options="filterOptions"
+                  @change="onFredFilterChange('filters')"
+                />
+                <button class="btn-secondary refresh-btn" @click="fetchFredData" :disabled="fredLoading">Refresh chart</button>
               </div>
-              <p class="fred-hint">FRED US Treasury benchmarks — used for calculations and charts.</p>
 
               <div v-if="fredLoading" class="loading-container">
                 <v-icon size="48" class="spin">mdi-loading</v-icon>
@@ -397,9 +359,9 @@
                 <button class="btn-primary" @click="fetchFredData">Retry</button>
               </div>
               <div v-else-if="chartData.datasets.length" class="chart-container chart-container--fred">
-                <canvas ref="yieldCurveChart"></canvas>
+                <canvas ref="yieldCurveChart" width="800" height="400"></canvas>
                 <div class="chart-footer">
-                  <small>Source: Federal Reserve Economic Data (FRED) – {{ selectedSeriesLabel }}</small>
+                  <small>Source: FRED – {{ chartSeriesLabel }} ({{ fredFilters.country }} / {{ fredFilters.currency }})</small>
                 </div>
               </div>
               <div v-else class="visualization-placeholder">
@@ -417,31 +379,43 @@
           </v-card>
         </div>
 
-        <!-- ==================== SUMMARY TAB ==================== -->
+        <!-- ==================== SUMMARY TAB (with professional blue gradient and fixed navigation) ==================== -->
         <div v-if="activeTab === 'summary'" class="content-card">
-          <v-card>
-            <v-card-title><v-icon>mdi-file-document</v-icon> {{ instrumentName }} Summary</v-card-title>
+          <v-card class="summary-pro-card">
+            <v-card-title><v-icon>mdi-file-document</v-icon> {{ instrumentName }} – Executive Summary</v-card-title>
             <v-card-text>
-              <div class="summary-grid">
-                <div class="summary-section">
-                  <h3>Portfolio Overview</h3>
-                  <p><strong>Total Value:</strong> ${{ calculations.totalValue?.toLocaleString() || 0 }}</p>
-                  <p><strong>Number of Instruments:</strong> {{ calculations.instrumentCount || 0 }}</p>
-                  <p><strong>Data Processed:</strong> {{ cleanedData.length }} records</p>
-                  <p><strong>Rows Removed:</strong> {{ cleaningStats.removedRows }}</p>
-                  <p><strong>Missing Values Fixed:</strong> {{ cleaningStats.fixedMissing }}</p>
+              <div class="summary-hero">
+                <div class="hero-stat">
+                  <span class="hero-label">Portfolio value</span>
+                  <span class="hero-value">${{ (calculations.totalValue || 0).toLocaleString() }}</span>
                 </div>
-                <div class="summary-section">
-                  <h3>Key Metrics</h3>
-                  <p><strong>Average Rate:</strong> {{ instrumentType === 'money-market' ? (calculations.avgRate || 0) : instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) : (calculations.avgDiscountRate || 0) }}%</p>
-                  <p><strong>Weighted Average:</strong> {{ instrumentType === 'money-market' ? (calculations.weightedAvgRate || 0) : instrumentType === 'bonds' ? (calculations.weightedAvgCoupon || 0) : (calculations.weightedAvgDiscount || 0) }}%</p>
-                  <p><strong>Total Interest/Discount:</strong> ${{ instrumentType === 'money-market' ? (calculations.totalInterest?.toLocaleString() || 0) : instrumentType === 'bonds' ? (calculations.totalAnnualIncome?.toLocaleString() || 0) : (calculations.totalDiscount?.toLocaleString() || 0) }}</p>
+                <div class="hero-stat">
+                  <span class="hero-label">Instruments</span>
+                  <span class="hero-value">{{ calculations.instrumentCount || 0 }}</span>
+                </div>
+                <div class="hero-stat" v-if="calculations.fred?.benchmark_rate">
+                  <span class="hero-label">FRED benchmark</span>
+                  <span class="hero-value">{{ calculations.fred.benchmark_rate }}%</span>
                 </div>
               </div>
-              <div class="summary-progress"><div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div><p class="progress-text">✓ Upload ✓ Clean ✓ Calculate — Ready for Report</p></div>
+              <div class="summary-grid">
+                <div class="summary-section card-panel">
+                  <h3><v-icon size="20">mdi-database</v-icon> Data quality</h3>
+                  <p><strong>Records processed:</strong> {{ cleanedData.length }}</p>
+                  <p><strong>Rows removed:</strong> {{ cleaningStats.removedRows }}</p>
+                  <p><strong>Missing values fixed:</strong> {{ cleaningStats.fixedMissing }}</p>
+                </div>
+                <div class="summary-section card-panel">
+                  <h3><v-icon size="20">mdi-finance</v-icon> Valuation metrics</h3>
+                  <p><strong>Average rate:</strong> {{ instrumentType === 'money-market' ? (calculations.avgRate || 0) : instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) : (calculations.avgDiscountRate || 0) }}%</p>
+                  <p><strong>Weighted average:</strong> {{ instrumentType === 'money-market' ? (calculations.weightedAvgRate || 0) : instrumentType === 'bonds' ? (calculations.weightedAvgCoupon || 0) : (calculations.weightedAvgDiscount || 0) }}%</p>
+                  <p v-if="calculations.fred?.spread_vs_market != null"><strong>Spread vs FRED:</strong> {{ calculations.fred.spread_vs_market }}%</p>
+                </div>
+              </div>
+              <div class="summary-progress"><div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div><p class="progress-text">✓ Upload ✓ Clean ✓ Calculate ✓ Visualize — Ready for Report</p></div>
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('visualizations')">Previous</button>
-                <button class="btn-primary" @click="switchTab('reports')">Move to Report →</button>
+                <button class="btn-primary" @click="switchTab('reports')">Go to Report →</button>
                 <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
               </div>
             </v-card-text>
@@ -479,33 +453,7 @@
                   </div>
                 </div>
 
-                <div class="report-preview-full">
-                  <h3>Report Preview</h3>
-                  <div class="preview-content" v-if="reportPreviewData.instruments.length">
-                    <div class="preview-header">
-                      <p><strong>Session:</strong> {{ reportPreviewData.session }}</p>
-                      <p><strong>Date Generated:</strong> {{ reportPreviewData.date }}</p>
-                    </div>
-                    <div class="preview-instruments">
-                      <div v-for="inst in reportPreviewData.instruments" :key="inst.name" class="preview-instrument-card">
-                        <h4>{{ inst.name }}</h4>
-                        <div class="report-table-wrapper">
-                          <table class="report-table">
-                            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-                            <tbody>
-                              <tr v-for="(value, key) in inst.calculations" :key="key">
-                                <td>{{ formatMetricName(key) }}</td>
-                                <td class="report-value">{{ formatMetricValue(key, value) }}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div v-else class="preview-empty"><p>No data available for the selected instruments. Please complete data processing for the instruments you wish to include.</p></div>
-                </div>
-
+                <p class="report-hint">Click <strong>Preview Report</strong> to see the full report with live FRED charts. Downloads match the preview.</p>
                 <div class="report-actions">
                   <button class="btn-preview" @click="previewReport">Preview Report</button>
                   <button class="btn-json" @click="downloadCombinedReport('json')">JSON</button>
@@ -531,26 +479,8 @@
     <v-dialog v-model="showExcelDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">{{ excelDialogTitle }} - Excel Viewer <v-spacer></v-spacer><button class="btn-close-dialog" @click="closeExcelDialog">✕</button></v-card-title>
-        <v-card-text class="excel-dialog-content">
-          <div class="excel-full-view">
-            <div class="excel-toolbar-full"><span>{{ excelData.length }} rows × {{ excelColumns.length }} columns</span><div><button class="btn-excel-export" @click="exportToCSV">Export CSV</button><button class="btn-excel-export" @click="exportToJSON">Export JSON</button></div></div>
-            <div class="excel-full-table-wrapper">
-              <table class="excel-full-table">
-                <thead>
-                  <tr>
-                    <th class="sticky-col">#</th>
-                    <th v-for="col in excelColumns" :key="col" class="sticky-header">{{ col }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, idx) in excelData" :key="idx">
-                    <td class="sticky-col">{{ idx+1 }}</td>
-                    <td v-for="col in excelColumns" :key="col">{{ formatCellValue(row[col]) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+        <v-card-text class="excel-dialog-content pa-0">
+          <ExcelViewer :data="excelData" :headers="excelColumns" @data-update="onExcelDataUpdate" />
         </v-card-text>
         <v-card-actions><v-spacer></v-spacer><button class="btn-secondary" @click="closeExcelDialog">Close</button></v-card-actions>
       </v-card>
@@ -585,6 +515,11 @@ import axios from 'axios'
 import api from '@/services/api.js'
 import sessionManager from '@/services/sessionManager.js'
 import { useFredMarket } from '@/composables/useFredMarket'
+import FredFiltersPanel from '@/components/FredFiltersPanel.vue'
+import ExcelViewer from '@/components/ExcelViewer.vue'
+import { loadFredSeriesChart, loadFredSeriesForReport } from '@/utils/fredChartHelper'
+import { renderFredLineChart } from '@/utils/renderFredChart'
+import { buildWorkflowSnapshot, applyWorkflowToPage } from '@/utils/instrumentSession.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -605,7 +540,6 @@ function saveUploadHistory() {
 }
 
 function addToHistory(filename, data) {
-  // Avoid duplicate within 5 seconds
   const existing = uploadHistory.value.find(h => h.name === filename && (Date.now() - h.date) < 5000)
   if (existing) return
   uploadHistory.value.unshift({
@@ -646,14 +580,12 @@ function refreshPage() {
   showMappingDialog.value = false
   activeTab.value = 'upload'
   if (activeSession.value) {
-    // clear session data on refresh
     const sid = activeSession.value.id
     sessionManager.updateSession(sid, { data: [], cleanedData: [], calculations: {}, uploaded_file_name: null })
   }
 }
 
 async function loadSavedData() {
-  // Prefer dataset_id from route (backend persistence)
   const datasetId = route.query.dataset_id
   if (datasetId) {
     try {
@@ -680,15 +612,24 @@ async function loadSavedData() {
   if (!activeSession.value) return false
   const sid = activeSession.value.id
   let loaded = false
-  const s = sessionManager.getSession(sid)
-  if (s && s.payload) {
-    if (s.payload.data && s.payload.data.length) { rawData.value = s.payload.data; loaded = true }
-    if (s.payload.cleanedData && s.payload.cleanedData.length) { cleanedData.value = s.payload.cleanedData; loaded = true }
-    if (s.payload.calculations) { calculations.value = s.payload.calculations; loaded = true }
-    if (s.payload.uploaded_file_name) { uploadedFile.value = { name: s.payload.uploaded_file_name, size: 0 }; loaded = true }
+  let wf = sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
+  if (!wf) {
+    await sessionManager.loadSessionFromDb(sid)
+    wf = sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
+  }
+  if (wf) {
+    loaded = applyWorkflowToPage(wf, { rawData, cleanedData, calculations, uploadedFile, cleaningStats })
+    if (wf.last_tab) activeTab.value = wf.last_tab
   }
 
-  // fallback to old localStorage keys for compatibility
+  const s = sessionManager.getSession(sid)
+  if (!loaded && s) {
+    if (s.data?.length) { rawData.value = s.data; loaded = true }
+    if (s.cleanedData?.length) { cleanedData.value = s.cleanedData; loaded = true }
+    if (s.calculations) { calculations.value = s.calculations; loaded = true }
+    if (s.uploaded_file_name) { uploadedFile.value = { name: s.uploaded_file_name, size: 0 }; loaded = true }
+  }
+
   if (!loaded) {
     const key = `${instrumentType.value}_session_${sid}`
     const savedRaw = localStorage.getItem(`${key}_raw`)
@@ -713,7 +654,6 @@ async function loadSavedData() {
 }
 
 function saveSessionData() {
-  // If dataset_id provided, persist cleaned data to backend
   const datasetId = route.query.dataset_id
   if (datasetId) {
     const payload = {
@@ -725,7 +665,6 @@ function saveSessionData() {
       headers: Object.keys((cleanedData.value[0] || rawData.value[0]) || {})
     }
     api.datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, payload.data, payload.headers, instrumentType.value)
-    // also persist last tab to session when possible (fallback to localStorage)
     if (activeSession.value) sessionManager.updateSession(activeSession.value.id, { last_tab: activeTab.value })
     else localStorage.setItem(`instrument_${instrumentType.value}_last_tab`, activeTab.value)
     return
@@ -733,10 +672,15 @@ function saveSessionData() {
 
   if (!activeSession.value) return
   const sid = activeSession.value.id
-  if (rawData.value.length) sessionManager.updateSessionData(sid, 'data', rawData.value, rawData.value.length)
-  if (cleanedData.value.length) sessionManager.updateSessionData(sid, 'cleanedData', cleanedData.value, cleanedData.value.length)
-  if (Object.keys(calculations.value).length) sessionManager.updateSessionData(sid, 'calculations', calculations.value, calculations.value.instrumentCount || 0)
-  if (uploadedFile.value?.name) sessionManager.updateSession(sid, { uploaded_file_name: uploadedFile.value.name })
+  const wf = buildWorkflowSnapshot({
+    rawData: rawData.value,
+    cleanedData: cleanedData.value,
+    calculations: calculations.value,
+    activeTab: activeTab.value,
+    uploadedFile: uploadedFile.value,
+    cleaningStats: cleaningStats.value
+  })
+  sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, wf)
   sessionManager.updateSession(sid, { last_tab: activeTab.value })
 }
 
@@ -744,11 +688,18 @@ function updateSessionCompletion() {
   if (!activeSession.value) return
   if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
   activeSession.value.instrumentData[instrumentType.value] = {
-    totalValue: calculations.value.totalValue || 0,
-    count: calculations.value.instrumentCount || 0,
+    ...calculations.value,
     completed: true,
     timestamp: new Date().toISOString()
   }
+  sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, buildWorkflowSnapshot({
+    rawData: rawData.value,
+    cleanedData: cleanedData.value,
+    calculations: calculations.value,
+    activeTab: activeTab.value,
+    uploadedFile: uploadedFile.value,
+    cleaningStats: cleaningStats.value
+  }))
   let total = 0, count = 0
   for (const data of Object.values(activeSession.value.instrumentData)) {
     if (data.completed) { total += data.totalValue || 0; count++ }
@@ -756,7 +707,6 @@ function updateSessionCompletion() {
   activeSession.value.totalValue = total
   activeSession.value.instrumentCount = count
   if (count === 3) activeSession.value.status = 'completed'
-  // persist updated session metadata to backend (and local cache)
   sessionManager.updateSession(activeSession.value.id, activeSession.value)
 }
 
@@ -800,30 +750,61 @@ const fixedValuesTracker = ref(new Map())
 const calculations = ref({})
 const cleaningStats = ref({ totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 })
 
-// Simplified cleaning options – fewer choices makes the code easier to follow for beginners
 const cleaningOptions = ref({
   removeDuplicates: true,
-  trimWhitespace: true,
-  convertToNumbers: true,
   fillMissingNumeric: true,
   fillMethod: 'mean',
-  fillMissingText: true
+  fillMissingText: true,
+  dropRowsWithMissing: false,
+  trimWhitespace: true,
+  convertToNumbers: true,
+  removeOutliers: false,
+  standardizeDates: false,
+  removeSpecialChars: false,
+  changeCase: false,
+  caseType: 'none',
+  fillWithCustom: false,
+  customFillValue: '',
+  removeColumnsAllMissing: false,
+  capOutliers: false,
+  removeRowsSpecificColumnEmpty: false,
+  specificColumn: '',
+  standardizeNumericRange: false,
+  removeEmptyRows: false,
+  fillForward: false,
+  fillBackward: false
 })
 
-// Keep a compact set of required columns per instrument for beginners
 const requiredColumns = computed(() => {
-  if (instrumentType.value === 'money-market') return ['Date', 'Rate', 'Amount', 'MaturityDate']
-  if (instrumentType.value === 'bonds') return ['Date', 'CouponRate', 'FaceValue', 'Yield', 'MaturityDate']
-  return ['Date', 'DiscountRate', 'FaceValue', 'MaturityDate']
+  if (instrumentType.value === 'money-market') {
+    return ['Date', 'Instrument', 'Rate', 'Amount', 'MaturityDate', 'DaysToMaturity', 'Principal', 'InterestRate', 'DiscountRate', 'Price', 'FaceValue']
+  } else if (instrumentType.value === 'bonds') {
+    return ['Date', 'BondName', 'CouponRate', 'FaceValue', 'Yield', 'MaturityDate', 'IssueDate', 'Frequency', 'Price', 'AccruedInterest', 'DaysToMaturity', 'RedemptionValue']
+  } else {
+    return ['Date', 'TBillName', 'DiscountRate', 'FaceValue', 'MaturityDate', 'DaysToMaturity', 'IssueDate', 'Price', 'Yield']
+  }
 })
 
-// A short list of common column name variations used for automatic mapping
 const columnVariations = {
-  Date: ['date', 'transaction date', 'trade date', 'value date'],
-  Rate: ['rate', 'interest rate', 'coupon rate', 'yield'],
-  Amount: ['amount', 'face value', 'notional', 'principal'],
-  MaturityDate: ['maturity', 'maturity date', 'due date'],
-  FaceValue: ['facevalue', 'face value', 'par value']
+  Date: ['Date', 'date', 'DATE', 'Transaction Date', 'Trade Date', 'Settlement Date', 'Value Date', 'Start Date', 'Issue Date'],
+  Instrument: ['Instrument', 'instrument', 'INSTRUMENT', 'Security', 'Security Name', 'Name', 'Description', 'Asset'],
+  Rate: ['Rate', 'rate', 'RATE', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Yield', 'Return', 'APR'],
+  Amount: ['Amount', 'amount', 'AMOUNT', 'Face Value', 'FaceValue', 'Value', 'Price', 'Notional', 'Principal', 'Investment'],
+  MaturityDate: ['MaturityDate', 'Maturity Date', 'Maturity', 'Matures', 'End Date', 'Due Date', 'Expiry Date'],
+  DaysToMaturity: ['DaysToMaturity', 'Days to Maturity', 'Tenor', 'Days', 'Term', 'Duration Days'],
+  Principal: ['Principal', 'Amount', 'Face Value', 'Notional', 'Investment Amount'],
+  InterestRate: ['InterestRate', 'Interest Rate', 'Rate', 'Coupon', 'Yield'],
+  DiscountRate: ['DiscountRate', 'Discount Rate', 'discount', 'Rate'],
+  Price: ['Price', 'price', 'PRICE', 'Market Price', 'Current Price', 'Purchase Price', 'Bid Price', 'Ask Price'],
+  FaceValue: ['FaceValue', 'Face Value', 'Face', 'Value', 'Amount', 'Principal', 'Par Value', 'Nominal'],
+  BondName: ['BondName', 'Bond Name', 'bond', 'BOND', 'Security', 'Issuer', 'Description', 'Name'],
+  CouponRate: ['CouponRate', 'Coupon Rate', 'coupon', 'Rate', 'Interest Rate', 'Annual Coupon'],
+  Yield: ['Yield', 'yield', 'YIELD', 'Yield to Maturity', 'YTM', 'Return', 'Effective Yield'],
+  IssueDate: ['IssueDate', 'Issue Date', 'Issued', 'Issuance Date', 'Start Date'],
+  Frequency: ['Frequency', 'Payment Frequency', 'Coupon Frequency', 'Period', 'SemiAnnual', 'Quarterly', 'Annual'],
+  AccruedInterest: ['AccruedInterest', 'Accrued Interest', 'Accrued', 'Interest Accrued'],
+  RedemptionValue: ['RedemptionValue', 'Redemption Value', 'Call Value', 'Maturity Value'],
+  TBillName: ['TBillName', 'T-Bill Name', 'TBill', 'T Bill', 'Security', 'Instrument', 'Treasury Bill']
 }
 
 // Preview helpers
@@ -899,22 +880,30 @@ const fileInput = ref(null)
 function handleFileUpload(e) { const file = e.target.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 function handleDrop(e) { const file = e.dataTransfer.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 async function readFileData(file) {
-  // Use XLSX to parse both CSV and Excel – keeps the code short and consistent
+  const ext = file.name.split('.').pop().toLowerCase()
+  let data = []
   try {
-    let content
-    const ext = file.name.split('.').pop().toLowerCase()
-    if (ext === 'csv') content = await file.text()
-    else content = await file.arrayBuffer()
-    const workbook = XLSX.read(content, { type: ext === 'csv' ? 'string' : 'array' })
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
-    rawData.value = XLSX.utils.sheet_to_json(sheet) || []
-    addToHistory(file.name, rawData.value)
+    if (ext === 'csv') {
+      const text = await file.text()
+      const lines = text.split('\n')
+      const headers = lines[0].split(',').map(h => h.trim())
+      data = lines.slice(1).filter(l=>l.trim()).map(line => {
+        const vals = line.split(',')
+        const row = {}
+        headers.forEach((h,i) => { row[h] = vals[i] ? vals[i].trim() : '' })
+        return row
+      })
+    } else {
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer)
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      data = XLSX.utils.sheet_to_json(sheet)
+    }
+    rawData.value = data
+    addToHistory(file.name, data)
     saveSessionData()
     if (missingColumns.value.length) autoMatchColumns()
-  } catch (err) {
-    console.error(err)
-    alert('Error reading file')
-  }
+  } catch(err) { console.error(err); alert('Error reading file') }
 }
 function removeFile() {
   uploadedFile.value = null
@@ -968,6 +957,7 @@ async function uploadData() {
 function previewCleanedData() {
   if (!rawData.value.length) return
   let data = JSON.parse(JSON.stringify(rawData.value))
+  // Apply cleaning steps (full list as in original)
   if (cleaningOptions.value.removeDuplicates) {
     const seen = new Set()
     data = data.filter(row => {
@@ -1227,18 +1217,18 @@ function selectAllInstruments() { selectedInstruments.value = { moneyMarket: tru
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
 
 function getInstrumentData(instrumentId) {
-  if (activeSession.value && activeSession.value.instrumentData && activeSession.value.instrumentData[instrumentId]) {
-    return activeSession.value.instrumentData[instrumentId]
+  if (!activeSession.value) return null
+  const sid = activeSession.value.id
+  const wf = sessionManager.getInstrumentWorkflow(sid, instrumentId)
+  if (wf?.calculations && Object.keys(wf.calculations).length) return wf.calculations
+  const stored = activeSession.value.instrumentData?.[instrumentId]
+  if (stored) {
+    if (stored.avgRate || stored.avgCouponRate || stored.avgDiscountRate) return stored
+    if (stored.totalValue && !stored.completed) return stored
   }
-  if (activeSession.value) {
-    const key = `${instrumentId}_session_${activeSession.value.id}`
-    const savedCalc = localStorage.getItem(`${key}_calc`)
-    if (savedCalc) {
-      const data = JSON.parse(savedCalc)
-      if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
-      activeSession.value.instrumentData[instrumentId] = data
-      return data
-    }
+  const savedCalc = localStorage.getItem(`${instrumentId}_session_${sid}_calc`)
+  if (savedCalc) {
+    try { return JSON.parse(savedCalc) } catch { /* ignore */ }
   }
   return null
 }
@@ -1282,16 +1272,15 @@ function formatMetricName(key) {
   }
   return names[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
 }
-// Simple formatter: currency-like keys get $ prefix; rate-like keys get % suffix
 function formatMetricValue(key, value) {
-  if (value === undefined || value === null) return '-'
-  if (!isNaN(Number(value))) {
-    const num = Number(value)
-    if (/value|price|interest|income|discount|principal|investment/i.test(key)) return `$${num.toLocaleString()}`
-    if (/rate|yield|coupon|discount/i.test(key)) return `${num}%`
-    return num.toLocaleString()
+  if (typeof value === 'number') {
+    if (key.includes('Value') || key.includes('Price') || key.includes('Interest') || key.includes('Income') || key.includes('Discount') || key.includes('Principal') || key.includes('Investment'))
+      return `$${value.toLocaleString()}`
+    if (key.includes('Rate') || key.includes('Yield') || key.includes('Coupon') || key.includes('Discount'))
+      return `${value}%`
+    return value.toLocaleString()
   }
-  return String(value)
+  return value
 }
 
 const reportPreviewDialog = ref(false)
@@ -1333,19 +1322,22 @@ function buildMethodologySection(selectedInstrumentNames) {
   return methods.join('')
 }
 
-const instrumentFredSeries = {
-  'Money Market': 'DTB3',
-  'Bonds': 'DGS10',
-  'T-Bills': 'DTB3'
-}
-
-// Small wrapper to get series data via central API client
+// Fetch FRED series via backend API
 async function fetchFredSeriesData(seriesId, limit = 30) {
-  const res = await api.fredAPI.getSeries(seriesId, limit, 'desc')
-  if (!res || !res.success) return null
-  const obs = res.data || []
-  const reversed = [...obs].reverse()
-  return { labels: reversed.map(o => o.date), values: reversed.map(o => o.value) }
+  try {
+    const result = await api.fredAPI.getSeries(seriesId, limit, 'desc')
+    if (result && result.success && result.data) {
+      const observations = result.data
+      const reversed = [...observations].reverse()
+      const labels = reversed.map(obs => obs.date)
+      const values = reversed.map(obs => obs.value)
+      return { labels, values }
+    }
+    return null
+  } catch (err) {
+    console.error(`Failed to fetch FRED series ${seriesId}:`, err)
+    return null
+  }
 }
 
 async function generateReportHtml() {
@@ -1356,27 +1348,21 @@ async function generateReportHtml() {
   }
 
   const chartDataMap = {}
-  await Promise.all(report.instruments.map(async (inst) => {
-    const map = { 'Money Market': 'money_market', 'Bonds': 'bonds', 'T-Bills': 'treasury_bills', 'Treasury Bills': 'treasury_bills' }
-    const instParam = map[inst.name] || 'all'
+  const sid = await seriesIdForMaturity()
+  for (const inst of report.instruments) {
     try {
-      const res = await api.fredAPI.getYieldCurve(instParam)
-      if (res && res.success && res.data && res.data.labels && res.data.labels.length) {
-        chartDataMap[inst.name] = {
-          labels: res.data.labels,
-          values: res.data.current,
-          datasets: res.data.datasets || [{ label: inst.name, data: res.data.current, borderColor: '#0B2044' }]
-        }
-      }
+      const loaded = await loadFredSeriesForReport(sid)
+      if (loaded) chartDataMap[inst.name] = loaded
     } catch (err) {
-      console.error('Failed to fetch yield curve for', inst.name, err)
+      console.error('FRED chart for report', inst.name, err)
     }
-  }))
+  }
 
   const origin = window.location.origin
   const backgroundImageUrl = `${origin}/background%20report%201.webp`
-  const logoUrl = `${origin}/DuraCapital%20logo.png`
-  const logoHtml = `<img src="${logoUrl}" alt="DuraCapital Logo" style="height:70px;" onerror="this.style.display='none'">`
+  const logoUrl = `${origin}/DataStudio-logo.jpeg`
+  // Remove white padding by making the logo a block element with no extra space
+  const logoHtml = `<img src="${logoUrl}" alt="DataStudio Logo" style="display:block; width:auto; height:70px; margin:0; padding:0; border:none;" onerror="this.style.display='none'">`
 
   let totalPortfolioValue = 0, totalInstrumentCount = 0
   for (const inst of report.instruments) {
@@ -1484,12 +1470,12 @@ async function generateReportHtml() {
               <p><strong>Bond Equivalent Yield:</strong> ${instData.bondEquivalentYield || 0}%</p>
               <p><strong>Average Days to Maturity:</strong> ${instData.avgDaysToMaturity || 0} days</p>`
     }
-    html += `</div><h3>Detailed Metrics</h3><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+    html += `</div><h3>Detailed Metrics</h3></table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
     for (const [key, val] of Object.entries(instData)) {
-      if (key === 'completed' || key === 'timestamp') continue
+      if (key === 'completed' || key === 'timestamp' || key === 'fred') continue
       html += `<tr><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
     }
-    html += `</tbody></table>`
+    html += `</tbody><table>`
 
     const chartData = chartDataMap[inst.name]
     if (chartData && chartData.labels && chartData.labels.length) {
@@ -1499,7 +1485,7 @@ async function generateReportHtml() {
         <h3>Yield Curve Analysis – ${inst.name}</h3>
         <div class="chart-container">
           <canvas id="${chartId}" width="800" height="400" style="max-width:100%; height:auto;"></canvas>
-          <div class="chart-caption">Source: Federal Reserve Economic Data (FRED) – ${inst.name === 'Bonds' ? '10-Year Treasury Rate' : '3-Month Treasury Bill'}</div>
+          <div class="chart-caption">Source: FRED – ${chartSeriesLabel.value || 'market rate'} (${fredFilters.value.country} / ${fredFilters.value.currency})</div>
         </div>
         <p>This chart shows the latest market yield curve used as a benchmark for discounting cash flows of ${inst.name} instruments.</p>
         <script>
@@ -1519,9 +1505,11 @@ async function generateReportHtml() {
                   legend: { position: 'top' }
                 },
                 scales: {
-                  y: { title: { display: true, text: 'Percent (%)' }, ticks: { callback: function(val) { return val + '%'; } } },
+                  y: { title: { display: true, text: 'Percent (%)' } },
                   x: { title: { display: true, text: 'Date' }, ticks: { maxRotation: 45, autoSkip: true } }
-                }
+                },
+                maintainAspectRatio: false,
+                animation: false
               }
             });
           })();
@@ -1558,6 +1546,7 @@ async function generateReportHtml() {
 }
 
 async function previewReport() {
+  await loadSavedData()   // Ensure latest data is loaded
   const html = await generateReportHtml()
   if (html) {
     reportPreviewHtml.value = html
@@ -1600,16 +1589,7 @@ async function downloadCombinedReport(format) {
   } else if (format === 'word') {
     downloadBlob(html, `${filename}.doc`, 'application/msword')
   } else if (format === 'excel') {
-    const report = reportPreviewData.value
-    let csvRows = [['Instrument', 'Metric', 'Value']]
-    for (const inst of report.instruments) {
-      for (const [key, val] of Object.entries(inst.calculations)) {
-        if (key === 'completed' || key === 'timestamp') continue
-        csvRows.push([inst.name, formatMetricName(key), formatMetricValue(key, val)])
-      }
-    }
-    const csv = csvRows.map(row => row.join(',')).join('\n')
-    downloadBlob(csv, `${filename}.xls`, 'application/vnd.ms-excel')
+    downloadBlob(html, `${filename}.xls`, 'application/vnd.ms-excel')
   }
 }
 
@@ -1646,7 +1626,7 @@ function exportToJSON() {
 function saveToSession() { saveSessionData(); alert('Data saved to session!') }
 
 // ========== FRED (calculations + visualizations) ==========
-const { fredFilters, filterOptions, countryItems, currencyItems, maturityItems, loadFilterOptions, onCountryChange, seriesIdForMaturity, fetchBenchmark } = useFredMarket('3M')
+const { fredFilters, filterOptions, countryItems, currencyItems, maturityItems, loadFilterOptions, onCountryChange, seriesIdForMaturity, fetchBenchmark } = useFredMarket('1Y')
 
 function defaultMaturityForInstrument() {
   if (instrumentType.value === 'bonds') return '10Y'
@@ -1670,9 +1650,8 @@ async function enrichCalculationsWithFred() {
 }
 
 async function onFredFilterChange(field) {
-  if (field === 'country') onCountryChange()
-  selectedSeries.value = await seriesIdForMaturity()
-  if (activeTab.value === 'visualizations') fetchFredData()
+  if (field === 'country' || field === 'filters') onCountryChange()
+  if (activeTab.value === 'visualizations') await fetchFredData()
   if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
 }
 
@@ -1680,8 +1659,9 @@ const fredLoading = ref(false)
 const fredError = ref('')
 const selectedSeries = ref('')
 const yieldCurveChart = ref(null)
-let chartInstance = null
+const chartInstanceRef = { current: null }
 const chartData = ref({ labels: [], datasets: [] })
+const chartSeriesLabel = ref('')
 const currentMarketRate = ref(null)
 
 const fredCategories = ref({})
@@ -1696,55 +1676,39 @@ const portfolioAvgRate = computed(() => {
 })
 
 async function fetchFredData() {
-  if (!selectedSeries.value) {
-    const firstSeries = Object.keys(availableSeries.value)[0]
-    if (firstSeries) selectedSeries.value = firstSeries
-    else return
-  }
   fredLoading.value = true
   fredError.value = ''
   try {
-    const result = await api.fredAPI.getSeries(selectedSeries.value, 365, 'desc')
-    if (!result || !result.success) throw new Error(result?.error || 'Failed to fetch FRED data')
-    const observations = result.data || []
-    if (observations.length === 0) throw new Error('No data returned for this series')
-    const reversed = [...observations].reverse()
-    const labels = reversed.map(obs => obs.date)
-    const values = reversed.map(obs => obs.value)
-    if (observations.length > 0) currentMarketRate.value = observations[0].value
-    chartData.value = { labels, datasets: [{ label: selectedSeriesLabel.value, data: values, borderColor: '#0B2044', backgroundColor: 'rgba(11,32,68,0.1)', tension: 0.1, fill: true }] }
-    await waitForChartCanvas()
-    renderChart()
+    const sid = await seriesIdForMaturity()
+    if (!sid) throw new Error('Could not resolve FRED series for selected filters')
+    selectedSeries.value = sid
+    chartSeriesLabel.value = availableSeries.value[sid] || sid
+    const loaded = await loadFredSeriesChart(sid)
+    if (!loaded) throw new Error('No FRED data for this series')
+    chartData.value = loaded
+    currentMarketRate.value = loaded.latest
+    await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
   } catch (err) {
     console.error(err)
-    fredError.value = err.message || 'Failed to load market data. Check your network or try again later.'
+    fredError.value = err.message || 'Failed to load market data.'
+    chartData.value = { labels: [], datasets: [] }
   } finally {
     fredLoading.value = false
   }
 }
 
-async function waitForChartCanvas() {
-  for (let i = 0; i < 8; i++) {
-    await nextTick()
-    if (yieldCurveChart.value) return true
-  }
-  return false
-}
+const uploadPreviewHeaders = computed(() => Object.keys(rawData.value[0] || {}))
+const cleanPreviewHeaders = computed(() => Object.keys((previewData.value[0] || cleanedData.value[0]) || {}))
 
-function renderChart() {
-  if (!yieldCurveChart.value || !chartData.value.datasets.length) return
-  if (chartInstance) chartInstance.destroy()
-  const ctx = yieldCurveChart.value.getContext('2d')
-  chartInstance = new Chart(ctx, {
-    type: 'line',
-    data: chartData.value,
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.raw}%` } }, legend: { position: 'top' } },
-      scales: { y: { title: { display: true, text: 'Percent (%)' }, ticks: { callback: (val) => val + '%' } }, x: { title: { display: true, text: 'Date' }, ticks: { maxRotation: 45, autoSkip: true } } }
-    }
-  })
+function onRawExcelUpdate(data) { rawData.value = data; saveSessionData() }
+function onCleanPreviewUpdate(data) { previewData.value = data }
+function onCleanedExcelUpdate(data) { cleanedData.value = data; saveSessionData() }
+
+function onExcelDataUpdate(data) {
+  excelData.value = data
+  if (activeTab.value === 'upload') rawData.value = data
+  if (cleanedData.value.length) cleanedData.value = data
+  saveSessionData()
 }
 
 watch(() => instrumentType.value, () => {
@@ -1756,17 +1720,8 @@ watch(() => instrumentType.value, () => {
 }, { immediate: true })
 watch(() => activeTab.value, async (newTab) => {
   if (newTab !== 'visualizations' || !hasCleanedData.value) return
-  if (!chartData.value.datasets.length) await fetchFredData()
-  else {
-    await waitForChartCanvas()
-    renderChart()
-  }
-})
-watch(() => chartData.value.datasets.length, async (newLen) => {
-  if (newLen > 0 && activeTab.value === 'visualizations') {
-    await waitForChartCanvas()
-    renderChart()
-  }
+  await nextTick()
+  await fetchFredData()
 })
 
 // ========== Force refresh on instrument or session change ==========
@@ -1803,6 +1758,15 @@ function checkAndReset() {
   }
 }
 onMounted(async () => { 
+  const qSid = route.query.session
+  if (qSid) {
+    await sessionManager.loadSessionFromDb(String(qSid))
+    const s = sessionManager.getSession(String(qSid))
+    if (s) {
+      activeSession.value = s
+      sessionManager.setActiveSession(s)
+    }
+  }
   checkAndReset()
   loadUploadHistory()
   window.addEventListener('storage', () => checkAndReset())
@@ -1819,13 +1783,15 @@ onMounted(async () => {
     console.error('Failed to load FRED categories:', err)
   }
   if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
+  // Force load saved data if missing
+  if (!calculations.value.totalValue && activeSession.value) await loadSavedData()
 })
 onBeforeUnmount(() => { window.removeEventListener('storage', () => checkAndReset()) })
 watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* All original styles – unchanged. */
+/* All original styles – unchanged plus additions for alignment and logo fitting */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
@@ -2062,8 +2028,48 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   width: 100% !important;
   height: 100% !important;
 }
-.fred-filters-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.fred-hint { font-size: 12px; color: #666; margin: 8px 0 0; }
+.fred-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.fred-layout > * {
+  flex: 1 1 auto;
+}
+.refresh-btn {
+  align-self: center;
+  white-space: nowrap;
+}
+.report-hint { font-size: 14px; color: #555; margin-bottom: 16px; padding: 12px; background: #f0f4f8; border-radius: 8px; }
+.summary-hero {
+  display: flex;
+  justify-content: space-around;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-bottom: 24px;
+  padding: 30px 20px;
+  background: linear-gradient(135deg, #0B2044, #1E88E5);
+  border-radius: 16px;
+  color: white;
+  text-align: center;
+}
+.hero-stat {
+  flex: 1;
+  min-width: 140px;
+}
+.hero-label {
+  font-size: 14px;
+  opacity: 0.9;
+  margin-bottom: 8px;
+}
+.hero-value {
+  font-size: 28px;
+  font-weight: 700;
+}
+.card-panel { background: #f8f9ff; padding: 16px; border-radius: 10px; border: 1px solid #e8ecf1; }
 .fred-calc-card { margin: 16px 0; }
 .fred-meta { display: block; margin-top: 8px; color: #666; font-size: 12px; }
 .chart-footer {

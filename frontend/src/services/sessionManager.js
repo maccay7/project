@@ -1,162 +1,170 @@
-// utils/sessionManager.js
-
+// Session manager: localStorage + MySQL via /api/sessions/*
 import api from './api.js'
 
 const STORAGE_KEY = 'duracapital_sessions'
+const ACTIVE_KEY = 'active_session'
+
+function parsePayload(p) {
+  if (!p) return null
+  if (typeof p === 'string') {
+    try { return JSON.parse(p) } catch { return null }
+  }
+  return p
+}
 
 export const sessionManager = {
-  // Get all sessions (returns local copy immediately, synchronizes from backend in background)
   getAllSessions() {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
       const local = stored ? JSON.parse(stored) : []
-      // fetch remote list and update localStorage in background
       api.sessionsAPI.list().then(res => {
-        if (res && res.success && Array.isArray(res.data)) {
-          const mapped = res.data.map(r => ({ id: r.session_id, name: r.name, instrument: r.instrument, status: r.status, created_at: r.created_at }))
+        if (res?.success && Array.isArray(res.data)) {
+          const mapped = res.data.map(r => ({
+            id: r.session_id,
+            name: r.name,
+            instrument: r.instrument,
+            status: r.status,
+            date: r.created_at,
+            created_at: r.created_at
+          }))
           localStorage.setItem(STORAGE_KEY, JSON.stringify(mapped))
         }
       }).catch(() => {})
       return local
-    } catch (err) {
-      console.error('Error loading sessions:', err)
+    } catch {
       return []
     }
   },
 
-  // Get single session by ID
   getSession(id) {
-    const sessions = this.getAllSessions()
-    const local = sessions.find(s => s.id === id)
-    // try backend and update local copy asynchronously
-    api.sessionsAPI.get(id).then(res => {
-      if (res && res.success && res.data) {
-        const sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
-        const idx = sessions.findIndex(s => s.id === id)
-        const payload = { id: res.data.session_id, name: res.data.name, instrument: res.data.instrument, payload: res.data.payload, status: res.data.status, created_at: res.data.created_at }
-        if (idx !== -1) sessions[idx] = payload
-        else sessions.unshift(payload)
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
-      }
-    }).catch(() => {})
-    return local
+    return this.getAllSessions().find(s => s.id === id) || null
   },
 
-  // Create new session
-  createSession(instrumentType) {
+  /** Load full session from database into localStorage */
+  async loadSessionFromDb(sessionId) {
+    const res = await api.sessionsAPI.get(sessionId)
+    if (!res?.success) return null
+    const body = res.data
+    if (!body) return this.getSession(sessionId)
+
+    let full = parsePayload(body.payload) || {}
+    full.id = body.session_id || sessionId
+    full.name = body.name || full.name
+    full.status = body.status || full.status
+    full.created_at = body.created_at
+
+    const list = this.getAllSessions().filter(s => s.id !== full.id)
+    list.unshift(full)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
+    return full
+  },
+
+  setActiveSession(session) {
+    if (!session) {
+      localStorage.removeItem(ACTIVE_KEY)
+      return
+    }
+    localStorage.setItem(ACTIVE_KEY, JSON.stringify({ id: session.id, name: session.name }))
+  },
+
+  getActiveSessionId() {
+    try {
+      const a = localStorage.getItem(ACTIVE_KEY)
+      return a ? JSON.parse(a).id : null
+    } catch {
+      return null
+    }
+  },
+
+  createSession(nameOverride = '') {
     const sessions = this.getAllSessions()
     const newSession = {
       id: Date.now().toString(),
-      instrument: instrumentType,
-      name: `${this.getInstrumentName(instrumentType)} - ${new Date().toLocaleDateString()}`,
+      instrument: '',
+      name: nameOverride || `Session ${new Date().toLocaleDateString()}`,
       date: new Date().toISOString(),
-      data: null,
-      cleanedData: null,
-      calculations: null,
-      rows: 0,
-      status: 'upload', // upload, cleaned, calculated, completed
-      timestamp: Date.now()
+      instrumentWorkflow: {},
+      status: 'in-progress',
+      instrumentCount: 0,
+      totalValue: 0
     }
     sessions.unshift(newSession)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
-    // persist to backend asynchronously
-    api.sessionsAPI.save({ id: newSession.id, name: newSession.name, instrument: newSession.instrument, payload: newSession, status: newSession.status }).catch(() => {})
+    this.persistToDb(newSession)
+    this.setActiveSession(newSession)
     return newSession
   },
 
-  // Update existing session
+  renameSession(id, newName) {
+    return this.updateSession(id, { name: newName.trim() })
+  },
+
   updateSession(id, updates) {
     const sessions = this.getAllSessions()
     const index = sessions.findIndex(s => s.id === id)
-    if (index !== -1) {
-      sessions[index] = { ...sessions[index], ...updates, timestamp: Date.now() }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
-      // persist to backend
-      api.sessionsAPI.save({ id: sessions[index].id, name: sessions[index].name, instrument: sessions[index].instrument, payload: sessions[index], status: sessions[index].status }).catch(() => {})
-      return sessions[index]
+    if (index === -1) return null
+    sessions[index] = { ...sessions[index], ...updates, timestamp: Date.now() }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+    this.persistToDb(sessions[index])
+    const active = this.getActiveSessionId()
+    if (active === id && updates.name) {
+      this.setActiveSession(sessions[index])
     }
-    return null
+    return sessions[index]
   },
 
-  // Update session data (uploaded file)
+  /** Save workflow for one instrument inside the session */
+  saveInstrumentWorkflow(sessionId, instrumentKey, workflow) {
+    const s = this.getSession(sessionId)
+    if (!s) return
+    const iw = { ...(s.instrumentWorkflow || {}), [instrumentKey]: workflow }
+    this.updateSession(sessionId, { instrumentWorkflow: iw })
+  },
+
+  getInstrumentWorkflow(sessionId, instrumentKey) {
+    const s = this.getSession(sessionId)
+    return s?.instrumentWorkflow?.[instrumentKey] || null
+  },
+
   updateSessionData(id, dataType, data, rows = 0) {
-    const updates = { [dataType]: data, rows: rows }
-    if (dataType === 'data') updates.status = 'upload'
-    if (dataType === 'cleanedData') updates.status = 'cleaned'
-    if (dataType === 'calculations') updates.status = 'calculated'
-    const updated = this.updateSession(id, updates)
-    return updated
+    const updates = { [dataType]: data, rows }
+    if (dataType === 'data') updates.status = 'in-progress'
+    return this.updateSession(id, updates)
   },
 
-  // Delete session
+  persistToDb(session) {
+    if (!session?.id) return
+    api.sessionsAPI.save({
+      id: session.id,
+      session_id: session.id,
+      name: session.name,
+      instrument: session.instrument || '',
+      payload: session,
+      status: session.status || 'in-progress'
+    }).catch(() => {})
+  },
+
   deleteSession(id) {
     const sessions = this.getAllSessions().filter(s => s.id !== id)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+    if (this.getActiveSessionId() === id) localStorage.removeItem(ACTIVE_KEY)
     api.sessionsAPI.delete(id).catch(() => {})
   },
 
-  // Clear all sessions
   clearAllSessions() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
+    localStorage.removeItem(ACTIVE_KEY)
   },
 
-  // Get sessions by instrument
-  getSessionsByInstrument(instrumentType) {
-    return this.getAllSessions().filter(s => s.instrument === instrumentType)
-  },
-
-  // Get instrument name
   getInstrumentName(type) {
     const names = {
       treasury_bills: 'Treasury Bills',
+      tbills: 'T-Bills',
       bonds: 'Bonds',
-      money_market: 'Money Market'
+      money_market: 'Money Market',
+      'money-market': 'Money Market'
     }
     return names[type] || type
-  },
-
-  // Get summary totals across all instruments
-  getSummaryTotals() {
-    const sessions = this.getAllSessions()
-    const totals = {
-      treasury_bills: { count: 0, totalPrincipal: 0, totalInterest: 0, avgYield: 0 },
-      bonds: { count: 0, totalPrincipal: 0, totalInterest: 0, avgYield: 0 },
-      money_market: { count: 0, totalPrincipal: 0, totalInterest: 0, avgYield: 0 },
-      grandTotal: { totalPrincipal: 0, totalInterest: 0, sessionCount: 0 }
-    }
-    
-    let yieldSum = 0
-    let yieldCount = 0
-    
-    sessions.forEach(session => {
-      if (session.calculations && session.calculations.length) {
-        const calc = session.calculations[0]
-        const instrument = session.instrument
-        
-        if (totals[instrument]) {
-          totals[instrument].count++
-          totals[instrument].totalPrincipal += calc.principal || 0
-          totals[instrument].totalInterest += calc.interest_earned || 0
-          if (calc.annual_yield || calc.yield) {
-            totals[instrument].avgYield += calc.annual_yield || calc.yield || 0
-          }
-        }
-        
-        totals.grandTotal.totalPrincipal += calc.principal || 0
-        totals.grandTotal.totalInterest += calc.interest_earned || 0
-        totals.grandTotal.sessionCount++
-        
-        yieldSum += calc.annual_yield || calc.yield || 0
-        yieldCount++
-      }
-    })
-    
-    // Calculate averages
-    if (yieldCount > 0) {
-      totals.grandTotal.avgYield = yieldSum / yieldCount
-    }
-    
-    return totals
   }
 }
 

@@ -5,8 +5,8 @@
       <div class="logo-area">
         <div class="logo-placeholder">
           <img 
-            src="/DuraCapital logo.png" 
-            alt="DuraCapital Logo" 
+            src="/DataStudio-logo.jpeg" 
+            alt="DataStudio Logo" 
             class="navbar-logo"
             @error="e => e.target.style.display = 'none'"
           />
@@ -83,6 +83,9 @@
                   <div class="session-row-status" :class="session.status">
                     {{ session.status === 'completed' ? '✓' : '⟳' }}
                   </div>
+                  <button class="row-rename-btn" @click.stop="openRename(session)" title="Rename">
+                    <v-icon size="12">mdi-pencil</v-icon>
+                  </button>
                   <button class="row-delete-btn" @click.stop="deleteSession(session.id)">
                     <v-icon size="12">mdi-close</v-icon>
                   </button>
@@ -119,7 +122,10 @@
               <div v-if="activeSession" class="active-session-info">
                 <div class="session-header">
                   <v-icon color="#4CAF50" size="16">mdi-check-circle</v-icon>
-                  <span class="session-name-display">Active: {{ activeSession.name }}</span>
+                  <span v-if="!renamingActive" class="session-name-display">Active: {{ activeSession.name }}</span>
+                  <input v-else v-model="renameInput" class="session-rename-input" @keyup.enter="saveRename" @keyup.esc="renamingActive = false" />
+                  <button v-if="!renamingActive" class="btn-rename-sm" type="button" @click="startRenameActive">Rename</button>
+                  <button v-else class="btn-rename-sm" type="button" @click="saveRename">Save</button>
                   <span class="session-status-badge" :class="activeSession.status">
                     {{ activeSession.status === 'completed' ? 'Completed' : 'In Progress' }}
                   </span>
@@ -207,7 +213,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { sessionManager } from '@/services/sessionManager.js'
+import sessionManager from '@/services/sessionManager.js'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -216,6 +222,8 @@ const sessions = ref([])
 const searchQuery = ref('')
 const newSessionName = ref('')
 const activeSession = ref(null)
+const renamingActive = ref(false)
+const renameInput = ref('')
 
 const instruments = [
   { id: 'money-market', name: 'Money Market', description: 'Short-term debt instruments', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
@@ -254,25 +262,47 @@ function handleLogout() {
   window.location.href = '/login'
 }
 
-function loadExistingSession(sessionId) {
-  const session = sessions.value.find(s => s.id === sessionId)
+async function loadExistingSession(sessionId) {
+  const full = await sessionManager.loadSessionFromDb(sessionId)
+  sessions.value = sessionManager.getAllSessions()
+  const session = full || sessions.value.find(s => s.id === sessionId)
   if (session) {
     activeSession.value = session
-    // update the active session cache via sessionManager
-    sessionManager.updateSession(session.id, session)
+    sessionManager.setActiveSession(session)
   }
+}
+
+function openRename(session) {
+  const name = prompt('Rename session:', session.name)
+  if (name && name.trim()) {
+    sessionManager.renameSession(session.id, name.trim())
+    sessions.value = sessionManager.getAllSessions()
+    if (activeSession.value?.id === session.id) {
+      activeSession.value = sessionManager.getSession(session.id)
+    }
+  }
+}
+
+function startRenameActive() {
+  if (!activeSession.value) return
+  renameInput.value = activeSession.value.name
+  renamingActive.value = true
+}
+
+function saveRename() {
+  if (!activeSession.value || !renameInput.value.trim()) return
+  sessionManager.renameSession(activeSession.value.id, renameInput.value.trim())
+  sessions.value = sessionManager.getAllSessions()
+  activeSession.value = sessionManager.getSession(activeSession.value.id)
+  renamingActive.value = false
 }
 
 function createNewSession() {
   if (!newSessionName.value.trim()) return
-  // create via sessionManager to persist to backend (falls back to localStorage)
-  const created = sessionManager.createSession('')
-  // override name provided by user
-  sessionManager.updateSession(created.id, { name: newSessionName.value.trim() })
-  // refresh local list and set active
+  const created = sessionManager.createSession(newSessionName.value.trim())
   sessions.value = sessionManager.getAllSessions()
   activeSession.value = sessionManager.getSession(created.id) || created
-  // active session now tracked via sessionManager
+  sessionManager.setActiveSession(activeSession.value)
   newSessionName.value = ''
 }
 
@@ -291,18 +321,25 @@ function goToInstrument(instrumentId) {
     alert('Please create or select a session first')
     return
   }
-  router.push(`/instrument/${instrumentId}`)
+  sessionManager.setActiveSession(activeSession.value)
+  router.push({ path: `/instrument/${instrumentId}`, query: { session: activeSession.value.id } })
 }
 
 function loadSessions() {
   sessions.value = sessionManager.getAllSessions()
-  // prefer sessionManager's active session if present
-  const all = sessions.value
-  if (all && all.length) activeSession.value = all[0]
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadSessions()
+  const aid = sessionManager.getActiveSessionId()
+  if (aid) {
+    await sessionManager.loadSessionFromDb(aid)
+    loadSessions()
+    activeSession.value = sessionManager.getSession(aid)
+  } else if (sessions.value.length) {
+    activeSession.value = sessions.value[0]
+    sessionManager.setActiveSession(activeSession.value)
+  }
 })
 </script>
 
@@ -336,7 +373,8 @@ onMounted(() => {
 
 .navbar-logo {
   width: 180px;
-  height: 200px;
+  max-height: 48px;
+  height: auto;
   object-fit: contain;
   border-radius: 8px;
 }
@@ -583,6 +621,40 @@ onMounted(() => {
 .session-row-status.completed {
   background: #E8F5E9;
   color: #4CAF50;
+}
+
+.row-rename-btn {
+  background: #0B2044;
+  border: none;
+  color: white;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  margin-right: 4px;
+}
+.session-row-item:hover .row-rename-btn { opacity: 1; }
+.session-rename-input {
+  flex: 1;
+  min-width: 120px;
+  padding: 4px 8px;
+  border: 1px solid #0B2044;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.btn-rename-sm {
+  background: #0B2044;
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: 8px;
 }
 
 .row-delete-btn {

@@ -4,8 +4,8 @@
       <!-- Logo Section -->
       <div class="logo-section">
         <img 
-          src="/DuraCapital logo.png" 
-          alt="DuraCapital Logo" 
+          src="/DataStudio-logo.jpeg" 
+          alt="DataStudio Logo" 
           class="login-logo"
           @error="e => e.target.style.display = 'none'"
         />
