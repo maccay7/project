@@ -40,7 +40,7 @@
 
       <!-- Content based on active tab -->
       <div class="tab-content">
-        <!-- ==================== UPLOAD TAB (with history) ==================== -->
+        <!-- ==================== UPLOAD TAB ==================== -->
         <div v-if="activeTab === 'upload'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-upload</v-icon> Upload {{ instrumentName }} Dataset</v-card-title>
@@ -52,7 +52,7 @@
                 <small>Supported: CSV, Excel files</small>
               </div>
 
-              <!-- Upload History Section (moved here) -->
+              <!-- Upload History Section -->
               <div v-if="uploadHistory.length" class="upload-history">
                 <h4>📁 Upload History ({{ uploadHistory.length }} files)</h4>
                 <div class="history-list">
@@ -141,7 +141,6 @@
                   <h3>Cleaning Filters (select any combination)</h3>
                   <div class="filter-scroll-container">
                     <div class="options-list">
-                      <!-- Full list of cleaning options – same as your original -->
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeDuplicates"> Remove duplicate rows</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingNumeric"> Fill missing numeric with:
                         <select v-model="cleaningOptions.fillMethod"><option value="zero">Zero</option><option value="mean">Mean</option><option value="median">Median</option></select>
@@ -321,7 +320,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== VISUALIZATIONS TAB (FIXED) ==================== -->
+        <!-- ==================== VISUALIZATIONS TAB ==================== -->
         <div v-if="activeTab === 'visualizations'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-chart-line</v-icon> {{ instrumentName }} – Market Yield Curves</v-card-title>
@@ -379,7 +378,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== SUMMARY TAB (with professional blue gradient and fixed navigation) ==================== -->
+        <!-- ==================== SUMMARY TAB ==================== -->
         <div v-if="activeTab === 'summary'" class="content-card">
           <v-card class="summary-pro-card">
             <v-card-title><v-icon>mdi-file-document</v-icon> {{ instrumentName }} – Executive Summary</v-card-title>
@@ -416,6 +415,7 @@
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('visualizations')">Previous</button>
                 <button class="btn-primary" @click="switchTab('reports')">Go to Report →</button>
+                <button class="btn-primary" @click="goToPortfolioSummary">Portfolio Summary →</button>
                 <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
               </div>
             </v-card-text>
@@ -850,6 +850,7 @@ function isInvalidValue(value) { return !value || value === '' || value === null
 
 // Navigation
 function goToDashboard() { router.push('/dashboard') }
+function goToPortfolioSummary() { router.push('/summary') }
 function switchTab(tab) { activeTab.value = tab; saveSessionData() }
 function goToCalculations() {
   if (hasCleanedData.value) {
@@ -957,7 +958,6 @@ async function uploadData() {
 function previewCleanedData() {
   if (!rawData.value.length) return
   let data = JSON.parse(JSON.stringify(rawData.value))
-  // Apply cleaning steps (full list as in original)
   if (cleaningOptions.value.removeDuplicates) {
     const seen = new Set()
     data = data.filter(row => {
@@ -1211,7 +1211,7 @@ async function calculateMetrics() {
   updateSessionCompletion()
 }
 
-// ========== REPORT LOGIC (LIVE FRED DATA, ESCAPED TAGS) ==========
+// ========== REPORT LOGIC ==========
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
@@ -1222,10 +1222,7 @@ function getInstrumentData(instrumentId) {
   const wf = sessionManager.getInstrumentWorkflow(sid, instrumentId)
   if (wf?.calculations && Object.keys(wf.calculations).length) return wf.calculations
   const stored = activeSession.value.instrumentData?.[instrumentId]
-  if (stored) {
-    if (stored.avgRate || stored.avgCouponRate || stored.avgDiscountRate) return stored
-    if (stored.totalValue && !stored.completed) return stored
-  }
+  if (stored) return stored
   const savedCalc = localStorage.getItem(`${instrumentId}_session_${sid}_calc`)
   if (savedCalc) {
     try { return JSON.parse(savedCalc) } catch { /* ignore */ }
@@ -1361,7 +1358,6 @@ async function generateReportHtml() {
   const origin = window.location.origin
   const backgroundImageUrl = `${origin}/background%20report%201.webp`
   const logoUrl = `${origin}/DataStudio-logo.jpeg`
-  // Remove white padding by making the logo a block element with no extra space
   const logoHtml = `<img src="${logoUrl}" alt="DataStudio Logo" style="display:block; width:auto; height:70px; margin:0; padding:0; border:none;" onerror="this.style.display='none'">`
 
   let totalPortfolioValue = 0, totalInstrumentCount = 0
@@ -1475,7 +1471,7 @@ async function generateReportHtml() {
       if (key === 'completed' || key === 'timestamp' || key === 'fred') continue
       html += `<tr><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
     }
-    html += `</tbody><table>`
+    html += `</tbody></table>`
 
     const chartData = chartDataMap[inst.name]
     if (chartData && chartData.labels && chartData.labels.length) {
@@ -1546,7 +1542,7 @@ async function generateReportHtml() {
 }
 
 async function previewReport() {
-  await loadSavedData()   // Ensure latest data is loaded
+  await loadSavedData()
   const html = await generateReportHtml()
   if (html) {
     reportPreviewHtml.value = html
@@ -1625,36 +1621,8 @@ function exportToJSON() {
 }
 function saveToSession() { saveSessionData(); alert('Data saved to session!') }
 
-// ========== FRED (calculations + visualizations) ==========
-const { fredFilters, filterOptions, countryItems, currencyItems, maturityItems, loadFilterOptions, onCountryChange, seriesIdForMaturity, fetchBenchmark } = useFredMarket('1Y')
-
-function defaultMaturityForInstrument() {
-  if (instrumentType.value === 'bonds') return '10Y'
-  if (instrumentType.value === 'money-market') return '1Y'
-  return '3M'
-}
-
-async function enrichCalculationsWithFred() {
-  try {
-    const bench = await fetchBenchmark(instrumentType.value)
-    if (bench?.benchmark_rate != null) {
-      const portfolio = parseFloat(portfolioAvgRate.value) || 0
-      calculations.value = {
-        ...calculations.value,
-        fred: { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2), portfolio_rate: portfolio }
-      }
-    }
-  } catch (e) {
-    console.error('FRED benchmark', e)
-  }
-}
-
-async function onFredFilterChange(field) {
-  if (field === 'country' || field === 'filters') onCountryChange()
-  if (activeTab.value === 'visualizations') await fetchFredData()
-  if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
-}
-
+// ========== FRED ==========
+const { fredFilters, filterOptions, loadFilterOptions, seriesIdForMaturity, fetchBenchmark } = useFredMarket('1Y')
 const fredLoading = ref(false)
 const fredError = ref('')
 const selectedSeries = ref('')
@@ -1665,9 +1633,7 @@ const chartSeriesLabel = ref('')
 const currentMarketRate = ref(null)
 
 const fredCategories = ref({})
-const availableSeries = computed(() => {
-  return fredCategories.value.interest_rates || {}
-})
+const availableSeries = computed(() => fredCategories.value.interest_rates || {})
 const selectedSeriesLabel = computed(() => availableSeries.value[selectedSeries.value] || selectedSeries.value)
 const portfolioAvgRate = computed(() => {
   if (instrumentType.value === 'money-market') return calculations.value.avgRate || 0
@@ -1680,21 +1646,40 @@ async function fetchFredData() {
   fredError.value = ''
   try {
     const sid = await seriesIdForMaturity()
-    if (!sid) throw new Error('Could not resolve FRED series for selected filters')
+    if (!sid) throw new Error('Could not resolve FRED series')
     selectedSeries.value = sid
     chartSeriesLabel.value = availableSeries.value[sid] || sid
     const loaded = await loadFredSeriesChart(sid)
-    if (!loaded) throw new Error('No FRED data for this series')
+    if (!loaded) throw new Error('No FRED data')
     chartData.value = loaded
     currentMarketRate.value = loaded.latest
     await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
   } catch (err) {
-    console.error(err)
     fredError.value = err.message || 'Failed to load market data.'
-    chartData.value = { labels: [], datasets: [] }
   } finally {
     fredLoading.value = false
   }
+}
+
+function defaultMaturityForInstrument() {
+  if (instrumentType.value === 'bonds') return '10Y'
+  if (instrumentType.value === 'money-market') return '1Y'
+  return '3M'
+}
+
+async function enrichCalculationsWithFred() {
+  try {
+    const bench = await fetchBenchmark(instrumentType.value)
+    if (bench?.benchmark_rate != null) {
+      const portfolio = parseFloat(portfolioAvgRate.value) || 0
+      calculations.value.fred = { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2) }
+    }
+  } catch (e) { console.error(e) }
+}
+
+async function onFredFilterChange() {
+  if (activeTab.value === 'visualizations') await fetchFredData()
+  if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
 }
 
 const uploadPreviewHeaders = computed(() => Object.keys(rawData.value[0] || {}))
@@ -1703,7 +1688,6 @@ const cleanPreviewHeaders = computed(() => Object.keys((previewData.value[0] || 
 function onRawExcelUpdate(data) { rawData.value = data; saveSessionData() }
 function onCleanPreviewUpdate(data) { previewData.value = data }
 function onCleanedExcelUpdate(data) { cleanedData.value = data; saveSessionData() }
-
 function onExcelDataUpdate(data) {
   excelData.value = data
   if (activeTab.value === 'upload') rawData.value = data
@@ -1712,16 +1696,10 @@ function onExcelDataUpdate(data) {
 }
 
 watch(() => instrumentType.value, () => {
-  const firstSeries = Object.keys(availableSeries.value)[0]
-  if (firstSeries) {
-    selectedSeries.value = firstSeries
-    if (activeTab.value === 'visualizations') fetchFredData()
-  }
+  if (activeTab.value === 'visualizations') fetchFredData()
 }, { immediate: true })
 watch(() => activeTab.value, async (newTab) => {
-  if (newTab !== 'visualizations' || !hasCleanedData.value) return
-  await nextTick()
-  await fetchFredData()
+  if (newTab === 'visualizations' && hasCleanedData.value) await fetchFredData()
 })
 
 // ========== Force refresh on instrument or session change ==========
@@ -1757,7 +1735,7 @@ function checkAndReset() {
     }
   }
 }
-onMounted(async () => { 
+onMounted(async () => {
   const qSid = route.query.session
   if (qSid) {
     await sessionManager.loadSessionFromDb(String(qSid))
@@ -1776,22 +1754,18 @@ onMounted(async () => {
     const res = await api.fredAPI.getCategories()
     if (res && res.success && res.categories) {
       fredCategories.value = res.categories
-      selectedSeries.value = (await seriesIdForMaturity())
-        || Object.keys(fredCategories.value.interest_rates || {})[0]
+      selectedSeries.value = (await seriesIdForMaturity()) || Object.keys(fredCategories.value.interest_rates || {})[0]
     }
-  } catch (err) {
-    console.error('Failed to load FRED categories:', err)
-  }
+  } catch (err) { console.error(err) }
   if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
-  // Force load saved data if missing
   if (!calculations.value.totalValue && activeSession.value) await loadSavedData()
 })
-onBeforeUnmount(() => { window.removeEventListener('storage', () => checkAndReset()) })
+onBeforeUnmount(() => window.removeEventListener('storage', () => checkAndReset()))
 watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* All original styles – unchanged plus additions for alignment and logo fitting */
+/* ========== All original styles – copy from your existing file ========== */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }

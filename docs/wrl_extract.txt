@@ -1,0 +1,415 @@
+=== DEFENSE ===
+TECHNICAL ASSESSMENT 
+System or software prototype  
+ 
+ 
+ 
+1. User Interface (UX/UI): 
+▪ Is the user interface intuitive, user-friendly, and visually appealing? 
+▪ Are the different features and functionalities easily accessible? 
+ 
+2. Functionality: 
+▪ Does the system perform the required functions correctly? 
+▪ Are the different features and functionalities working as expected? 
+ 
+3. Code Quality: 
+▪ Is the code well-organized, readable, and maintainable? 
+▪ Are coding standards and best practices followed? 
+ 
+4. Testing and Debugging: 
+▪ Is the system thoroughly tested for errors and bugs? 
+▪ Are testing methodologies and tools used effectively? 
+ 
+5. Validation and Verification: 
+▪ Does the system meet the specified requirements and user needs? 
+▪ Are validation and verification processes properly implemented? 
+ 
+6. Security and Error Handling: 
+• Are security measures implemented to protect user data and prevent unauthorized access? 
+• Are error handling mechanisms properly implemented to handle unexpected errors and 
+exceptions? 
+ 
+TOTAL 
+ 
+ 
+=== MANUAL ===
+ 
+ 
+ 
+ 
+MANICALAND STATE UNIVERSITY OF APPLIED SCIENCES 
+ 
+DEPARTMENT OF COMPUTER SCIENCE & INFORMATION SYSTEMS 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+WORK RELATED LEARNING PROJECT GUIDELINES 
+1. Title Page (Use Standard MSUAS Project Cover Page) 
+2. Declaration 
+3. Acknowledgements 
+4. Abstract 
+5. Tale of Contents 
+6. List of Figures and Tales 
+7. Report body 
+Chapter 1: Introduction and background 
+ Chapter 2: Planning 
+Chapter 3: Systems Analysis and Requirements Definition  
+Chapter 4: System Design 
+Chapter 5: Implementation and Testing 
+Chapter 6: Conclusion/ Recommendation  
+          References (APA Referencing) 
+Appendices 
+ User Manual 
+Chapter/Task Description Recommended Tools 
+Document Presentation Proper formatting of the document 
+(Headings font 14, Bold, Times New 
+Roman. Rest of Document font size 12, 
+1.5 spacing). Tables and figures properly 
+numbered 
+Microsoft Word Google Docs LaTeX (for 
+advanced formatting)                               
+Chapter 1 : Introduction and 
+Background 
+  
+Microsoft Word Google Docs (for writing) 
+Grammarly (for proof reading)                   
+(i) Background and Motivation Highlight the background and motivation 
+leading to the development of the system 
+  
+(ii) Identification of the Problem A clear understanding of the problem   
+(iii) Objectives SMART objectives   
+Chapter 2: Planning   Microsoft Project Trello Asana (for project 
+planning) Excel (for feasibility/risk 
+analysis)  
+(i) Feasibility study A feasibility study evaluates whether a 
+proposed system is practical, viable, 
+and worth developing from technical, 
+economic, legal, operational, and 
+scheduling perspectives.  
+SWOT Analysis, Return on Investment, 
+Cost enefit Analysis, Legal Guidelines, 
+Surveys, Gantt Charts etc (MS Project, 
+Trello, Asana) 
+(ii) Risk Analysis Quantitative and Qualitative Risk 
+Analysis 
+Risk Matrix (Probability vs. Impact), 
+SWOT Analysis ,Monte Carlo Simulation, 
+Decision Trees, Failure Mode and Effects 
+Analysis (FMEA). 
+(iii) Project Plan     
+Chapter 3: Systems Analysis 
+and Requirements Definition 
+  
+ 
+(i) Analysis of current system: 
+Context Diagram, DFD, Use case, 
+Sequence, State transition, Activity 
+diagrams of the 
+existing system 
+Student should have at least 2 of the data 
+flow diagrams of current system Lucidchart Draw.io Microsoft Visio (for 
+diagrams) UML tools like StarUML or 
+PlantUML   
+(ii) Weaknesses of current system     
+(iii) Requirements Analysis Requirements analysis is a critical phase in 
+system development where stakeholder 
+needs are gathered, analyzed, and 
+documented to define what the system 
+must do. It bridges the gap between user 
+expectations and technical 
+implementation. 
+  
+Chapter 4: System Design    
+(i)   System   Design:   Context 
+Diagram, DFD, Use case, Sequence, Class, 
+State transition, Activity diagrams of the 
+proposed System) 
+Student should have at least 2 of the 
+diagrams Lucidchart Draw.io Microsoft Visio (for 
+diagrams) MySQL Workbench (for 
+database design) 
+(ii) Database design   ER Modeling: MySQL Workbench (free), 
+Lucidchart (collaborative), ERwin 
+(enterprise). 
+(iii) Interface design    Figma, Adobe XD 
+Chapter 5: Implementation 
+&Testing 
+  
+ 
+Authentication Test, Input 
+Validation Test 
+ 
+Installation and Deployment and 
+Maintenance 
+The Implementation & Testing phase 
+focuses on building and rigorously 
+testing the system to ensure 
+functionality, followed by deployment 
+and ongoing maintenance for optimal 
+performance. Key tools include IDEs, 
+testing frameworks, and CI/CD 
+pipelines for efficient development and 
+validation 
+Unit Testing: JUnit (Java), pytest (Python), 
+NUnit (.NET),Integration/UI Testing: 
+Selenium, Cypress, Postman (API 
+testing),Load/Performance Testing: 
+JMeter, LoadRunner 
+Chapter 6: Conclusion/ 
+Recommendation 
+Overall summary of the entire report 
+  
+References Use of Referencing Software Zotero,Mendeley, EndNote 
+Appendix User Manual 
+Microsoft Word|Google Docs    
+The document must not exceed 50 pages. Students should demonstrate proficiency by utilizing at least one relevant software tool in 
+each project phase  
+ 
+=== DOCX ===
+MANICALAND STATE UNIVERSITY OF APPLIED SCIENCES
+FACULTY OF ENGINEERING, APPLIED SCIENCES AND TECHNOLOGY
+DEPARTMENT OF COMPUTER SCIENCE AND INFORMATION SYSTEMS
+AUTOMATION OF FINANCIAL INSTRUMENTS VALUATION
+THIS PROJECT IS SUBMITTED IN PARTIAL FULFILLMENT OF THE REQUIREMENTS FOR THE BACHELOR OF SCIENCE HONOURS IN BUSINESS INTELLIGENCE AND DATA ANALYTICS
+BY
+MAKANAKA KANYAI
+M2469O
+2026
+Approval Form
+The undersigned certify that they have supervised the student Makanaka Kanyai, on a project entitled: Automation of Financial Instruments Valuation, submitted in the partial fulfilment of the requirements of the Bachelor of Science Honours in Business Intelligence and Data Analytics at Manicaland State University of Applied Sciences.
+……………………………….                                                …………/………/……….
+Student                                                                                                                     Date
+……T.J.Mutsemi…………………….         	                                   ……11…/05…/…26…
+Supervisor                                                                                                                 Date
+……………………………….                                                …………/………/…………..
+Chairperson                                                                                                              Date
+Student Declaration
+I (Makanaka Kanyai) confirm that this work is my original work and that it has been written by me in its entirety. I have duly acknowledged all sources of information used in the project.
+Student’s signature: _____________________ Date: 10-01-2026
+Supervisor declaration
+I________T.J.Mutsemi___________confirm that, to the best of my knowledge, the material submitted is the authentic work of the student.
+Supervisor’s signature ______tjm_____________ Date _____11/05.26_________
+ACKNOWLEDGEMENTS
+I would like to thank my supervisor for the guidance and support provided throughout this project, Automation of Financial Instruments Valuation. I am also grateful to Dura Capital for the practical exposure and insights that inspired this work. My appreciation goes to the lecturers at Manicaland State University of Applied Sciences for their knowledge and support. Finally, I thank my family and friends for their encouragement and motivation.
+ABSTRACT
+This project presents the design and development of a web-based prototype system called Automation of Financial Instruments Valuation, developed to automate the valuation of financial instruments. Traditional spreadsheet-based valuation methods used in many financial institutions are often inefficient, error-prone, and difficult to manage, especially when handling large datasets and complex financial calculations.
+The developed system allows users to securely log in, upload financial datasets, and automatically generate financial instrument valuations. The system also provides dashboards and visualizations to support the analysis and interpretation of results. In addition, automated report generation features enable users to quickly produce structured valuation reports, improving efficiency, accuracy, and transparency in financial processes.
+The system was designed using Figma for interface prototyping and MySQL Workbench for database modeling, while modern web technologies supported implementation. The outcome is a functional prototype that demonstrates how automation can improve financial valuation processes and support better decision-making in financial institutions.
+Table of contents
+CHAPTER 1: INTRODUCTION AND BACKGROUND
+1.1 Background and Motivation
+Financial institutions operate in data-driven environments where accuracy, efficiency, and timely reporting are important. Treasury and investment departments manage financial instruments such as Treasury Bills, Bonds, and Money Market instruments, which require regular valuation for decision-making and reporting purposes.
+Traditionally, many organizations use spreadsheet tools such as Excel for valuation processes. However, as datasets become larger and more complex, spreadsheet-based methods become inefficient, difficult to manage, and prone to errors. Manual data cleaning, formula entry, and report preparation increase the risk of inconsistencies and reduce productivity.
+Another challenge is the lack of automated visualization and reporting tools, forcing users to manually create charts and summaries. To address these challenges, this project proposes a web-based system called Automation of Financial Instruments Valuation. The system allows users to securely log in, upload datasets, automatically clean datasets, automatically generate valuations, view visualizations, and produce reports in a structured and efficient manner.
+1.2 Problem Identification
+The current valuation process for financial instruments relies heavily on spreadsheets and manual operations. Although spreadsheets are widely used, they become inefficient and error-prone when handling large datasets and complex calculations.
+Data cleaning, preparation, and valuation calculations are performed manually, increasing the risk of human error and reducing efficiency. In addition, report preparation and data visualizations are manually created, which consumes time and may lead to inconsistencies in reporting.
+The proposed system, Automation of Financial Instruments Valuation, addresses these challenges by automating dataset upload, cleaning, valuation calculations, visualization generation, and report generation. This improves accuracy, efficiency, and productivity in financial valuation processes.
+1.3 Objectives
+1.3.1 Main Objective
+To design and develop a web-based system that automates the valuation of financial instruments.
+1.3.2 Specific Objectives
+To automate dataset upload and processing.
+To automate financial instrument valuation calculations.
+To generate dashboards and data visualizations automatically.
+To automate report generation.
+To improve efficiency and reduce manual workload.
+CHAPTER 2: PLANNING
+2.1 Feasibility Study
+Technical Feasibility
+The system is technically feasible because it uses widely available tools and technologies. Figma was used to design the user interface, allowing visualization of the system before development. MySQL Workbench was used to design the database structure, ensuring proper data organization. The backend can be implemented using frameworks such as Flask, which supports rapid development and integration with databases.
+Economic Feasibility
+The project is cost-effective because it relies on free and open-source tools. The main investment is time and effort. The benefits of automation, such as reduced errors and improved efficiency, make the project worthwhile.
+Operational Feasibility
+The system is designed with the user in mind. It simplifies the valuation process and reduces manual workload. Users can easily upload data, view results, and generate reports.
+Legal Feasibility
+The system complies with standard data handling, security, and ethical requirements. It is designed for academic and organizational use and ensures that financial data is processed responsibly, securely, and in line with acceptable legal and institutional practices.
+RETURN ON INVESTMENT (ROI)
+Return on Investment (ROI) was used to assess the economic viability of the system by comparing financial benefits with development costs.
+Assumptions
+Total Cost = 2000
+Total Benefit = 3500
+Net Benefit = 1500
+FORMULA
+CALCULATION
+An ROI of 75% indicates that the project is financially beneficial, as the returns exceed the initial cost. This confirms that the system is economically viable and supports its implementation.
+COST-BENEFIT ANALYSIS (CBA)
+Cost-Benefit Analysis was used to compare the total expected costs of developing the system against the benefits it generates, in order to determine its economic feasibility.
+Tab 2.1:Cost-Benefit Analysis table
+FORMULA
+CALCULATION
+The analysis shows a positive net benefit of 1500, meaning the benefits outweigh the costs. This confirms that the system is economically viable and financially justified, supporting its implementation.
+2.2 Project Plan
+The project followed an iterative plan including requirements gathering, schema design, core features (login and dashboard), file upload and analysis, report generation, and final documentation and defense preparation. A Gantt chart was maintained in a spreadsheet, with milestones aligned to supervisor reviews and WRL deadlines.
+Fig 2.2:Asana Project Task Board
+Tab 2.2: Excel planning
+Fig 2.2.1: Project Gantt Chart
+Feasibility and Cost-Benefit Analysis
+Tab 2.2.1: Excel table showing cost-based analysis
+2.3 Risk Analysis
+A qualitative risk matrix was used to assess key risks based on probability and impact:
+R1: API/database outages – mitigated using health checks and connection pooling
+R2: Invalid data uploads – mitigated through validation, cleaning previews, and audit trails
+R3: Weak credentials – mitigated using server-side hashing and HTTPS
+R4: Scope creep in valuation models – controlled by limiting WRL scope to prototype workflows and documenting future work.
+Tab 2.3: Risk analysis table
+Quantitative risk analysis
+SWOT Analysis
+Tab 2.3.1:SWOT Analysis
+Strong UI–API–database architecture supports scalability and maintainability. Weaknesses include incomplete imports and placeholder charts. Opportunities include integrations and automation, while threats include security risks and poor data quality.
+Risk Matrix (Probability vs Impact)
+Fig 2.3: Risk Matrix (Probability vs Impact)
+The figure shows a risk matrix based on probability and impact, highlighting priority risks. High-probability, high-impact risks are prioritized for better mitigation and decision-making.
+Quantitative risk analysis
+1)Monte Carlo simulation
+Monte Carlo simulation estimated project duration using optimistic, most likely, and pessimistic times to identify delays and improve planning and risk analysis.
+Fig 2.3.1:Monte Carlo simulation table and graph in Excel
+2) Decision tree
+Decision tree analysis compared normal execution and adding resources using probabilities and expected durations.
+Expected values = Probability × Outcome.
+Results show that adding resources reduces overall project duration, making it the better option under uncertainty.
+Tab 2.3.2: Decision tree table
+Fig 2.3.2:Decision tree
+3)FMEA
+FMEA was used to assess failure points in the system using severity, occurrence, and detection to calculate Risk Priority Numbers (RPN). Results showed that testing and debugging are the highest-risk phase requiring priority attention.
+Tab 2.3.3: FMEA table
+Survey
+A survey using Google Forms collected user feedback on system efficiency and adoption. Results showed inefficiencies in the current system and strong user support for a digital solution, confirming demand and feasibility.
+Fig 2.3.3:Survey questions
+Fig 2.3.4:Survey results
+Chapter 3: Systems Analysis and Requirements Definition
+3.1 Analysis of the Current System
+Manual valuation spreadsheets, email-based file exchange and decentralized storage characterize the current environment. The context and logical data flows are captured at a high level in Figures 3.1–3.1.1. Detailed UML and DFD layers are maintained in the Draw.io source file supplied with the project for consistency with the defense slides.
+Figure 3.1: Context Diagram (Current System)
+Fig 3.1.1: DFD Level 1 (Current System)
+Figure 3.1.2: Activity (Current System)
+Figure 3.1.3: Sequence (Current System)
+Figure 3.1.4: Use case (Current System)
+3.2 Weaknesses of the Current System
+Limited single source of truth for instrument terms and valuations.
+Weak version control on assumptions embedded in spreadsheet cells.
+Manual copy-paste into reports increases error rates.
+Audit trails are fragmented (email timestamps vs. cell history).
+Scaling to multiple analysts introduces merge conflicts and inconsistent files.
+3.3 Requirements Analysis
+3.3.1 Functional Requirements
+Users shall authenticate using email and password.
+Authenticated users shall view portfolio statistics and instrument lists.
+Users shall upload CSV/XLSX files with metadata and receive structured previews and cleaning summaries.
+The system shall store upload metadata and maintain audit logs.
+Users shall view reports and export them in CSV, JSON, or HTML formats.
+The system shall provide REST APIs for dashboards, instruments, uploads, and reports.
+3.3.2 Non-Functional Requirements
+Usability: Responsive interface with clear navigation and workflow.
+Security: HTTPS, token-based authentication, and password hashing.
+Performance: Paginated data handling and controlled file upload sizes.
+Maintainability: Modular frontend structure with extensible backend design.
+Reliability: Database health checks and structured error handling.
+Chapter 4: System Design
+4.1 Proposed System Architecture and Data Flow
+The proposed system follows a three-tier architecture. The presentation layer is a Vue 3 single-page application (SPA) built using Vite. The application layer is developed using Flask, which handles RESTful JSON APIs and file uploads. The data layer uses MySQL to store users, instruments, file uploads, and audit logs.
+Fig 4.1: Use case diagram (Proposed)
+Fig 4.1.2:Activity diagram(Proposed)
+Fig 4.1.3:Context diagram(Proposed)
+Fig 4.1.4: DFD1 diagram (Proposed)
+Fig 4.1.5: Sequence diagram (Proposed)
+4.2  Database design
+The database was designed using MySQL Workbench. An EER diagram was developed to model the relationships among Users, Upload History, Calculations, Reports, User Preferences, and Financial Instruments. Primary and foreign keys were used to ensure data integrity and consistency.
+Fig 4.2:Database design
+4.3 Interface Design
+Figma wireframes were used to plan the layout and structure of the system pages. These guided the development of the Vue.js frontend, keeping the same structure for key pages. The wireframes are shown below.
+Fig 4.3: Login page
+Fig 4.3.1:  Dashboard
+Fig 4.3.2: Upload
+Fig 4.3.3: Cleaning
+Fig 4.3.4: Calculations
+Fig 4.3.5: Reports
+Fig 4.3.6: Visualizations
+Fig 4.3.7: Settings
+CHAPTER 5: IMPLEMENTATION AND TESTING
+5.1 Introduction
+This chapter presents the implementation and testing of the Automation of Financial Instruments Valuation System. The implementation phase focused on developing a web-based platform that automates the valuation of selected financial instruments, namely Treasury Bills, Money Market Instruments, and Bonds. The system was designed to improve efficiency, accuracy, and consistency in the valuation process by reducing reliance on manual calculations.
+To ensure that the developed system met its functional and non-functional requirements, various testing techniques were employed. Authentication testing and input validation testing were conducted to verify system security and data integrity. Unit testing was performed using pytest, API testing was conducted using Postman, and performance testing was carried out using Apache JMeter. The chapter also discusses system deployment and maintenance procedures.
+5.2 System Implementation
+The Automation of Financial Instruments Valuation System was developed using the Django framework and Python programming language. The system architecture integrates valuation models, database management, user authentication, reporting functionalities, and dashboard visualizations into a single platform.
+The implementation process involved developing modules responsible for instrument management, valuation calculations, user management, report generation, and data storage. These modules interact to provide users with automated valuation results based on instrument-specific parameters and market information.
+The system allows users to perform valuations for Treasury Bills, Money Market Instruments, and Bonds through an intuitive web interface. The implementation also included search functionalities, dashboard analytics, and automated report generation to enhance usability and decision-making.
+Figure 5.1: System Dashboard
+Insert a screenshot of the dashboard displaying valuation summaries, total instruments, recent valuations, and graphical analytics.
+Figure 5.2: Treasury Bill Valuation Interface
+Insert a screenshot showing Treasury Bill input fields and valuation results.
+Figure 5.3: Money Market Valuation Interface
+Insert a screenshot showing the Money Market valuation page and generated outputs.
+Figure 5.4: Bond Valuation Interface
+Insert a screenshot showing Bond valuation inputs such as face value, coupon rate, maturity period, and calculated value.
+5.3 Testing Strategy
+Testing was conducted throughout the development lifecycle to ensure that the system performed according to the specified requirements. The testing process focused on functionality, security, accuracy, reliability, and performance.
+The testing tools used are presented in Table 5.1.
+Table 5.1: Testing Tools Used
+The testing process included authentication testing, input validation testing, unit testing, API testing, and performance testing.
+5.4 Authentication Testing
+Authentication testing was conducted to ensure that access to the system was restricted to authorized users. The objective was to verify that the login mechanism correctly validated user credentials and prevented unauthorized access.
+Several test scenarios were executed using valid and invalid credentials. The system successfully authenticated registered users while rejecting invalid login attempts.
+Table 5.2: Authentication Test Results
+Figure 5.5: Login Page
+Insert screenshot of the login page.
+Figure 5.6: Successful Authentication
+Insert screenshot showing successful login and access to the dashboard.
+5.5 Input Validation Testing
+Input validation testing was performed to ensure that users entered valid information before valuation calculations were processed. Since valuation accuracy depends on the quality of input data, validation controls were implemented to prevent incorrect entries.
+The system checks for missing values, invalid numerical inputs, incorrect dates, and values that fall outside acceptable ranges.
+Table 5.3: Input Validation Test Results
+Figure 5.7: Validation Error Messages
+Insert screenshot showing validation errors when invalid data is entered.
+5.6 Unit Testing Using pytest
+Unit testing was conducted using pytest to verify the correctness of individual system components. The testing focused primarily on valuation functions and data processing logic.
+The tests covered Treasury Bill valuation calculations, Money Market valuation calculations, Bond pricing calculations, discount rate computations, and report generation functions. Test cases were designed using known inputs and expected outputs to confirm the accuracy of implemented algorithms.
+The successful execution of unit tests demonstrated that individual modules performed as intended and produced reliable valuation results.
+Figure 5.8: pytest Test Execution Results
+Insert screenshot of terminal output showing successful pytest execution with passed tests.
+5.7 API Testing Using Postman
+Postman was used to test the system's API endpoints. The objective was to verify that requests were correctly processed and that appropriate responses were returned.
+The tests evaluated response codes, returned data structures, request validation, and error-handling mechanisms. Both valid and invalid requests were submitted to assess system robustness.
+Results indicated that all tested API endpoints responded correctly and returned accurate valuation data when supplied with valid inputs.
+Table 5.4: API Testing Results
+Figure 5.9: Postman Request Execution
+Insert screenshot showing a successful API request.
+Figure 5.10: Postman Response Output
+Insert screenshot showing the returned JSON response.
+5.8 Performance Testing Using Apache JMeter
+Performance testing was conducted using Apache JMeter to determine the system's responsiveness and stability under varying workloads. The objective was to assess how the system performed when multiple users accessed valuation services simultaneously.
+The testing process simulated concurrent users submitting valuation requests. Performance metrics such as response time, throughput, and error rates were monitored and analyzed.
+The results indicated that the system maintained stable performance and acceptable response times under expected operational conditions.
+Table 5.5: Performance Testing Results
+Figure 5.11: JMeter Test Plan
+Insert screenshot of the JMeter test configuration.
+Figure 5.12: JMeter Performance Report
+Insert screenshot showing graphs, response times, and throughput statistics.
+5.9 Installation and Deployment
+Following successful testing, the system was deployed within the target environment. Deployment involved installing required dependencies, configuring the database, and establishing application settings.
+The deployment procedure included:
+Installation of Python and required libraries.
+Installation of Django and supporting packages.
+Configuration of the PostgreSQL database.
+Execution of database migrations.
+Creation of administrative user accounts.
+Configuration of application settings.
+Verification of system functionality after deployment.
+Figure 5.13: Deployment Environment
+Insert screenshot showing the deployed application or deployment architecture.
+5.10 System Maintenance
+System maintenance activities were established to ensure continued reliability and performance. Maintenance procedures include software updates, database backups, security monitoring, bug fixing, and performance optimization.
+Regular maintenance enables the system to adapt to evolving business requirements while maintaining accurate valuation functionality and secure access to financial data.
+5.11 Chapter Summary
+This chapter presented the implementation and testing of the Automation of Financial Instruments Valuation System. The system was successfully developed using Django and Python and incorporated modules for Treasury Bill, Money Market, and Bond valuation. Testing activities included authentication testing, input validation testing, unit testing using pytest, API testing using Postman, and performance testing using Apache JMeter. The results demonstrated that the system met its functional requirements and achieved acceptable levels of accuracy, security, reliability, and performance. The chapter also discussed deployment procedures and maintenance activities necessary for the continued operation of the system.
