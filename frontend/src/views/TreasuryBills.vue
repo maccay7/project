@@ -339,34 +339,56 @@
                 </div>
               </div>
 
-              <div class="fred-layout">
-                <FredFiltersPanel
-                  :filters="fredFilters"
-                  :filter-options="filterOptions"
-                  @change="onFredFilterChange('filters')"
-                />
+              <!-- Filter row with dropdowns -->
+              <div class="filters-row">
+                <div class="filter-group">
+                  <label>Country / Region</label>
+                  <select v-model="fredFilters.country" @change="onFredFilterChange" class="filter-select">
+                    <option v-for="opt in countryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                  </select>
+                </div>
+                <div class="filter-group">
+                  <label>Currency</label>
+                  <select v-model="fredFilters.currency" @change="onFredFilterChange" class="filter-select">
+                    <option v-for="opt in currencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                  </select>
+                </div>
+                <div class="filter-group">
+                  <label>Maturity</label>
+                  <select v-model="fredFilters.maturity" @change="onFredFilterChange" class="filter-select">
+                    <option v-for="opt in maturityOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                  </select>
+                </div>
                 <button class="btn-secondary refresh-btn" @click="fetchFredData" :disabled="fredLoading">Refresh chart</button>
               </div>
 
+              <!-- Loading state -->
               <div v-if="fredLoading" class="loading-container">
                 <v-icon size="48" class="spin">mdi-loading</v-icon>
                 <p>Fetching market data from FRED...</p>
               </div>
+
+              <!-- Error state -->
               <div v-else-if="fredError" class="error-container">
                 <v-icon color="error" size="48">mdi-alert-circle</v-icon>
                 <p>{{ fredError }}</p>
                 <button class="btn-primary" @click="fetchFredData">Retry</button>
               </div>
-              <div v-else-if="chartData.datasets.length" class="chart-container chart-container--fred">
-                <canvas ref="yieldCurveChart" width="800" height="400"></canvas>
+
+              <!-- Chart display when data exists -->
+              <div v-else-if="chartData.datasets && chartData.datasets.length" class="chart-container chart-container--fred">
+                <canvas ref="yieldCurveChart" width="800" height="400" style="background: white; border-radius: 8px;"></canvas>
                 <div class="chart-footer">
-                  <small>Source: FRED – {{ chartSeriesLabel }} ({{ fredFilters.country }} / {{ fredFilters.currency }})</small>
+                  <small>Source: FRED – {{ chartSeriesLabel }} ({{ getCountryLabel(fredFilters.country) }} / {{ getCurrencyLabel(fredFilters.currency) }})</small>
                 </div>
               </div>
+
+              <!-- Empty state – show button to load data -->
               <div v-else class="visualization-placeholder">
                 <v-icon size="64" color="#0B2044">mdi-chart-line</v-icon>
-                <h3>No Market Data Yet</h3>
-                <p>Select a series above and click Refresh to load the latest yield curve.</p>
+                <h3>No Market Data Loaded</h3>
+                <p>Click the <strong>Refresh chart</strong> button above to fetch the latest yield curve.</p>
+                <button class="btn-primary" @click="fetchFredData" style="margin-top: 16px;">Load Market Data</button>
               </div>
 
               <div class="navigation-buttons">
@@ -383,18 +405,19 @@
           <v-card class="summary-pro-card">
             <v-card-title><v-icon>mdi-file-document</v-icon> {{ instrumentName }} – Executive Summary</v-card-title>
             <v-card-text>
+              <!-- FIXED: figure above label -->
               <div class="summary-hero">
                 <div class="hero-stat">
-                  <span class="hero-label">Portfolio value</span>
                   <span class="hero-value">${{ (calculations.totalValue || 0).toLocaleString() }}</span>
+                  <span class="hero-label">Portfolio value</span>
                 </div>
                 <div class="hero-stat">
-                  <span class="hero-label">Instruments</span>
                   <span class="hero-value">{{ calculations.instrumentCount || 0 }}</span>
+                  <span class="hero-label">Instruments</span>
                 </div>
                 <div class="hero-stat" v-if="calculations.fred?.benchmark_rate">
-                  <span class="hero-label">FRED benchmark</span>
                   <span class="hero-value">{{ calculations.fred.benchmark_rate }}%</span>
+                  <span class="hero-label">FRED benchmark</span>
                 </div>
               </div>
               <div class="summary-grid">
@@ -414,7 +437,7 @@
               <div class="summary-progress"><div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div><p class="progress-text">✓ Upload ✓ Clean ✓ Calculate ✓ Visualize — Ready for Report</p></div>
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('visualizations')">Previous</button>
-                <button class="btn-primary" @click="switchTab('reports')">Go to Report →</button>
+                <button class="btn-primary" @click="goToReportTab">Go to Report →</button>
                 <button class="btn-primary" @click="goToPortfolioSummary">Portfolio Summary →</button>
                 <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
               </div>
@@ -515,7 +538,6 @@ import axios from 'axios'
 import api from '@/services/api.js'
 import sessionManager from '@/services/sessionManager.js'
 import { useFredMarket } from '@/composables/useFredMarket'
-import FredFiltersPanel from '@/components/FredFiltersPanel.vue'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import { loadFredSeriesChart, loadFredSeriesForReport } from '@/utils/fredChartHelper'
 import { renderFredLineChart } from '@/utils/renderFredChart'
@@ -578,11 +600,6 @@ function refreshPage() {
   columnMapping.value = {}
   fileColumns.value = []
   showMappingDialog.value = false
-  activeTab.value = 'upload'
-  if (activeSession.value) {
-    const sid = activeSession.value.id
-    sessionManager.updateSession(sid, { data: [], cleanedData: [], calculations: {}, uploaded_file_name: null })
-  }
 }
 
 async function loadSavedData() {
@@ -619,7 +636,7 @@ async function loadSavedData() {
   }
   if (wf) {
     loaded = applyWorkflowToPage(wf, { rawData, cleanedData, calculations, uploadedFile, cleaningStats })
-    if (wf.last_tab) activeTab.value = wf.last_tab
+    if (wf.last_tab && !route.query.tab) activeTab.value = wf.last_tab
   }
 
   const s = sessionManager.getSession(sid)
@@ -682,6 +699,8 @@ function saveSessionData() {
   })
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, wf)
   sessionManager.updateSession(sid, { last_tab: activeTab.value })
+  
+  updateSessionCompletion()
 }
 
 function updateSessionCompletion() {
@@ -689,25 +708,28 @@ function updateSessionCompletion() {
   if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
   activeSession.value.instrumentData[instrumentType.value] = {
     ...calculations.value,
-    completed: true,
+    completed: !!calculations.value.totalValue,
     timestamp: new Date().toISOString()
   }
-  sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, buildWorkflowSnapshot({
-    rawData: rawData.value,
-    cleanedData: cleanedData.value,
-    calculations: calculations.value,
-    activeTab: activeTab.value,
-    uploadedFile: uploadedFile.value,
-    cleaningStats: cleaningStats.value
-  }))
-  let total = 0, count = 0
-  for (const data of Object.values(activeSession.value.instrumentData)) {
-    if (data.completed) { total += data.totalValue || 0; count++ }
+  
+  let totalValue = 0
+  let completedCount = 0
+  for (const [instId, data] of Object.entries(activeSession.value.instrumentData)) {
+    if (data.completed) {
+      totalValue += parseFloat(data.totalValue) || 0
+      completedCount++
+    }
   }
-  activeSession.value.totalValue = total
-  activeSession.value.instrumentCount = count
-  if (count === 3) activeSession.value.status = 'completed'
-  sessionManager.updateSession(activeSession.value.id, activeSession.value)
+  activeSession.value.totalValue = totalValue
+  activeSession.value.instrumentCount = completedCount
+  activeSession.value.status = completedCount === 3 ? 'completed' : 'in-progress'
+  
+  sessionManager.updateSession(activeSession.value.id, {
+    totalValue: activeSession.value.totalValue,
+    instrumentCount: activeSession.value.instrumentCount,
+    status: activeSession.value.status,
+    instrumentData: activeSession.value.instrumentData
+  })
 }
 
 // ========== Instrument info ==========
@@ -733,7 +755,7 @@ const steps = [
 
 const activeTab = computed({
   get: () => route.query.tab || 'upload',
-  set: (val) => router.push({ query: { tab: val } })
+  set: (val) => router.push({ query: { ...route.query, tab: val } })
 })
 const currentStepIndex = computed(() => steps.findIndex(s => s.tab === activeTab.value))
 const totalSteps = steps.length
@@ -865,6 +887,10 @@ function goToVisualizations() {
     updateStatus('visualizations', true)
     saveSessionData()
   } else alert('Please clean your data first.')
+}
+function goToReportTab() {
+  activeTab.value = 'reports'
+  saveSessionData()
 }
 function updateStatus(tab, completed) {
   const statuses = JSON.parse(localStorage.getItem(`instrument_${instrumentType.value}_status`) || '{}')
@@ -1219,15 +1245,17 @@ function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: f
 function getInstrumentData(instrumentId) {
   if (!activeSession.value) return null
   const sid = activeSession.value.id
-  const wf = sessionManager.getInstrumentWorkflow(sid, instrumentId)
-  if (wf?.calculations && Object.keys(wf.calculations).length) return wf.calculations
-  const stored = activeSession.value.instrumentData?.[instrumentId]
-  if (stored) return stored
-  const savedCalc = localStorage.getItem(`${instrumentId}_session_${sid}_calc`)
-  if (savedCalc) {
-    try { return JSON.parse(savedCalc) } catch { /* ignore */ }
+  let wf = sessionManager.getInstrumentWorkflow(sid, instrumentId)
+  if (!wf) {
+    const stored = activeSession.value.instrumentData?.[instrumentId]
+    if (stored) return stored
+    const savedCalc = localStorage.getItem(`${instrumentId}_session_${sid}_calc`)
+    if (savedCalc) {
+      try { return JSON.parse(savedCalc) } catch { /* ignore */ }
+    }
+    return null
   }
-  return null
+  return wf.calculations || null
 }
 
 const reportPreviewData = computed(() => {
@@ -1319,7 +1347,6 @@ function buildMethodologySection(selectedInstrumentNames) {
   return methods.join('')
 }
 
-// Fetch FRED series via backend API
 async function fetchFredSeriesData(seriesId, limit = 30) {
   try {
     const result = await api.fredAPI.getSeries(seriesId, limit, 'desc')
@@ -1338,9 +1365,10 @@ async function fetchFredSeriesData(seriesId, limit = 30) {
 }
 
 async function generateReportHtml() {
+  await loadSavedData()
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
-    alert('No data available for the selected instruments.')
+    alert('No data available for the selected instruments. Please complete at least one instrument workflow.')
     return null
   }
 
@@ -1356,9 +1384,9 @@ async function generateReportHtml() {
   }
 
   const origin = window.location.origin
-  const backgroundImageUrl = `${origin}/background%20report%201.webp`
-  const logoUrl = `${origin}/DataStudio-logo.jpeg`
-  const logoHtml = `<img src="${logoUrl}" alt="DataStudio Logo" style="display:block; width:auto; height:70px; margin:0; padding:0; border:none;" onerror="this.style.display='none'">`
+  // FIXED: use correct logo file and constrain size
+  const logoUrl = `${origin}/DuraCapital logo.png`
+  const logoHtml = `<img src="${logoUrl}" alt="DuraCapital Logo" style="display:block; width:auto; max-height:60px; height:auto; margin:0; padding:0; border:none;" onerror="this.style.display='none'">`
 
   let totalPortfolioValue = 0, totalInstrumentCount = 0
   for (const inst of report.instruments) {
@@ -1383,7 +1411,7 @@ async function generateReportHtml() {
         position: relative;
         height: 100vh;
         width: 100%;
-        background: url('${backgroundImageUrl}') no-repeat center center;
+        background: url('${origin}/background%20report%201.webp') no-repeat center center;
         background-size: cover;
         display: flex;
         flex-direction: column;
@@ -1395,7 +1423,7 @@ async function generateReportHtml() {
       .cover-content { position: relative; z-index: 2; padding: 20px; background: rgba(255,255,255,0.7); border-radius: 16px; max-width: 80%; }
       .session-name { font-size: 56px; font-weight: 700; letter-spacing: 2px; text-shadow: 2px 2px 8px rgba(255,255,255,0.8); margin: 20px 0 10px; font-family: 'Georgia', serif; color: #0B2044; }
       .valuation-title { font-size: 24px; font-weight: 500; margin-bottom: 20px; color: #1E88E5; }
-      .logo-cover { margin-bottom: 20px; }
+      .logo-cover img { max-height: 70px; width: auto; }
       .report-content { padding: 20px 30px; max-width: 1000px; margin: 0 auto; }
       h1 { color: #0B2044; font-size: 28px; border-bottom: 2px solid #0B2044; padding-bottom: 10px; }
       h2 { color: #1E88E5; margin-top: 30px; font-size: 22px; }
@@ -1409,8 +1437,8 @@ async function generateReportHtml() {
       .methodology-card { background: #f8f9ff; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
       .methodology-card h4 { margin-top: 0; color: #0B2044; }
       .footer { margin-top: 40px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }
-      .chart-container { margin: 20px 0; text-align: center; }
-      canvas { max-width: 100%; height: auto; background: #f8f9ff; border-radius: 8px; padding: 10px; }
+      .chart-container { margin: 20px 0; text-align: center; max-height: 360px; overflow: hidden; }
+      canvas { max-width: 100%; height: auto; max-height: 300px; background: #f8f9ff; border-radius: 8px; padding: 10px; }
       .chart-caption { font-size: 12px; color: #666; margin-top: 5px; }
     <\/style>
   <\/head>
@@ -1466,7 +1494,7 @@ async function generateReportHtml() {
               <p><strong>Bond Equivalent Yield:</strong> ${instData.bondEquivalentYield || 0}%</p>
               <p><strong>Average Days to Maturity:</strong> ${instData.avgDaysToMaturity || 0} days</p>`
     }
-    html += `</div><h3>Detailed Metrics</h3></table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+    html += `</div><h3>Detailed Metrics</h3><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
     for (const [key, val] of Object.entries(instData)) {
       if (key === 'completed' || key === 'timestamp' || key === 'fred') continue
       html += `<tr><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
@@ -1480,8 +1508,8 @@ async function generateReportHtml() {
       <div class="summary-text">
         <h3>Yield Curve Analysis – ${inst.name}</h3>
         <div class="chart-container">
-          <canvas id="${chartId}" width="800" height="400" style="max-width:100%; height:auto;"></canvas>
-          <div class="chart-caption">Source: FRED – ${chartSeriesLabel.value || 'market rate'} (${fredFilters.value.country} / ${fredFilters.value.currency})</div>
+          <canvas id="${chartId}" width="800" height="300" style="max-width:100%; height:auto; max-height:300px;"></canvas>
+          <div class="chart-caption">Source: FRED – ${chartSeriesLabel.value || 'market rate'} (${getCountryLabel(fredFilters.country)} / ${getCurrencyLabel(fredFilters.currency)})</div>
         </div>
         <p>This chart shows the latest market yield curve used as a benchmark for discounting cash flows of ${inst.name} instruments.</p>
         <script>
@@ -1559,6 +1587,7 @@ async function downloadFromPreview(format) {
 }
 
 async function downloadCombinedReport(format) {
+  await loadSavedData()
   const html = await generateReportHtml()
   if (!html) return
   const filename = `combined_report_${Date.now()}`
@@ -1632,6 +1661,71 @@ const chartData = ref({ labels: [], datasets: [] })
 const chartSeriesLabel = ref('')
 const currentMarketRate = ref(null)
 
+// Helper functions to get display labels
+function getCountryLabel(code) {
+  const found = countryOptions.value.find(c => c.value === code)
+  return found ? found.label : code
+}
+function getCurrencyLabel(code) {
+  const found = currencyOptions.value.find(c => c.value === code)
+  return found ? found.label : code
+}
+
+// Fallback options in case filterOptions is empty
+const countryOptions = computed(() => {
+  if (filterOptions.value.countries && filterOptions.value.countries.length) {
+    return filterOptions.value.countries
+  }
+  return [
+    { value: 'USA', label: 'United States' },
+    { value: 'GBR', label: 'United Kingdom' },
+    { value: 'EUR', label: 'Eurozone' },
+    { value: 'JPN', label: 'Japan' },
+    { value: 'CAN', label: 'Canada' }
+  ]
+})
+
+const currencyOptions = computed(() => {
+  if (filterOptions.value.currencies && filterOptions.value.currencies.length) {
+    return filterOptions.value.currencies
+  }
+  return [
+    { value: 'USD', label: 'USD' },
+    { value: 'EUR', label: 'EUR' },
+    { value: 'GBP', label: 'GBP' },
+    { value: 'JPY', label: 'JPY' },
+    { value: 'CAD', label: 'CAD' }
+  ]
+})
+
+const maturityOptions = computed(() => {
+  if (filterOptions.value.maturities && filterOptions.value.maturities.length) {
+    return filterOptions.value.maturities
+  }
+  return [
+    { value: '1M', label: '1 Month' },
+    { value: '3M', label: '3 Months' },
+    { value: '6M', label: '6 Months' },
+    { value: '1Y', label: '1 Year' },
+    { value: '2Y', label: '2 Years' },
+    { value: '5Y', label: '5 Years' },
+    { value: '10Y', label: '10 Years' }
+  ]
+})
+
+// Set default filter values when options become available
+watch([countryOptions, currencyOptions, maturityOptions], () => {
+  if (!fredFilters.country && countryOptions.value.length) {
+    fredFilters.country = countryOptions.value[0].value
+  }
+  if (!fredFilters.currency && currencyOptions.value.length) {
+    fredFilters.currency = currencyOptions.value[0].value
+  }
+  if (!fredFilters.maturity && maturityOptions.value.length) {
+    fredFilters.maturity = maturityOptions.value[0].value
+  }
+}, { immediate: true })
+
 const fredCategories = ref({})
 const availableSeries = computed(() => fredCategories.value.interest_rates || {})
 const selectedSeriesLabel = computed(() => availableSeries.value[selectedSeries.value] || selectedSeries.value)
@@ -1653,9 +1747,13 @@ async function fetchFredData() {
     if (!loaded) throw new Error('No FRED data')
     chartData.value = loaded
     currentMarketRate.value = loaded.latest
-    await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
+    await nextTick()
+    if (yieldCurveChart.value) {
+      await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
+    }
   } catch (err) {
     fredError.value = err.message || 'Failed to load market data.'
+    chartData.value = { labels: [], datasets: [] }
   } finally {
     fredLoading.value = false
   }
@@ -1699,13 +1797,15 @@ watch(() => instrumentType.value, () => {
   if (activeTab.value === 'visualizations') fetchFredData()
 }, { immediate: true })
 watch(() => activeTab.value, async (newTab) => {
-  if (newTab === 'visualizations' && hasCleanedData.value) await fetchFredData()
+  if (newTab === 'visualizations' && hasCleanedData.value && !chartData.value.datasets.length && !fredLoading.value) {
+    await fetchFredData()
+  }
 })
 
 // ========== Force refresh on instrument or session change ==========
 let lastInstrument = ''
 let lastSessionId = ''
-function checkAndReset() {
+async function checkAndReset() {
   const savedSessionRaw = localStorage.getItem('active_session')
   let currentSessionId = null
   if (savedSessionRaw) {
@@ -1724,17 +1824,20 @@ function checkAndReset() {
     } else {
       activeSession.value = null
     }
-    const loaded = loadSavedData()
+    const loaded = await loadSavedData()
     if (!loaded) {
       refreshPage()
-      activeTab.value = 'upload'
+      if (!route.query.tab) activeTab.value = 'upload'
     } else {
-      const savedTab = sessionManager.getSession(activeSession.value?.id)?.payload?.last_tab || localStorage.getItem(`instrument_${instrumentType.value}_last_tab`)
-      if (savedTab && steps.some(s => s.tab === savedTab)) activeTab.value = savedTab
-      else activeTab.value = 'upload'
+      if (!route.query.tab) {
+        const savedTab = sessionManager.getSession(activeSession.value?.id)?.payload?.last_tab || localStorage.getItem(`instrument_${instrumentType.value}_last_tab`)
+        if (savedTab && steps.some(s => s.tab === savedTab)) activeTab.value = savedTab
+        else activeTab.value = 'upload'
+      }
     }
   }
 }
+
 onMounted(async () => {
   const qSid = route.query.session
   if (qSid) {
@@ -1745,7 +1848,7 @@ onMounted(async () => {
       sessionManager.setActiveSession(s)
     }
   }
-  checkAndReset()
+  await checkAndReset()
   loadUploadHistory()
   window.addEventListener('storage', () => checkAndReset())
   fredFilters.value.maturity = defaultMaturityForInstrument()
@@ -1760,12 +1863,13 @@ onMounted(async () => {
   if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
   if (!calculations.value.totalValue && activeSession.value) await loadSavedData()
 })
+
 onBeforeUnmount(() => window.removeEventListener('storage', () => checkAndReset()))
 watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* ========== All original styles – copy from your existing file ========== */
+/* ========== All original styles – keep exactly as in your existing file ========== */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
@@ -1997,10 +2101,55 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   position: relative;
   height: 400px;
   width: 100%;
+  background: white;
+  border-radius: 8px;
+  padding: 10px;
 }
 .chart-container--fred canvas {
   width: 100% !important;
   height: 100% !important;
+}
+/* Filter row styles */
+.filters-row {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.filter-group {
+  flex: 1;
+  min-width: 150px;
+}
+.filter-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0B2044;
+  margin-bottom: 4px;
+}
+.filter-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: white;
+  color: #0B2044;        /* visible text */
+  font-size: 14px;
+  cursor: pointer;
+  transition: border 0.2s;
+}
+.filter-select:focus {
+  outline: none;
+  border-color: #0B2044;
+}
+.filter-select option {
+  color: #0B2044;
+  background: white;
+}
+.refresh-btn {
+  flex-shrink: 0;
+  align-self: flex-end;
 }
 .fred-layout {
   display: flex;
@@ -2013,11 +2162,8 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .fred-layout > * {
   flex: 1 1 auto;
 }
-.refresh-btn {
-  align-self: center;
-  white-space: nowrap;
-}
 .report-hint { font-size: 14px; color: #555; margin-bottom: 16px; padding: 12px; background: #f0f4f8; border-radius: 8px; }
+/* Summary hero – value above label */
 .summary-hero {
   display: flex;
   justify-content: space-around;
@@ -2033,15 +2179,18 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .hero-stat {
   flex: 1;
   min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.hero-value {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 4px;
 }
 .hero-label {
   font-size: 14px;
   opacity: 0.9;
-  margin-bottom: 8px;
-}
-.hero-value {
-  font-size: 28px;
-  font-weight: 700;
 }
 .card-panel { background: #f8f9ff; padding: 16px; border-radius: 10px; border: 1px solid #e8ecf1; }
 .fred-calc-card { margin: 16px 0; }

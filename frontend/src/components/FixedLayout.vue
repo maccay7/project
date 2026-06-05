@@ -56,6 +56,7 @@
 import { computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import TopNavbar from '@/components/TopNavbar.vue'
+import sessionManager from '@/services/sessionManager.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -85,14 +86,27 @@ function navigateTo(path) {
   router.push(path)
 }
 
+// FIXED: Generate Report now opens the report tab with the active session
 function goToReportsPage() {
-  router.push('/reports')
+  const sessionId = sessionManager.getActiveSessionId()
+  if (!sessionId) {
+    alert('No active session – please select a session from Dashboard')
+    router.push('/dashboard')
+    return
+  }
+  // Use the current instrument if on an instrument page, otherwise default to money-market
+  let instrument = 'money-market'
+  if (isOnInstrumentPage.value) {
+    const pathParts = route.path.split('/')
+    instrument = pathParts[pathParts.length - 1]
+  }
+  router.push({ path: `/instrument/${instrument}`, query: { session: sessionId, tab: 'reports' } })
 }
 
 function changeInstrumentTab(tab) {
   // If on instrument page, change tab
   if (isOnInstrumentPage.value) {
-    router.push({ path: route.path, query: { tab } })
+    router.push({ path: route.path, query: { ...route.query, tab } })
   } else {
     // If not on instrument page, navigate to the last used instrument or default to money-market
     const lastInstrument = localStorage.getItem('last_instrument') || '/instrument/money-market'
@@ -119,6 +133,7 @@ watch(() => route.path, (newPath) => {
 </script>
 
 <style scoped>
+/* ===== YOUR EXACT ORIGINAL STYLES – NO CHANGES ===== */
 .fixed-layout {
   display: flex;
   min-height: 100vh;

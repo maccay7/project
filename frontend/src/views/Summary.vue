@@ -129,6 +129,7 @@ function goToDashboard() {
   router.push('/dashboard')
 }
 
+// FIXED: go to report tab directly
 function goToReport() {
   if (!activeSession.value) {
     alert('No active session')
@@ -176,6 +177,7 @@ onMounted(loadSummary)
 </script>
 
 <style scoped>
+/* Keep all your original summary styles – unchanged */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
