@@ -339,7 +339,7 @@
                 </div>
               </div>
 
-              <!-- Filter row with dropdowns -->
+              <!-- Filter row with dropdowns - now fully visible and functional -->
               <div class="filters-row">
                 <div class="filter-group">
                   <label>Country / Region</label>
@@ -405,7 +405,6 @@
           <v-card class="summary-pro-card">
             <v-card-title><v-icon>mdi-file-document</v-icon> {{ instrumentName }} – Executive Summary</v-card-title>
             <v-card-text>
-              <!-- FIXED: figure above label -->
               <div class="summary-hero">
                 <div class="hero-stat">
                   <span class="hero-value">${{ (calculations.totalValue || 0).toLocaleString() }}</span>
@@ -1384,7 +1383,6 @@ async function generateReportHtml() {
   }
 
   const origin = window.location.origin
-  // FIXED: use correct logo file and constrain size
   const logoUrl = `${origin}/DuraCapital logo.png`
   const logoHtml = `<img src="${logoUrl}" alt="DuraCapital Logo" style="display:block; width:auto; max-height:60px; height:auto; margin:0; padding:0; border:none;" onerror="this.style.display='none'">`
 
@@ -1494,7 +1492,7 @@ async function generateReportHtml() {
               <p><strong>Bond Equivalent Yield:</strong> ${instData.bondEquivalentYield || 0}%</p>
               <p><strong>Average Days to Maturity:</strong> ${instData.avgDaysToMaturity || 0} days</p>`
     }
-    html += `</div><h3>Detailed Metrics</h3><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+    html += `</div><h3>Detailed Metrics</h3></table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
     for (const [key, val] of Object.entries(instData)) {
       if (key === 'completed' || key === 'timestamp' || key === 'fred') continue
       html += `<tr><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
@@ -1793,6 +1791,11 @@ function onExcelDataUpdate(data) {
   saveSessionData()
 }
 
+// Auto-save on any data change
+watch([rawData, cleanedData, calculations], () => {
+  saveSessionData()
+}, { deep: true })
+
 watch(() => instrumentType.value, () => {
   if (activeTab.value === 'visualizations') fetchFredData()
 }, { immediate: true })
@@ -1835,6 +1838,7 @@ async function checkAndReset() {
         else activeTab.value = 'upload'
       }
     }
+    saveSessionData() // ensure any loaded data is saved immediately
   }
 }
 
@@ -1862,6 +1866,7 @@ onMounted(async () => {
   } catch (err) { console.error(err) }
   if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
   if (!calculations.value.totalValue && activeSession.value) await loadSavedData()
+  saveSessionData() // final sync
 })
 
 onBeforeUnmount(() => window.removeEventListener('storage', () => checkAndReset()))
@@ -2109,7 +2114,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   width: 100% !important;
   height: 100% !important;
 }
-/* Filter row styles */
+/* Filter row styles - base styles */
 .filters-row {
   display: flex;
   gap: 20px;
@@ -2134,7 +2139,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   border: 1px solid #ddd;
   border-radius: 8px;
   background: white;
-  color: #0B2044;        /* visible text */
+  color: #0B2044;
   font-size: 14px;
   cursor: pointer;
   transition: border 0.2s;
@@ -2215,4 +2220,17 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .history-item:hover { background: #e8ecf1; }
 .history-item small { font-size: 11px; color: #666; margin-left: auto; }
 .btn-delete-history { background: none; border: none; cursor: pointer; color: #f44336; font-size: 16px; }
+</style>
+
+<style>
+/* GLOBAL OVERRIDE - Ensures filter dropdowns stay black on white even after Vuetify theme applies */
+.instrument-page .filters-row select,
+.instrument-page .filters-row .filter-select,
+.instrument-page .filters-row select option,
+.instrument-page .filters-row .filter-select option,
+.instrument-page .filters-row select:focus,
+.instrument-page .filters-row .filter-select:focus {
+  color: #000000 ;
+  background-color: #ffffff ;
+}
 </style>

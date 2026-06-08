@@ -28,7 +28,7 @@
           </div>
         </div>
 
-        <!-- Instrument Tools - ALWAYS VISIBLE -->
+        <!-- Instrument Tools - ALWAYS VISIBLE (green ticks removed) -->
         <div class="nav-group">
           <div class="nav-group-title">INSTRUMENT TOOLS</div>
           <div 
@@ -40,7 +40,7 @@
           >
             <v-icon class="nav-icon">{{ item.icon }}</v-icon>
             <span class="nav-label">{{ item.name }}</span>
-            <span v-if="getTabStatus(item.tab)" class="check-badge">✓</span>
+            <!-- ✓ REMOVED GREEN TICK BADGE -->
           </div>
         </div>
       </div>
@@ -86,7 +86,6 @@ function navigateTo(path) {
   router.push(path)
 }
 
-// FIXED: Generate Report now opens the report tab with the active session
 function goToReportsPage() {
   const sessionId = sessionManager.getActiveSessionId()
   if (!sessionId) {
@@ -94,7 +93,6 @@ function goToReportsPage() {
     router.push('/dashboard')
     return
   }
-  // Use the current instrument if on an instrument page, otherwise default to money-market
   let instrument = 'money-market'
   if (isOnInstrumentPage.value) {
     const pathParts = route.path.split('/')
@@ -104,24 +102,12 @@ function goToReportsPage() {
 }
 
 function changeInstrumentTab(tab) {
-  // If on instrument page, change tab
   if (isOnInstrumentPage.value) {
     router.push({ path: route.path, query: { ...route.query, tab } })
   } else {
-    // If not on instrument page, navigate to the last used instrument or default to money-market
     const lastInstrument = localStorage.getItem('last_instrument') || '/instrument/money-market'
     router.push({ path: lastInstrument, query: { tab } })
   }
-}
-
-function getTabStatus(tab) {
-  // Get current instrument from route or localStorage
-  let instrument = route.path.split('/').pop()
-  if (instrument === 'dashboard' || instrument === 'summary' || instrument === 'reports') {
-    instrument = localStorage.getItem('last_instrument')?.split('/').pop() || 'money-market'
-  }
-  const statuses = JSON.parse(localStorage.getItem(`instrument_${instrument}_status`) || '{}')
-  return statuses[tab] || false
 }
 
 // Save last instrument when on instrument page
@@ -209,18 +195,6 @@ watch(() => route.path, (newPath) => {
 
 .nav-label {
   flex: 1;
-}
-
-.check-badge {
-  background: #4CAF50;
-  color: white;
-  border-radius: 50%;
-  width: 18px;
-  height: 18px;
-  font-size: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .sidebar::-webkit-scrollbar {
