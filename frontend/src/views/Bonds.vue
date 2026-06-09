@@ -46,10 +46,16 @@
             <v-card-title><v-icon>mdi-upload</v-icon> Upload {{ instrumentName }} Dataset</v-card-title>
             <v-card-text>
               <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
-                <input type="file" ref="fileInput" @change="handleFileUpload" accept=".csv,.xlsx,.xls" style="display: none">
+                <input
+                  type="file"
+                  ref="fileInput"
+                  @change="handleFileUpload"
+                  accept=".csv,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.xlam,.ods,.xml,.html,.prn,.dif,.slk,.dbf"
+                  style="display: none"
+                >
                 <v-icon size="48" color="#0B2044">mdi-cloud-upload</v-icon>
                 <p>Drag & drop or <span class="browse-link" @click="$refs.fileInput.click()">browse</span></p>
-                <small>Supported: CSV, Excel files</small>
+                <small>Supported: CSV, Excel (including .xlsm, .xlsb, .ods), and many other spreadsheet formats</small>
               </div>
 
               <!-- Upload History Section -->
@@ -65,6 +71,12 @@
                 </div>
               </div>
 
+              <!-- Loading indicator while parsing file -->
+              <div v-if="fileLoading" class="loading-container">
+                <v-icon size="48" class="spin">mdi-loading</v-icon>
+                <p>Parsing file... Please wait.</p>
+              </div>
+
               <div v-if="uploadedFile" class="file-info">
                 <v-icon>mdi-file-excel</v-icon>
                 <span>{{ uploadedFile.name }}</span>
@@ -74,10 +86,11 @@
                 <button class="btn-mapping" @click="autoMatchColumns" :disabled="!rawData.length">Map Columns</button>
               </div>
 
+              <!-- Preview limited to first 500 rows to avoid browser freeze -->
               <div v-if="rawData.length" class="excel-preview-section">
-                <h4>File Preview (Excel)</h4>
-                <p class="preview-info">{{ rawData.length }} rows — edit cells below like Excel</p>
-                <ExcelViewer :data="rawData" :headers="uploadPreviewHeaders" @data-update="onRawExcelUpdate" />
+                <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
+                <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
+                <ExcelViewer :data="rawData.slice(0, 500)" :headers="uploadPreviewHeaders" @data-update="onRawExcelUpdate" />
                 <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
               </div>
 
@@ -311,31 +324,37 @@
                 </div>
               </div>
 
-              <!-- Filter row with dropdown selectors (fixed visibility & custom maturity) -->
+              <!-- Filter row with dropdown selectors (custom options added for country & currency) -->
               <div class="filters-row">
                 <div class="filter-group">
                   <label>Country / Region</label>
-                  <select
-                    v-model="fredFilters.country"
-                    @change="onFredFilterChange"
-                    class="filter-select"
-                    :key="countryOptions.length"
-                    style="display: block !important; background: white !important; color: black !important;"
-                  >
+                  <select v-model="selectedCountryOption" @change="onCountrySelectChange" class="filter-select" style="display: block !important; background: white !important; color: black !important;">
                     <option v-for="opt in countryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option value="__custom__">Custom...</option>
                   </select>
+                  <input
+                    v-if="selectedCountryOption === '__custom__'"
+                    v-model="customCountry"
+                    @change="onCustomCountryChange"
+                    type="text"
+                    class="filter-select custom-maturity-input"
+                    placeholder="e.g., DEU, FRA, CHN, AUS"
+                  />
                 </div>
                 <div class="filter-group">
                   <label>Currency</label>
-                  <select
-                    v-model="fredFilters.currency"
-                    @change="onFredFilterChange"
-                    class="filter-select"
-                    :key="currencyOptions.length"
-                    style="display: block !important; background: white !important; color: black !important;"
-                  >
+                  <select v-model="selectedCurrencyOption" @change="onCurrencySelectChange" class="filter-select" style="display: block !important; background: white !important; color: black !important;">
                     <option v-for="opt in currencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option value="__custom__">Custom...</option>
                   </select>
+                  <input
+                    v-if="selectedCurrencyOption === '__custom__'"
+                    v-model="customCurrency"
+                    @change="onCustomCurrencyChange"
+                    type="text"
+                    class="filter-select custom-maturity-input"
+                    placeholder="e.g., CHF, SEK, NZD"
+                  />
                 </div>
                 <div class="filter-group">
                   <label>Maturity</label>
@@ -372,7 +391,7 @@
               <div v-else-if="chartData.datasets && chartData.datasets.length" class="chart-container chart-container--fred">
                 <canvas ref="yieldCurveChart" width="800" height="400" style="background: white; border-radius: 8px;"></canvas>
                 <div class="chart-footer">
-                  <small>Source: FRED – {{ chartSeriesLabel }} ({{ getCountryLabel(fredFilters.country) }} / {{ getCurrencyLabel(fredFilters.currency) }})</small>
+                  <small>Source: FRED – {{ chartSeriesLabel }} ({{ getCountryLabel(effectiveCountry) }} / {{ getCurrencyLabel(effectiveCurrency) }})</small>
                 </div>
               </div>
 
@@ -600,9 +619,11 @@ function isStepCompleted(tab) {
   if (tab === 'cleaning') return cleanedData.value.length > 0
   if (tab === 'calculations') return !!calculations.value.totalValue
   if (tab === 'visualizations') return chartData.value.datasets && chartData.value.datasets.length > 0
-  // summary and reports are considered completed if calculations exist
   if (tab === 'summary') return !!calculations.value.totalValue
-  if (tab === 'reports') return true
+  if (tab === 'reports') {
+    return cleanedData.value.length > 0 || Object.keys(calculations.value).length > 0 ||
+           (activeSession.value?.instrumentData && Object.values(activeSession.value.instrumentData).some(d => d.completed))
+  }
   return false
 }
 
@@ -640,15 +661,45 @@ async function loadSavedData() {
   }
   if (wf) {
     loaded = applyWorkflowToPage(wf, { rawData, cleanedData, calculations, uploadedFile, cleaningStats })
-    // Also restore chart data and filters if present
+    // Restore chart data and FRED filters (including custom selections)
     if (wf.chartData) chartData.value = wf.chartData
     if (wf.fredFilters) {
       fredFilters.value = { ...fredFilters.value, ...wf.fredFilters }
-      if (wf.fredFilters.maturity && !maturityOptions.value.some(opt => opt.value === wf.fredFilters.maturity)) {
-        selectedMaturityOption.value = '__custom__'
-        customMaturity.value = wf.fredFilters.maturity
-      } else {
-        selectedMaturityOption.value = wf.fredFilters.maturity || maturityOptions.value[0]?.value
+      // Restore custom maturity selection
+      if (wf.fredFilters.maturity) {
+        const matVal = wf.fredFilters.maturity
+        const isCustom = !maturityOptions.value.some(opt => opt.value === matVal)
+        if (isCustom) {
+          selectedMaturityOption.value = '__custom__'
+          customMaturity.value = matVal
+        } else {
+          selectedMaturityOption.value = matVal
+          customMaturity.value = ''
+        }
+      }
+      // Restore custom country selection
+      if (wf.fredFilters.country) {
+        const countryVal = wf.fredFilters.country
+        const isCustom = !countryOptions.value.some(opt => opt.value === countryVal)
+        if (isCustom) {
+          selectedCountryOption.value = '__custom__'
+          customCountry.value = countryVal
+        } else {
+          selectedCountryOption.value = countryVal
+          customCountry.value = ''
+        }
+      }
+      // Restore custom currency selection
+      if (wf.fredFilters.currency) {
+        const currencyVal = wf.fredFilters.currency
+        const isCustom = !currencyOptions.value.some(opt => opt.value === currencyVal)
+        if (isCustom) {
+          selectedCurrencyOption.value = '__custom__'
+          customCurrency.value = currencyVal
+        } else {
+          selectedCurrencyOption.value = currencyVal
+          customCurrency.value = ''
+        }
       }
     }
     if (wf.last_tab && !route.query.tab) activeTab.value = wf.last_tab
@@ -662,16 +713,25 @@ async function loadSavedData() {
     if (s.uploaded_file_name) { uploadedFile.value = { name: s.uploaded_file_name, size: 0 }; loaded = true }
   }
 
+  // Fallback to localStorage if sessionManager fails
   if (!loaded) {
     const key = `${instrumentType.value}_session_${sid}`
     const savedRaw = localStorage.getItem(`${key}_raw`)
     const savedClean = localStorage.getItem(`${key}_clean`)
     const savedCalc = localStorage.getItem(`${key}_calc`)
     const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
+    const savedChartData = localStorage.getItem(`${key}_chartData`)
+    const savedFredFilters = localStorage.getItem(`${key}_fredFilters`)
     if (savedRaw) { rawData.value = JSON.parse(savedRaw); loaded = true }
     if (savedClean) { cleanedData.value = JSON.parse(savedClean); loaded = true }
     if (savedCalc) { calculations.value = JSON.parse(savedCalc); loaded = true }
     if (savedFileName) { uploadedFile.value = { name: savedFileName, size: 0 }; loaded = true }
+    if (savedChartData) { chartData.value = JSON.parse(savedChartData); loaded = true }
+    if (savedFredFilters) {
+      const filters = JSON.parse(savedFredFilters)
+      fredFilters.value = { ...fredFilters.value, ...filters }
+      loaded = true
+    }
   }
 
   if (cleanedData.value.length && rawData.value.length) {
@@ -712,10 +772,29 @@ function saveSessionData() {
     uploadedFile: uploadedFile.value,
     cleaningStats: cleaningStats.value,
     chartData: chartData.value,
-    fredFilters: { country: fredFilters.value.country, currency: fredFilters.value.currency, maturity: effectiveMaturity.value }
+    fredFilters: { 
+      country: effectiveCountry.value, 
+      currency: effectiveCurrency.value, 
+      maturity: effectiveMaturity.value 
+    }
   })
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, wf)
   sessionManager.updateSession(sid, { last_tab: activeTab.value })
+  
+  // Also save to localStorage as backup
+  const key = `${instrumentType.value}_session_${sid}`
+  localStorage.setItem(`${key}_raw`, JSON.stringify(rawData.value))
+  localStorage.setItem(`${key}_clean`, JSON.stringify(cleanedData.value))
+  localStorage.setItem(`${key}_calc`, JSON.stringify(calculations.value))
+  localStorage.setItem(`${key}_chartData`, JSON.stringify(chartData.value))
+  localStorage.setItem(`${key}_fredFilters`, JSON.stringify({ 
+    country: effectiveCountry.value, 
+    currency: effectiveCurrency.value, 
+    maturity: effectiveMaturity.value 
+  }))
+  if (uploadedFile.value) {
+    localStorage.setItem(`${instrumentType.value}_uploaded_file_name`, uploadedFile.value.name)
+  }
   
   updateSessionCompletion()
 }
@@ -788,6 +867,7 @@ const fileColumns = ref([])
 const fixedValuesTracker = ref(new Map())
 const calculations = ref({})
 const cleaningStats = ref({ totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 })
+const fileLoading = ref(false)
 
 const cleaningOptions = ref({
   removeDuplicates: true,
@@ -887,57 +967,91 @@ function hasInvalidData(row) {
 }
 function isInvalidValue(value) { return !value || value === '' || value === null }
 
-// Navigation
-function goToDashboard() { router.push('/dashboard') }
-function goToPortfolioSummary() { router.push('/summary') }
-function switchTab(tab) { activeTab.value = tab; saveSessionData() }
+// Navigation - save before switching
+function goToDashboard() { saveSessionData(); router.push('/dashboard') }
+function goToPortfolioSummary() { saveSessionData(); router.push('/summary') }
+function switchTab(tab) { 
+  saveSessionData()
+  activeTab.value = tab
+}
 function goToCalculations() {
   if (hasCleanedData.value) {
-    activeTab.value = 'calculations'
     saveSessionData()
+    activeTab.value = 'calculations'
   } else alert('Please clean your data first (click Apply Cleaning).')
 }
 function goToVisualizations() {
   if (hasCleanedData.value) {
-    activeTab.value = 'visualizations'
     saveSessionData()
+    activeTab.value = 'visualizations'
   } else alert('Please clean your data first.')
 }
 function goToReportTab() {
-  activeTab.value = 'reports'
   saveSessionData()
+  activeTab.value = 'reports'
 }
 
 // File upload & column mapping
 const fileInput = ref(null)
 function handleFileUpload(e) { const file = e.target.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 function handleDrop(e) { const file = e.dataTransfer.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
+
 async function readFileData(file) {
+  fileLoading.value = true
   const ext = file.name.split('.').pop().toLowerCase()
   let data = []
   try {
+    if (file.size > 20 * 1024 * 1024) {
+      if (!confirm(`File is ${(file.size / (1024*1024)).toFixed(2)} MB. Large files may take a while. Continue?`)) {
+        fileLoading.value = false
+        uploadedFile.value = null
+        return
+      }
+    }
+    
     if (ext === 'csv') {
       const text = await file.text()
-      const lines = text.split('\n')
-      const headers = lines[0].split(',').map(h => h.trim())
-      data = lines.slice(1).filter(l=>l.trim()).map(line => {
-        const vals = line.split(',')
+      const lines = text.split(/\r?\n/).filter(l => l.trim())
+      if (lines.length === 0) throw new Error('Empty file')
+      let delimiter = ','
+      if (lines[0].includes(';') && !lines[0].includes(',')) delimiter = ';'
+      const headers = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ''))
+      data = lines.slice(1).map(line => {
+        const vals = line.split(delimiter).map(v => v.trim().replace(/^"|"$/g, ''))
         const row = {}
-        headers.forEach((h,i) => { row[h] = vals[i] ? vals[i].trim() : '' })
+        headers.forEach((h, i) => { row[h] = vals[i] !== undefined ? vals[i] : '' })
         return row
       })
     } else {
       const buffer = await file.arrayBuffer()
-      const workbook = XLSX.read(buffer)
-      const sheet = workbook.Sheets[workbook.SheetNames[0]]
-      data = XLSX.utils.sheet_to_json(sheet)
+      const workbook = XLSX.read(buffer, {
+        type: 'array',
+        cellDates: false,
+        cellNF: false,
+        cellText: false,
+        sheetRows: 5000,
+        defval: ""
+      })
+      const sheetName = workbook.SheetNames[0]
+      const sheet = workbook.Sheets[sheetName]
+      data = XLSX.utils.sheet_to_json(sheet, { defval: "" })
+      if (data.length === 0) throw new Error('No data found in the first sheet')
     }
     rawData.value = data
     addToHistory(file.name, data)
     saveSessionData()
     if (missingColumns.value.length) autoMatchColumns()
-  } catch(err) { console.error(err); alert('Error reading file') }
+    alert(`Successfully loaded ${data.length} rows.`)
+  } catch(err) {
+    console.error('Error reading file:', err)
+    alert(`Failed to parse file: ${err.message}. Please ensure the file is not corrupted and is a valid spreadsheet.`)
+    uploadedFile.value = null
+    rawData.value = []
+  } finally {
+    fileLoading.value = false
+  }
 }
+
 function removeFile() {
   uploadedFile.value = null
   rawData.value = []
@@ -1237,7 +1351,6 @@ async function calculateMetrics() {
       avgDaysToMaturity: 91
     }
   }
-  // Do not auto-set maturity to default – keep current filter
   await enrichCalculationsWithFred()
   saveSessionData()
   updateSessionCompletion()
@@ -1248,7 +1361,6 @@ const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true }
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
 
-// Store last fetched chart data per instrument for report consistency
 const lastChartDataMap = ref({})
 
 function getInstrumentData(instrumentId) {
@@ -1525,7 +1637,7 @@ async function generateReportHtml() {
         <h3>Yield Curve Analysis – ${inst.name}</h3>
         <div class="chart-container">
           <canvas id="${chartId}" width="800" height="300" style="max-width:100%; height:auto; max-height:300px;"></canvas>
-          <div class="chart-caption">Source: FRED – ${chartSeriesLabel.value || 'market rate'} (${getCountryLabel(fredFilters.country)} / ${getCurrencyLabel(fredFilters.currency)})</div>
+          <div class="chart-caption">Source: FRED – ${chartSeriesLabel.value || 'market rate'} (${getCountryLabel(effectiveCountry.value)} / ${getCurrencyLabel(effectiveCurrency.value)})</div>
         </div>
         <p>This chart shows the latest market yield curve used as a benchmark for discounting cash flows of ${inst.name} instruments.</p>
         <script>
@@ -1685,6 +1797,56 @@ const effectiveMaturity = computed(() => {
   return selectedMaturityOption.value
 })
 
+// Custom country handling
+const selectedCountryOption = ref('')
+const customCountry = ref('')
+const effectiveCountry = computed(() => {
+  if (selectedCountryOption.value === '__custom__') return customCountry.value
+  return selectedCountryOption.value
+})
+
+// Custom currency handling
+const selectedCurrencyOption = ref('')
+const customCurrency = ref('')
+const effectiveCurrency = computed(() => {
+  if (selectedCurrencyOption.value === '__custom__') return customCurrency.value
+  return selectedCurrencyOption.value
+})
+
+function onCountrySelectChange() {
+  if (selectedCountryOption.value !== '__custom__') {
+    fredFilters.value.country = selectedCountryOption.value
+    onFredFilterChange()
+  } else {
+    fredFilters.value.country = customCountry.value
+    if (customCountry.value) onFredFilterChange()
+  }
+}
+
+function onCustomCountryChange() {
+  if (selectedCountryOption.value === '__custom__') {
+    fredFilters.value.country = customCountry.value
+    onFredFilterChange()
+  }
+}
+
+function onCurrencySelectChange() {
+  if (selectedCurrencyOption.value !== '__custom__') {
+    fredFilters.value.currency = selectedCurrencyOption.value
+    onFredFilterChange()
+  } else {
+    fredFilters.value.currency = customCurrency.value
+    if (customCurrency.value) onFredFilterChange()
+  }
+}
+
+function onCustomCurrencyChange() {
+  if (selectedCurrencyOption.value === '__custom__') {
+    fredFilters.value.currency = customCurrency.value
+    onFredFilterChange()
+  }
+}
+
 function onMaturitySelectChange() {
   if (selectedMaturityOption.value !== '__custom__') {
     fredFilters.value.maturity = selectedMaturityOption.value
@@ -1711,31 +1873,22 @@ function getCurrencyLabel(code) {
   return found ? found.label : code
 }
 
-const countryOptions = computed(() => {
-  if (filterOptions.value.countries && filterOptions.value.countries.length) {
-    return filterOptions.value.countries
-  }
-  return [
-    { value: 'USA', label: 'United States' },
-    { value: 'GBR', label: 'United Kingdom' },
-    { value: 'EUR', label: 'Eurozone' },
-    { value: 'JPN', label: 'Japan' },
-    { value: 'CAN', label: 'Canada' }
-  ]
-})
+// Hardcoded fallback lists – guaranteed to be non-empty and always visible
+const countryOptions = computed(() => [
+  { value: 'USA', label: 'United States' },
+  { value: 'GBR', label: 'United Kingdom' },
+  { value: 'EUR', label: 'Eurozone' },
+  { value: 'JPN', label: 'Japan' },
+  { value: 'CAN', label: 'Canada' }
+])
 
-const currencyOptions = computed(() => {
-  if (filterOptions.value.currencies && filterOptions.value.currencies.length) {
-    return filterOptions.value.currencies
-  }
-  return [
-    { value: 'USD', label: 'USD' },
-    { value: 'EUR', label: 'EUR' },
-    { value: 'GBP', label: 'GBP' },
-    { value: 'JPY', label: 'JPY' },
-    { value: 'CAD', label: 'CAD' }
-  ]
-})
+const currencyOptions = computed(() => [
+  { value: 'USD', label: 'USD' },
+  { value: 'EUR', label: 'EUR' },
+  { value: 'GBP', label: 'GBP' },
+  { value: 'JPY', label: 'JPY' },
+  { value: 'CAD', label: 'CAD' }
+])
 
 const maturityOptions = computed(() => {
   let baseOptions = []
@@ -1760,29 +1913,22 @@ const maturityOptions = computed(() => {
   return baseOptions
 })
 
+// Initialize default selections
 watch([countryOptions, currencyOptions, maturityOptions], () => {
-  if (!fredFilters.country && countryOptions.value.length) {
-    fredFilters.country = countryOptions.value[0].value
+  if (!effectiveCountry.value && countryOptions.value.length) {
+    const def = countryOptions.value[0].value
+    selectedCountryOption.value = def
+    fredFilters.value.country = def
   }
-  if (!fredFilters.currency && currencyOptions.value.length) {
-    fredFilters.currency = currencyOptions.value[0].value
+  if (!effectiveCurrency.value && currencyOptions.value.length) {
+    const def = currencyOptions.value[0].value
+    selectedCurrencyOption.value = def
+    fredFilters.value.currency = def
   }
-  if (!fredFilters.maturity && maturityOptions.value.length) {
+  if (!effectiveMaturity.value && maturityOptions.value.length) {
     const def = maturityOptions.value[0]?.value
     selectedMaturityOption.value = def
-    fredFilters.maturity = def
-  }
-}, { immediate: true })
-
-// Additional watchers to ensure dropdowns get default values even if options load later
-watch(countryOptions, (newVal) => {
-  if (newVal.length && !fredFilters.country) {
-    fredFilters.country = newVal[0].value
-  }
-}, { immediate: true })
-watch(currencyOptions, (newVal) => {
-  if (newVal.length && !fredFilters.currency) {
-    fredFilters.currency = newVal[0].value
+    fredFilters.value.maturity = def
   }
 }, { immediate: true })
 
@@ -1885,7 +2031,7 @@ watch(chartData, async () => {
 
 watch(() => instrumentType.value, () => {
   if (activeTab.value === 'visualizations') fetchFredData()
-  if (!fredFilters.value.maturity) {
+  if (!effectiveMaturity.value) {
     const def = defaultMaturityForInstrument()
     selectedMaturityOption.value = def
     fredFilters.value.maturity = def
@@ -1950,8 +2096,7 @@ onMounted(async () => {
   loadUploadHistory()
   window.addEventListener('storage', () => checkAndReset())
   await loadFilterOptions()
-  // Set default maturity after options loaded
-  if (!fredFilters.value.maturity) {
+  if (!effectiveMaturity.value) {
     const def = defaultMaturityForInstrument()
     selectedMaturityOption.value = def
     fredFilters.value.maturity = def
@@ -1977,7 +2122,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* ========== Your original scoped styles – keep exactly as in your existing file ========== */
+/* ========== Your original scoped styles – unchanged ========== */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
