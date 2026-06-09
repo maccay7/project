@@ -311,25 +311,46 @@
                 </div>
               </div>
 
-              <!-- Filter row with dropdown selectors (fixed: now proper dropdowns) -->
+              <!-- Filter row with dropdown selectors (fixed visibility & custom maturity) -->
               <div class="filters-row">
                 <div class="filter-group">
                   <label>Country / Region</label>
-                  <select v-model="fredFilters.country" @change="onFredFilterChange" class="filter-select">
+                  <select
+                    v-model="fredFilters.country"
+                    @change="onFredFilterChange"
+                    class="filter-select"
+                    :key="countryOptions.length"
+                    style="display: block !important; background: white !important; color: black !important;"
+                  >
                     <option v-for="opt in countryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                   </select>
                 </div>
                 <div class="filter-group">
                   <label>Currency</label>
-                  <select v-model="fredFilters.currency" @change="onFredFilterChange" class="filter-select">
+                  <select
+                    v-model="fredFilters.currency"
+                    @change="onFredFilterChange"
+                    class="filter-select"
+                    :key="currencyOptions.length"
+                    style="display: block !important; background: white !important; color: black !important;"
+                  >
                     <option v-for="opt in currencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                   </select>
                 </div>
                 <div class="filter-group">
                   <label>Maturity</label>
-                  <select v-model="fredFilters.maturity" @change="onFredFilterChange" class="filter-select">
+                  <select v-model="selectedMaturityOption" @change="onMaturitySelectChange" class="filter-select">
                     <option v-for="opt in maturityOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option value="__custom__">Custom...</option>
                   </select>
+                  <input
+                    v-if="selectedMaturityOption === '__custom__'"
+                    v-model="customMaturity"
+                    @change="onCustomMaturityChange"
+                    type="text"
+                    class="filter-select custom-maturity-input"
+                    placeholder="e.g., 18M, 2Y, 3M"
+                  />
                 </div>
                 <button class="btn-secondary refresh-btn" @click="fetchFredData" :disabled="fredLoading">Refresh chart</button>
               </div>
@@ -573,12 +594,15 @@ function refreshPage() {
   showMappingDialog.value = false
 }
 
-// Helper to compute step completion based on actual data (no cross-session leak)
+// Helper to compute step completion based on actual data
 function isStepCompleted(tab) {
   if (tab === 'upload') return rawData.value.length > 0
   if (tab === 'cleaning') return cleanedData.value.length > 0
   if (tab === 'calculations') return !!calculations.value.totalValue
   if (tab === 'visualizations') return chartData.value.datasets && chartData.value.datasets.length > 0
+  // summary and reports are considered completed if calculations exist
+  if (tab === 'summary') return !!calculations.value.totalValue
+  if (tab === 'reports') return true
   return false
 }
 
@@ -616,6 +640,17 @@ async function loadSavedData() {
   }
   if (wf) {
     loaded = applyWorkflowToPage(wf, { rawData, cleanedData, calculations, uploadedFile, cleaningStats })
+    // Also restore chart data and filters if present
+    if (wf.chartData) chartData.value = wf.chartData
+    if (wf.fredFilters) {
+      fredFilters.value = { ...fredFilters.value, ...wf.fredFilters }
+      if (wf.fredFilters.maturity && !maturityOptions.value.some(opt => opt.value === wf.fredFilters.maturity)) {
+        selectedMaturityOption.value = '__custom__'
+        customMaturity.value = wf.fredFilters.maturity
+      } else {
+        selectedMaturityOption.value = wf.fredFilters.maturity || maturityOptions.value[0]?.value
+      }
+    }
     if (wf.last_tab && !route.query.tab) activeTab.value = wf.last_tab
   }
 
@@ -675,7 +710,9 @@ function saveSessionData() {
     calculations: calculations.value,
     activeTab: activeTab.value,
     uploadedFile: uploadedFile.value,
-    cleaningStats: cleaningStats.value
+    cleaningStats: cleaningStats.value,
+    chartData: chartData.value,
+    fredFilters: { country: fredFilters.value.country, currency: fredFilters.value.currency, maturity: effectiveMaturity.value }
   })
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, wf)
   sessionManager.updateSession(sid, { last_tab: activeTab.value })
@@ -1200,7 +1237,7 @@ async function calculateMetrics() {
       avgDaysToMaturity: 91
     }
   }
-  fredFilters.value.maturity = defaultMaturityForInstrument()
+  // Do not auto-set maturity to default – keep current filter
   await enrichCalculationsWithFred()
   saveSessionData()
   updateSessionCompletion()
@@ -1640,6 +1677,31 @@ const chartData = ref({ labels: [], datasets: [] })
 const chartSeriesLabel = ref('')
 const currentMarketRate = ref(null)
 
+// Custom maturity handling
+const selectedMaturityOption = ref('')
+const customMaturity = ref('')
+const effectiveMaturity = computed(() => {
+  if (selectedMaturityOption.value === '__custom__') return customMaturity.value
+  return selectedMaturityOption.value
+})
+
+function onMaturitySelectChange() {
+  if (selectedMaturityOption.value !== '__custom__') {
+    fredFilters.value.maturity = selectedMaturityOption.value
+    onFredFilterChange()
+  } else {
+    fredFilters.value.maturity = customMaturity.value
+    if (customMaturity.value) onFredFilterChange()
+  }
+}
+
+function onCustomMaturityChange() {
+  if (selectedMaturityOption.value === '__custom__') {
+    fredFilters.value.maturity = customMaturity.value
+    onFredFilterChange()
+  }
+}
+
 function getCountryLabel(code) {
   const found = countryOptions.value.find(c => c.value === code)
   return found ? found.label : code
@@ -1706,7 +1768,21 @@ watch([countryOptions, currencyOptions, maturityOptions], () => {
     fredFilters.currency = currencyOptions.value[0].value
   }
   if (!fredFilters.maturity && maturityOptions.value.length) {
-    fredFilters.maturity = maturityOptions.value[0].value
+    const def = maturityOptions.value[0]?.value
+    selectedMaturityOption.value = def
+    fredFilters.maturity = def
+  }
+}, { immediate: true })
+
+// Additional watchers to ensure dropdowns get default values even if options load later
+watch(countryOptions, (newVal) => {
+  if (newVal.length && !fredFilters.country) {
+    fredFilters.country = newVal[0].value
+  }
+}, { immediate: true })
+watch(currencyOptions, (newVal) => {
+  if (newVal.length && !fredFilters.currency) {
+    fredFilters.currency = newVal[0].value
   }
 }, { immediate: true })
 
@@ -1769,6 +1845,7 @@ async function enrichCalculationsWithFred() {
 async function onFredFilterChange() {
   if (activeTab.value === 'visualizations') await fetchFredData()
   if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
+  saveSessionData()
 }
 
 const uploadPreviewHeaders = computed(() => Object.keys(rawData.value[0] || {}))
@@ -1808,7 +1885,11 @@ watch(chartData, async () => {
 
 watch(() => instrumentType.value, () => {
   if (activeTab.value === 'visualizations') fetchFredData()
-  fredFilters.value.maturity = defaultMaturityForInstrument()
+  if (!fredFilters.value.maturity) {
+    const def = defaultMaturityForInstrument()
+    selectedMaturityOption.value = def
+    fredFilters.value.maturity = def
+  }
 }, { immediate: true })
 watch(() => activeTab.value, async (newTab) => {
   if (newTab === 'visualizations' && hasCleanedData.value && !chartData.value.datasets.length && !fredLoading.value) {
@@ -1849,6 +1930,7 @@ async function checkAndReset() {
         else activeTab.value = 'upload'
       }
       if (cleanedData.value.length) await calculateMetrics()
+      if (activeTab.value === 'visualizations' && !chartData.value.datasets.length) await fetchFredData()
     }
     saveSessionData()
   }
@@ -1867,8 +1949,13 @@ onMounted(async () => {
   await checkAndReset()
   loadUploadHistory()
   window.addEventListener('storage', () => checkAndReset())
-  fredFilters.value.maturity = defaultMaturityForInstrument()
   await loadFilterOptions()
+  // Set default maturity after options loaded
+  if (!fredFilters.value.maturity) {
+    const def = defaultMaturityForInstrument()
+    selectedMaturityOption.value = def
+    fredFilters.value.maturity = def
+  }
   try {
     const res = await api.fredAPI.getCategories()
     if (res && res.success && res.categories) {
@@ -2167,6 +2254,9 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .filter-select option {
   color: #0B2044;
   background: white;
+}
+.custom-maturity-input {
+  margin-top: 8px;
 }
 .refresh-btn {
   flex-shrink: 0;
