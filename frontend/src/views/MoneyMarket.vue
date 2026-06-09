@@ -29,7 +29,7 @@
             v-for="(step, index) in steps"
             :key="step.tab"
             class="progress-step"
-            :class="{ active: activeTab === step.tab, completed: getTabStatus(step.tab) }"
+            :class="{ active: activeTab === step.tab, completed: isStepCompleted(step.tab) }"
             @click="switchTab(step.tab)"
           >
             <div class="step-circle">{{ index + 1 }}</div>
@@ -175,6 +175,7 @@
                   </div>
                 </div>
 
+                <!-- Preview section only shown after preview button clicked -->
                 <div v-if="previewData.length" class="preview-section">
                   <h4>Preview of Cleaned Data ({{ previewData.length }} rows)</h4>
                   <ExcelViewer :data="previewData" :headers="cleanPreviewHeaders" @data-update="onCleanPreviewUpdate" />
@@ -339,25 +340,28 @@
                 </div>
               </div>
 
-              <!-- Filter row with dropdowns - now fully visible and functional -->
+              <!-- Filter row with searchable inputs -->
               <div class="filters-row">
                 <div class="filter-group">
                   <label>Country / Region</label>
-                  <select v-model="fredFilters.country" @change="onFredFilterChange" class="filter-select">
+                  <input list="countryList" v-model="fredFilters.country" @change="onFredFilterChange" class="filter-select" placeholder="Type or select country">
+                  <datalist id="countryList">
                     <option v-for="opt in countryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                  </select>
+                  </datalist>
                 </div>
                 <div class="filter-group">
                   <label>Currency</label>
-                  <select v-model="fredFilters.currency" @change="onFredFilterChange" class="filter-select">
+                  <input list="currencyList" v-model="fredFilters.currency" @change="onFredFilterChange" class="filter-select" placeholder="Type or select currency">
+                  <datalist id="currencyList">
                     <option v-for="opt in currencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                  </select>
+                  </datalist>
                 </div>
                 <div class="filter-group">
                   <label>Maturity</label>
-                  <select v-model="fredFilters.maturity" @change="onFredFilterChange" class="filter-select">
+                  <input list="maturityList" v-model="fredFilters.maturity" @change="onFredFilterChange" class="filter-select" placeholder="Type or select maturity">
+                  <datalist id="maturityList">
                     <option v-for="opt in maturityOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                  </select>
+                  </datalist>
                 </div>
                 <button class="btn-secondary refresh-btn" @click="fetchFredData" :disabled="fredLoading">Refresh chart</button>
               </div>
@@ -599,6 +603,15 @@ function refreshPage() {
   columnMapping.value = {}
   fileColumns.value = []
   showMappingDialog.value = false
+}
+
+// Helper to compute step completion based on actual data (no cross-session leak)
+function isStepCompleted(tab) {
+  if (tab === 'upload') return rawData.value.length > 0
+  if (tab === 'cleaning') return cleanedData.value.length > 0
+  if (tab === 'calculations') return !!calculations.value.totalValue
+  if (tab === 'visualizations') return chartData.value.datasets && chartData.value.datasets.length > 0
+  return false
 }
 
 async function loadSavedData() {
@@ -876,29 +889,18 @@ function switchTab(tab) { activeTab.value = tab; saveSessionData() }
 function goToCalculations() {
   if (hasCleanedData.value) {
     activeTab.value = 'calculations'
-    updateStatus('calculations', true)
     saveSessionData()
   } else alert('Please clean your data first (click Apply Cleaning).')
 }
 function goToVisualizations() {
   if (hasCleanedData.value) {
     activeTab.value = 'visualizations'
-    updateStatus('visualizations', true)
     saveSessionData()
   } else alert('Please clean your data first.')
 }
 function goToReportTab() {
   activeTab.value = 'reports'
   saveSessionData()
-}
-function updateStatus(tab, completed) {
-  const statuses = JSON.parse(localStorage.getItem(`instrument_${instrumentType.value}_status`) || '{}')
-  statuses[tab] = completed
-  localStorage.setItem(`instrument_${instrumentType.value}_status`, JSON.stringify(statuses))
-}
-function getTabStatus(tab) {
-  const statuses = JSON.parse(localStorage.getItem(`instrument_${instrumentType.value}_status`) || '{}')
-  return statuses[tab] || false
 }
 
 // File upload & column mapping
@@ -974,7 +976,6 @@ async function uploadData() {
   if (!uploadedFile.value) return
   if (rawData.value.length && missingColumns.value.length === 0) {
     activeTab.value = 'cleaning'
-    updateStatus('upload', true)
     saveSessionData()
   } else alert('Please map missing columns first')
 }
@@ -1167,7 +1168,6 @@ async function applyCleaningOnly() {
   }
   calculateMetrics()
   saveSessionData()
-  updateStatus('cleaning', true)
   alert(`Cleaning applied! ${cleanedData.value.length} rows remaining.`)
   await nextTick()
 }
@@ -1240,6 +1240,9 @@ async function calculateMetrics() {
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
+
+// Store last fetched chart data per instrument for report consistency
+const lastChartDataMap = ref({})
 
 function getInstrumentData(instrumentId) {
   if (!activeSession.value) return null
@@ -1372,13 +1375,23 @@ async function generateReportHtml() {
   }
 
   const chartDataMap = {}
-  const sid = await seriesIdForMaturity()
+  // Use stored chart data if available, otherwise fetch
   for (const inst of report.instruments) {
-    try {
-      const loaded = await loadFredSeriesForReport(sid)
-      if (loaded) chartDataMap[inst.name] = loaded
-    } catch (err) {
-      console.error('FRED chart for report', inst.name, err)
+    const cached = lastChartDataMap.value[inst.name]
+    if (cached && cached.labels && cached.labels.length) {
+      chartDataMap[inst.name] = cached
+    } else {
+      try {
+        // Use the current filters (or defaults) to fetch
+        const sid = await seriesIdForMaturity()
+        const loaded = await loadFredSeriesForReport(sid)
+        if (loaded) {
+          chartDataMap[inst.name] = loaded
+          lastChartDataMap.value[inst.name] = loaded
+        }
+      } catch (err) {
+        console.error('FRED chart for report', inst.name, err)
+      }
     }
   }
 
@@ -1492,7 +1505,7 @@ async function generateReportHtml() {
               <p><strong>Bond Equivalent Yield:</strong> ${instData.bondEquivalentYield || 0}%</p>
               <p><strong>Average Days to Maturity:</strong> ${instData.avgDaysToMaturity || 0} days</p>`
     }
-    html += `</div><h3>Detailed Metrics</h3></table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
+    html += `</div><h3>Detailed Metrics</h3><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
     for (const [key, val] of Object.entries(instData)) {
       if (key === 'completed' || key === 'timestamp' || key === 'fred') continue
       html += `<tr><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
@@ -1696,19 +1709,28 @@ const currencyOptions = computed(() => {
   ]
 })
 
+// Instrument‑specific maturity options (derived from FRED when possible)
 const maturityOptions = computed(() => {
+  let baseOptions = []
   if (filterOptions.value.maturities && filterOptions.value.maturities.length) {
-    return filterOptions.value.maturities
+    baseOptions = filterOptions.value.maturities
+  } else {
+    baseOptions = [
+      { value: '1M', label: '1 Month' }, { value: '3M', label: '3 Months' }, { value: '6M', label: '6 Months' },
+      { value: '1Y', label: '1 Year' }, { value: '2Y', label: '2 Years' }, { value: '5Y', label: '5 Years' },
+      { value: '10Y', label: '10 Years' }, { value: '30Y', label: '30 Years' },
+      { value: '4W', label: '4 Weeks' }, { value: '8W', label: '8 Weeks' }, { value: '13W', label: '13 Weeks' },
+      { value: '26W', label: '26 Weeks' }, { value: '52W', label: '52 Weeks' }
+    ]
   }
-  return [
-    { value: '1M', label: '1 Month' },
-    { value: '3M', label: '3 Months' },
-    { value: '6M', label: '6 Months' },
-    { value: '1Y', label: '1 Year' },
-    { value: '2Y', label: '2 Years' },
-    { value: '5Y', label: '5 Years' },
-    { value: '10Y', label: '10 Years' }
-  ]
+  if (instrumentType.value === 'money-market') {
+    return baseOptions.filter(opt => ['1M', '3M', '6M', '1Y'].includes(opt.value))
+  } else if (instrumentType.value === 'bonds') {
+    return baseOptions.filter(opt => ['2Y', '5Y', '10Y', '30Y'].includes(opt.value))
+  } else if (instrumentType.value === 'tbills') {
+    return baseOptions.filter(opt => ['4W', '8W', '13W', '26W', '52W'].includes(opt.value))
+  }
+  return baseOptions
 })
 
 // Set default filter values when options become available
@@ -1745,6 +1767,8 @@ async function fetchFredData() {
     if (!loaded) throw new Error('No FRED data')
     chartData.value = loaded
     currentMarketRate.value = loaded.latest
+    // Store chart data for this instrument for report consistency
+    lastChartDataMap.value[instrumentName.value] = loaded
     await nextTick()
     if (yieldCurveChart.value) {
       await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
@@ -1760,6 +1784,7 @@ async function fetchFredData() {
 function defaultMaturityForInstrument() {
   if (instrumentType.value === 'bonds') return '10Y'
   if (instrumentType.value === 'money-market') return '1Y'
+  if (instrumentType.value === 'tbills') return '13W'
   return '3M'
 }
 
@@ -1798,6 +1823,7 @@ watch([rawData, cleanedData, calculations], () => {
 
 watch(() => instrumentType.value, () => {
   if (activeTab.value === 'visualizations') fetchFredData()
+  fredFilters.value.maturity = defaultMaturityForInstrument()
 }, { immediate: true })
 watch(() => activeTab.value, async (newTab) => {
   if (newTab === 'visualizations' && hasCleanedData.value && !chartData.value.datasets.length && !fredLoading.value) {
@@ -2224,11 +2250,9 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 
 <style>
 /* GLOBAL OVERRIDE - Ensures filter dropdowns stay black on white even after Vuetify theme applies */
-.instrument-page .filters-row select,
+.instrument-page .filters-row input,
 .instrument-page .filters-row .filter-select,
-.instrument-page .filters-row select option,
-.instrument-page .filters-row .filter-select option,
-.instrument-page .filters-row select:focus,
+.instrument-page .filters-row input:focus,
 .instrument-page .filters-row .filter-select:focus {
   color: #000000 !important;
   background-color: #ffffff !important;
