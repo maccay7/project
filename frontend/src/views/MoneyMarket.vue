@@ -171,7 +171,6 @@
                   </div>
                   <div class="cleaning-buttons">
                     <button class="btn-primary" @click="previewCleanedData">Preview Cleaned Data</button>
-                    <!-- Apply Cleaning button moved to bottom navigation -->
                   </div>
                 </div>
 
@@ -189,35 +188,6 @@
                   <p>✓ Removed {{ cleaningStats.removedRows }} invalid rows</p>
                   <p>✓ Fixed {{ cleaningStats.fixedMissing }} missing values</p>
                   <p class="success-text">✓ Data is now clean and ready for calculations</p>
-                </div>
-
-                <div v-if="rawData.length && !cleanedData.length && !previewData.length" class="preview-section">
-                  <h4>Raw Data with Issues Highlighted:</h4>
-                  <div class="legend"><span class="legend-badge invalid-row-badge">⚠ Invalid Row</span><span class="legend-badge invalid-cell-badge">❌ Missing/Invalid Value</span></div>
-                  <div class="preview-toolbar">
-                    <span class="preview-info">{{ rawData.length }} rows</span>
-                    <div class="preview-controls">
-                      <button @click="rawPreviewStartRow = Math.max(0, rawPreviewStartRow - 10)" :disabled="rawPreviewStartRow === 0">← Previous</button>
-                      <span>Rows {{ rawPreviewStartRow + 1 }} - {{ Math.min(rawPreviewEndRow, rawData.length) }}</span>
-                      <button @click="rawPreviewStartRow = Math.min(rawData.length - rawPreviewRows, rawPreviewStartRow + 10)" :disabled="rawPreviewEndRow >= rawData.length">Next →</button>
-                    </div>
-                  </div>
-                  <div class="table-wrapper">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th v-for="col in rawPreviewColumnsList" :key="col">{{ col }}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr v-for="(row, idx) in paginatedRawPreview" :key="idx" :class="{ 'invalid-row': hasInvalidData(row) }">
-                          <td class="row-number">{{ rawPreviewStartRow + idx + 1 }}</td>
-                          <td v-for="col in rawPreviewColumnsList" :key="col" :class="{ 'invalid-cell': isInvalidValue(row[col]) }">{{ formatCellValue(row[col]) }}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
                 </div>
 
                 <div class="navigation-buttons">
@@ -341,28 +311,25 @@
                 </div>
               </div>
 
-              <!-- Filter row with searchable inputs -->
+              <!-- Filter row with dropdown selectors (fixed: now proper dropdowns) -->
               <div class="filters-row">
                 <div class="filter-group">
                   <label>Country / Region</label>
-                  <input list="countryList" v-model="fredFilters.country" @change="onFredFilterChange" class="filter-select" placeholder="Type or select country">
-                  <datalist id="countryList">
+                  <select v-model="fredFilters.country" @change="onFredFilterChange" class="filter-select">
                     <option v-for="opt in countryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                  </datalist>
+                  </select>
                 </div>
                 <div class="filter-group">
                   <label>Currency</label>
-                  <input list="currencyList" v-model="fredFilters.currency" @change="onFredFilterChange" class="filter-select" placeholder="Type or select currency">
-                  <datalist id="currencyList">
+                  <select v-model="fredFilters.currency" @change="onFredFilterChange" class="filter-select">
                     <option v-for="opt in currencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                  </datalist>
+                  </select>
                 </div>
                 <div class="filter-group">
                   <label>Maturity</label>
-                  <input list="maturityList" v-model="fredFilters.maturity" @change="onFredFilterChange" class="filter-select" placeholder="Type or select maturity">
-                  <datalist id="maturityList">
+                  <select v-model="fredFilters.maturity" @change="onFredFilterChange" class="filter-select">
                     <option v-for="opt in maturityOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                  </datalist>
+                  </select>
                 </div>
                 <button class="btn-secondary refresh-btn" @click="fetchFredData" :disabled="fredLoading">Refresh chart</button>
               </div>
@@ -1168,6 +1135,7 @@ async function applyCleaningOnly() {
     fixedMissing: 0
   }
   await calculateMetrics()
+  updateSessionCompletion()
   saveSessionData()
   alert(`Cleaning applied! ${cleanedData.value.length} rows remaining.`)
   await nextTick()
@@ -1508,7 +1476,7 @@ async function generateReportHtml() {
     html += `</div><h3>Detailed Metrics</h3><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
     for (const [key, val] of Object.entries(instData)) {
       if (key === 'completed' || key === 'timestamp' || key === 'fred') continue
-      html += `<td><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
+      html += `<tr><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
     }
     html += `</tbody></table>`
 
@@ -1766,9 +1734,14 @@ async function fetchFredData() {
     lastChartDataMap.value[instrumentName.value] = loaded
     await nextTick()
     if (yieldCurveChart.value) {
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.destroy()
+        chartInstanceRef.current = null
+      }
       await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
     }
   } catch (err) {
+    console.error('FRED fetch error:', err)
     fredError.value = err.message || 'Failed to load market data.'
     chartData.value = { labels: [], datasets: [] }
   } finally {
@@ -1819,6 +1792,17 @@ watch([rawData, cleanedData], () => {
 watch(cleanedData, async (newVal) => {
   if (newVal.length) {
     await calculateMetrics()
+  }
+}, { deep: true })
+
+watch(chartData, async () => {
+  if (activeTab.value === 'visualizations' && yieldCurveChart.value && chartData.value.datasets?.length) {
+    await nextTick()
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy()
+      chartInstanceRef.current = null
+    }
+    await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
   }
 }, { deep: true })
 
@@ -1898,7 +1882,10 @@ onMounted(async () => {
   saveSessionData()
 })
 
-onBeforeUnmount(() => window.removeEventListener('storage', () => checkAndReset()))
+onBeforeUnmount(() => {
+  window.removeEventListener('storage', () => checkAndReset())
+  saveSessionData()
+})
 watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
@@ -2143,7 +2130,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   width: 100% !important;
   height: 100% !important;
 }
-/* Filter row styles - base styles */
+/* Filter row styles - now selects instead of inputs */
 .filters-row {
   display: flex;
   gap: 20px;
@@ -2253,9 +2240,9 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 
 <style>
 /* GLOBAL OVERRIDE - Ensures filter dropdowns stay black on white even after Vuetify theme applies */
-.instrument-page .filters-row input,
+.instrument-page .filters-row select,
 .instrument-page .filters-row .filter-select,
-.instrument-page .filters-row input:focus,
+.instrument-page .filters-row select:focus,
 .instrument-page .filters-row .filter-select:focus {
   color: #000000 !important;
   background-color: #ffffff !important;

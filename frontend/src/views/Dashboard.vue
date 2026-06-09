@@ -218,6 +218,9 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
+const SESSIONS_STORAGE_KEY = 'dura_sessions'
+const ACTIVE_SESSION_ID_KEY = 'dura_active_session_id'
+
 const sessions = ref([])
 const searchQuery = ref('')
 const newSessionName = ref('')
@@ -249,36 +252,115 @@ const kpiStats = computed(() => [
   { title: 'Completion', value: `${Math.round((activeSession.value?.instrumentCount || 0) / 3 * 100)}%`, icon: 'mdi-database', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }
 ])
 
-function goToSettings() {
-  router.push('/settings')
+// ========== PERSISTENCE HELPERS ==========
+function saveSessionsToLocalStorage() {
+  localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.value))
 }
 
-// Logout without deleting sessions list
-function handleLogout() {
-  // clear auth but keep sessions managed by sessionManager
-  localStorage.removeItem('auth_token')
-  localStorage.removeItem('user')
-  sessionStorage.clear()
-  window.location.href = '/login'
-}
-
-async function loadExistingSession(sessionId) {
-  const full = await sessionManager.loadSessionFromDb(sessionId)
-  sessions.value = sessionManager.getAllSessions()
-  const session = full || sessions.value.find(s => s.id === sessionId)
-  if (session) {
-    activeSession.value = session
-    sessionManager.setActiveSession(session)
+function loadSessionsFromLocalStorage() {
+  const stored = localStorage.getItem(SESSIONS_STORAGE_KEY)
+  if (stored) {
+    try {
+      sessions.value = JSON.parse(stored)
+    } catch(e) { console.error('Failed to parse sessions', e) }
+  } else {
+    sessions.value = []
   }
+}
+
+function saveActiveSessionId(id) {
+  if (id) {
+    localStorage.setItem(ACTIVE_SESSION_ID_KEY, id)
+  } else {
+    localStorage.removeItem(ACTIVE_SESSION_ID_KEY)
+  }
+}
+
+function loadActiveSessionId() {
+  return localStorage.getItem(ACTIVE_SESSION_ID_KEY)
+}
+
+// Sync a single session (after updates from instrument pages) – can be called from elsewhere
+function syncSessionFromManager(sessionId) {
+  const managerSession = sessionManager.getSession(sessionId)
+  if (managerSession) {
+    const index = sessions.value.findIndex(s => s.id === sessionId)
+    if (index !== -1) {
+      sessions.value[index] = { ...managerSession }
+      saveSessionsToLocalStorage()
+      if (activeSession.value && activeSession.value.id === sessionId) {
+        activeSession.value = sessions.value[index]
+      }
+    }
+  }
+}
+
+// ========== SESSION ACTIONS ==========
+function createNewSession() {
+  if (!newSessionName.value.trim()) return
+  const created = sessionManager.createSession(newSessionName.value.trim())
+  // Ensure the created session has the required fields
+  const newSession = {
+    id: created.id,
+    name: created.name,
+    date: created.date || new Date().toLocaleString(),
+    status: created.status || 'in-progress',
+    instrumentCount: created.instrumentCount || 0,
+    totalValue: created.totalValue || 0
+  }
+  sessions.value.unshift(newSession)
+  saveSessionsToLocalStorage()
+  activeSession.value = newSession
+  sessionManager.setActiveSession(activeSession.value)
+  saveActiveSessionId(activeSession.value.id)
+  newSessionName.value = ''
+}
+
+function loadExistingSession(sessionId) {
+  // First try to get from our local array
+  let session = sessions.value.find(s => s.id === sessionId)
+  if (!session) {
+    // Try to load from sessionManager
+    const full = sessionManager.getSession(sessionId)
+    if (full) session = full
+  }
+  if (!session) return
+  
+  // Load full data from sessionManager (workflows, etc.)
+  sessionManager.loadSessionFromDb(sessionId).then(() => {
+    // Refresh session from manager after load
+    const refreshed = sessionManager.getSession(sessionId)
+    if (refreshed) {
+      const index = sessions.value.findIndex(s => s.id === sessionId)
+      if (index !== -1) {
+        sessions.value[index] = { ...refreshed }
+        saveSessionsToLocalStorage()
+        session = sessions.value[index]
+      }
+    }
+    activeSession.value = session
+    sessionManager.setActiveSession(activeSession.value)
+    saveActiveSessionId(activeSession.value.id)
+  }).catch(() => {
+    // Even if load fails, still set active session with basic info
+    activeSession.value = session
+    sessionManager.setActiveSession(activeSession.value)
+    saveActiveSessionId(activeSession.value.id)
+  })
 }
 
 function openRename(session) {
   const name = prompt('Rename session:', session.name)
   if (name && name.trim()) {
     sessionManager.renameSession(session.id, name.trim())
-    sessions.value = sessionManager.getAllSessions()
+    // Update local session array
+    const index = sessions.value.findIndex(s => s.id === session.id)
+    if (index !== -1) {
+      sessions.value[index].name = name.trim()
+      saveSessionsToLocalStorage()
+    }
     if (activeSession.value?.id === session.id) {
-      activeSession.value = sessionManager.getSession(session.id)
+      activeSession.value = sessions.value[index]
     }
   }
 }
@@ -292,26 +374,23 @@ function startRenameActive() {
 function saveRename() {
   if (!activeSession.value || !renameInput.value.trim()) return
   sessionManager.renameSession(activeSession.value.id, renameInput.value.trim())
-  sessions.value = sessionManager.getAllSessions()
-  activeSession.value = sessionManager.getSession(activeSession.value.id)
+  const index = sessions.value.findIndex(s => s.id === activeSession.value.id)
+  if (index !== -1) {
+    sessions.value[index].name = renameInput.value.trim()
+    saveSessionsToLocalStorage()
+    activeSession.value = sessions.value[index]
+  }
   renamingActive.value = false
-}
-
-function createNewSession() {
-  if (!newSessionName.value.trim()) return
-  const created = sessionManager.createSession(newSessionName.value.trim())
-  sessions.value = sessionManager.getAllSessions()
-  activeSession.value = sessionManager.getSession(created.id) || created
-  sessionManager.setActiveSession(activeSession.value)
-  newSessionName.value = ''
 }
 
 function deleteSession(sessionId) {
   if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
-    sessions.value = sessionManager.getAllSessions().filter(s => s.id !== sessionId)
     sessionManager.deleteSession(sessionId)
+    sessions.value = sessions.value.filter(s => s.id !== sessionId)
+    saveSessionsToLocalStorage()
     if (activeSession.value && activeSession.value.id === sessionId) {
       activeSession.value = null
+      saveActiveSessionId(null)
     }
   }
 }
@@ -325,26 +404,69 @@ function goToInstrument(instrumentId) {
   router.push({ path: `/instrument/${instrumentId}`, query: { session: activeSession.value.id } })
 }
 
-function loadSessions() {
-  sessions.value = sessionManager.getAllSessions()
+function goToSettings() {
+  router.push('/settings')
 }
 
+function handleLogout() {
+  localStorage.removeItem('auth_token')
+  localStorage.removeItem('user')
+  sessionStorage.clear()
+  window.location.href = '/login'
+}
+
+// Initialize sessions on mount
 onMounted(async () => {
-  loadSessions()
-  const aid = sessionManager.getActiveSessionId()
-  if (aid) {
-    await sessionManager.loadSessionFromDb(aid)
-    loadSessions()
-    activeSession.value = sessionManager.getSession(aid)
-  } else if (sessions.value.length) {
+  loadSessionsFromLocalStorage()
+  
+  // Also try to load from sessionManager in case there are newer sessions there (e.g., from other tabs)
+  const managerSessions = sessionManager.getAllSessions()
+  if (managerSessions.length > 0) {
+    // Merge: manager sessions may have more up-to-date data (like instrument counts)
+    const merged = [...sessions.value]
+    for (const ms of managerSessions) {
+      const existingIndex = merged.findIndex(s => s.id === ms.id)
+      if (existingIndex !== -1) {
+        merged[existingIndex] = { ...merged[existingIndex], ...ms }
+      } else {
+        merged.push(ms)
+      }
+    }
+    sessions.value = merged
+    saveSessionsToLocalStorage()
+  }
+  
+  const activeId = loadActiveSessionId()
+  if (activeId) {
+    const session = sessions.value.find(s => s.id === activeId)
+    if (session) {
+      activeSession.value = session
+      sessionManager.setActiveSession(activeSession.value)
+      // Optionally load full data in background
+      sessionManager.loadSessionFromDb(activeId).catch(() => {})
+    } else {
+      // Try to load from manager directly
+      const managerSession = sessionManager.getSession(activeId)
+      if (managerSession) {
+        activeSession.value = managerSession
+        sessionManager.setActiveSession(activeSession.value)
+        sessions.value.unshift(managerSession)
+        saveSessionsToLocalStorage()
+      } else {
+        saveActiveSessionId(null)
+      }
+    }
+  } else if (sessions.value.length > 0 && !activeSession.value) {
+    // Auto-select the most recent session
     activeSession.value = sessions.value[0]
     sessionManager.setActiveSession(activeSession.value)
+    saveActiveSessionId(activeSession.value.id)
   }
 })
 </script>
 
 <style scoped>
-/* ========== ALL STYLES REMAIN AS IN YOUR ORIGINAL ========== */
+/* ========== ALL STYLES REMAIN EXACTLY AS IN YOUR ORIGINAL ========== */
 .dashboard {
   min-height: 100vh;
   background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
