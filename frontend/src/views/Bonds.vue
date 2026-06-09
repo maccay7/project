@@ -171,7 +171,7 @@
                   </div>
                   <div class="cleaning-buttons">
                     <button class="btn-primary" @click="previewCleanedData">Preview Cleaned Data</button>
-                    <button class="btn-primary" @click="applyCleaningOnly">Apply Cleaning</button>
+                    <!-- Apply Cleaning button moved to bottom navigation -->
                   </div>
                 </div>
 
@@ -222,6 +222,7 @@
 
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('upload')">Previous</button>
+                  <button class="btn-primary" @click="applyCleaningOnly" :disabled="!previewData.length">Apply Cleaning</button>
                   <button class="btn-primary" @click="goToCalculations" :disabled="!hasCleanedData">Next: Calculations</button>
                   <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
                 </div>
@@ -1166,7 +1167,7 @@ async function applyCleaningOnly() {
     removedRows: rawData.value.length - cleanedData.value.length,
     fixedMissing: 0
   }
-  calculateMetrics()
+  await calculateMetrics()
   saveSessionData()
   alert(`Cleaning applied! ${cleanedData.value.length} rows remaining.`)
   await nextTick()
@@ -1175,6 +1176,7 @@ async function applyCleaningOnly() {
 // ========== CALCULATIONS ==========
 async function calculateMetrics() {
   if (!cleanedData.value.length) return
+  
   if (instrumentType.value === 'money-market') {
     const totalValue = cleanedData.value.reduce((s,row) => s + (parseFloat(row.Amount)||0), 0)
     const totalRate = cleanedData.value.reduce((s,row) => s + (parseFloat(row.Rate)||0), 0)
@@ -1375,14 +1377,12 @@ async function generateReportHtml() {
   }
 
   const chartDataMap = {}
-  // Use stored chart data if available, otherwise fetch
   for (const inst of report.instruments) {
     const cached = lastChartDataMap.value[inst.name]
     if (cached && cached.labels && cached.labels.length) {
       chartDataMap[inst.name] = cached
     } else {
       try {
-        // Use the current filters (or defaults) to fetch
         const sid = await seriesIdForMaturity()
         const loaded = await loadFredSeriesForReport(sid)
         if (loaded) {
@@ -1508,7 +1508,7 @@ async function generateReportHtml() {
     html += `</div><h3>Detailed Metrics</h3><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>`
     for (const [key, val] of Object.entries(instData)) {
       if (key === 'completed' || key === 'timestamp' || key === 'fred') continue
-      html += `<tr><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
+      html += `<td><td class="metric-highlight">${formatMetricName(key)}</td><td class="metric-highlight">${formatMetricValue(key, val)}</td></tr>`
     }
     html += `</tbody></table>`
 
@@ -1672,7 +1672,6 @@ const chartData = ref({ labels: [], datasets: [] })
 const chartSeriesLabel = ref('')
 const currentMarketRate = ref(null)
 
-// Helper functions to get display labels
 function getCountryLabel(code) {
   const found = countryOptions.value.find(c => c.value === code)
   return found ? found.label : code
@@ -1682,7 +1681,6 @@ function getCurrencyLabel(code) {
   return found ? found.label : code
 }
 
-// Fallback options in case filterOptions is empty
 const countryOptions = computed(() => {
   if (filterOptions.value.countries && filterOptions.value.countries.length) {
     return filterOptions.value.countries
@@ -1709,7 +1707,6 @@ const currencyOptions = computed(() => {
   ]
 })
 
-// Instrument‑specific maturity options (derived from FRED when possible)
 const maturityOptions = computed(() => {
   let baseOptions = []
   if (filterOptions.value.maturities && filterOptions.value.maturities.length) {
@@ -1733,7 +1730,6 @@ const maturityOptions = computed(() => {
   return baseOptions
 })
 
-// Set default filter values when options become available
 watch([countryOptions, currencyOptions, maturityOptions], () => {
   if (!fredFilters.country && countryOptions.value.length) {
     fredFilters.country = countryOptions.value[0].value
@@ -1767,7 +1763,6 @@ async function fetchFredData() {
     if (!loaded) throw new Error('No FRED data')
     chartData.value = loaded
     currentMarketRate.value = loaded.latest
-    // Store chart data for this instrument for report consistency
     lastChartDataMap.value[instrumentName.value] = loaded
     await nextTick()
     if (yieldCurveChart.value) {
@@ -1808,7 +1803,7 @@ const cleanPreviewHeaders = computed(() => Object.keys((previewData.value[0] || 
 
 function onRawExcelUpdate(data) { rawData.value = data; saveSessionData() }
 function onCleanPreviewUpdate(data) { previewData.value = data }
-function onCleanedExcelUpdate(data) { cleanedData.value = data; saveSessionData() }
+function onCleanedExcelUpdate(data) { cleanedData.value = data; saveSessionData(); calculateMetrics() }
 function onExcelDataUpdate(data) {
   excelData.value = data
   if (activeTab.value === 'upload') rawData.value = data
@@ -1816,9 +1811,15 @@ function onExcelDataUpdate(data) {
   saveSessionData()
 }
 
-// Auto-save on any data change
-watch([rawData, cleanedData, calculations], () => {
+// Auto-save and recalc on data changes
+watch([rawData, cleanedData], () => {
   saveSessionData()
+}, { deep: true })
+
+watch(cleanedData, async (newVal) => {
+  if (newVal.length) {
+    await calculateMetrics()
+  }
 }, { deep: true })
 
 watch(() => instrumentType.value, () => {
@@ -1863,8 +1864,9 @@ async function checkAndReset() {
         if (savedTab && steps.some(s => s.tab === savedTab)) activeTab.value = savedTab
         else activeTab.value = 'upload'
       }
+      if (cleanedData.value.length) await calculateMetrics()
     }
-    saveSessionData() // ensure any loaded data is saved immediately
+    saveSessionData()
   }
 }
 
@@ -1892,7 +1894,8 @@ onMounted(async () => {
   } catch (err) { console.error(err) }
   if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
   if (!calculations.value.totalValue && activeSession.value) await loadSavedData()
-  saveSessionData() // final sync
+  if (cleanedData.value.length) await calculateMetrics()
+  saveSessionData()
 })
 
 onBeforeUnmount(() => window.removeEventListener('storage', () => checkAndReset()))
@@ -1900,7 +1903,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* ========== All original styles – keep exactly as in your existing file ========== */
+/* ========== Your original scoped styles – keep exactly as in your existing file ========== */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
