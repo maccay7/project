@@ -30,15 +30,9 @@
       <div class="section-header">
         <v-icon color="#0B2044" size="22">mdi-chart-areaspline</v-icon>
         <h2>Instrument breakdown</h2>
-        <!-- EXPORT BUTTON WITH INSTRUMENT SELECTION -->
-        <div class="export-controls">
-          <button class="btn-export-excel" @click="showExportDialog = true">
-            <v-icon size="16">mdi-microsoft-excel</v-icon> Export to Excel
-          </button>
-        </div>
       </div>
 
-      <!-- Instrument cards -->
+      <!-- Instrument cards – all stat rows always shown for equal height -->
       <div class="summary-cards">
         <div class="summary-card" v-for="inst in instruments" :key="inst.id">
           <div class="card-top" :style="{ background: inst.gradient }">
@@ -54,13 +48,15 @@
               <span>Count</span>
               <strong>{{ inst.count }}</strong>
             </div>
-            <div class="stat-row" v-if="inst.avgRate !== null">
+            <!-- Always show average rate, use placeholder if missing -->
+            <div class="stat-row">
               <span>{{ inst.rateLabel }}</span>
-              <strong>{{ inst.avgRate }}%</strong>
+              <strong>{{ inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate + '%' : '—' }}</strong>
             </div>
-            <div class="stat-row" v-if="inst.fredBench != null">
+            <!-- Always show FRED benchmark, use placeholder if missing -->
+            <div class="stat-row">
               <span>FRED benchmark</span>
-              <strong>{{ inst.fredBench }}%</strong>
+              <strong>{{ inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench + '%' : '—' }}</strong>
             </div>
             <div class="status-badge" :class="inst.statusClass">
               <v-icon size="14">{{ inst.statusIcon }}</v-icon> {{ inst.statusText }}
@@ -70,37 +66,28 @@
         </div>
       </div>
 
-      <!-- Detailed tables (collapsible, same as before) -->
+      <!-- Detailed sections – only "View as Excel" button -->
       <div v-for="inst in instrumentsWithDetails" :key="inst.id" class="detail-section">
         <div class="detail-header">
           <h3>{{ inst.name }} – Detailed Instruments ({{ inst.details.length }} rows)</h3>
-          <button class="btn-view-details" @click="openDetailModal(inst)">
-            <v-icon size="16">mdi-eye</v-icon> View as Excel
-          </button>
+          <div class="detail-actions">
+            <button class="btn-view-details" @click="openDetailModal(inst)">
+              <v-icon size="16">mdi-eye</v-icon> View as Excel
+            </button>
+          </div>
         </div>
-        <div class="table-wrapper" v-if="inst.showDetails">
-          <table class="detail-table">
-            <thead><tr><th v-for="col in inst.detailHeaders" :key="col">{{ col }}</th></tr></thead>
-            <tbody>
-              <tr v-for="(row, idx) in inst.details" :key="idx">
-                <td v-for="col in inst.detailHeaders" :key="col">{{ formatCell(row[col]) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      </div>
+
+      <!-- SINGLE EXPORT BUTTON -->
+      <div class="export-all-section">
+        <button class="btn-export-all" @click="showExportDialog = true">
+          <v-icon>mdi-microsoft-excel</v-icon> Export to Excel
+        </button>
       </div>
 
       <div class="action-buttons">
         <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
         <button class="btn-primary" @click="goToReport">Continue to Report →</button>
-      </div>
-
-      <div class="workflow-card">
-        <h3><v-icon size="20">mdi-progress-check</v-icon> Session workflow</h3>
-        <p class="wf-hint">Each instrument saves upload, clean, calculate, and visualize steps to your session in the database.</p>
-        <div class="workflow-steps">
-          <span v-for="step in workflowSteps" :key="step" class="wf" :class="{ done: stepDone(step) }">{{ step }}</span>
-        </div>
       </div>
     </div>
 
@@ -115,7 +102,10 @@
         <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
           <ExcelViewer :data="selectedInst?.details || []" :headers="selectedInst?.detailHeaders || []" />
         </v-card-text>
-        <v-card-actions><v-spacer></v-spacer><button class="btn-secondary" @click="detailModalVisible = false">Close</button></v-card-actions>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="detailModalVisible = false">Close</button>
+        </v-card-actions>
       </v-card>
     </v-dialog>
 
@@ -156,7 +146,7 @@ const instrumentsWithDetails = ref([])
 const detailModalVisible = ref(false)
 const selectedInst = ref(null)
 const showExportDialog = ref(false)
-const selectedExportInstruments = ref({}) // { 'money-market': true, ... }
+const selectedExportInstruments = ref({})
 
 const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
 const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
@@ -169,14 +159,16 @@ const quickKpis = computed(() => [
 ])
 
 const lastUpdatedLabel = computed(() => {
-  const wfs = activeSession.value?.instrumentWorkflow || {}
-  const dates = Object.values(wfs).map(w => w.saved_at).filter(Boolean)
-  if (!dates.length) return '—'
-  return new Date(Math.max(...dates.map(d => new Date(d).getTime()))).toLocaleDateString()
+  try {
+    const wfs = activeSession.value?.instrumentWorkflow || {}
+    const dates = Object.values(wfs).map(w => w.saved_at).filter(Boolean)
+    if (!dates.length) return '—'
+    return new Date(Math.max(...dates.map(d => new Date(d).getTime()))).toLocaleDateString()
+  } catch (e) {
+    return '—'
+  }
 })
 
-const workflowSteps = ['Upload', 'Clean', 'Calculate', 'Visualize', 'Report']
-function stepDone(step) { return completedCount.value > 0 }
 function formatNumber(num) { return (num || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
 function formatCell(value) {
   if (value === undefined || value === null) return ''
@@ -199,15 +191,35 @@ function openDetailModal(inst) {
 }
 
 async function loadSummary() {
-  const aid = sessionManager.getActiveSessionId()
-  if (aid) {
-    await sessionManager.loadSessionFromDb(aid)
-    activeSession.value = sessionManager.getSession(aid)
-  } else {
-    const all = sessionManager.getAllSessions()
-    activeSession.value = all[0] || null
+  let session = null
+  try {
+    session = sessionManager.getActiveSession()
+    if (!session) {
+      const all = sessionManager.getAllSessions()
+      session = all[0] || null
+    }
+  } catch(e) {
+    console.warn('Error getting session:', e)
+  }
+  
+  if (!session) {
+    const savedSessionRaw = localStorage.getItem('active_session')
+    if (savedSessionRaw) {
+      try {
+        session = JSON.parse(savedSessionRaw)
+      } catch(e) {}
+    }
+  }
+  activeSession.value = session
+
+  if (!activeSession.value) {
+    console.warn('No active session found')
+    instruments.value = []
+    instrumentsWithDetails.value = []
+    return
   }
 
+  const sid = activeSession.value.id
   const templates = [
     { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', rateLabel: 'Avg interest rate' },
     { id: 'bonds', name: 'Bonds', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', rateLabel: 'Avg coupon' },
@@ -216,11 +228,31 @@ async function loadSummary() {
 
   const detailsList = []
   instruments.value = templates.map(template => {
-    const wf = activeSession.value ? sessionManager.getInstrumentWorkflow(activeSession.value.id, template.id) : null
-    const calc = wf?.calculations || activeSession.value?.instrumentData?.[template.id] || {}
-    const completed = !!wf?.calculations?.totalValue || !!calc.completed
-    const value = parseFloat(calc.totalValue) || 0
-    const cleanedData = wf?.cleanedData || []
+    let wf = null
+    try {
+      wf = sessionManager.getInstrumentWorkflow(sid, template.id)
+    } catch(e) { console.warn(e) }
+    
+    let cleanedData = []
+    let calculations = {}
+    if (!wf || !wf.calculations?.totalValue) {
+      const cleanKey = `${template.id}_session_${sid}_clean`
+      const calcKey = `${template.id}_session_${sid}_calc`
+      const savedClean = localStorage.getItem(cleanKey)
+      const savedCalc = localStorage.getItem(calcKey)
+      if (savedClean) {
+        try { cleanedData = JSON.parse(savedClean) } catch(e) {}
+      }
+      if (savedCalc) {
+        try { calculations = JSON.parse(savedCalc) } catch(e) {}
+      }
+    } else {
+      cleanedData = wf.cleanedData || []
+      calculations = wf.calculations || {}
+    }
+    
+    const completed = !!calculations.totalValue
+    const value = parseFloat(calculations.totalValue) || 0
     const headers = cleanedData.length ? Object.keys(cleanedData[0]) : []
     detailsList.push({
       id: template.id,
@@ -229,12 +261,19 @@ async function loadSummary() {
       detailHeaders: headers,
       showDetails: false
     })
+    // extract correct average rate
+    let avgRate = null
+    if (template.id === 'money-market') avgRate = calculations.avgRate
+    else if (template.id === 'bonds') avgRate = calculations.avgCouponRate
+    else avgRate = calculations.avgDiscountRate
+    if (avgRate === undefined) avgRate = null
+    
     return {
       ...template,
       value,
-      count: calc.instrumentCount || 0,
-      avgRate: calc.avgRate || calc.avgCouponRate || calc.avgDiscountRate || null,
-      fredBench: calc.fred?.benchmark_rate ?? null,
+      count: calculations.instrumentCount || 0,
+      avgRate,
+      fredBench: calculations.fred?.benchmark_rate ?? null,
       completed,
       statusClass: completed ? 'completed' : value > 0 ? 'in-progress' : 'pending',
       statusText: completed ? 'Completed' : value > 0 ? 'In progress' : 'Not started',
@@ -243,7 +282,6 @@ async function loadSummary() {
   })
   instrumentsWithDetails.value = detailsList
 
-  // Initialize selectedExportInstruments to only those with data
   const initSelections = {}
   instruments.value.forEach(inst => {
     initSelections[inst.id] = inst.completed || inst.value > 0
@@ -257,36 +295,34 @@ function exportToExcel() {
   if (toExport.length === 0) { alert('No instruments selected for export'); return }
 
   const workbook = XLSX.utils.book_new()
-
-  // Summary sheet (only selected instruments)
   const summaryData = toExport.map(inst => ({
     'Instrument Type': inst.name,
     'Total Value': inst.value,
     'Number of Instruments': inst.count,
-    'Average Rate (%)': inst.avgRate,
-    'FRED Benchmark (%)': inst.fredBench,
+    'Average Rate (%)': inst.avgRate !== null ? inst.avgRate : '—',
+    'FRED Benchmark (%)': inst.fredBench !== null ? inst.fredBench : '—',
     'Status': inst.statusText
   }))
   const summarySheet = XLSX.utils.json_to_sheet(summaryData)
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
 
-  // Detail sheets for selected instruments (only those with data)
   for (const inst of instrumentsWithDetails.value) {
     if (selectedExportInstruments.value[inst.id] && inst.details && inst.details.length) {
       const sheet = XLSX.utils.json_to_sheet(inst.details)
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name)
     }
   }
-
   XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name || 'session'}.xlsx`)
   showExportDialog.value = false
 }
 
-onMounted(loadSummary)
+onMounted(() => {
+  loadSummary().catch(err => console.error('Error loading summary:', err))
+})
 </script>
 
 <style scoped>
-/* All your original styles – unchanged – plus new export dialog styles */
+/* ========== ALL STYLES UNCHANGED – KEEP EXACTLY AS YOUR ORIGINAL ========== */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
@@ -303,9 +339,6 @@ onMounted(loadSummary)
 .kpi-mini-lbl { font-size: 12px; color: #666; }
 .section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
 .section-header h2 { color: #0B2044; margin: 0; font-size: 20px; }
-.export-controls { margin-left: auto; }
-.btn-export-excel { background: #4CAF50; color: white; border: none; padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
-.btn-export-excel:hover { background: #45a049; }
 .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
 .summary-card { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(11,32,68,0.1); background: white; }
 .card-top { padding: 20px; color: white; display: flex; align-items: center; gap: 12px; }
@@ -323,27 +356,18 @@ onMounted(loadSummary)
 .btn-primary, .btn-secondary { padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; }
 .btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; }
 .btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; }
-.workflow-card { margin-top: 32px; padding: 24px; background: linear-gradient(135deg, #f8f9ff, #fff); border-radius: 12px; border: 1px solid #e8ecf1; }
-.wf-hint { color: #666; font-size: 13px; margin: 8px 0 16px; }
-.workflow-steps { display: flex; gap: 12px; flex-wrap: wrap; }
-.wf { padding: 8px 16px; border-radius: 20px; background: #e0e0e0; font-size: 13px; }
-.wf.done { background: #0B2044; color: white; }
-
-/* Detailed tables */
 .detail-section { margin-top: 32px; background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
 .detail-header h3 { color: #0B2044; margin: 0; }
+.detail-actions { display: flex; gap: 8px; }
 .btn-view-details { background: #0B2044; color: white; border: none; padding: 4px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .btn-view-details:hover { background: #1a3a6e; }
-.table-wrapper { overflow-x: auto; }
-.detail-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.detail-table th, .detail-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
-.detail-table th { background: #f5f5f5; font-weight: 600; }
+.export-all-section { display: flex; justify-content: center; margin: 32px 0 20px; }
+.btn-export-all { background: #4CAF50; color: white; border: none; padding: 10px 24px; border-radius: 40px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.btn-export-all:hover { background: #45a049; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
 .excel-dialog-title { background: #0B2044; color: white; padding: 16px 24px; display: flex; align-items: center; }
 .btn-close-dialog { background: transparent; border: none; color: white; cursor: pointer; padding: 8px; border-radius: 50%; }
 .btn-close-dialog:hover { background: rgba(255,255,255,0.1); }
-
-/* Export selection dialog */
 .export-instrument-select { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .export-checkbox { display: flex; align-items: center; gap: 10px; font-size: 16px; cursor: pointer; }
 .warning-badge { background: #ffebee; color: #c62828; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }

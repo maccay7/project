@@ -83,10 +83,10 @@
                 <span class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
                 <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData.length">Review Excel</button>
-                <button class="btn-mapping" @click="autoMatchColumns" :disabled="!rawData.length">Map Columns</button>
+                <button class="btn-mapping" @click="openMappingDialog" :disabled="!rawData.length">Map Columns</button>
               </div>
 
-              <!-- Preview with dynamic mapping -->
+              <!-- Preview with live mapping (ExcelViewer handles display using columnMapping) -->
               <div v-if="rawData.length" class="excel-preview-section">
                 <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
                 <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
@@ -96,13 +96,14 @@
                   :show-mapping-controls="true"
                   :column-mapping="columnMapping"
                   :available-file-columns="fileColumns"
+                  :default-mapped-mode="mappingApplied ? 'mapped' : 'original'"
                   @data-update="onRawExcelUpdate"
                   @mapping-update="updateColumnMapping"
                 />
                 <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
               </div>
 
-              <!-- Column Mapping Dialog (legacy) – this is the only mapping interface -->
+              <!-- Column Mapping Dialog – live preview via v-model only -->
               <v-dialog v-model="showMappingDialog" max-width="700px">
                 <v-card>
                   <v-card-title>Map Columns</v-card-title>
@@ -116,11 +117,11 @@
                         </select>
                       </div>
                     </div>
-                    <div class="mapping-hint"><v-icon size="16">mdi-information</v-icon><small>Column names are matched automatically.</small></div>
+                    <div class="mapping-hint"><v-icon size="16">mdi-information</v-icon><small>Column names are matched automatically. Preview updates live.</small></div>
                   </v-card-text>
                   <v-card-actions>
                     <button class="btn-secondary" @click="showMappingDialog = false">Cancel</button>
-                    <button class="btn-primary" @click="applyColumnMapping">Apply Mapping</button>
+                    <button class="btn-primary" @click="applyColumnMappingAndClose">Apply Mapping & Close</button>
                   </v-card-actions>
                 </v-card>
               </v-dialog>
@@ -197,7 +198,6 @@
                   </div>
                 </div>
 
-                <!-- Preview section only shown after preview button clicked -->
                 <div v-if="previewData.length" class="preview-section">
                   <h4>Preview of Cleaned Data ({{ previewData.length }} rows)</h4>
                   <ExcelViewer :data="previewData" :headers="cleanPreviewHeaders" @data-update="onCleanPreviewUpdate" />
@@ -988,7 +988,7 @@ function goToCalculations() { if (hasCleanedData.value) { saveSessionData(); act
 function goToVisualizations() { if (hasCleanedData.value) { saveSessionData(); activeTab.value = 'visualizations' } else alert('Please clean your data first.') }
 function goToReportTab() { saveSessionData(); activeTab.value = 'reports' }
 
-// File upload & column mapping
+// ========== FILE UPLOAD & MAPPING ==========
 const fileInput = ref(null)
 function handleFileUpload(e) { const file = e.target.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 function handleDrop(e) { const file = e.dataTransfer.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
@@ -1062,6 +1062,10 @@ function autoMatchColumns() {
     newMapping[reqCol] = match || null
   })
   columnMapping.value = newMapping
+}
+
+function openMappingDialog() {
+  autoMatchColumns()
   showMappingDialog.value = true
 }
 
@@ -1082,9 +1086,13 @@ function applyColumnMapping() {
   if (mappingApplied.value) alert('Columns mapped successfully!')
 }
 
+function applyColumnMappingAndClose() {
+  applyColumnMapping()
+}
+
 function updateColumnMapping(newMapping) {
   columnMapping.value = newMapping
-  applyColumnMapping()
+  // Do NOT auto-apply – user must click "Apply Mapping & Close"
 }
 
 async function uploadData() {

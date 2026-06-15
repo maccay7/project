@@ -42,7 +42,7 @@
         </thead>
         <tbody>
           <tr v-for="(row, idx) in paginatedData" :key="idx">
-            <td class="row-number">{{ (currentPage - 1) * pageSize + idx + 1 }}</td>
+            <td class="row-number">{{ (currentPage - 1) * pageSize + idx + 1 }}<\/td>
             <td v-for="col in displayHeaders" :key="col">
               <input
                 type="text"
@@ -50,10 +50,10 @@
                 @input="updateCell(row, col, $event.target.value)"
                 class="editable-cell"
               />
-            </td>
-          </tr>
+            <\/td>
+          <\/tr>
         </tbody>
-      </table>
+      <\/table>
     </div>
   </div>
 </template>
@@ -66,14 +66,22 @@ const props = defineProps({
   headers: { type: Array, required: true },
   showMappingControls: { type: Boolean, default: false },
   columnMapping: { type: Object, default: () => ({}) },
-  availableFileColumns: { type: Array, default: () => [] }
+  availableFileColumns: { type: Array, default: () => [] },
+  defaultMappedMode: { type: Boolean, default: false }   // NEW
 })
 
 const emit = defineEmits(['data-update', 'mapping-update'])
 
 const pageSize = 15
 const currentPage = ref(1)
-const mappingMode = ref('original')
+const mappingMode = ref(props.defaultMappedMode ? 'mapped' : 'original')
+
+// Watch for changes to defaultMappedMode prop (e.g., after mapping is applied)
+watch(() => props.defaultMappedMode, (newVal) => {
+  if (newVal && mappingMode.value !== 'mapped') {
+    mappingMode.value = 'mapped'
+  }
+})
 
 const totalPages = computed(() => Math.ceil(props.data.length / pageSize))
 
@@ -133,7 +141,7 @@ function prevPage() { if (currentPage.value > 1) currentPage.value-- }
 function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
 
 watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
-</script>
+<\/script>
 
 <style scoped>
 .excel-viewer {

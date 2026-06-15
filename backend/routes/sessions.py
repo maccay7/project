@@ -3,8 +3,41 @@ import uuid
 from flask import request, jsonify
 from utils.db import get_db
 
-
 def sessions_routes(app):
+    # Ensure table has versions column (JSON) and instrument_workflows column (JSON)
+    @app.before_request
+    def ensure_table_schema():
+        conn = get_db()
+        if not conn:
+            return
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS ui_sessions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    session_id VARCHAR(255) UNIQUE,
+                    user_id INT,
+                    name VARCHAR(255),
+                    status VARCHAR(64),
+                    versions JSON,
+                    instrument_workflows JSON,
+                    payload JSON,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            ''')
+            # Add columns if missing (MySQL 5.7 compatibility)
+            for col in ['versions', 'instrument_workflows']:
+                try:
+                    cursor.execute(f"ALTER TABLE ui_sessions ADD COLUMN {col} JSON DEFAULT NULL")
+                except Exception:
+                    pass
+            cursor.close()
+        except Exception as e:
+            print(f"Schema check error: {e}")
+        finally:
+            conn.close()
+
     @app.route('/api/sessions/save', methods=['POST', 'OPTIONS'])
     def save_session():
         if request.method == 'OPTIONS':
@@ -12,108 +45,40 @@ def sessions_routes(app):
         payload = request.get_json() or {}
         session_id = payload.get('id') or payload.get('session_id') or str(int(uuid.uuid4().int % 1e12))
         name = payload.get('name') or ''
-        instrument = payload.get('instrument') or payload.get('instrumentType') or ''
-        status = payload.get('status') or 'upload'
+        status = payload.get('status') or 'in-progress'
         user_id = payload.get('user_id')
-        payload_json = json.dumps(payload.get('payload') or payload)
+        versions = payload.get('versions', [])
+        instrument_workflows = payload.get('instrument_workflows', {})
+        legacy_payload = payload.get('payload')
 
         conn = get_db()
         if not conn:
             return jsonify({'success': False, 'message': 'DB connection failed'}), 500
         try:
             cursor = conn.cursor()
-            # create a separate ui_sessions table if not exists (avoid colliding with auth sessions table)
-            try:
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS ui_sessions (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        session_id VARCHAR(255) UNIQUE,
-                        user_id INT,
-                        name VARCHAR(255),
-                        instrument VARCHAR(128),
-                        payload JSON,
-                        status VARCHAR(64),
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-                ''')
-            except Exception:
-                # ignore if cannot create; will attempt to work with existing table name
-                try:
-                    cursor.execute('ALTER TABLE ui_sessions ADD COLUMN session_id VARCHAR(255)')
-                except Exception:
-                    pass
-                try:
-                    cursor.execute('ALTER TABLE ui_sessions ADD COLUMN payload JSON')
-                except Exception:
-                    pass
-            # Ensure expected columns exist (MySQL 8+ supports IF NOT EXISTS; wrap in try/except for compatibility)
-            # Ensure commonly expected columns exist on ui_sessions; best-effort add if missing
-            for col_sql in [
-                "ALTER TABLE ui_sessions ADD COLUMN IF NOT EXISTS session_id VARCHAR(255)",
-                "ALTER TABLE ui_sessions ADD COLUMN IF NOT EXISTS payload JSON",
-                "ALTER TABLE ui_sessions ADD COLUMN IF NOT EXISTS name VARCHAR(255)",
-                "ALTER TABLE ui_sessions ADD COLUMN IF NOT EXISTS instrument VARCHAR(128)",
-                "ALTER TABLE ui_sessions ADD COLUMN IF NOT EXISTS status VARCHAR(64)"
-            ]:
-                try:
-                    cursor.execute(col_sql)
-                except Exception:
-                    try:
-                        fallback = col_sql.replace('IF NOT EXISTS ', '')
-                        cursor.execute(fallback)
-                    except Exception:
-                        pass
-
-            # normalize user_id to non-null (some schemas require NOT NULL)
-            user_db_id = user_id if user_id is not None else 0
-
-            # Try the expected upsert first; if the table has a different schema, fall back to a generic insert.
-            try:
-                cursor.execute(
-                    'REPLACE INTO ui_sessions (session_id, user_id, name, instrument, payload, status) VALUES (%s, %s, %s, %s, %s, %s)',
-                    (session_id, user_db_id, name, instrument, payload_json, status)
-                )
-                conn.commit()
-                cursor.close()
-                conn.close()
-                return jsonify({'success': True, 'session_id': session_id})
-            except Exception as primary_exc:
-                print(f"Primary REPLACE failed, attempting fallback insert: {primary_exc}")
-                # Inspect existing columns and try to insert into a sensible column
-                try:
-                    cursor.execute('SHOW COLUMNS FROM ui_sessions')
-                    cols = [r.get('Field') for r in cursor.fetchall()]
-                except Exception as e:
-                    print(f"Failed to inspect columns: {e}")
-                    cols = []
-
-                inserted = False
-                for candidate in ('payload', 'data', 'json', 'session_data'):
-                    if candidate in cols:
-                        try:
-                            cursor.execute(f'INSERT INTO ui_sessions ({candidate}) VALUES (%s)', (payload_json,))
-                            conn.commit()
-                            inserted = True
-                            break
-                        except Exception as e:
-                            print(f"Insert into {candidate} failed: {e}")
-                            continue
-
-                if not inserted:
-                    try:
-                        cursor.execute('INSERT INTO ui_sessions SET payload = %s', (payload_json,))
-                        conn.commit()
-                        inserted = True
-                    except Exception as e:
-                        print(f"Generic INSERT SET payload failed: {e}")
-
-                cursor.close()
-                conn.close()
-                if inserted:
-                    return jsonify({'success': True, 'session_id': session_id})
-                else:
-                    # Nothing worked — return diagnostic info to help debugging
-                    return jsonify({'success': False, 'message': str(primary_exc), 'columns': cols}), 500
+            # Upsert
+            cursor.execute('''
+                INSERT INTO ui_sessions (session_id, user_id, name, status, versions, instrument_workflows, payload)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    name = VALUES(name),
+                    status = VALUES(status),
+                    versions = VALUES(versions),
+                    instrument_workflows = VALUES(instrument_workflows),
+                    payload = VALUES(payload)
+            ''', (
+                session_id,
+                user_id if user_id is not None else 0,
+                name,
+                status,
+                json.dumps(versions) if versions else None,
+                json.dumps(instrument_workflows) if instrument_workflows else None,
+                json.dumps(legacy_payload) if legacy_payload else None
+            ))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'session_id': session_id})
         except Exception as e:
             print(f"Save session error: {e}")
             return jsonify({'success': False, 'message': str(e)}), 500
@@ -131,18 +96,47 @@ def sessions_routes(app):
             return jsonify({'success': False, 'message': 'DB error'}), 500
         try:
             cursor = conn.cursor()
-            cursor.execute('SELECT session_id, name, instrument, payload, status, created_at FROM ui_sessions WHERE session_id = %s LIMIT 1', (session_id,))
+            cursor.execute('''
+                SELECT session_id, name, status, versions, instrument_workflows, payload, created_at, updated_at
+                FROM ui_sessions WHERE session_id = %s LIMIT 1
+            ''', (session_id,))
             row = cursor.fetchone()
             cursor.close()
             conn.close()
             if not row:
-                # Local-only session (not saved to DB yet) — avoid 404 noise in browser
-                return jsonify({'success': True, 'data': None, 'message': 'Session not in database yet'}), 200
-            try:
-                payload = json.loads(row.get('payload') or '{}')
-            except Exception:
-                payload = row.get('payload')
-            return jsonify({'success': True, 'data': { 'session_id': row.get('session_id'), 'name': row.get('name'), 'instrument': row.get('instrument'), 'payload': payload, 'status': row.get('status'), 'created_at': row.get('created_at') }})
+                return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
+            # Parse JSON fields
+            versions = []
+            if row.get('versions'):
+                try:
+                    versions = json.loads(row['versions']) if isinstance(row['versions'], str) else row['versions']
+                except:
+                    versions = []
+            instrument_workflows = {}
+            if row.get('instrument_workflows'):
+                try:
+                    instrument_workflows = json.loads(row['instrument_workflows']) if isinstance(row['instrument_workflows'], str) else row['instrument_workflows']
+                except:
+                    instrument_workflows = {}
+            payload = {}
+            if row.get('payload'):
+                try:
+                    payload = json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
+                except:
+                    payload = row['payload']
+            return jsonify({
+                'success': True,
+                'data': {
+                    'session_id': row['session_id'],
+                    'name': row['name'],
+                    'status': row['status'],
+                    'versions': versions,
+                    'instrument_workflows': instrument_workflows,
+                    'payload': payload,
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
+                }
+            })
         except Exception as e:
             print(f"Get session error: {e}")
             return jsonify({'success': False, 'message': 'Query failed'}), 500
@@ -156,11 +150,30 @@ def sessions_routes(app):
             return jsonify({'success': False, 'message': 'DB error'}), 500
         try:
             cursor = conn.cursor()
-            cursor.execute('SELECT session_id, name, instrument, status, created_at FROM ui_sessions ORDER BY created_at DESC LIMIT 200')
+            cursor.execute('''
+                SELECT session_id, name, status, versions, instrument_workflows, created_at, updated_at
+                FROM ui_sessions ORDER BY updated_at DESC LIMIT 200
+            ''')
             rows = cursor.fetchall()
             cursor.close()
             conn.close()
-            return jsonify({'success': True, 'data': rows})
+            sessions_list = []
+            for row in rows:
+                versions = []
+                if row.get('versions'):
+                    try:
+                        versions = json.loads(row['versions']) if isinstance(row['versions'], str) else row['versions']
+                    except:
+                        versions = []
+                sessions_list.append({
+                    'id': row['session_id'],
+                    'name': row['name'],
+                    'status': row['status'],
+                    'versions': versions,
+                    'instrumentCount': len(row.get('instrument_workflows', {}) or {}) if row.get('instrument_workflows') else 0,
+                    'date': row['created_at'].isoformat() if row['created_at'] else None
+                })
+            return jsonify({'success': True, 'data': sessions_list})
         except Exception as e:
             print(f"List sessions error: {e}")
             return jsonify({'success': False, 'message': 'Query failed'}), 500
@@ -186,3 +199,67 @@ def sessions_routes(app):
         except Exception as e:
             print(f"Delete session error: {e}")
             return jsonify({'success': False, 'message': 'Delete failed'}), 500
+
+    # NEW: Save instrument workflow for a session
+    @app.route('/api/sessions/workflow/save', methods=['POST', 'OPTIONS'])
+    def save_instrument_workflow():
+        if request.method == 'OPTIONS':
+            return '', 200
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        instrument_type = data.get('instrument_type')
+        workflow = data.get('workflow')
+        if not session_id or not instrument_type:
+            return jsonify({'success': False, 'message': 'session_id and instrument_type required'}), 400
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'DB error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT instrument_workflows FROM ui_sessions WHERE session_id = %s', (session_id,))
+            row = cursor.fetchone()
+            workflows = {}
+            if row and row.get('instrument_workflows'):
+                try:
+                    workflows = json.loads(row['instrument_workflows']) if isinstance(row['instrument_workflows'], str) else row['instrument_workflows']
+                except:
+                    workflows = {}
+            workflows[instrument_type] = workflow
+            cursor.execute('''
+                UPDATE ui_sessions SET instrument_workflows = %s WHERE session_id = %s
+            ''', (json.dumps(workflows), session_id))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True})
+        except Exception as e:
+            print(f"Save workflow error: {e}")
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+    # NEW: Get instrument workflow for a session
+    @app.route('/api/sessions/workflow/get', methods=['POST', 'OPTIONS'])
+    def get_instrument_workflow():
+        if request.method == 'OPTIONS':
+            return '', 200
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        instrument_type = data.get('instrument_type')
+        if not session_id or not instrument_type:
+            return jsonify({'success': False, 'message': 'session_id and instrument_type required'}), 400
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'DB error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT instrument_workflows FROM ui_sessions WHERE session_id = %s', (session_id,))
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if not row or not row.get('instrument_workflows'):
+                return jsonify({'success': True, 'data': None})
+            workflows = json.loads(row['instrument_workflows']) if isinstance(row['instrument_workflows'], str) else row['instrument_workflows']
+            workflow = workflows.get(instrument_type)
+            return jsonify({'success': True, 'data': workflow})
+        except Exception as e:
+            print(f"Get workflow error: {e}")
+            return jsonify({'success': False, 'message': str(e)}), 500

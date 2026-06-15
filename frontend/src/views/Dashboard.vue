@@ -1,58 +1,33 @@
 <template>
   <div class="dashboard">
-    <!-- Fixed Top Navbar -->
     <div class="top-navbar">
       <div class="logo-area">
         <div class="logo-placeholder">
-          <img 
-            src="/DataStudio-logo.jpeg" 
-            alt="DataStudio Logo" 
-            class="navbar-logo"
-            @error="e => e.target.style.display = 'none'"
-          />
+          <img src="/DataStudio-logo.jpeg" alt="DataStudio Logo" class="navbar-logo" @error="e => e.target.style.display = 'none'"/>
         </div>
       </div>
       <div class="nav-actions">
-        <button class="nav-icon-btn" @click="goToSettings">
-          <v-icon>mdi-cog</v-icon>
-        </button>
-        <button class="nav-icon-btn" @click="handleLogout">
-          <v-icon>mdi-logout</v-icon>
-        </button>
+        <button class="nav-icon-btn" @click="goToSettings"><v-icon>mdi-cog</v-icon></button>
+        <button class="nav-icon-btn" @click="handleLogout"><v-icon>mdi-logout</v-icon></button>
       </div>
     </div>
 
-    <div class="dashboard-title">
-      <h1>Dashboard</h1>
-    </div>
+    <div class="dashboard-title"><h1>Dashboard</h1></div>
 
     <div class="session-management-row">
       <!-- Recent Sessions Card -->
       <div class="recent-sessions-card">
         <v-card class="session-card">
           <v-card-title class="card-title">
-            <div class="title-left">
-              <v-icon>mdi-history</v-icon>
-              Recent Sessions
-            </div>
-            <div class="title-right">
-              <span class="session-count">{{ filteredSessions.length }} Total</span>
-            </div>
+            <div class="title-left"><v-icon>mdi-history</v-icon> Recent Sessions</div>
+            <div class="title-right"><span class="session-count">{{ filteredSessions.length }} Total</span></div>
           </v-card-title>
           <v-card-text class="card-text-flex">
             <div class="search-bar">
               <v-icon class="search-icon" size="16">mdi-magnify</v-icon>
-              <input 
-                type="text" 
-                v-model="searchQuery" 
-                placeholder="Search sessions..." 
-                class="search-input"
-              />
-              <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''">
-                <v-icon size="14">mdi-close</v-icon>
-              </button>
+              <input type="text" v-model="searchQuery" placeholder="Search sessions..." class="search-input"/>
+              <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''"><v-icon size="14">mdi-close</v-icon></button>
             </div>
-
             <div class="sessions-list-container">
               <div class="sessions-list">
                 <div v-if="filteredSessions.length === 0" class="empty-sessions-list">
@@ -60,31 +35,18 @@
                   <p>No sessions yet</p>
                   <p class="empty-hint">Create a session using the form on the right</p>
                 </div>
-                <div 
-                  v-for="session in filteredSessions" 
-                  :key="session.id" 
-                  class="session-row-item"
-                  :class="{ 'active-session-row': activeSession && activeSession.id === session.id }"
-                >
-                  <div class="session-row-icon" :style="{ background: '#0B2044' }" @click="loadExistingSession(session.id)">
-                    <v-icon size="14" color="white">mdi-folder</v-icon>
-                  </div>
+                <div v-for="session in filteredSessions" :key="session.id" class="session-row-item" :class="{ 'active-session-row': activeSession && activeSession.id === session.id }">
+                  <div class="session-row-icon" :style="{ background: '#0B2044' }" @click="loadExistingSession(session.id)"><v-icon size="14" color="white">mdi-folder</v-icon></div>
                   <div class="session-row-info" @click="loadExistingSession(session.id)">
                     <div class="session-row-name">{{ session.name }}</div>
                     <div class="session-row-meta">{{ formatDate(session.date) }}</div>
                   </div>
-                  <div class="session-row-stats">
-                    <span>{{ session.instrumentCount || 0 }} instruments</span>
-                  </div>
-                  <div class="session-row-status" :class="session.status">
-                    {{ session.status === 'completed' ? '✓' : '⟳' }}
-                  </div>
-                  
-                  <!-- VERSIONS DROPDOWN - full width of session row -->
+                  <div class="session-row-stats"><span>{{ session.instrumentCount || 0 }} instruments</span></div>
+                  <div class="session-row-status" :class="session.status">{{ session.status === 'completed' ? '✓' : '⟳' }}</div>
+
                   <div class="version-dropdown-container">
                     <button class="version-btn" @click.stop="toggleVersionMenu(session.id)">
-                      <v-icon size="12">mdi-history</v-icon> 
-                      Versions ({{ session.versions?.length || 0 }})
+                      <v-icon size="12">mdi-history</v-icon> <span class="version-count">Versions ({{ session.versions?.length || 0 }})</span>
                     </button>
                     <div v-if="activeVersionMenu === session.id" class="version-menu" @click.stop>
                       <div v-if="!session.versions?.length" class="version-empty">No versions yet</div>
@@ -98,12 +60,8 @@
                     </div>
                   </div>
 
-                  <button class="row-rename-btn" @click.stop="openRename(session)" title="Rename">
-                    <v-icon size="12">mdi-pencil</v-icon>
-                  </button>
-                  <button class="row-delete-btn" @click.stop="deleteSession(session.id)">
-                    <v-icon size="12">mdi-close</v-icon>
-                  </button>
+                  <button class="row-rename-btn" @click.stop="openRename(session)" title="Rename"><v-icon size="12">mdi-pencil</v-icon></button>
+                  <button class="row-delete-btn" @click.stop="deleteSession(session.id)"><v-icon size="12">mdi-close</v-icon></button>
                 </div>
               </div>
             </div>
@@ -114,68 +72,33 @@
       <!-- Create New Session Card -->
       <div class="create-session-card">
         <v-card class="session-card">
-          <v-card-title class="card-title">
-            <v-icon>mdi-folder-plus</v-icon>
-            Create New Session
-          </v-card-title>
+          <v-card-title class="card-title"><v-icon>mdi-folder-plus</v-icon> Create New Session</v-card-title>
           <v-card-text class="create-session-content">
-            <div class="create-session-input">
-              <input 
-                v-model="newSessionName" 
-                placeholder="Enter session name " 
-                class="session-input"
-                @keyup.enter="createNewSession"
-              />
-            </div>
-            <div class="create-session-action">
-              <button class="btn-primary full-width" @click="createNewSession" :disabled="!newSessionName.trim()">
-                <v-icon>mdi-plus</v-icon> Create Session
-              </button>
-            </div>
-            
+            <div class="create-session-input"><input v-model="newSessionName" placeholder="Enter session name " class="session-input" @keyup.enter="createNewSession"/></div>
+            <div class="create-session-action"><button class="btn-primary full-width" @click="createNewSession" :disabled="!newSessionName.trim()"><v-icon>mdi-plus</v-icon> Create Session</button></div>
+
             <div class="active-session-container">
               <div v-if="activeSession" class="active-session-info">
                 <div class="session-header">
                   <v-icon color="#4CAF50" size="16">mdi-check-circle</v-icon>
                   <span v-if="!renamingActive" class="session-name-display">Active: {{ activeSession.name }}</span>
                   <input v-else v-model="renameInput" class="session-rename-input" @keyup.enter="saveRename" @keyup.esc="renamingActive = false" />
-                  <button v-if="!renamingActive" class="btn-rename-sm" type="button" @click="startRenameActive">Rename</button>
-                  <button v-else class="btn-rename-sm" type="button" @click="saveRename">Save</button>
-                  <span class="session-status-badge" :class="activeSession.status">
-                    {{ activeSession.status === 'completed' ? 'Completed' : 'In Progress' }}
-                  </span>
+                  <button v-if="!renamingActive" class="btn-rename-sm" @click="startRenameActive">Rename</button>
+                  <button v-else class="btn-rename-sm" @click="saveRename">Save</button>
+                  <span class="session-status-badge" :class="activeSession.status">{{ activeSession.status === 'completed' ? 'Completed' : 'In Progress' }}</span>
                 </div>
-                <div class="session-details">
-                  <span>Created: {{ formatDate(activeSession.date) }}</span>
-                  <span>Instruments: {{ activeSession.instrumentCount || 0 }}/3</span>
-                </div>
+                <div class="session-details"><span>Created: {{ formatDate(activeSession.date) }}</span><span>Instruments: {{ activeSession.instrumentCount || 0 }}/3</span></div>
               </div>
-              <div v-else class="no-session-warning">
-                <v-icon color="warning" size="16">mdi-alert</v-icon>
-                <span>No active session selected</span>
-              </div>
+              <div v-else class="no-session-warning"><v-icon color="warning" size="16">mdi-alert</v-icon><span>No active session selected</span></div>
             </div>
 
             <div class="flex-spacer"></div>
-
             <div class="session-stats-summary">
-              <div class="stats-header">
-                <v-icon size="16">mdi-chart-box</v-icon>
-                <span>Session Summary</span>
-              </div>
+              <div class="stats-header"><v-icon size="16">mdi-chart-box</v-icon><span>Session Summary</span></div>
               <div class="stats-grid">
-                <div class="stat-item">
-                  <div class="stat-number">{{ totalSessions }}</div>
-                  <div class="stat-label">Total Sessions</div>
-                </div>
-                <div class="stat-item">
-                  <div class="stat-number">{{ completedSessions }}</div>
-                  <div class="stat-label">Completed</div>
-                </div>
-                <div class="stat-item">
-                  <div class="stat-number">{{ inProgressSessions }}</div>
-                  <div class="stat-label">In Progress</div>
-                </div>
+                <div class="stat-item"><div class="stat-number">{{ totalSessions }}</div><div class="stat-label">Total Sessions</div></div>
+                <div class="stat-item"><div class="stat-number">{{ completedSessions }}</div><div class="stat-label">Completed</div></div>
+                <div class="stat-item"><div class="stat-number">{{ inProgressSessions }}</div><div class="stat-label">In Progress</div></div>
               </div>
             </div>
           </v-card-text>
@@ -187,40 +110,18 @@
     <div class="kpis-row">
       <div v-for="stat in kpiStats" :key="stat.title" class="kpi-card">
         <div class="kpi-top-bar"></div>
-        <div class="kpi-icon" :style="{ background: stat.gradient }">
-          <v-icon size="28" color="white">{{ stat.icon }}</v-icon>
-        </div>
-        <div class="kpi-info">
-          <div class="kpi-value">{{ stat.value }}</div>
-          <div class="kpi-title">{{ stat.title }}</div>
-        </div>
+        <div class="kpi-icon" :style="{ background: stat.gradient }"><v-icon size="28" color="white">{{ stat.icon }}</v-icon></div>
+        <div class="kpi-info"><div class="kpi-value">{{ stat.value }}</div><div class="kpi-title">{{ stat.title }}</div></div>
       </div>
     </div>
 
     <!-- Instruments -->
-    <div class="section-header">
-      <v-icon color="#0B2044" size="20">mdi-filter-outline</v-icon>
-      <h2>Select Financial Instrument</h2>
-    </div>
-
+    <div class="section-header"><v-icon color="#0B2044" size="20">mdi-filter-outline</v-icon><h2>Select Financial Instrument</h2></div>
     <div class="instruments-row">
-      <div 
-        v-for="instrument in instruments" 
-        :key="instrument.id"
-        class="instrument-card"
-        :class="{ 'disabled-card': !activeSession }"
-        @click="activeSession && goToInstrument(instrument.id)"
-      >
-        <div class="instrument-icon" :style="{ background: instrument.gradient }">
-          <v-icon size="28" color="white">{{ instrument.icon }}</v-icon>
-        </div>
-        <div class="instrument-info">
-          <h3>{{ instrument.name }}</h3>
-          <p>{{ instrument.description }}</p>
-        </div>
-        <div v-if="!activeSession" class="lock-overlay">
-          <v-icon>mdi-lock</v-icon>
-        </div>
+      <div v-for="instrument in instruments" :key="instrument.id" class="instrument-card" :class="{ 'disabled-card': !activeSession }" @click="activeSession && goToInstrument(instrument.id)">
+        <div class="instrument-icon" :style="{ background: instrument.gradient }"><v-icon size="28" color="white">{{ instrument.icon }}</v-icon></div>
+        <div class="instrument-info"><h3>{{ instrument.name }}</h3><p>{{ instrument.description }}</p></div>
+        <div v-if="!activeSession" class="lock-overlay"><v-icon>mdi-lock</v-icon></div>
       </div>
     </div>
   </div>
@@ -232,7 +133,6 @@ import sessionManager from '@/services/sessionManager.js'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-
 const SESSIONS_STORAGE_KEY = 'dura_sessions'
 const ACTIVE_SESSION_ID_KEY = 'dura_active_session_id'
 
@@ -250,30 +150,24 @@ const instruments = [
   { id: 'tbills', name: 'T-Bills', description: 'Treasury bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
 ]
 
-// Filter out sessions with no name
-const validSessions = computed(() => {
-  return sessions.value.filter(s => {
-    if (!s.name || s.name.trim().length === 0) return false
-    // Clean up version names if needed
-    if (s.versions) {
-      s.versions.forEach(v => {
-        if (v.name && v.name.includes('Auto-save')) {
-          v.name = v.name.replace(/Auto-save\s*/g, '').trim()
-          v.displayName = v.name
-        }
-        if (!v.displayName) v.displayName = v.name
-      })
-    }
-    return true
-  })
-})
+const validSessions = computed(() => sessions.value.filter(s => {
+  if (!s.name || s.name.trim().length === 0) return false
+  if (s.versions) {
+    s.versions.forEach(v => {
+      if (v.name && v.name.includes('Auto-save')) {
+        v.name = v.name.replace(/Auto-save\s*/g, '').trim()
+        v.displayName = v.name
+      }
+      if (!v.displayName) v.displayName = v.name
+    })
+  }
+  return true
+}))
 
 const filteredSessions = computed(() => {
   if (!searchQuery.value) return validSessions.value
   const query = searchQuery.value.toLowerCase()
-  return validSessions.value.filter(session => 
-    session.name.toLowerCase().includes(query)
-  )
+  return validSessions.value.filter(session => session.name.toLowerCase().includes(query))
 })
 
 const totalSessions = computed(() => validSessions.value.length)
@@ -288,46 +182,19 @@ const kpiStats = computed(() => [
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
-  try {
-    return new Date(dateStr).toLocaleString()
-  } catch {
-    return dateStr
-  }
+  try { return new Date(dateStr).toLocaleString() } catch { return dateStr }
 }
+function formatVersionTime(timestamp) { return new Date(timestamp).toLocaleString() }
 
-function formatVersionTime(timestamp) {
-  return new Date(timestamp).toLocaleString()
-}
-
-// ========== PERSISTENCE HELPERS ==========
-function saveSessionsToLocalStorage() {
-  localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.value))
-}
-
+function saveSessionsToLocalStorage() { localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.value)) }
 function loadSessionsFromLocalStorage() {
   const stored = localStorage.getItem(SESSIONS_STORAGE_KEY)
-  if (stored) {
-    try {
-      sessions.value = JSON.parse(stored)
-    } catch(e) { console.error('Failed to parse sessions', e) }
-  } else {
-    sessions.value = []
-  }
+  if (stored) { try { sessions.value = JSON.parse(stored) } catch(e) { console.error(e) } }
+  else { sessions.value = [] }
 }
+function saveActiveSessionId(id) { if (id) localStorage.setItem(ACTIVE_SESSION_ID_KEY, id); else localStorage.removeItem(ACTIVE_SESSION_ID_KEY) }
+function loadActiveSessionId() { return localStorage.getItem(ACTIVE_SESSION_ID_KEY) }
 
-function saveActiveSessionId(id) {
-  if (id) {
-    localStorage.setItem(ACTIVE_SESSION_ID_KEY, id)
-  } else {
-    localStorage.removeItem(ACTIVE_SESSION_ID_KEY)
-  }
-}
-
-function loadActiveSessionId() {
-  return localStorage.getItem(ACTIVE_SESSION_ID_KEY)
-}
-
-// ========== VERSIONING (clean, no "Auto-save", includes instrument) ==========
 function captureVersion(sessionId, versionName = null, changedInstrument = null) {
   const session = sessions.value.find(s => s.id === sessionId)
   if (!session) return
@@ -340,23 +207,13 @@ function captureVersion(sessionId, versionName = null, changedInstrument = null)
       if (!changedInst && wf.last_updated) changedInst = inst
     }
   }
-  // Determine instrument display name
   let instDisplay = ''
   if (changedInst === 'money-market') instDisplay = 'Money Market'
   else if (changedInst === 'bonds') instDisplay = 'Bonds'
   else if (changedInst === 'tbills') instDisplay = 'T-Bills'
-  
-  // Create clean display name WITHOUT "Auto-save"
   let displayName = versionName || (instDisplay ? `${instDisplay} – ${new Date().toLocaleString()}` : new Date().toLocaleString())
   displayName = displayName.replace(/Auto-save\s*/g, '')
-  
-  const version = {
-    timestamp: Date.now(),
-    name: displayName,
-    displayName: displayName,
-    instrument: instDisplay,
-    workflows
-  }
+  const version = { timestamp: Date.now(), name: displayName, displayName: displayName, instrument: instDisplay, workflows }
   if (!session.versions) session.versions = []
   session.versions.push(version)
   if (session.versions.length > 10) session.versions.shift()
@@ -371,69 +228,38 @@ function restoreVersion(sessionId, versionIndex) {
     sessionManager.saveInstrumentWorkflow(sessionId, inst, wf)
   }
   alert(`Restored version from ${new Date(version.timestamp).toLocaleString()}`)
-  if (activeSession.value && activeSession.value.id === sessionId) {
-    loadExistingSession(sessionId)
-  }
+  if (activeSession.value && activeSession.value.id === sessionId) loadExistingSession(sessionId)
   activeVersionMenu.value = null
 }
 
-function toggleVersionMenu(sessionId) {
-  activeVersionMenu.value = activeVersionMenu.value === sessionId ? null : sessionId
-}
+function toggleVersionMenu(sessionId) { activeVersionMenu.value = activeVersionMenu.value === sessionId ? null : sessionId }
+function onSessionUpdated(event) { captureVersion(event.detail.sessionId, null, event.detail.instrument) }
 
-function onSessionUpdated(event) {
-  const { sessionId, instrument } = event.detail
-  captureVersion(sessionId, null, instrument)
-}
-
-// ========== SESSION ACTIONS ==========
 function createNewSession() {
   if (!newSessionName.value.trim()) return
   const created = sessionManager.createSession(newSessionName.value.trim())
   const newSession = {
-    id: created.id,
-    name: created.name,
-    date: created.date || new Date().toISOString(),
-    status: created.status || 'in-progress',
-    instrumentCount: created.instrumentCount || 0,
-    totalValue: created.totalValue || 0,
-    versions: []
+    id: created.id, name: created.name, date: created.date || new Date().toISOString(),
+    status: created.status || 'in-progress', instrumentCount: created.instrumentCount || 0,
+    totalValue: created.totalValue || 0, versions: []
   }
-  sessions.value.unshift(newSession)
-  saveSessionsToLocalStorage()
-  activeSession.value = newSession
-  sessionManager.setActiveSession(activeSession.value)
-  saveActiveSessionId(activeSession.value.id)
-  newSessionName.value = ''
-  captureVersion(newSession.id, 'Initial creation')
+  sessions.value.unshift(newSession); saveSessionsToLocalStorage()
+  activeSession.value = newSession; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id)
+  newSessionName.value = ''; captureVersion(newSession.id, 'Initial creation')
 }
 
 function loadExistingSession(sessionId) {
   let session = sessions.value.find(s => s.id === sessionId)
-  if (!session) {
-    const full = sessionManager.getSession(sessionId)
-    if (full) session = full
-  }
+  if (!session) { const full = sessionManager.getSession(sessionId); if (full) session = full }
   if (!session) return
-  
   sessionManager.loadSessionFromDb(sessionId).then(() => {
     const refreshed = sessionManager.getSession(sessionId)
     if (refreshed) {
       const index = sessions.value.findIndex(s => s.id === sessionId)
-      if (index !== -1) {
-        sessions.value[index] = { ...refreshed, versions: sessions.value[index]?.versions || [] }
-        saveSessionsToLocalStorage()
-        session = sessions.value[index]
-      }
+      if (index !== -1) { sessions.value[index] = { ...refreshed, versions: sessions.value[index]?.versions || [] }; saveSessionsToLocalStorage(); session = sessions.value[index] }
     }
-    activeSession.value = session
-    sessionManager.setActiveSession(activeSession.value)
-    saveActiveSessionId(activeSession.value.id)
-  }).catch(() => {
-    activeSession.value = session
-    sessionManager.setActiveSession(activeSession.value)
-    saveActiveSessionId(activeSession.value.id)
-  })
+    activeSession.value = session; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id)
+  }).catch(() => { activeSession.value = session; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id) })
 }
 
 function openRename(session) {
@@ -441,87 +267,40 @@ function openRename(session) {
   if (name && name.trim()) {
     sessionManager.renameSession(session.id, name.trim())
     const index = sessions.value.findIndex(s => s.id === session.id)
-    if (index !== -1) {
-      sessions.value[index].name = name.trim()
-      saveSessionsToLocalStorage()
-      captureVersion(session.id, `Renamed to ${name.trim()}`)
-    }
-    if (activeSession.value?.id === session.id) {
-      activeSession.value = sessions.value[index]
-    }
+    if (index !== -1) { sessions.value[index].name = name.trim(); saveSessionsToLocalStorage(); captureVersion(session.id, `Renamed to ${name.trim()}`) }
+    if (activeSession.value?.id === session.id) activeSession.value = sessions.value[index]
   }
 }
-
-function startRenameActive() {
-  if (!activeSession.value) return
-  renameInput.value = activeSession.value.name
-  renamingActive.value = true
-}
-
+function startRenameActive() { if (!activeSession.value) return; renameInput.value = activeSession.value.name; renamingActive.value = true }
 function saveRename() {
   if (!activeSession.value || !renameInput.value.trim()) return
   sessionManager.renameSession(activeSession.value.id, renameInput.value.trim())
   const index = sessions.value.findIndex(s => s.id === activeSession.value.id)
-  if (index !== -1) {
-    sessions.value[index].name = renameInput.value.trim()
-    saveSessionsToLocalStorage()
-    captureVersion(activeSession.value.id, `Renamed to ${renameInput.value.trim()}`)
-    activeSession.value = sessions.value[index]
-  }
+  if (index !== -1) { sessions.value[index].name = renameInput.value.trim(); saveSessionsToLocalStorage(); captureVersion(activeSession.value.id, `Renamed to ${renameInput.value.trim()}`); activeSession.value = sessions.value[index] }
   renamingActive.value = false
 }
-
 function deleteSession(sessionId) {
   if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
     sessionManager.deleteSession(sessionId)
-    sessions.value = sessions.value.filter(s => s.id !== sessionId)
-    saveSessionsToLocalStorage()
-    if (activeSession.value && activeSession.value.id === sessionId) {
-      activeSession.value = null
-      saveActiveSessionId(null)
-    }
+    sessions.value = sessions.value.filter(s => s.id !== sessionId); saveSessionsToLocalStorage()
+    if (activeSession.value && activeSession.value.id === sessionId) { activeSession.value = null; saveActiveSessionId(null) }
   }
 }
-
 function goToInstrument(instrumentId) {
-  if (!activeSession.value) {
-    alert('Please create or select a session first')
-    return
-  }
+  if (!activeSession.value) { alert('Please create or select a session first'); return }
   sessionManager.setActiveSession(activeSession.value)
   router.push({ path: `/instrument/${instrumentId}`, query: { session: activeSession.value.id } })
 }
+function goToSettings() { router.push('/settings') }
+function handleLogout() { localStorage.removeItem('auth_token'); localStorage.removeItem('user'); sessionStorage.clear(); window.location.href = '/login' }
 
-function goToSettings() {
-  router.push('/settings')
-}
-
-function handleLogout() {
-  localStorage.removeItem('auth_token')
-  localStorage.removeItem('user')
-  sessionStorage.clear()
-  window.location.href = '/login'
-}
-
-// Clean up malformed sessions and version names
 function cleanupSessions() {
   let changed = false
-  sessions.value = sessions.value.filter(s => {
-    if (!s.name || s.name.trim().length === 0) {
-      console.warn('Removing session without name', s)
-      changed = true
-      return false
-    }
-    return true
-  })
+  sessions.value = sessions.value.filter(s => { if (!s.name || s.name.trim().length === 0) { console.warn('Removing session without name', s); changed = true; return false } return true })
   sessions.value.forEach(s => {
     if (s.versions) {
       s.versions.forEach(v => {
-        if (v.name && v.name.includes('Auto-save')) {
-          v.name = v.name.replace(/Auto-save\s*/g, '').trim()
-          v.displayName = v.name
-          changed = true
-        }
+        if (v.name && v.name.includes('Auto-save')) { v.name = v.name.replace(/Auto-save\s*/g, '').trim(); v.displayName = v.name; changed = true }
         if (!v.displayName) v.displayName = v.name
       })
     }
@@ -530,60 +309,32 @@ function cleanupSessions() {
 }
 
 onMounted(async () => {
-  loadSessionsFromLocalStorage()
-  cleanupSessions()
-  
+  loadSessionsFromLocalStorage(); cleanupSessions()
   const managerSessions = sessionManager.getAllSessions()
   if (managerSessions.length > 0) {
     const merged = [...sessions.value]
     for (const ms of managerSessions) {
       const existingIndex = merged.findIndex(s => s.id === ms.id)
-      if (existingIndex !== -1) {
-        merged[existingIndex] = { ...merged[existingIndex], ...ms }
-      } else {
-        merged.push(ms)
-      }
+      if (existingIndex !== -1) merged[existingIndex] = { ...merged[existingIndex], ...ms }
+      else merged.push(ms)
     }
-    sessions.value = merged
-    cleanupSessions()
-    saveSessionsToLocalStorage()
+    sessions.value = merged; cleanupSessions(); saveSessionsToLocalStorage()
   }
-  
   const activeId = loadActiveSessionId()
   if (activeId) {
     const session = sessions.value.find(s => s.id === activeId)
-    if (session) {
-      activeSession.value = session
-      sessionManager.setActiveSession(activeSession.value)
-      sessionManager.loadSessionFromDb(activeId).catch(() => {})
-    } else {
-      const managerSession = sessionManager.getSession(activeId)
-      if (managerSession) {
-        activeSession.value = managerSession
-        sessionManager.setActiveSession(activeSession.value)
-        sessions.value.unshift(managerSession)
-        cleanupSessions()
-        saveSessionsToLocalStorage()
-      } else {
-        saveActiveSessionId(null)
-      }
-    }
+    if (session) { activeSession.value = session; sessionManager.setActiveSession(activeSession.value); sessionManager.loadSessionFromDb(activeId).catch(()=>{}) }
+    else { const managerSession = sessionManager.getSession(activeId); if (managerSession) { activeSession.value = managerSession; sessionManager.setActiveSession(activeSession.value); sessions.value.unshift(managerSession); cleanupSessions(); saveSessionsToLocalStorage() } else { saveActiveSessionId(null) } }
   } else if (sessions.value.length > 0 && !activeSession.value) {
-    activeSession.value = sessions.value[0]
-    sessionManager.setActiveSession(activeSession.value)
-    saveActiveSessionId(activeSession.value.id)
+    activeSession.value = sessions.value[0]; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id)
   }
-  
   window.addEventListener('session-updated', onSessionUpdated)
 })
-
-onBeforeUnmount(() => {
-  window.removeEventListener('session-updated', onSessionUpdated)
-})
+onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionUpdated) })
 </script>
 
 <style scoped>
-/* All original styles remain – only version dropdown positioning and width fixed */
+/* all original styles – plus increased z-index for version menu */
 .dashboard { min-height: 100vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px 40px; }
 .top-navbar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: white; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); z-index: 1000; }
 .logo-placeholder { display: flex; align-items: center; }
@@ -625,80 +376,19 @@ onBeforeUnmount(() => {
 .session-row-status.in-progress { background: #FFF3E0; color: #FF9800; }
 .session-row-status.completed { background: #E8F5E9; color: #4CAF50; }
 
-/* FIXED: version dropdown now spans full width of session row and appears below */
-.version-dropdown-container {
-  position: relative;
-  margin-left: auto;
-  margin-right: 4px;
-}
-.version-btn {
-  background: #e8ecf1;
-  border: none;
-  border-radius: 20px;
-  padding: 4px 10px;
-  font-size: 10px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.2s;
-  color: #0B2044;
-  white-space: nowrap;
-}
-.version-btn:hover {
-  background: #d0d5dd;
-}
-.version-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  left: auto;
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 12px;
-  min-width: 280px;
-  width: max-content;
-  max-width: 90vw;
-  z-index: 1000;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
-  padding: 6px 0;
-  margin-top: 8px;
-}
-.version-item {
-  padding: 8px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.2s;
-  border-bottom: 1px solid #f0f0f0;
-}
-.version-item:last-child {
-  border-bottom: none;
-}
-.version-item:hover {
-  background: #f5f7fa;
-}
-.version-time {
-  font-size: 10px;
-  color: #888;
-  margin-bottom: 2px;
-}
-.version-detail {
-  font-weight: 500;
-  color: #0B2044;
-}
-.version-instrument {
-  color: #1E88E5;
-  font-weight: 600;
-}
-.version-label {
-  color: #555;
-}
-.version-empty {
-  padding: 12px;
-  font-size: 11px;
-  color: #999;
-  text-align: center;
-}
+.version-dropdown-container { position: relative; margin-left: auto; margin-right: 4px; }
+.version-btn { background: #e8ecf1; border: none; border-radius: 20px; padding: 4px 10px; font-size: 10px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s; color: #0B2044; white-space: nowrap; }
+.version-btn:hover { background: #d0d5dd; }
+.version-count { font-weight: 600; }
+.version-menu { position: absolute; top: 100%; right: 0; left: auto; background: white; border: 1px solid #e0e0e0; border-radius: 12px; min-width: 280px; width: max-content; max-width: 90vw; z-index: 2000; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12); padding: 6px 0; margin-top: 8px; }
+.version-item { padding: 8px 12px; font-size: 12px; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid #f0f0f0; }
+.version-item:last-child { border-bottom: none; }
+.version-item:hover { background: #f5f7fa; }
+.version-time { font-size: 10px; color: #888; margin-bottom: 2px; }
+.version-detail { font-weight: 500; color: #0B2044; }
+.version-instrument { color: #1E88E5; font-weight: 600; }
+.version-label { color: #555; }
+.version-empty { padding: 12px; font-size: 11px; color: #999; text-align: center; }
 
 .row-rename-btn { background: #0B2044; border: none; color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; margin-right: 4px; }
 .session-row-item:hover .row-rename-btn { opacity: 1; }
