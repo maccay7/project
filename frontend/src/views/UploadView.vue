@@ -1,14 +1,11 @@
 <template>
   <fixed-layout>
     <div class="upload-page">
-
-      <!-- Header -->
       <div class="page-header">
         <h1>Upload Dataset</h1>
         <p>Upload financial data for analysis</p>
       </div>
 
-      <!-- Upload & Saved Datasets -->
       <v-row>
         <!-- Upload Area -->
         <v-col cols="12" md="6">
@@ -17,15 +14,25 @@
               <v-icon size="56" color="#0B2A44">mdi-cloud-upload</v-icon>
               <h3>Upload File</h3>
               <p>Drag & drop or click to browse</p>
-              <div class="drop-area" :class="{ 'drag-over': isDragging }"
+              <div
+                class="drop-area"
+                :class="{ 'drag-over': isDragging }"
                 @dragover.prevent="isDragging = true"
                 @dragleave.prevent="isDragging = false"
-                @drop.prevent="handleDrop" @click="openFileBrowser">
+                @drop.prevent="handleDrop"
+                @click="openFileBrowser"
+              >
                 <v-icon size="32" color="#1E88E5">mdi-file-upload-outline</v-icon>
                 <p>Excel, CSV, or JSON files</p>
                 <v-btn color="#0B2A44" size="small">Browse</v-btn>
               </div>
-              <input ref="fileInput" type="file" accept=".csv,.xlsx,.xls,.json" @change="handleFileSelect" style="display:none">
+              <input
+                ref="fileInput"
+                type="file"
+                accept=".csv,.xlsx,.xls,.xlsm,.xlsb,.ods,.json"
+                @change="handleFileSelect"
+                style="display:none"
+              />
             </v-card-text>
           </v-card>
         </v-col>
@@ -46,8 +53,12 @@
                     <div class="dataset-name">{{ ds.name }}</div>
                     <div class="dataset-rows">{{ ds.rows || 0 }} rows</div>
                   </div>
-                  <v-btn size="small" variant="text" @click="loadDataset(idx)"><v-icon size="small">mdi-folder-open</v-icon></v-btn>
-                  <v-btn size="small" color="error" variant="text" @click="deleteDataset(idx)"><v-icon size="small">mdi-delete</v-icon></v-btn>
+                  <v-btn size="small" variant="text" @click="loadDataset(idx)">
+                    <v-icon size="small">mdi-folder-open</v-icon>
+                  </v-btn>
+                  <v-btn size="small" color="error" variant="text" @click="deleteDataset(idx)">
+                    <v-icon size="small">mdi-delete</v-icon>
+                  </v-btn>
                 </div>
               </div>
               <div v-else class="empty-state">
@@ -88,28 +99,33 @@
         </v-card-text>
       </v-card>
 
-      <!-- Excel Viewer -->
-      <ExcelViewer v-if="showPreview"
-        :key="fileBase64 || uploadedFile?.name"
-        :file-base64="fileBase64"
-        :file-name="uploadedFile?.name || ''"
-        :data="dataset"
-        :headers="headers"
-        @data-update="dataset = $event"
-        @headers-update="headers = $event"
-      />
+      <!-- Excel Viewer (basic, without mapping controls) -->
+<ExcelViewer
+  :data="rawData.slice(0, 500)"
+  :headers="uploadPreviewHeaders"
+  :show-mapping-controls="true"
+  :column-mapping="columnMapping"
+  :available-file-columns="fileColumns"
+  @data-update="onRawExcelUpdate"
+  @mapping-update="updateColumnMapping"
+/>
 
       <!-- Dataset Info -->
       <v-card v-if="showPreview && dataset.length" class="info-card">
         <v-card-title><v-icon>mdi-information</v-icon> Dataset Summary</v-card-title>
         <v-card-text>
           <v-row>
-            <v-col cols="6" sm="3"><div class="info-label">Total Rows</div><div class="info-value">{{ dataset.length }}</div></v-col>
-            <v-col cols="6" sm="3"><div class="info-label">Total Columns</div><div class="info-value">{{ headers.length }}</div></v-col>
+            <v-col cols="6" sm="3">
+              <div class="info-label">Total Rows</div>
+              <div class="info-value">{{ dataset.length }}</div>
+            </v-col>
+            <v-col cols="6" sm="3">
+              <div class="info-label">Total Columns</div>
+              <div class="info-value">{{ headers.length }}</div>
+            </v-col>
           </v-row>
         </v-card-text>
       </v-card>
-
     </div>
   </fixed-layout>
 </template>
@@ -119,7 +135,8 @@ import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { dataAPI, datasetAPI } from '../services/api'
+import { datasetAPI } from '../services/api'
+import * as XLSX from 'xlsx'
 
 const router = useRouter()
 const fileInput = ref(null)
@@ -131,47 +148,134 @@ const showPreview = ref(false)
 
 // Data
 const uploadedFile = ref(null)
-const fileBase64 = ref('')
 const dataset = ref([])
 const headers = ref([])
 const savedDatasets = ref([])
 const selectedDatasetId = ref(null)
 const selectedDatasetName = ref('')
 
-// Computed
 const hasFile = computed(() => uploadedFile.value !== null)
-const hasData = computed(() => dataset.value.length > 0 || fileBase64.value)
+const hasData = computed(() => dataset.value.length > 0)
 
-// Load saved datasets
+// ---------- File reading (local, no backend) ----------
+async function readFileData(file) {
+  const ext = file.name.split('.').pop().toLowerCase()
+  let data = []
+  try {
+    if (ext === 'csv') {
+      const text = await file.text()
+      const lines = text.split(/\r?\n/).filter(l => l.trim())
+      if (lines.length === 0) throw new Error('Empty file')
+      let delimiter = ','
+      if (lines[0].includes(';') && !lines[0].includes(',')) delimiter = ';'
+      const fileHeaders = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ''))
+      data = lines.slice(1).map(line => {
+        const vals = line.split(delimiter).map(v => v.trim().replace(/^"|"$/g, ''))
+        const row = {}
+        fileHeaders.forEach((h, i) => { row[h] = vals[i] !== undefined ? vals[i] : '' })
+        return row
+      })
+    } else {
+      // Excel / ODS / etc.
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, {
+        type: 'array',
+        cellDates: false,
+        cellNF: false,
+        cellText: false,
+        sheetRows: 5000,
+        defval: ""
+      })
+      const sheetName = workbook.SheetNames[0]
+      const sheet = workbook.Sheets[sheetName]
+      data = XLSX.utils.sheet_to_json(sheet, { defval: "" })
+      if (data.length === 0) throw new Error('No data found in first sheet')
+    }
+    return data
+  } catch (err) {
+    console.error('File read error:', err)
+    throw new Error(`Failed to parse file: ${err.message}`)
+  }
+}
+
+// ---------- Upload & Preview ----------
+async function uploadFile(file) {
+  uploadedFile.value = file
+  isLoading.value = true
+  try {
+    const parsed = await readFileData(file)
+    dataset.value = parsed
+    headers.value = Object.keys(parsed[0] || {})
+    showPreview.value = true
+    // Auto-save prompt after successful load
+    const name = file.name.replace(/\.[^/.]+$/, '')
+    if (confirm(`Load successful. Save "${name}" to datasets?`)) {
+      await saveDataset(name)
+    }
+  } catch (err) {
+    alert(err.message)
+    dataset.value = []
+    headers.value = []
+    uploadedFile.value = null
+    showPreview.value = false
+  } finally {
+    isLoading.value = false
+  }
+}
+
+async function loadExcel() {
+  if (!uploadedFile.value) {
+    alert('Please select a file first')
+    return
+  }
+  if (dataset.value.length) {
+    showPreview.value = true
+    return
+  }
+  await uploadFile(uploadedFile.value)
+}
+
+// ---------- Dataset persistence (via datasetAPI) ----------
 async function loadSavedDatasets() {
   try {
     const res = await datasetAPI.getAll()
     if (res && res.success) savedDatasets.value = res.data || []
-  } catch (err) { console.error('Load datasets error', err) }
+  } catch (err) {
+    console.error('Load datasets error', err)
+  }
 }
 
-// Save dataset
 async function saveDataset(name) {
-  if (!fileBase64.value && !dataset.value.length) {
+  if (!dataset.value.length && !uploadedFile.value) {
     alert('No data to save')
     return false
   }
   try {
     const payload = {
       name,
-      file_base64: fileBase64.value || '',
-      sheet_names: headers.value || [],
-      upload_id: selectedDatasetId.value || null
+      file_base64: '',
+      sheet_names: headers.value,
+      upload_id: selectedDatasetId.value || null,
+      data: dataset.value,
+      headers: headers.value
     }
-    if (dataset.value && dataset.value.length) payload.data = dataset.value
-    const res = await datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, payload.data || null, headers.value || null)
+    const res = await datasetAPI.save(
+      payload.name,
+      payload.file_base64,
+      payload.sheet_names,
+      payload.upload_id,
+      payload.data,
+      payload.headers
+    )
     if (res && res.success) {
       selectedDatasetId.value = res.data.id
       selectedDatasetName.value = res.data.name
       await loadSavedDatasets()
       return true
     }
-  } catch (err) { console.error('Save dataset error', err) }
+  } catch (err) {
+    console.error('Save dataset error', err)
+  }
   return false
 }
 
@@ -183,7 +287,6 @@ async function savePrompt() {
   }
 }
 
-// Load dataset
 async function loadDataset(idx) {
   const ds = savedDatasets.value[idx]
   if (!ds) return
@@ -191,18 +294,23 @@ async function loadDataset(idx) {
     const res = await datasetAPI.load(ds.id)
     if (res && res.success) {
       const data = res.data || {}
-      if (data.file_base64) { fileBase64.value = data.file_base64; dataset.value = [] }
-      else if (data.data) { dataset.value = data.data; fileBase64.value = '' }
-      if (data.headers) headers.value = data.headers
-      uploadedFile.value = { name: data.name }
-      selectedDatasetId.value = data.id
-      selectedDatasetName.value = data.name
-      showPreview.value = true
+      if (data.data && data.data.length) {
+        dataset.value = data.data
+        headers.value = data.headers || Object.keys(data.data[0] || {})
+        uploadedFile.value = { name: data.name }
+        selectedDatasetId.value = data.id
+        selectedDatasetName.value = data.name
+        showPreview.value = true
+      } else {
+        alert('Dataset has no data')
+      }
     }
-  } catch (err) { console.error('Load dataset error', err) }
+  } catch (err) {
+    console.error('Load dataset error', err)
+    alert('Failed to load dataset')
+  }
 }
 
-// Delete dataset
 async function deleteDataset(idx) {
   const ds = savedDatasets.value[idx]
   if (!ds) return
@@ -210,89 +318,62 @@ async function deleteDataset(idx) {
     try {
       await datasetAPI.delete(ds.id)
       await loadSavedDatasets()
-    } catch (err) { console.error('Delete dataset error', err) }
+      if (selectedDatasetId.value === ds.id) {
+        selectedDatasetId.value = null
+        dataset.value = []
+        headers.value = []
+        uploadedFile.value = null
+        showPreview.value = false
+      }
+    } catch (err) {
+      console.error('Delete dataset error', err)
+    }
   }
 }
 
-// File handling
-function openFileBrowser() { fileInput.value?.click() }
+// ---------- Navigation & UI helpers ----------
+function openFileBrowser() {
+  fileInput.value?.click()
+}
+
 function handleFileSelect(e) {
   const files = Array.from(e.target.files || [])
   if (files.length) uploadFile(files[0])
 }
+
 function handleDrop(e) {
   isDragging.value = false
   const files = Array.from(e.dataTransfer?.files || [])
   if (files.length) uploadFile(files[0])
 }
 
-// Upload to backend
-async function uploadFile(file) {
-  uploadedFile.value = file
-  await loadPreview()
-}
-
-async function loadPreview() {
-  if (!uploadedFile.value) return
-  isLoading.value = true
-  try {
-    const res = await dataAPI.upload(uploadedFile.value, 'treasury_bills')
-    if (res.data?.file_base64) {
-      fileBase64.value = res.data.file_base64
-      dataset.value = []
-    } else if (res.data?.data) {
-      dataset.value = res.data.data
-      headers.value = Object.keys(dataset.value[0] || {})
-    }
-  } catch (err) {
-    console.error(err)
-    alert('Upload failed')
-  } finally {
-    isLoading.value = false
-  }
-}
-
-// Load Excel
-async function loadExcel() {
-  if (dataset.value.length || fileBase64.value) {
-    showPreview.value = true
-    return
-  }
-  if (!uploadedFile.value) {
-    alert('Upload a file first')
-    return
-  }
-  await loadPreview()
-  if (dataset.value.length || fileBase64.value) {
-    showPreview.value = true
-    const name = uploadedFile.value.name.replace(/\.[^/.]+$/, '')
-    if (confirm(`Save "${name}" to datasets?`)) await saveDataset(name)
-  } else {
-    alert('Failed to load data')
-  }
-}
-
-// Go to cleaning
-async function goToClean() {
-  if (!dataset.value.length && !fileBase64.value) {
+function goToClean() {
+  if (!dataset.value.length) {
     alert('Load data first')
     return
   }
+  // If not saved yet, ask to save
   if (!selectedDatasetId.value) {
     const name = uploadedFile.value?.name?.replace(/\.[^/.]+$/, '') || `Dataset-${Date.now()}`
-    const saved = await saveDataset(name)
-    if (!saved) {
-      alert('Unable to save dataset before cleaning')
-      return
-    }
+    saveDataset(name).then(saved => {
+      if (saved) {
+        router.push({ name: 'cleaning', query: { dataset_id: selectedDatasetId.value } })
+      } else {
+        alert('Unable to save dataset before cleaning')
+      }
+    })
+  } else {
+    router.push({ name: 'cleaning', query: { dataset_id: selectedDatasetId.value } })
   }
-  router.push({ name: 'cleaning', query: { dataset_id: selectedDatasetId.value } })
 }
 
-onMounted(() => { loadSavedDatasets() })
+onMounted(() => {
+  loadSavedDatasets()
+})
 </script>
 
 <style scoped>
+/* (same as your original styles – unchanged) */
 .upload-page { max-width: 1400px; margin: 0 auto; padding: 20px; }
 .page-header { margin-bottom: 30px; }
 .page-header h1 { color: #0B2A44; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
@@ -318,4 +399,4 @@ onMounted(() => { loadSavedDatasets() })
   .upload-page { padding: 0 16px; }
   .drop-area { padding: 20px 16px; }
 }
-</style>s
+</style>
