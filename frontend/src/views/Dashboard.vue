@@ -1,5 +1,6 @@
 <template>
   <div class="dashboard">
+    <!-- Fixed Top Navbar -->
     <div class="top-navbar">
       <div class="logo-area">
         <div class="logo-placeholder">
@@ -44,21 +45,11 @@
                   <div class="session-row-stats"><span>{{ session.instrumentCount || 0 }} instruments</span></div>
                   <div class="session-row-status" :class="session.status">{{ session.status === 'completed' ? '✓' : '⟳' }}</div>
 
-                  <div class="version-dropdown-container">
-                    <button class="version-btn" @click.stop="toggleVersionMenu(session.id)">
-                      <v-icon size="12">mdi-history</v-icon> <span class="version-count">Versions ({{ session.versions?.length || 0 }})</span>
-                    </button>
-                    <div v-if="activeVersionMenu === session.id" class="version-menu" @click.stop>
-                      <div v-if="!session.versions?.length" class="version-empty">No versions yet</div>
-                      <div v-for="(ver, vIdx) in session.versions" :key="vIdx" class="version-item" @click.stop="restoreVersion(session.id, vIdx)">
-                        <div class="version-time">{{ formatVersionTime(ver.timestamp) }}</div>
-                        <div class="version-detail">
-                          <span class="version-instrument" v-if="ver.instrument">{{ ver.instrument }} – </span>
-                          <span class="version-label">{{ ver.displayName || ver.name }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <!-- History button -->
+                  <button class="version-btn" @click.stop="openVersionModal(session.id)">
+                    <v-icon size="12">mdi-history</v-icon>
+                    <span class="version-count">History ({{ session.versions?.length || 0 }})</span>
+                  </button>
 
                   <button class="row-rename-btn" @click.stop="openRename(session)" title="Rename"><v-icon size="12">mdi-pencil</v-icon></button>
                   <button class="row-delete-btn" @click.stop="deleteSession(session.id)"><v-icon size="12">mdi-close</v-icon></button>
@@ -124,6 +115,59 @@
         <div v-if="!activeSession" class="lock-overlay"><v-icon>mdi-lock</v-icon></div>
       </div>
     </div>
+
+    <!-- ========== VERSION HISTORY MODAL (compact, scrollable) ========== -->
+    <v-dialog v-model="versionDialogVisible" max-width="650px">
+      <v-card>
+        <v-card-title class="version-dialog-title">
+          <v-icon>mdi-history</v-icon> Change History – {{ selectedSessionForVersions?.name || 'Session' }}
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="versionDialogVisible = false">✕</button>
+        </v-card-title>
+        <v-card-text class="version-dialog-body">
+          <div v-if="!selectedSessionForVersions?.versions?.length" class="empty-versions">
+            <v-icon size="36" color="#ccc">mdi-file-document-outline</v-icon>
+            <p>No changes recorded yet.</p>
+          </div>
+          <div v-else class="version-list">
+            <div v-for="(ver, idx) in selectedSessionForVersions.versions" :key="idx" class="version-entry" :class="{ 'latest': idx === 0 }">
+              <div class="version-entry-header">
+                <div class="version-entry-time">{{ formatVersionTime(ver.timestamp) }}</div>
+                <div class="version-entry-badge" :class="ver.changeTypeClass">{{ ver.changeType }}</div>
+              </div>
+              <div class="version-entry-details">
+                <div class="version-entry-row">
+                  <span class="label">Instrument</span>
+                  <span class="value">{{ ver.instrument || '—' }}</span>
+                </div>
+                <div class="version-entry-row">
+                  <span class="label">User</span>
+                  <span class="value">{{ ver.user || 'System' }}</span>
+                </div>
+                <div class="version-entry-row description-row">
+                  <span class="label">Change</span>
+                  <span class="value description-text">{{ ver.shortDescription || ver.description || ver.name || 'Updated' }}</span>
+                </div>
+                <div class="version-entry-row" v-if="ver.fieldsChanged && ver.fieldsChanged.length">
+                  <span class="label">Fields</span>
+                  <span class="value fields-tags">
+                    <span v-for="(field, fi) in ver.fieldsChanged" :key="fi" class="field-tag">{{ field }}</span>
+                  </span>
+                </div>
+              </div>
+              <div class="version-entry-actions">
+                <button class="btn-restore" @click="restoreVersion(selectedSessionForVersions.id, idx)">Restore</button>
+              </div>
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions class="version-dialog-actions">
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="versionDialogVisible = false">Close</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
   </div>
 </template>
 
@@ -142,7 +186,10 @@ const newSessionName = ref('')
 const activeSession = ref(null)
 const renamingActive = ref(false)
 const renameInput = ref('')
-const activeVersionMenu = ref(null)
+
+// Version modal state
+const versionDialogVisible = ref(false)
+const selectedSessionForVersions = ref(null)
 
 const instruments = [
   { id: 'money-market', name: 'Money Market', description: 'Short-term debt instruments', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
@@ -184,7 +231,9 @@ function formatDate(dateStr) {
   if (!dateStr) return ''
   try { return new Date(dateStr).toLocaleString() } catch { return dateStr }
 }
-function formatVersionTime(timestamp) { return new Date(timestamp).toLocaleString() }
+function formatVersionTime(timestamp) {
+  return new Date(timestamp).toLocaleString()
+}
 
 function saveSessionsToLocalStorage() { localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.value)) }
 function loadSessionsFromLocalStorage() {
@@ -195,46 +244,123 @@ function loadSessionsFromLocalStorage() {
 function saveActiveSessionId(id) { if (id) localStorage.setItem(ACTIVE_SESSION_ID_KEY, id); else localStorage.removeItem(ACTIVE_SESSION_ID_KEY) }
 function loadActiveSessionId() { return localStorage.getItem(ACTIVE_SESSION_ID_KEY) }
 
-function captureVersion(sessionId, versionName = null, changedInstrument = null) {
+// ========== VERSION CAPTURE (enhanced) ==========
+function captureVersion(sessionId, options = {}) {
   const session = sessions.value.find(s => s.id === sessionId)
   if (!session) return
-  const workflows = {}
-  let changedInst = changedInstrument
-  for (const inst of ['money-market', 'bonds', 'tbills']) {
-    const wf = sessionManager.getInstrumentWorkflow(sessionId, inst)
-    if (wf) {
-      workflows[inst] = wf
-      if (!changedInst && wf.last_updated) changedInst = inst
+
+  const {
+    instrument = null,
+    changeType = 'Updated',
+    fieldsChanged = [],
+    description = null,
+    shortDescription = null,
+    user = localStorage.getItem('user') || 'System'
+  } = options
+
+  // Detect instrument if not provided
+  let detectedInstrument = instrument
+  if (!detectedInstrument) {
+    const wf = sessionManager.getInstrumentWorkflow(sessionId, 'money-market')
+    if (wf && wf.last_updated) detectedInstrument = 'Money Market'
+    else {
+      const wfBonds = sessionManager.getInstrumentWorkflow(sessionId, 'bonds')
+      if (wfBonds && wfBonds.last_updated) detectedInstrument = 'Bonds'
+      else {
+        const wfTbills = sessionManager.getInstrumentWorkflow(sessionId, 'tbills')
+        if (wfTbills && wfTbills.last_updated) detectedInstrument = 'T-Bills'
+      }
     }
   }
-  let instDisplay = ''
-  if (changedInst === 'money-market') instDisplay = 'Money Market'
-  else if (changedInst === 'bonds') instDisplay = 'Bonds'
-  else if (changedInst === 'tbills') instDisplay = 'T-Bills'
-  let displayName = versionName || (instDisplay ? `${instDisplay} – ${new Date().toLocaleString()}` : new Date().toLocaleString())
-  displayName = displayName.replace(/Auto-save\s*/g, '')
-  const version = { timestamp: Date.now(), name: displayName, displayName: displayName, instrument: instDisplay, workflows }
+
+  // Build a short description
+  let shortDesc = shortDescription || description || changeType
+  if (!shortDesc || shortDesc === changeType) {
+    if (changeType === 'Uploaded') shortDesc = '📤 Uploaded data'
+    else if (changeType === 'Cleaned') shortDesc = '🧹 Cleaned data'
+    else if (changeType === 'Calculated') shortDesc = '📊 Updated calculations'
+    else if (changeType === 'Renamed') shortDesc = '✏️ Renamed session'
+    else if (changeType === 'Created') shortDesc = '📁 Session created'
+    else if (changeType === 'Restored') shortDesc = '↩️ Restored previous version'
+    else shortDesc = changeType
+  }
+
+  // Get workflows snapshot for restore
+  const workflows = {}
+  for (const inst of ['money-market', 'bonds', 'tbills']) {
+    const wf = sessionManager.getInstrumentWorkflow(sessionId, inst)
+    if (wf) workflows[inst] = wf
+  }
+
+  // Unified color scheme: dark blue and muted accents
+  const changeTypeClassMap = {
+    'Created': 'badge-created',
+    'Uploaded': 'badge-uploaded',
+    'Cleaned': 'badge-cleaned',
+    'Calculated': 'badge-calculated',
+    'Renamed': 'badge-renamed',
+    'Updated': 'badge-updated',
+    'Restored': 'badge-restored'
+  }
+
+  const version = {
+    timestamp: Date.now(),
+    instrument: detectedInstrument || 'Session',
+    changeType: changeType,
+    changeTypeClass: changeTypeClassMap[changeType] || 'badge-updated',
+    fieldsChanged: fieldsChanged || [],
+    description: description || shortDesc,
+    shortDescription: shortDesc,
+    user: user,
+    workflows: workflows,
+    name: shortDesc
+  }
+
   if (!session.versions) session.versions = []
-  session.versions.push(version)
-  if (session.versions.length > 10) session.versions.shift()
+  session.versions.unshift(version)
+  if (session.versions.length > 30) session.versions.pop()
+
   saveSessionsToLocalStorage()
+}
+
+// Open the version modal
+function openVersionModal(sessionId) {
+  const session = sessions.value.find(s => s.id === sessionId)
+  if (session) {
+    selectedSessionForVersions.value = session
+    versionDialogVisible.value = true
+  }
 }
 
 function restoreVersion(sessionId, versionIndex) {
   const session = sessions.value.find(s => s.id === sessionId)
   if (!session || !session.versions || !session.versions[versionIndex]) return
   const version = session.versions[versionIndex]
+  if (!version.workflows) {
+    alert('This version does not contain workflow data to restore.')
+    return
+  }
   for (const [inst, wf] of Object.entries(version.workflows)) {
     sessionManager.saveInstrumentWorkflow(sessionId, inst, wf)
   }
-  alert(`Restored version from ${new Date(version.timestamp).toLocaleString()}`)
-  if (activeSession.value && activeSession.value.id === sessionId) loadExistingSession(sessionId)
-  activeVersionMenu.value = null
+  captureVersion(sessionId, {
+    changeType: 'Restored',
+    shortDescription: `↩️ Restored version from ${formatVersionTime(version.timestamp)}`,
+    instrument: version.instrument || 'Session'
+  })
+  alert(`Restored version from ${formatVersionTime(version.timestamp)}`)
+  if (activeSession.value && activeSession.value.id === sessionId) {
+    loadExistingSession(sessionId)
+  }
+  versionDialogVisible.value = false
 }
 
-function toggleVersionMenu(sessionId) { activeVersionMenu.value = activeVersionMenu.value === sessionId ? null : sessionId }
-function onSessionUpdated(event) { captureVersion(event.detail.sessionId, null, event.detail.instrument) }
+function onSessionUpdated(event) {
+  const { sessionId, instrument, changeType, fieldsChanged, description, shortDescription } = event.detail || {}
+  captureVersion(sessionId, { instrument, changeType, fieldsChanged, description, shortDescription })
+}
 
+// ========== SESSION ACTIONS ==========
 function createNewSession() {
   if (!newSessionName.value.trim()) return
   const created = sessionManager.createSession(newSessionName.value.trim())
@@ -245,7 +371,8 @@ function createNewSession() {
   }
   sessions.value.unshift(newSession); saveSessionsToLocalStorage()
   activeSession.value = newSession; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id)
-  newSessionName.value = ''; captureVersion(newSession.id, 'Initial creation')
+  newSessionName.value = ''
+  captureVersion(newSession.id, { changeType: 'Created', shortDescription: '📁 Session created' })
 }
 
 function loadExistingSession(sessionId) {
@@ -267,7 +394,11 @@ function openRename(session) {
   if (name && name.trim()) {
     sessionManager.renameSession(session.id, name.trim())
     const index = sessions.value.findIndex(s => s.id === session.id)
-    if (index !== -1) { sessions.value[index].name = name.trim(); saveSessionsToLocalStorage(); captureVersion(session.id, `Renamed to ${name.trim()}`) }
+    if (index !== -1) {
+      sessions.value[index].name = name.trim()
+      saveSessionsToLocalStorage()
+      captureVersion(session.id, { changeType: 'Renamed', shortDescription: `✏️ Renamed to "${name.trim()}"` })
+    }
     if (activeSession.value?.id === session.id) activeSession.value = sessions.value[index]
   }
 }
@@ -276,7 +407,12 @@ function saveRename() {
   if (!activeSession.value || !renameInput.value.trim()) return
   sessionManager.renameSession(activeSession.value.id, renameInput.value.trim())
   const index = sessions.value.findIndex(s => s.id === activeSession.value.id)
-  if (index !== -1) { sessions.value[index].name = renameInput.value.trim(); saveSessionsToLocalStorage(); captureVersion(activeSession.value.id, `Renamed to ${renameInput.value.trim()}`); activeSession.value = sessions.value[index] }
+  if (index !== -1) {
+    sessions.value[index].name = renameInput.value.trim()
+    saveSessionsToLocalStorage()
+    captureVersion(activeSession.value.id, { changeType: 'Renamed', shortDescription: `✏️ Renamed to "${renameInput.value.trim()}"` })
+    activeSession.value = sessions.value[index]
+  }
   renamingActive.value = false
 }
 function deleteSession(sessionId) {
@@ -334,7 +470,7 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 </script>
 
 <style scoped>
-/* all original styles – plus increased z-index for version menu */
+/* ========== ALL ORIGINAL STYLES – UNCHANGED ========== */
 .dashboard { min-height: 100vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px 40px; }
 .top-navbar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: white; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); z-index: 1000; }
 .logo-placeholder { display: flex; align-items: center; }
@@ -376,19 +512,27 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .session-row-status.in-progress { background: #FFF3E0; color: #FF9800; }
 .session-row-status.completed { background: #E8F5E9; color: #4CAF50; }
 
-.version-dropdown-container { position: relative; margin-left: auto; margin-right: 4px; }
-.version-btn { background: #e8ecf1; border: none; border-radius: 20px; padding: 4px 10px; font-size: 10px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s; color: #0B2044; white-space: nowrap; }
-.version-btn:hover { background: #d0d5dd; }
-.version-count { font-weight: 600; }
-.version-menu { position: absolute; top: 100%; right: 0; left: auto; background: white; border: 1px solid #e0e0e0; border-radius: 12px; min-width: 280px; width: max-content; max-width: 90vw; z-index: 2000; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12); padding: 6px 0; margin-top: 8px; }
-.version-item { padding: 8px 12px; font-size: 12px; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid #f0f0f0; }
-.version-item:last-child { border-bottom: none; }
-.version-item:hover { background: #f5f7fa; }
-.version-time { font-size: 10px; color: #888; margin-bottom: 2px; }
-.version-detail { font-weight: 500; color: #0B2044; }
-.version-instrument { color: #1E88E5; font-weight: 600; }
-.version-label { color: #555; }
-.version-empty { padding: 12px; font-size: 11px; color: #999; text-align: center; }
+/* History button */
+.version-btn {
+  background: #e8ecf1;
+  border: none;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+  color: #0B2044;
+  white-space: nowrap;
+}
+.version-btn:hover {
+  background: #d0d5dd;
+}
+.version-count {
+  font-weight: 600;
+}
 
 .row-rename-btn { background: #0B2044; border: none; color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; margin-right: 4px; }
 .session-row-item:hover .row-rename-btn { opacity: 1; }
@@ -445,12 +589,189 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.3s; }
 .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(11, 32, 68, 0.3); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ========== VERSION MODAL – COMPACT & CONSISTENT COLORS ========== */
+.version-dialog-title {
+  background: #0B2044;
+  color: white;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  font-size: 18px;
+}
+.btn-close-dialog {
+  background: transparent;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  transition: background 0.2s;
+  font-size: 18px;
+}
+.btn-close-dialog:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.version-dialog-body {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.version-dialog-body::-webkit-scrollbar {
+  width: 6px;
+}
+.version-dialog-body::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 4px;
+}
+.version-dialog-body::-webkit-scrollbar-thumb {
+  background: #0B2044;
+  border-radius: 4px;
+}
+
+.empty-versions {
+  text-align: center;
+  padding: 30px 0;
+  color: #999;
+}
+.empty-versions p {
+  margin-top: 8px;
+}
+
+.version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.version-entry {
+  background: #f8f9ff;
+  border-radius: 6px;
+  padding: 8px 12px;
+  border: 1px solid #e8ecf1;
+  transition: all 0.2s;
+}
+.version-entry.latest {
+  border-color: #0B2044;
+  background: #f0f4ff;
+}
+.version-entry:hover {
+  border-color: #0B2044;
+}
+
+.version-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.version-entry-time {
+  font-size: 11px;
+  font-weight: 600;
+  color: #0B2044;
+}
+.version-entry-badge {
+  padding: 1px 10px;
+  border-radius: 30px;
+  font-size: 9px;
+  font-weight: 600;
+  color: white;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+/* Consistent dark blue / muted palette */
+.badge-created { background: #2E7D32; }
+.badge-uploaded { background: #0B2044; }
+.badge-cleaned { background: #FF9800; }
+.badge-calculated { background: #1E88E5; }
+.badge-renamed { background: #607D8B; }
+.badge-updated { background: #0B2044; }
+.badge-restored { background: #C62828; }
+
+.version-entry-details {
+  font-size: 11px;
+  color: #555;
+}
+.version-entry-row {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 1px;
+}
+.version-entry-row .label {
+  width: 68px;
+  font-weight: 600;
+  color: #0B2044;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.version-entry-row .value {
+  color: #333;
+  font-size: 11px;
+}
+.description-row .description-text {
+  font-weight: 500;
+  color: #0B2044;
+}
+.fields-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.field-tag {
+  background: #e8ecf1;
+  padding: 0 8px;
+  border-radius: 20px;
+  font-size: 9px;
+  color: #0B2044;
+  line-height: 1.6;
+}
+
+.version-entry-actions {
+  margin-top: 4px;
+  display: flex;
+  justify-content: flex-end;
+}
+.btn-restore {
+  background: #0B2044;
+  color: white;
+  border: none;
+  padding: 1px 12px;
+  border-radius: 30px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-restore:hover {
+  background: #1a3a6e;
+}
+
+.version-dialog-actions {
+  padding: 6px 16px 10px;
+  border-top: 1px solid #e8ecf1;
+}
+.btn-secondary {
+  background: white;
+  color: #0B2044;
+  border: 2px solid #0B2044;
+  padding: 4px 16px;
+  border-radius: 30px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-secondary:hover {
+  background: #0B2044;
+  color: white;
+}
+
 @media (max-width: 900px) {
   .dashboard { padding: 20px; }
   .session-management-row { grid-template-columns: 1fr; gap: 20px; }
   .kpis-row, .instruments-row { grid-template-columns: 1fr; }
   .session-row-stats { display: none; }
   .row-delete-btn { opacity: 1; }
-  .version-menu { min-width: 240px; right: 0; left: auto; }
 }
 </style>
