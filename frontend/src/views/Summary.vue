@@ -32,7 +32,7 @@
         <h2>Instrument breakdown</h2>
       </div>
 
-      <!-- Instrument cards – all stat rows always shown for equal height -->
+      <!-- Instrument cards -->
       <div class="summary-cards">
         <div class="summary-card" v-for="inst in instruments" :key="inst.id">
           <div class="card-top" :style="{ background: inst.gradient }">
@@ -48,12 +48,10 @@
               <span>Count</span>
               <strong>{{ inst.count }}</strong>
             </div>
-            <!-- Always show average rate, use placeholder if missing -->
             <div class="stat-row">
               <span>{{ inst.rateLabel }}</span>
               <strong>{{ inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate + '%' : '—' }}</strong>
             </div>
-            <!-- Always show FRED benchmark, use placeholder if missing -->
             <div class="stat-row">
               <span>FRED benchmark</span>
               <strong>{{ inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench + '%' : '—' }}</strong>
@@ -66,7 +64,7 @@
         </div>
       </div>
 
-      <!-- Detailed sections – only "View as Excel" button -->
+      <!-- Detailed sections – with "View as Excel" per instrument -->
       <div v-for="inst in instrumentsWithDetails" :key="inst.id" class="detail-section">
         <div class="detail-header">
           <h3>{{ inst.name }} – Detailed Instruments ({{ inst.details.length }} rows)</h3>
@@ -78,8 +76,11 @@
         </div>
       </div>
 
-      <!-- SINGLE EXPORT BUTTON -->
+      <!-- Combined View & Export buttons -->
       <div class="export-all-section">
+        <button class="btn-view-portfolio" @click="openCombinedModal">
+          <v-icon>mdi-eye</v-icon> View Portfolio as Excel
+        </button>
         <button class="btn-export-all" @click="showExportDialog = true">
           <v-icon>mdi-microsoft-excel</v-icon> Export to Excel
         </button>
@@ -91,7 +92,7 @@
       </div>
     </div>
 
-    <!-- Modal for detailed Excel view -->
+    <!-- Modal for per-instrument Excel view -->
     <v-dialog v-model="detailModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">
@@ -105,6 +106,61 @@
         <v-card-actions>
           <v-spacer></v-spacer>
           <button class="btn-secondary" @click="detailModalVisible = false">Close</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Combined Portfolio Excel view (matches export EXACTLY) -->
+    <v-dialog v-model="combinedModalVisible" max-width="90%" fullscreen hide-overlay>
+      <v-card>
+        <v-card-title class="excel-dialog-title">
+          Portfolio – Combined Excel View
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="combinedModalVisible = false">✕</button>
+        </v-card-title>
+        <v-card-text class="combined-excel-body">
+          <!-- Summary table -->
+          <div class="combined-section">
+            <h4 class="combined-section-title">Summary</h4>
+            <table class="summary-table">
+              <thead>
+                <tr>
+                  <th>Instrument</th>
+                  <th>Total Value</th>
+                  <th>Count</th>
+                  <th>Avg Rate (%)</th>
+                  <th>FRED Benchmark (%)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="inst in filteredInstruments" :key="inst.id">
+                  <td><strong>{{ inst.name }}</strong></td>
+                  <td>${{ formatNumber(inst.value) }}</td>
+                  <td>{{ inst.count }}</td>
+                  <td>{{ inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate : '—' }}</td>
+                  <td>{{ inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench : '—' }}</td>
+                  <td><span class="status-badge small" :class="inst.statusClass">{{ inst.statusText }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Detail sections per instrument -->
+          <div v-for="inst in filteredDetails" :key="inst.id" class="combined-section">
+            <h4 class="combined-section-title">
+              {{ inst.name }} – Details ({{ inst.details.length }} rows)
+              <span v-if="!inst.details.length" class="empty-note">(no data)</span>
+            </h4>
+            <div v-if="inst.details.length" class="excel-wrapper">
+              <ExcelViewer :data="inst.details" :headers="inst.detailHeaders" />
+            </div>
+            <div v-else class="empty-placeholder">No data available for this instrument.</div>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="combinedModalVisible = false">Close</button>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -145,8 +201,19 @@ const instruments = ref([])
 const instrumentsWithDetails = ref([])
 const detailModalVisible = ref(false)
 const selectedInst = ref(null)
+const combinedModalVisible = ref(false)
 const showExportDialog = ref(false)
 const selectedExportInstruments = ref({})
+
+// ===== FILTERED DATA FOR MODAL =====
+// Only includes instruments that are selected for export
+const filteredInstruments = computed(() => {
+  return instruments.value.filter(inst => selectedExportInstruments.value[inst.id])
+})
+
+const filteredDetails = computed(() => {
+  return instrumentsWithDetails.value.filter(inst => selectedExportInstruments.value[inst.id])
+})
 
 const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
 const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
@@ -170,11 +237,6 @@ const lastUpdatedLabel = computed(() => {
 })
 
 function formatNumber(num) { return (num || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
-function formatCell(value) {
-  if (value === undefined || value === null) return ''
-  if (typeof value === 'number') return value.toFixed(2)
-  return String(value)
-}
 
 function openInstrument(id) {
   if (!activeSession.value) { alert('Select a session on the Dashboard first'); router.push('/dashboard'); return }
@@ -188,6 +250,19 @@ function goToReport() {
 function openDetailModal(inst) {
   selectedInst.value = inst
   detailModalVisible.value = true
+}
+
+function openCombinedModal() {
+  // Auto-select all instruments with data if none are selected
+  const hasSelection = Object.values(selectedExportInstruments.value).some(v => v === true)
+  if (!hasSelection) {
+    instruments.value.forEach(inst => {
+      if (inst.completed || inst.value > 0) {
+        selectedExportInstruments.value[inst.id] = true
+      }
+    })
+  }
+  combinedModalVisible.value = true
 }
 
 async function loadSummary() {
@@ -261,7 +336,6 @@ async function loadSummary() {
       detailHeaders: headers,
       showDetails: false
     })
-    // extract correct average rate
     let avgRate = null
     if (template.id === 'money-market') avgRate = calculations.avgRate
     else if (template.id === 'bonds') avgRate = calculations.avgCouponRate
@@ -295,6 +369,8 @@ function exportToExcel() {
   if (toExport.length === 0) { alert('No instruments selected for export'); return }
 
   const workbook = XLSX.utils.book_new()
+  
+  // Summary sheet
   const summaryData = toExport.map(inst => ({
     'Instrument Type': inst.name,
     'Total Value': inst.value,
@@ -306,12 +382,14 @@ function exportToExcel() {
   const summarySheet = XLSX.utils.json_to_sheet(summaryData)
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
 
+  // Detail sheets for each selected instrument
   for (const inst of instrumentsWithDetails.value) {
     if (selectedExportInstruments.value[inst.id] && inst.details && inst.details.length) {
       const sheet = XLSX.utils.json_to_sheet(inst.details)
-      XLSX.utils.book_append_sheet(workbook, sheet, inst.name)
+      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31)) // Excel sheet name max 31 chars
     }
   }
+  
   XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name || 'session'}.xlsx`)
   showExportDialog.value = false
 }
@@ -322,7 +400,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* ========== ALL STYLES UNCHANGED – KEEP EXACTLY AS YOUR ORIGINAL ========== */
+/* ========== ALL ORIGINAL STYLES – KEPT UNCHANGED ========== */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
@@ -350,6 +428,7 @@ onMounted(() => {
 .status-badge.completed { background: #e8f5e9; color: #2e7d32; }
 .status-badge.in-progress { background: #e3f2fd; color: #1565c0; }
 .status-badge.pending { background: #f5f5f5; color: #757575; }
+.status-badge.small { padding: 4px 10px; font-size: 11px; }
 .btn-open-inst { margin-top: 12px; width: 100%; padding: 10px; background: #0B2044; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .btn-open-inst:hover { background: #1a3a6e; }
 .action-buttons { display: flex; gap: 16px; justify-content: center; margin-top: 32px; }
@@ -362,13 +441,47 @@ onMounted(() => {
 .detail-actions { display: flex; gap: 8px; }
 .btn-view-details { background: #0B2044; color: white; border: none; padding: 4px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .btn-view-details:hover { background: #1a3a6e; }
-.export-all-section { display: flex; justify-content: center; margin: 32px 0 20px; }
-.btn-export-all { background: #4CAF50; color: white; border: none; padding: 10px 24px; border-radius: 40px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.export-all-section { display: flex; justify-content: center; gap: 16px; margin: 32px 0 20px; flex-wrap: wrap; }
+.btn-export-all, .btn-view-portfolio { border: none; padding: 10px 24px; border-radius: 40px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.btn-export-all { background: #4CAF50; color: white; }
 .btn-export-all:hover { background: #45a049; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
+.btn-view-portfolio { background: #0B2044; color: white; }
+.btn-view-portfolio:hover { background: #1a3a6e; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
 .excel-dialog-title { background: #0B2044; color: white; padding: 16px 24px; display: flex; align-items: center; }
 .btn-close-dialog { background: transparent; border: none; color: white; cursor: pointer; padding: 8px; border-radius: 50%; }
 .btn-close-dialog:hover { background: rgba(255,255,255,0.1); }
 .export-instrument-select { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .export-checkbox { display: flex; align-items: center; gap: 10px; font-size: 16px; cursor: pointer; }
 .warning-badge { background: #ffebee; color: #c62828; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
+
+/* Combined modal styles */
+.combined-excel-body {
+  padding: 16px 24px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  background: #f9fafc;
+}
+.combined-section {
+  background: white;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.combined-section-title {
+  color: #0B2044;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.empty-note { font-weight: normal; color: #999; font-size: 14px; }
+.empty-placeholder { color: #999; padding: 12px 0; font-style: italic; text-align: center; }
+.summary-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.summary-table th { text-align: left; padding: 10px 8px; background: #f0f2f5; color: #0B2044; font-weight: 600; border-bottom: 2px solid #e0e0e0; }
+.summary-table td { padding: 8px; border-bottom: 1px solid #eee; }
+.summary-table tr:hover { background: #f8f9ff; }
+.excel-wrapper { border: 1px solid #e8ecf1; border-radius: 8px; overflow: hidden; }
 </style>

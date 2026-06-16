@@ -29,7 +29,11 @@
             v-for="(step, index) in steps"
             :key="step.tab"
             class="progress-step"
-            :class="{ active: activeTab === step.tab, completed: isStepCompleted(step.tab) }"
+            :class="{
+              active: activeTab === step.tab,
+              completed: isStepCompleted(step.tab),
+              disabled: index > farthestAllowedIndex
+            }"
             @click="switchTab(step.tab)"
           >
             <div class="step-circle">{{ index + 1 }}</div>
@@ -707,6 +711,15 @@ function isStepCompleted(tab) {
   return false
 }
 
+const farthestAllowedIndex = computed(() => {
+  for (let i = 0; i < steps.length; i++) {
+    if (!isStepCompleted(steps[i].tab)) {
+      return i
+    }
+  }
+  return steps.length - 1
+})
+
 async function loadSavedData() {
   const datasetId = route.query.dataset_id
   if (datasetId) {
@@ -983,7 +996,16 @@ const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToPortfolioSummary() { saveSessionData(); router.push('/summary') }
-function switchTab(tab) { saveSessionData(); activeTab.value = tab }
+
+function switchTab(tab) {
+  const targetIndex = steps.findIndex(s => s.tab === tab)
+  if (targetIndex > farthestAllowedIndex.value) {
+    // Optionally show a message or just ignore
+    return
+  }
+  saveSessionData()
+  activeTab.value = tab
+}
 function goToCalculations() { if (hasCleanedData.value) { saveSessionData(); activeTab.value = 'calculations' } else alert('Please clean your data first.') }
 function goToVisualizations() { if (hasCleanedData.value) { saveSessionData(); activeTab.value = 'visualizations' } else alert('Please clean your data first.') }
 function goToReportTab() { saveSessionData(); activeTab.value = 'reports' }
@@ -1650,14 +1672,62 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .session-badge { background: #e8ecf1; padding: 4px 8px; border-radius: 12px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; }
 .session-badge.warning { background: #fff3e0; color: #e65100; }
 .step-indicator { background: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; color: #0B2044; font-weight: 600; }
-.progress-bar-container { margin-bottom: 30px; padding: 0 10px; }
-.progress-steps { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.progress-step { flex: 1; text-align: center; cursor: pointer; }
-.step-circle { width: 36px; height: 36px; background: #e0e0e0; color: #999; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; transition: all 0.3s; }
-.progress-step.active .step-circle { background: #0B2044; color: white; box-shadow: 0 0 0 4px rgba(11,32,68,0.2); }
-.progress-step.completed .step-circle { background: #4CAF50; color: white; }
-.step-label { font-size: 11px; color: #999; margin-top: 8px; }
-.progress-step.active .step-label { color: #0B2044; font-weight: 600; }
+
+/* ========== PROGRESS BAR – CLEAN, MINIMAL, EVENLY SPACED ========== */
+.progress-bar-container {
+  margin-bottom: 30px;
+  padding: 0 10px;
+}
+.progress-steps {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  padding: 20px;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+.progress-step {
+  flex: 1;
+  text-align: center;
+  cursor: pointer;
+}
+.progress-step.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.step-circle {
+  width: 36px;
+  height: 36px;
+  background: #e0e0e0;
+  color: #999;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  transition: all 0.3s;
+}
+.progress-step.active .step-circle {
+  background: #0B2044;
+  color: white;
+  box-shadow: 0 0 0 4px rgba(11,32,68,0.2);
+}
+.progress-step.completed .step-circle {
+  background: #4CAF50;
+  color: white;
+}
+.step-label {
+  font-size: 11px;
+  color: #999;
+  margin-top: 8px;
+}
+.progress-step.active .step-label {
+  color: #0B2044;
+  font-weight: 600;
+}
+
+/* ========== REST OF ORIGINAL STYLES – UNCHANGED ========== */
 .content-card { margin-bottom: 20px; }
 .upload-area { border: 2px dashed #ccc; border-radius: 12px; padding: 50px; text-align: center; cursor: pointer; transition: all 0.3s; }
 .upload-area:hover { border-color: #0B2044; background: #f8f9ff; }
@@ -1786,11 +1856,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .history-item:hover { background: #e8ecf1; }
 .history-item small { font-size: 11px; color: #666; margin-left: auto; }
 .btn-delete-history { background: none; border: none; cursor: pointer; color: #f44336; font-size: 16px; }
-
-/* NEW: Excel viewer button on summary */
 .excel-viewer-button { margin-bottom: 20px; text-align: right; }
-
-/* Formula dialog styles */
 .formula-dialog-title { background: #0B2044; color: white; }
 .formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; }
 </style>

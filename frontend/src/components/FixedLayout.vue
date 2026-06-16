@@ -28,7 +28,7 @@
           </div>
         </div>
 
-        <!-- Instrument Tools - ALWAYS VISIBLE (green ticks removed) -->
+        <!-- Instrument Tools - ALWAYS VISIBLE -->
         <div class="nav-group">
           <div class="nav-group-title">INSTRUMENT TOOLS</div>
           <div 
@@ -40,7 +40,6 @@
           >
             <v-icon class="nav-icon">{{ item.icon }}</v-icon>
             <span class="nav-label">{{ item.name }}</span>
-            <!-- ✓ REMOVED GREEN TICK BADGE -->
           </div>
         </div>
       </div>
@@ -74,7 +73,6 @@ const instrumentNav = [
   { tab: 'summary', name: 'Instrument Summary', icon: 'mdi-file-document' }
 ]
 
-// Check if on an instrument page
 const isOnInstrumentPage = computed(() => route.path.includes('/instrument/'))
 const currentTab = computed(() => route.query.tab || 'upload')
 
@@ -110,7 +108,6 @@ function changeInstrumentTab(tab) {
   }
 }
 
-// Save last instrument when on instrument page
 watch(() => route.path, (newPath) => {
   if (newPath.includes('/instrument/')) {
     localStorage.setItem('last_instrument', newPath)
@@ -119,31 +116,49 @@ watch(() => route.path, (newPath) => {
 </script>
 
 <style scoped>
-/* ===== YOUR EXACT ORIGINAL STYLES – NO CHANGES ===== */
+/* ===== FLEX LAYOUT – sidebar adapts to content ===== */
 .fixed-layout {
   display: flex;
   min-height: 100vh;
 }
 
-/* Sidebar - Below top navbar */
+/* Sidebar – now with 3D depth and auto width */
 .sidebar {
-  width: 260px;
-  background: linear-gradient(180deg, #0B2044 0%, #0e2a54 100%);
+  background: linear-gradient(180deg, #0a1a33 0%, #0B2044 50%, #0e2a54 100%);
   color: white;
-  position: fixed;
-  height: calc(100vh - 60px);
+  position: sticky;
   top: 60px;
-  left: 0;
+  height: calc(100vh - 60px);
   overflow-y: auto;
-  box-shadow: 2px 0 20px rgba(0, 0, 0, 0.08);
+  flex: 0 0 auto; /* width determined by content */
+  padding: 20px 12px 16px;
+  box-shadow: 
+    4px 0 20px rgba(0, 0, 0, 0.25),
+    inset -1px 0 0 rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
   z-index: 999;
   display: flex;
   flex-direction: column;
+  /* 3D effect via multiple shadows and inner glow */
+}
+
+/* Inner glow for 3D depth */
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(79, 195, 247, 0.3), transparent);
+  pointer-events: none;
 }
 
 .nav-menu {
   flex: 1;
-  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
 }
 
 .nav-group {
@@ -151,13 +166,24 @@ watch(() => route.path, (newPath) => {
 }
 
 .nav-group-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  color: rgba(255, 255, 255, 0.4);
-  padding: 8px 12px;
-  margin-bottom: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: rgba(255, 255, 255, 0.35);
+  padding: 0 8px 8px;
   text-transform: uppercase;
+  position: relative;
+}
+
+.nav-group-title::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 8px;
+  width: 20px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(30, 136, 229, 0.4), transparent);
+  border-radius: 2px;
 }
 
 .nav-link {
@@ -169,75 +195,91 @@ watch(() => route.path, (newPath) => {
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: rgba(255, 255, 255, 0.75);
+  color: rgba(255, 255, 255, 0.7);
   font-size: 14px;
   font-weight: 500;
   position: relative;
 }
 
+/* 3D hover: lift and shadow */
 .nav-link:hover {
   background: rgba(255, 255, 255, 0.08);
   color: white;
-  transform: translateX(4px);
+  transform: translateX(4px) translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .nav-link.active {
-  background: linear-gradient(135deg, #1E88E5, #0B2044);
+  background: rgba(30, 136, 229, 0.2);
   color: white;
-  box-shadow: 0 2px 8px rgba(30, 136, 229, 0.3);
+  box-shadow: 
+    inset 0 0 0 1px rgba(30, 136, 229, 0.2),
+    0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: translateX(2px);
+}
+
+.nav-link.active .nav-icon {
+  color: #4FC3F7;
 }
 
 .nav-icon {
   font-size: 20px;
   width: 24px;
   text-align: center;
+  color: rgba(255, 255, 255, 0.6);
+  transition: color 0.2s;
+}
+
+.nav-link:hover .nav-icon {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .nav-label {
   flex: 1;
+  white-space: nowrap;
 }
 
+/* Scrollbar – subtle and dark */
 .sidebar::-webkit-scrollbar {
   width: 4px;
 }
-
 .sidebar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.03);
 }
-
 .sidebar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 4px;
 }
 
+/* Main content – fills remaining space */
 .main-content {
-  margin-left: 260px;
   flex: 1;
   background: #f5f7fa;
   min-height: 100vh;
-  width: calc(100% - 260px);
   padding-top: 60px;
+  margin-left: 0; /* no fixed margin, flex handles it */
 }
 
+/* Responsive: on small screens, sidebar collapses to icon-only */
 @media (max-width: 768px) {
   .sidebar {
-    width: 80px;
-    top: 60px;
-    height: calc(100vh - 60px);
+    padding: 12px 8px;
+    min-width: 60px;
   }
-  .nav-label, .nav-group-title {
+  .nav-label,
+  .nav-group-title {
     display: none;
   }
   .nav-link {
     justify-content: center;
-    padding: 12px;
+    padding: 12px 8px;
   }
   .nav-icon {
+    width: auto;
     margin: 0;
   }
-  .main-content {
-    margin-left: 80px;
-    width: calc(100% - 80px);
+  .nav-link:hover {
+    transform: translateX(0) translateY(-1px);
   }
 }
 </style>

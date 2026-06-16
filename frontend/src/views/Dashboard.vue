@@ -116,7 +116,7 @@
       </div>
     </div>
 
-    <!-- ========== VERSION HISTORY MODAL (compact, scrollable) ========== -->
+    <!-- ========== VERSION HISTORY MODAL ========== -->
     <v-dialog v-model="versionDialogVisible" max-width="650px">
       <v-card>
         <v-card-title class="version-dialog-title">
@@ -125,12 +125,26 @@
           <button class="btn-close-dialog" @click="versionDialogVisible = false">✕</button>
         </v-card-title>
         <v-card-text class="version-dialog-body">
-          <div v-if="!selectedSessionForVersions?.versions?.length" class="empty-versions">
+          <!-- Version search bar -->
+          <div class="version-search-bar">
+            <v-icon size="16" class="search-icon">mdi-magnify</v-icon>
+            <input
+              type="text"
+              v-model="versionSearchQuery"
+              placeholder="Search versions by instrument, change type, or description..."
+              class="version-search-input"
+            />
+            <button v-if="versionSearchQuery" class="clear-search" @click="versionSearchQuery = ''">
+              <v-icon size="14">mdi-close</v-icon>
+            </button>
+          </div>
+
+          <div v-if="!filteredVersions.length" class="empty-versions">
             <v-icon size="36" color="#ccc">mdi-file-document-outline</v-icon>
-            <p>No changes recorded yet.</p>
+            <p>{{ selectedSessionForVersions?.versions?.length ? 'No versions match your search.' : 'No changes recorded yet.' }}</p>
           </div>
           <div v-else class="version-list">
-            <div v-for="(ver, idx) in selectedSessionForVersions.versions" :key="idx" class="version-entry" :class="{ 'latest': idx === 0 }">
+            <div v-for="(ver, idx) in filteredVersions" :key="idx" class="version-entry" :class="{ 'latest': idx === 0 }">
               <div class="version-entry-header">
                 <div class="version-entry-time">{{ formatVersionTime(ver.timestamp) }}</div>
                 <div class="version-entry-badge" :class="ver.changeTypeClass">{{ ver.changeType }}</div>
@@ -138,11 +152,7 @@
               <div class="version-entry-details">
                 <div class="version-entry-row">
                   <span class="label">Instrument</span>
-                  <span class="value">{{ ver.instrument || '—' }}</span>
-                </div>
-                <div class="version-entry-row">
-                  <span class="label">User</span>
-                  <span class="value">{{ ver.user || 'System' }}</span>
+                  <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.instrument || '—' }}</span>
                 </div>
                 <div class="version-entry-row description-row">
                   <span class="label">Change</span>
@@ -190,6 +200,7 @@ const renameInput = ref('')
 // Version modal state
 const versionDialogVisible = ref(false)
 const selectedSessionForVersions = ref(null)
+const versionSearchQuery = ref('')
 
 const instruments = [
   { id: 'money-market', name: 'Money Market', description: 'Short-term debt instruments', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
@@ -215,6 +226,21 @@ const filteredSessions = computed(() => {
   if (!searchQuery.value) return validSessions.value
   const query = searchQuery.value.toLowerCase()
   return validSessions.value.filter(session => session.name.toLowerCase().includes(query))
+})
+
+const filteredVersions = computed(() => {
+  if (!selectedSessionForVersions.value?.versions) return []
+  const versions = selectedSessionForVersions.value.versions
+  if (!versionSearchQuery.value) return versions
+  const query = versionSearchQuery.value.toLowerCase()
+  return versions.filter(v => {
+    return (v.instrument && v.instrument.toLowerCase().includes(query)) ||
+           (v.changeType && v.changeType.toLowerCase().includes(query)) ||
+           (v.shortDescription && v.shortDescription.toLowerCase().includes(query)) ||
+           (v.description && v.description.toLowerCase().includes(query)) ||
+           (v.name && v.name.toLowerCase().includes(query)) ||
+           (v.fieldsChanged && v.fieldsChanged.some(f => f.toLowerCase().includes(query)))
+  })
 })
 
 const totalSessions = computed(() => validSessions.value.length)
@@ -244,7 +270,42 @@ function loadSessionsFromLocalStorage() {
 function saveActiveSessionId(id) { if (id) localStorage.setItem(ACTIVE_SESSION_ID_KEY, id); else localStorage.removeItem(ACTIVE_SESSION_ID_KEY) }
 function loadActiveSessionId() { return localStorage.getItem(ACTIVE_SESSION_ID_KEY) }
 
-// ========== VERSION CAPTURE (enhanced) ==========
+// ========== VERSION CAPTURE – FIXED INSTRUMENT DETECTION ==========
+function detectInstrument(sessionId) {
+  const instrumentMap = {
+    'money-market': 'Money Market',
+    'bonds': 'Bonds',
+    'tbills': 'T-Bills'
+  }
+  const found = []
+  for (const [key, name] of Object.entries(instrumentMap)) {
+    const wf = sessionManager.getInstrumentWorkflow(sessionId, key)
+    // Check for actual data presence – not just last_updated
+    if (wf) {
+      const hasData = (wf.rawData && wf.rawData.length > 0) ||
+                      (wf.cleanedData && wf.cleanedData.length > 0) ||
+                      (wf.calculations && Object.keys(wf.calculations).length > 0)
+      if (hasData) {
+        found.push(name)
+      }
+    }
+  }
+  // Also check session.instrumentData as fallback
+  const session = sessions.value.find(s => s.id === sessionId)
+  if (session && session.instrumentData) {
+    for (const [key, name] of Object.entries(instrumentMap)) {
+      const keyMap = { 'money-market': 'Money Market', 'bonds': 'Bonds', 'tbills': 'T-Bills' }
+      const instKey = Object.keys(keyMap).find(k => keyMap[k] === name)
+      if (instKey && session.instrumentData[instKey]?.completed) {
+        if (!found.includes(name)) found.push(name)
+      }
+    }
+  }
+  if (found.length === 1) return found[0]
+  if (found.length > 1) return found.join(', ')
+  return null
+}
+
 function captureVersion(sessionId, options = {}) {
   const session = sessions.value.find(s => s.id === sessionId)
   if (!session) return
@@ -258,22 +319,25 @@ function captureVersion(sessionId, options = {}) {
     user = localStorage.getItem('user') || 'System'
   } = options
 
-  // Detect instrument if not provided
+  // Use provided instrument or detect it
   let detectedInstrument = instrument
   if (!detectedInstrument) {
-    const wf = sessionManager.getInstrumentWorkflow(sessionId, 'money-market')
-    if (wf && wf.last_updated) detectedInstrument = 'Money Market'
-    else {
-      const wfBonds = sessionManager.getInstrumentWorkflow(sessionId, 'bonds')
-      if (wfBonds && wfBonds.last_updated) detectedInstrument = 'Bonds'
-      else {
-        const wfTbills = sessionManager.getInstrumentWorkflow(sessionId, 'tbills')
-        if (wfTbills && wfTbills.last_updated) detectedInstrument = 'T-Bills'
-      }
+    detectedInstrument = detectInstrument(sessionId)
+  }
+
+  // If still not detected, use the most recent version's instrument as fallback
+  if (!detectedInstrument && session.versions && session.versions.length > 0) {
+    const lastVersion = session.versions[0]
+    if (lastVersion.instrument && lastVersion.instrument !== 'Session') {
+      detectedInstrument = lastVersion.instrument
     }
   }
 
-  // Build a short description
+  // Final fallback
+  if (!detectedInstrument) {
+    detectedInstrument = 'Session'
+  }
+
   let shortDesc = shortDescription || description || changeType
   if (!shortDesc || shortDesc === changeType) {
     if (changeType === 'Uploaded') shortDesc = '📤 Uploaded data'
@@ -285,14 +349,12 @@ function captureVersion(sessionId, options = {}) {
     else shortDesc = changeType
   }
 
-  // Get workflows snapshot for restore
   const workflows = {}
   for (const inst of ['money-market', 'bonds', 'tbills']) {
     const wf = sessionManager.getInstrumentWorkflow(sessionId, inst)
     if (wf) workflows[inst] = wf
   }
 
-  // Unified color scheme: dark blue and muted accents
   const changeTypeClassMap = {
     'Created': 'badge-created',
     'Uploaded': 'badge-uploaded',
@@ -305,7 +367,7 @@ function captureVersion(sessionId, options = {}) {
 
   const version = {
     timestamp: Date.now(),
-    instrument: detectedInstrument || 'Session',
+    instrument: detectedInstrument,
     changeType: changeType,
     changeTypeClass: changeTypeClassMap[changeType] || 'badge-updated',
     fieldsChanged: fieldsChanged || [],
@@ -328,6 +390,7 @@ function openVersionModal(sessionId) {
   const session = sessions.value.find(s => s.id === sessionId)
   if (session) {
     selectedSessionForVersions.value = session
+    versionSearchQuery.value = ''
     versionDialogVisible.value = true
   }
 }
@@ -343,10 +406,14 @@ function restoreVersion(sessionId, versionIndex) {
   for (const [inst, wf] of Object.entries(version.workflows)) {
     sessionManager.saveInstrumentWorkflow(sessionId, inst, wf)
   }
+
+  // Detect the instrument from the restored workflows
+  const restoredInstrument = detectInstrument(sessionId) || version.instrument || 'Session'
+
   captureVersion(sessionId, {
     changeType: 'Restored',
     shortDescription: `↩️ Restored version from ${formatVersionTime(version.timestamp)}`,
-    instrument: version.instrument || 'Session'
+    instrument: restoredInstrument
   })
   alert(`Restored version from ${formatVersionTime(version.timestamp)}`)
   if (activeSession.value && activeSession.value.id === sessionId) {
@@ -590,7 +657,7 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(11, 32, 68, 0.3); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ========== VERSION MODAL – COMPACT & CONSISTENT COLORS ========== */
+/* ========== VERSION MODAL ========== */
 .version-dialog-title {
   background: #0B2044;
   color: white;
@@ -628,6 +695,32 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .version-dialog-body::-webkit-scrollbar-thumb {
   background: #0B2044;
   border-radius: 4px;
+}
+
+.version-search-bar {
+  display: flex;
+  align-items: center;
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 5px 10px;
+  margin-bottom: 12px;
+  border: 1px solid #e0e0e0;
+  transition: border-color 0.2s;
+}
+.version-search-bar:focus-within {
+  border-color: #0B2044;
+  background: white;
+}
+.version-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 13px;
+  padding: 6px 0;
+}
+.version-search-input::placeholder {
+  color: #aaa;
 }
 
 .empty-versions {
@@ -681,7 +774,6 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
   letter-spacing: 0.2px;
   text-transform: uppercase;
 }
-/* Consistent dark blue / muted palette */
 .badge-created { background: #2E7D32; }
 .badge-uploaded { background: #0B2044; }
 .badge-cleaned { background: #FF9800; }
