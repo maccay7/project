@@ -114,7 +114,7 @@ const handleLogin = async () => {
         localStorage.setItem('rememberMe', 'true')
         localStorage.setItem('email', email.value)
       }
-      successMessage.value = 'Welcome back! Redirecting...'
+      successMessage.value = 'Login successful'
       setTimeout(() => {
         router.push('/dashboard')
       }, 1200)
