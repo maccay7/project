@@ -70,6 +70,13 @@
         {{ error }}
       </div>
     </div>
+
+    <!-- Success Toast -->
+    <div v-if="successMessage" class="success-toast">
+      <span class="toast-icon">✅</span>
+      <span class="toast-text">{{ successMessage }}</span>
+      <button class="toast-close" @click="successMessage = ''">✕</button>
+    </div>
   </div>
 </template>
 
@@ -87,6 +94,7 @@ const rememberMe = ref(false)
 const showPassword = ref(false)
 const loading = ref(false)
 const error = ref('')
+const successMessage = ref('')
 
 const handleLogin = async () => {
   if (!email.value || !password.value) {
@@ -96,6 +104,7 @@ const handleLogin = async () => {
 
   loading.value = true
   error.value = ''
+  successMessage.value = ''
 
   try {
     const success = await authStore.login(email.value, password.value)
@@ -105,7 +114,10 @@ const handleLogin = async () => {
         localStorage.setItem('rememberMe', 'true')
         localStorage.setItem('email', email.value)
       }
-      router.push('/dashboard')
+      successMessage.value = 'Welcome back! Redirecting...'
+      setTimeout(() => {
+        router.push('/dashboard')
+      }, 1200)
     } else {
       error.value = 'Invalid email or password'
     }
@@ -130,7 +142,6 @@ const forgotPassword = async () => {
     
     if (data.success) {
       if (data.reset_token) {
-        // Development mode: show token and direct link
         alert(`Reset token (development only): ${data.reset_token}\n\nUse this link to reset your password:\nhttp://localhost:3000/reset-password?token=${data.reset_token}`)
       } else {
         alert(data.message || 'If the email exists, a reset link has been sent.')
@@ -149,7 +160,7 @@ const goToRegister = () => {
 </script>
 
 <style scoped>
-/* ========== YOUR EXACT ORIGINAL STYLES ========== */
+/* ===== ORIGINAL STYLES – UNCHANGED ===== */
 .login-container {
   min-height: 100vh;
   background: url('https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1600&h=900&fit=crop') center/cover no-repeat;
@@ -172,14 +183,13 @@ const goToRegister = () => {
 }
 
 .login-form {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
+  background: #ffffff;
   border-radius: 20px;
   padding: 25px 30px;
   width: 100%;
   max-width: 360px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   position: relative;
   z-index: 1;
 }
@@ -220,7 +230,7 @@ const goToRegister = () => {
   border: 1.5px solid #e0e0e0;
   border-radius: 10px;
   font-size: 14px;
-  background: rgba(255, 255, 255, 0.9);
+  background: white;
   transition: all 0.3s ease;
   outline: none;
 }
@@ -372,6 +382,52 @@ const goToRegister = () => {
   border: 1px solid rgba(244, 67, 54, 0.2);
 }
 
+/* ===== SUCCESS TOAST ===== */
+.success-toast {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 9999;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #333;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e8f5e9;
+  animation: slideIn 0.4s ease;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.toast-icon {
+  font-size: 20px;
+}
+
+.toast-text {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  transition: color 0.2s;
+}
+
+.toast-close:hover {
+  color: #333;
+}
+
 @media (max-width: 480px) {
   .login-form {
     margin: 20px;
@@ -385,6 +441,11 @@ const goToRegister = () => {
   .forgot-password {
     right: 38px;
     font-size: 9px;
+  }
+  .success-toast {
+    top: 16px;
+    right: 16px;
+    left: 16px;
   }
 }
 </style>
