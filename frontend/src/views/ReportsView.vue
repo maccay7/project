@@ -112,7 +112,7 @@ import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
 import * as XLSX from 'xlsx'
-import { calculationsAPI } from '../services/api'
+import sessionManager from '@/services/sessionManager.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -140,28 +140,65 @@ const kpiStats = computed(() => [
   { title: 'Export', value: 'Excel (.xlsx)', icon: 'mdi-file-excel', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' }
 ])
 
-// Load data from the latest calculation for the selected dataset
+// Load data from the current session and instrument
 async function loadData() {
   try {
-    const datasetId = route.query.dataset_id
-    if (!datasetId) {
-      alert('No dataset selected. Please navigate from Visualizations or Calculations page.')
+    // Get active session and instrument from route
+    const instrument = route.query.instrument || 'money-market'
+    const sessionId = route.query.session
+    if (!sessionId) {
+      alert('No session selected. Please navigate from Dashboard or Instrument page.')
       return
     }
 
-    const res = await calculationsAPI.getLatest(datasetId)
-    if (!res || !res.success) {
-      alert('No calculation data found for this dataset. Please run calculations first.')
+    const session = sessionManager.getSession(sessionId)
+    if (!session) {
+      alert('Session not found.')
       return
     }
 
-    const data = res.data.result_data || {}
-    calcData.value = data.calculations || []
-    instrumentType.value = res.data.instrument_type || 'Money Market'
-    alert(`Loaded ${calcData.value.length} records`)
+    // Try to get cleaned data from session's instrument workflow
+    let data = []
+    let instType = instrument
+
+    // First attempt: from instrumentWorkflow
+    const wf = sessionManager.getInstrumentWorkflow(sessionId, instrument)
+    if (wf && wf.cleanedData && wf.cleanedData.length) {
+      data = wf.cleanedData
+      instType = instrument
+    } else {
+      // Fallback: try localStorage
+      const cleanKey = `${instrument}_session_${sessionId}_clean`
+      const saved = localStorage.getItem(cleanKey)
+      if (saved) {
+        try {
+          data = JSON.parse(saved)
+          instType = instrument
+        } catch(e) {}
+      } else {
+        // Last resort: from raw data
+        const rawKey = `${instrument}_session_${sessionId}_raw`
+        const rawSaved = localStorage.getItem(rawKey)
+        if (rawSaved) {
+          try {
+            data = JSON.parse(rawSaved)
+            instType = instrument
+          } catch(e) {}
+        }
+      }
+    }
+
+    if (!data.length) {
+      alert('No data found for this instrument in the session. Please upload and process data first.')
+      return
+    }
+
+    calcData.value = data
+    instrumentType.value = instType.charAt(0).toUpperCase() + instType.slice(1)
+    alert(`Loaded ${data.length} records for ${instrumentType.value}`)
   } catch (err) {
     console.error(err)
-    alert('Error loading data')
+    alert('Error loading data: ' + err.message)
   }
 }
 
@@ -172,7 +209,6 @@ function clearAll() { sections.value.forEach(s => s.selected = false) }
 // Generate Excel report
 async function generateExcel() {
   generating.value = true
-  
   setTimeout(() => {
     const selected = sections.value.filter(s => s.selected)
     const data = calcData.value
@@ -193,54 +229,46 @@ async function generateExcel() {
       rows.push([])
       
       if (section.key === 'summary') {
-        const totalPrincipal = data.reduce((s, c) => s + (c.principal || 0), 0)
-        const totalInterest = data.reduce((s, c) => s + (c.interest_earned || 0), 0)
-        const avgYield = data.length ? data.reduce((s, c) => s + (c.annual_yield || c.yield || 0), 0) / data.length : 0
+        // Compute aggregates based on available fields
+        const totalPrincipal = data.reduce((s, c) => s + (parseFloat(c.Principal || c.Amount || c.FaceValue || 0)), 0)
+        const totalInterest = data.reduce((s, c) => s + (parseFloat(c.InterestEarned || c.Interest || 0)), 0)
+        const rates = data.map(c => parseFloat(c.Rate || c.InterestRate || c.CouponRate || c.DiscountRate || 0)).filter(r => !isNaN(r) && r > 0)
+        const avgYield = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0
         
         rows.push(['Metric', 'Value'])
         rows.push(['Total Principal', totalPrincipal])
         rows.push(['Total Interest Earned', totalInterest])
-        rows.push(['Average Yield (%)', avgYield.toFixed(2)])
+        rows.push(['Average Rate (%)', avgYield.toFixed(2)])
         rows.push(['Number of Instruments', data.length])
         rows.push([])
       }
       
       if (section.key === 'data') {
-        const headers = ['Instrument Name', 'Principal', 'Interest Rate', 'Term Days', 'Interest Earned', 'Maturity Value', 'Yield (%)']
+        const headers = Object.keys(data[0] || {})
         rows.push(headers)
-        
         data.forEach(item => {
-          rows.push([
-            item.instrument_name || item.instrument_type || 'N/A',
-            item.principal || 0,
-            ((item.interest_rate || 0) * 100).toFixed(2),
-            item.term_days || 0,
-            item.interest_earned || 0,
-            item.maturity_value || 0,
-            (item.annual_yield || item.yield || 0).toFixed(2)
-          ])
+          rows.push(Object.values(item))
         })
         rows.push([])
       }
       
       if (section.key === 'yield') {
-        const yields = data.map(c => c.annual_yield || c.yield || 0)
-        const avgYield = yields.length ? yields.reduce((a, b) => a + b, 0) / yields.length : 0
-        const maxYield = yields.length ? Math.max(...yields) : 0
-        const minYield = yields.length ? Math.min(...yields.filter(y => y > 0)) : 0
+        const rates = data.map(c => parseFloat(c.Rate || c.InterestRate || c.CouponRate || c.DiscountRate || 0)).filter(r => !isNaN(r) && r > 0)
+        const avgYield = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0
+        const maxYield = rates.length ? Math.max(...rates) : 0
+        const minYield = rates.length ? Math.min(...rates) : 0
         
         rows.push(['Metric', 'Value'])
-        rows.push(['Average Yield (%)', avgYield.toFixed(2)])
-        rows.push(['Maximum Yield (%)', maxYield.toFixed(2)])
-        rows.push(['Minimum Yield (%)', minYield.toFixed(2)])
+        rows.push(['Average Rate (%)', avgYield.toFixed(2)])
+        rows.push(['Maximum Rate (%)', maxYield.toFixed(2)])
+        rows.push(['Minimum Rate (%)', minYield.toFixed(2)])
         rows.push([])
-        rows.push(['Instrument', 'Yield (%)'])
+        rows.push(['Instrument', 'Rate (%)'])
         
         data.forEach(item => {
-          rows.push([
-            item.instrument_name || item.instrument_type || 'N/A',
-            (item.annual_yield || item.yield || 0).toFixed(2)
-          ])
+          const name = item.Instrument || item.BondName || item.TBillName || 'N/A'
+          const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
+          rows.push([name, rate.toFixed(2)])
         })
         rows.push([])
       }
@@ -271,152 +299,37 @@ function finishAndReset() {
 }
 
 onMounted(() => {
-  if (route.query.dataset_id) {
+  // Auto-load if session and instrument are in query
+  if (route.query.session && route.query.instrument) {
     loadData()
   }
 })
 </script>
 
 <style scoped>
+/* same as original – keep your existing styles */
 .reports-view { max-width: 1400px; margin: 0 auto; padding: 20px; }
-
 .page-header { margin-bottom: 30px; }
 .page-header h1 { color: #0B2A44; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
 .page-header p { color: #666; font-size: 16px; }
-
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 .action-buttons.small { margin-bottom: 16px; }
-
-/* Stats Card - Same as Dashboard/Visualizations */
-.stats-card {
-  border-radius: 12px;
-  margin-bottom: 24px;
-  background: white;
-  border: 1px solid rgba(11,42,68,0.08);
-  position: relative;
-}
-
-.stats-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #0B2A44, #1E88E5);
-  border-radius: 12px 12px 0 0;
-}
-
-.card-title {
-  display: flex;
-  align-items: center;
-  color: #0B2A44;
-  font-weight: 600;
-  font-size: 18px;
-  padding: 16px 20px 0 20px;
-}
-
-.title-icon {
-  margin-right: 8px;
-}
-
-/* KPI Card Styles - Matching DashboardView */
-.kpi-card {
-  height: 120px;
-  border-radius: 12px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  background: white;
-  border: 1px solid rgba(11,42,68,0.08);
-  position: relative;
-}
-
-.kpi-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50);
-  border-radius: 12px 12px 0 0;
-}
-
-.kpi-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-}
-
-.kpi-content {
-  display: flex;
-  align-items: center;
-  height: 100%;
-  padding: 8px;
-}
-
-.kpi-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 12px;
-  flex-shrink: 0;
-}
-
-.kpi-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.kpi-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: #0B2A44;
-  line-height: 1;
-  margin-bottom: 4px;
-}
-
-.kpi-title {
-  font-size: 12px;
-  color: #666;
-}
-
-/* Section Cards */
-.section-card {
-  cursor: pointer;
-  transition: 0.2s;
-  border: 2px solid transparent;
-  border-radius: 12px;
-}
-
-.section-card:hover {
-  transform: translateY(-2px);
-}
-
-.section-card.selected {
-  border-color: #1E88E5;
-  background: rgba(30,136,229,0.05);
-}
-
-.section-name {
-  font-weight: 600;
-  margin-top: 8px;
-  color: #0B2A44;
-}
-
-.section-desc {
-  font-size: 11px;
-  color: #666;
-}
-
-@media (max-width: 600px) {
-  .reports-view { padding: 0 16px; }
-  .action-buttons { flex-direction: column; }
-  .kpi-card { height: 100px; }
-  .kpi-value { font-size: 20px; }
-}
+.stats-card { border-radius: 12px; margin-bottom: 24px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
+.stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); border-radius: 12px 12px 0 0; }
+.card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
+.title-icon { margin-right: 8px; }
+.kpi-card { height: 120px; border-radius: 12px; transition: transform 0.2s ease, box-shadow 0.2s ease; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
+.kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50); border-radius: 12px 12px 0 0; }
+.kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1); }
+.kpi-content { display: flex; align-items: center; height: 100%; padding: 8px; }
+.kpi-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; flex-shrink: 0; }
+.kpi-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.kpi-value { font-size: 24px; font-weight: 700; color: #0B2A44; line-height: 1; margin-bottom: 4px; }
+.kpi-title { font-size: 12px; color: #666; }
+.section-card { cursor: pointer; transition: 0.2s; border: 2px solid transparent; border-radius: 12px; }
+.section-card:hover { transform: translateY(-2px); }
+.section-card.selected { border-color: #1E88E5; background: rgba(30,136,229,0.05); }
+.section-name { font-weight: 600; margin-top: 8px; color: #0B2A44; }
+.section-desc { font-size: 11px; color: #666; }
+@media (max-width: 600px) { .reports-view { padding: 0 16px; } .action-buttons { flex-direction: column; } .kpi-card { height: 100px; } .kpi-value { font-size: 20px; } }
 </style>

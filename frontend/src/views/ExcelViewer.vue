@@ -22,7 +22,11 @@
         <thead>
           <tr>
             <th class="row-number-col">#</th>
-            <th v-for="(col, idx) in displayHeaders" :key="idx">
+            <th
+              v-for="(col, idx) in displayHeaders"
+              :key="idx"
+              @dblclick="autoSizeColumn(idx)"
+            >
               <div v-if="showMappingControls && mappingMode === 'mapped'" class="header-dropdown">
                 <select
                   :value="getMappingForHeader(col)"
@@ -139,6 +143,43 @@ function onMappingChange(requiredCol, newSrcCol) {
 function prevPage() { if (currentPage.value > 1) currentPage.value-- }
 function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
 
+// Column resize on double-click
+function autoSizeColumn(colIndex) {
+  const table = document.querySelector('.excel-edit-table')
+  if (!table) return
+  const headerCells = table.querySelectorAll('thead th')
+  const headerCell = headerCells[colIndex + 1]
+  if (!headerCell) return
+
+  let maxWidth = 0
+  const temp = document.createElement('span')
+  temp.style.cssText = 'position:absolute; visibility:hidden; white-space:nowrap; font:inherit;'
+  temp.textContent = headerCell.textContent.trim() || ''
+  document.body.appendChild(temp)
+  maxWidth = Math.max(maxWidth, temp.offsetWidth + 20)
+  document.body.removeChild(temp)
+
+  const rows = table.querySelectorAll('tbody tr')
+  rows.forEach(row => {
+    const cell = row.querySelectorAll('td')[colIndex + 1]
+    if (cell) {
+      const temp2 = document.createElement('span')
+      temp2.style.cssText = 'position:absolute; visibility:hidden; white-space:nowrap; font:inherit;'
+      temp2.textContent = cell.textContent || ''
+      document.body.appendChild(temp2)
+      maxWidth = Math.max(maxWidth, temp2.offsetWidth + 20)
+      document.body.removeChild(temp2)
+    }
+  })
+
+  const allCells = table.querySelectorAll(`thead th:nth-child(${colIndex + 2}), tbody td:nth-child(${colIndex + 2})`)
+  allCells.forEach(cell => {
+    cell.style.width = maxWidth + 'px'
+    cell.style.minWidth = maxWidth + 'px'
+    cell.style.maxWidth = maxWidth + 'px'
+  })
+}
+
 watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
 </script>
 
@@ -221,7 +262,7 @@ watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
   padding: 6px 8px;
   text-align: left;
   word-break: break-word;
-  max-width: 200px; /* adjust as needed */
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -230,6 +271,7 @@ watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
   position: sticky;
   top: 0;
   z-index: 10;
+  cursor: pointer;
 }
 .row-number-col {
   background: #f8f9ff;

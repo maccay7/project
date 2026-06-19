@@ -48,7 +48,7 @@
                   <!-- History button -->
                   <button class="version-btn" @click.stop="openVersionModal(session.id)">
                     <v-icon size="12">mdi-history</v-icon>
-                    <span class="version-count">History ({{ session.versions?.length || 0 }})</span>
+                    <span class="version-count">History ({{ getVersionCount(session) }})</span>
                   </button>
 
                   <button class="row-rename-btn" @click.stop="openRename(session)" title="Rename"><v-icon size="12">mdi-pencil</v-icon></button>
@@ -261,54 +261,38 @@ function formatVersionTime(timestamp) {
   return new Date(timestamp).toLocaleString()
 }
 
-function saveSessionsToLocalStorage() { localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.value)) }
+// Get version count safely
+function getVersionCount(session) {
+  return session?.versions?.length || 0
+}
+
+function saveSessionsToLocalStorage() {
+  localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.value))
+}
 function loadSessionsFromLocalStorage() {
   const stored = localStorage.getItem(SESSIONS_STORAGE_KEY)
-  if (stored) { try { sessions.value = JSON.parse(stored) } catch(e) { console.error(e) } }
-  else { sessions.value = [] }
+  if (stored) {
+    try {
+      sessions.value = JSON.parse(stored)
+      // Ensure each session has a versions array
+      sessions.value.forEach(s => {
+        if (!s.versions) s.versions = []
+      })
+    } catch(e) { console.error(e) }
+  } else {
+    sessions.value = []
+  }
 }
 function saveActiveSessionId(id) { if (id) localStorage.setItem(ACTIVE_SESSION_ID_KEY, id); else localStorage.removeItem(ACTIVE_SESSION_ID_KEY) }
 function loadActiveSessionId() { return localStorage.getItem(ACTIVE_SESSION_ID_KEY) }
 
-// ========== VERSION CAPTURE – FIXED INSTRUMENT DETECTION ==========
-function detectInstrument(sessionId) {
-  const instrumentMap = {
-    'money-market': 'Money Market',
-    'bonds': 'Bonds',
-    'tbills': 'T-Bills'
-  }
-  const found = []
-  for (const [key, name] of Object.entries(instrumentMap)) {
-    const wf = sessionManager.getInstrumentWorkflow(sessionId, key)
-    // Check for actual data presence – not just last_updated
-    if (wf) {
-      const hasData = (wf.rawData && wf.rawData.length > 0) ||
-                      (wf.cleanedData && wf.cleanedData.length > 0) ||
-                      (wf.calculations && Object.keys(wf.calculations).length > 0)
-      if (hasData) {
-        found.push(name)
-      }
-    }
-  }
-  // Also check session.instrumentData as fallback
-  const session = sessions.value.find(s => s.id === sessionId)
-  if (session && session.instrumentData) {
-    for (const [key, name] of Object.entries(instrumentMap)) {
-      const keyMap = { 'money-market': 'Money Market', 'bonds': 'Bonds', 'tbills': 'T-Bills' }
-      const instKey = Object.keys(keyMap).find(k => keyMap[k] === name)
-      if (instKey && session.instrumentData[instKey]?.completed) {
-        if (!found.includes(name)) found.push(name)
-      }
-    }
-  }
-  if (found.length === 1) return found[0]
-  if (found.length > 1) return found.join(', ')
-  return null
-}
-
+// ========== VERSION CAPTURE – NOW USES DETAILS FROM EVENT ==========
 function captureVersion(sessionId, options = {}) {
   const session = sessions.value.find(s => s.id === sessionId)
-  if (!session) return
+  if (!session) {
+    console.warn('captureVersion: session not found', sessionId)
+    return
+  }
 
   const {
     instrument = null,
@@ -325,7 +309,7 @@ function captureVersion(sessionId, options = {}) {
     detectedInstrument = detectInstrument(sessionId)
   }
 
-  // If still not detected, use the most recent version's instrument as fallback
+  // Fallback to last version's instrument if still null
   if (!detectedInstrument && session.versions && session.versions.length > 0) {
     const lastVersion = session.versions[0]
     if (lastVersion.instrument && lastVersion.instrument !== 'Session') {
@@ -333,20 +317,19 @@ function captureVersion(sessionId, options = {}) {
     }
   }
 
-  // Final fallback
-  if (!detectedInstrument) {
-    detectedInstrument = 'Session'
-  }
+  if (!detectedInstrument) detectedInstrument = 'Session'
 
   let shortDesc = shortDescription || description || changeType
   if (!shortDesc || shortDesc === changeType) {
-    if (changeType === 'Uploaded') shortDesc = '📤 Uploaded data'
-    else if (changeType === 'Cleaned') shortDesc = '🧹 Cleaned data'
-    else if (changeType === 'Calculated') shortDesc = '📊 Updated calculations'
-    else if (changeType === 'Renamed') shortDesc = '✏️ Renamed session'
-    else if (changeType === 'Created') shortDesc = '📁 Session created'
-    else if (changeType === 'Restored') shortDesc = '↩️ Restored previous version'
-    else shortDesc = changeType
+    const map = {
+      'Uploaded': '📤 Uploaded data',
+      'Cleaned': '🧹 Cleaned data',
+      'Calculated': '📊 Updated calculations',
+      'Renamed': '✏️ Renamed session',
+      'Created': '📁 Session created',
+      'Restored': '↩️ Restored previous version'
+    }
+    shortDesc = map[changeType] || changeType
   }
 
   const workflows = {}
@@ -382,7 +365,41 @@ function captureVersion(sessionId, options = {}) {
   session.versions.unshift(version)
   if (session.versions.length > 30) session.versions.pop()
 
+  console.log(`📝 Version added for session ${session.name} (${sessionId}) – ${changeType} on ${detectedInstrument}`)
+
   saveSessionsToLocalStorage()
+}
+
+// Detect instrument from workflow data (fallback)
+function detectInstrument(sessionId) {
+  const instrumentMap = {
+    'money-market': 'Money Market',
+    'bonds': 'Bonds',
+    'tbills': 'T-Bills'
+  }
+  const found = []
+  for (const [key, name] of Object.entries(instrumentMap)) {
+    const wf = sessionManager.getInstrumentWorkflow(sessionId, key)
+    if (wf) {
+      const hasData = (wf.rawData && wf.rawData.length > 0) ||
+                      (wf.cleanedData && wf.cleanedData.length > 0) ||
+                      (wf.calculations && Object.keys(wf.calculations).length > 0)
+      if (hasData) found.push(name)
+    }
+  }
+  // Also check session.instrumentData as fallback
+  const session = sessions.value.find(s => s.id === sessionId)
+  if (session && session.instrumentData) {
+    for (const [key, name] of Object.entries(instrumentMap)) {
+      const instKey = Object.keys(instrumentMap).find(k => instrumentMap[k] === name)
+      if (instKey && session.instrumentData[instKey]?.completed) {
+        if (!found.includes(name)) found.push(name)
+      }
+    }
+  }
+  if (found.length === 1) return found[0]
+  if (found.length > 1) return found.join(', ')
+  return null
 }
 
 // Open the version modal
@@ -407,7 +424,6 @@ function restoreVersion(sessionId, versionIndex) {
     sessionManager.saveInstrumentWorkflow(sessionId, inst, wf)
   }
 
-  // Detect the instrument from the restored workflows
   const restoredInstrument = detectInstrument(sessionId) || version.instrument || 'Session'
 
   captureVersion(sessionId, {
@@ -422,9 +438,14 @@ function restoreVersion(sessionId, versionIndex) {
   versionDialogVisible.value = false
 }
 
+// ========== EVENT LISTENER – RECEIVES DETAILED EVENTS ==========
 function onSessionUpdated(event) {
-  const { sessionId, instrument, changeType, fieldsChanged, description, shortDescription } = event.detail || {}
-  captureVersion(sessionId, { instrument, changeType, fieldsChanged, description, shortDescription })
+  const detail = event.detail || {}
+  const { sessionId, instrument, changeType, fieldsChanged, description, shortDescription } = detail
+  if (sessionId) {
+    console.log(`📨 Session updated event received for ${sessionId}`, detail)
+    captureVersion(sessionId, { instrument, changeType, fieldsChanged, description, shortDescription })
+  }
 }
 
 // ========== SESSION ACTIONS ==========
@@ -450,7 +471,13 @@ function loadExistingSession(sessionId) {
     const refreshed = sessionManager.getSession(sessionId)
     if (refreshed) {
       const index = sessions.value.findIndex(s => s.id === sessionId)
-      if (index !== -1) { sessions.value[index] = { ...refreshed, versions: sessions.value[index]?.versions || [] }; saveSessionsToLocalStorage(); session = sessions.value[index] }
+      if (index !== -1) {
+        // Preserve versions when refreshing
+        const existingVersions = sessions.value[index]?.versions || []
+        sessions.value[index] = { ...refreshed, versions: existingVersions }
+        saveSessionsToLocalStorage()
+        session = sessions.value[index]
+      }
     }
     activeSession.value = session; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id)
   }).catch(() => { activeSession.value = session; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id) })

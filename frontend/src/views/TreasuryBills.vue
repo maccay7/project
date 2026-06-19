@@ -149,8 +149,8 @@
               </div>
 
               <div class="navigation-buttons">
-                <button v-if="rawData.length && missingColumns.length && !mappingApplied" class="btn-warning" @click="autoMatchColumns">Map Columns</button>
-                <button class="btn-primary" @click="uploadData" :disabled="!uploadedFile || (rawData.length && missingColumns.length && !mappingApplied)">Upload & Continue</button>
+                <!-- Bottom "Map Columns" button removed -->
+                <button class="btn-primary" @click="continueAfterUpload" :disabled="!uploadedFile || (rawData.length && missingColumns.length && !mappingApplied)">Continue</button>
                 <button class="btn-secondary" @click="goToDashboard">Cancel</button>
               </div>
             </v-card-text>
@@ -198,18 +198,13 @@
                     </div>
                   </div>
                   <div class="cleaning-buttons">
-                    <button class="btn-primary" @click="previewCleanedData">Preview Cleaned Data</button>
+                    <button class="btn-primary" @click="applyCleaning">Clean Data</button>
                   </div>
                 </div>
 
-                <div v-if="previewData.length" class="preview-section">
-                  <h4>Preview of Cleaned Data ({{ previewData.length }} rows)</h4>
-                  <div class="excel-scroll-wrapper">
-                    <ExcelViewer :data="previewData" :headers="cleanPreviewHeaders" @data-update="onCleanPreviewUpdate" />
-                  </div>
-                </div>
-                <div v-if="cleanedData.length && !previewData.length" class="preview-section">
-                  <h4>Cleaned dataset</h4>
+                <!-- Show cleaned data after cleaning -->
+                <div v-if="cleanedData.length" class="preview-section">
+                  <h4>Cleaned Data ({{ cleanedData.length }} rows)</h4>
                   <div class="excel-scroll-wrapper">
                     <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
                   </div>
@@ -223,7 +218,7 @@
 
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('upload')">Previous</button>
-                  <button class="btn-primary" @click="cleanAndContinue" :disabled="!previewData.length">Clean & Continue</button>
+                  <button class="btn-primary" @click="continueAfterCleaning" :disabled="!cleanedData.length">Continue</button>
                   <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
                 </div>
               </div>
@@ -374,7 +369,7 @@
 
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('cleaning')">Previous</button>
-                  <button class="btn-primary" @click="goToVisualizations">Next: Visualizations</button>
+                  <button class="btn-primary" @click="continueToVisualizations">Continue</button>
                   <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
                 </div>
               </div>
@@ -482,7 +477,7 @@
 
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('calculations')">Previous</button>
-                <button class="btn-primary" @click="switchTab('summary')">Next: Summary</button>
+                <button class="btn-primary" @click="switchTab('summary')">Continue</button>
                 <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
               </div>
             </v-card-text>
@@ -522,7 +517,6 @@
                   <p v-if="calculations.fred?.spread_vs_market != null"><strong>Spread vs FRED:</strong> {{ calculations.fred.spread_vs_market }}%</p>
                 </div>
               </div>
-              <!-- REMOVED the green progress bar as requested -->
               <div class="excel-viewer-button" style="margin-bottom: 20px; text-align: right;">
                 <button class="btn-secondary" @click="openExcelReview(cleanedData, `${instrumentName} - Cleaned Data`)">
                   📊 View Instrument Data as Excel
@@ -530,7 +524,7 @@
               </div>
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('visualizations')">Previous</button>
-                <button class="btn-primary" @click="goToReportTab">Go to Report →</button>
+                <button class="btn-primary" @click="goToReportTab">Continue to Report →</button>
                 <button class="btn-primary" @click="goToPortfolioSummary">Portfolio Summary →</button>
                 <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
               </div>
@@ -591,14 +585,17 @@
       </div>
     </div>
 
-    <!-- Excel Review Dialog -->
+    <!-- Excel Review Dialog – only X closes -->
     <v-dialog v-model="showExcelDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
-        <v-card-title class="excel-dialog-title">{{ excelDialogTitle }} - Excel Viewer <v-spacer></v-spacer><button class="btn-close-dialog" @click="closeExcelDialog">✕</button></v-card-title>
+        <v-card-title class="excel-dialog-title">
+          {{ excelDialogTitle }} - Excel Viewer
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="closeExcelDialog">✕</button>
+        </v-card-title>
         <v-card-text class="excel-dialog-content pa-0">
           <ExcelViewer :data="excelData" :headers="excelColumns" @data-update="onExcelDataUpdate" />
         </v-card-text>
-        <v-card-actions><v-spacer></v-spacer><button class="btn-secondary" @click="closeExcelDialog">Close</button></v-card-actions>
       </v-card>
     </v-dialog>
 
@@ -611,16 +608,19 @@
       </v-card>
     </v-dialog>
 
-    <!-- Report Preview Dialog -->
+    <!-- Report Preview Dialog – only X closes -->
     <v-dialog v-model="reportPreviewDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
-        <v-card-title class="excel-dialog-title">Report Preview <v-spacer></v-spacer><button class="btn-close-dialog" @click="reportPreviewDialog = false">✕</button></v-card-title>
+        <v-card-title class="excel-dialog-title">
+          Report Preview
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="reportPreviewDialog = false">✕</button>
+        </v-card-title>
         <v-card-text class="report-preview-content" style="padding:0;">
           <iframe :srcdoc="reportPreviewHtml" frameborder="0" style="width:100%; height:80vh;"></iframe>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <button class="btn-secondary" @click="reportPreviewDialog = false">Close</button>
           <button class="btn-primary" @click="downloadFromPreview('html')">Download HTML</button>
           <button class="btn-pdf" @click="downloadFromPreview('pdf')">Download PDF</button>
           <button class="btn-word" @click="downloadFromPreview('word')">Download Word</button>
@@ -1136,16 +1136,17 @@ function updateColumnMapping(newMapping) {
   }
 }
 
-async function uploadData() {
+async function continueAfterUpload() {
   if (!uploadedFile.value) return
   if (rawData.value.length && missingColumns.value.length === 0 && mappingApplied.value) {
+    // Mark upload step as completed
     activeTab.value = 'cleaning'
     debouncedSave()
   } else alert('Please map missing columns first')
 }
 
 // ========== CLEANING ==========
-function previewCleanedData() {
+function applyCleaning() {
   if (!rawData.value.length) return
   let data = JSON.parse(JSON.stringify(rawData.value))
   if (cleaningOptions.value.removeDuplicates) {
@@ -1196,18 +1197,17 @@ function previewCleanedData() {
   }
   if (cleaningOptions.value.fillForward) { for (let i = 1; i < data.length; i++) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i - 1][k] }) }
   if (cleaningOptions.value.fillBackward) { for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i + 1][k] }) }
-  previewData.value = data
+  cleanedData.value = data
+  cleaningStats.value = { totalRows: rawData.value.length, validRows: cleanedData.value.length, removedRows: rawData.value.length - cleanedData.value.length, fixedMissing: 0 }
+  // Auto-save and update progress
+  debouncedSave()
+  updateSessionCompletion()
 }
 
-async function cleanAndContinue() {
-  if (!previewData.value.length) { alert('Please click "Preview Cleaned Data" first.'); return }
-  cleanedData.value = previewData.value
-  cleaningStats.value = { totalRows: rawData.value.length, validRows: cleanedData.value.length, removedRows: rawData.value.length - cleanedData.value.length, fixedMissing: 0 }
+async function continueAfterCleaning() {
+  if (!cleanedData.value.length) { alert('Please clean your data first.'); return }
   await calculateMetrics()
-  updateSessionCompletion()
-  debouncedSave()
-  alert(`Cleaning applied! ${cleanedData.value.length} rows remaining.`)
-  await nextTick()
+  // Mark cleaning step as completed by going to calculations
   goToCalculations()
 }
 
@@ -1287,6 +1287,11 @@ async function calculateMetrics() {
   await enrichCalculationsWithFred()
   debouncedSave()
   updateSessionCompletion()
+}
+
+function continueToVisualizations() {
+  if (!hasCleanedData.value) { alert('Please clean your data first.'); return }
+  goToVisualizations()
 }
 
 // ========== REPORT LOGIC ==========
@@ -1381,7 +1386,10 @@ async function fetchFredSeriesData(seriesId, limit = 30) {
 async function generateReportHtml() {
   await loadSavedData()
   const report = reportPreviewData.value
-  if (report.instruments.length === 0) { alert('No data available for the selected instruments.'); return null }
+  if (report.instruments.length === 0) {
+    alert('No data available for the selected instruments.')
+    return null
+  }
 
   const chartDataMap = {}
   for (const inst of report.instruments) {
@@ -1437,7 +1445,12 @@ async function generateReportHtml() {
 async function previewReport() {
   await loadSavedData()
   const html = await generateReportHtml()
-  if (html) { reportPreviewHtml.value = html; reportPreviewDialog.value = true }
+  if (html) {
+    reportPreviewHtml.value = html
+    reportPreviewDialog.value = true
+  } else {
+    // Alert already shown inside generateReportHtml
+  }
 }
 
 async function downloadFromPreview(format) {
@@ -1631,12 +1644,12 @@ async function enrichCalculationsWithFred() { try { const bench = await fetchBen
 async function onFredFilterChange() { if (activeTab.value === 'visualizations') await fetchFredData(); if (Object.keys(calculations.value).length) enrichCalculationsWithFred(); debouncedSave() }
 
 const uploadPreviewHeaders = computed(() => Object.keys(rawData.value[0] || {}))
-const cleanPreviewHeaders = computed(() => Object.keys((previewData.value[0] || cleanedData.value[0]) || {}))
+const cleanPreviewHeaders = computed(() => Object.keys((cleanedData.value[0]) || {}))
 function onRawExcelUpdate(data) { rawData.value = data; debouncedSave() }
-function onCleanPreviewUpdate(data) { previewData.value = data }
+function onCleanPreviewUpdate(data) { /* not used anymore */ }
 function onCleanedExcelUpdate(data) { cleanedData.value = data; debouncedSave(); calculateMetrics() }
 function onExcelDataUpdate(data) { excelData.value = data; if (activeTab.value === 'upload') rawData.value = data; if (cleanedData.value.length) cleanedData.value = data; debouncedSave() }
- 
+
 let saveTimeout = null
 function debouncedSave() { if (saveTimeout) clearTimeout(saveTimeout); saveTimeout = setTimeout(() => { saveSessionData() }, 500) }
 watch([rawData, cleanedData], () => debouncedSave(), { deep: true })
@@ -1763,7 +1776,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .btn-review-excel-small { background: #2196F3; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; transition: all 0.2s; }
 .btn-review-excel-small:hover { background: #0b7dda; }
 .excel-dialog-title { background: #0B2044; color: white; padding: 16px 24px; }
-.btn-close-dialog { background: transparent; border: none; color: white; cursor: pointer; padding: 8px; border-radius: 50%; transition: all 0.2s; }
+.btn-close-dialog { background: transparent; border: none; color: white; cursor: pointer; padding: 8px; border-radius: 50%; }
 .btn-close-dialog:hover { background: rgba(255,255,255,0.1); }
 .excel-dialog-content { padding: 0; height: calc(100vh - 140px); }
 .mapping-grid { display: flex; flex-direction: column; gap: 15px; margin: 20px 0; }

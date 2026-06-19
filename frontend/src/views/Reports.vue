@@ -117,9 +117,10 @@ async function loadFredForReport() {
 
 async function generatePreview() {
   await loadFredForReport()
-  const reportType = localStorage.getItem('report_type') || selectedType.value
-  // Prefer active_session from localStorage, otherwise pick first session from sessionManager
-  let session = {}
+  const reportType = selectedType.value // use current selection
+
+  // Get session data
+  let session = null
   try {
     const saved = localStorage.getItem('active_session')
     if (saved) {
@@ -127,32 +128,66 @@ async function generatePreview() {
       session = sessionManager.getSession(sid) || JSON.parse(saved)
     } else {
       const all = sessionManager.getAllSessions() || []
-      session = all.length ? all[0] : {}
+      session = all.length ? all[0] : null
     }
   } catch (e) {
-    session = {}
+    session = null
   }
 
-  if (reportType === 'current') {
-    previewData.value = {
-      type: 'Current Instrument Report',
-      date: new Date().toLocaleString(),
-      session: session.name || 'Current Session',
-      instrument: route.query.instrument || dataset.value?.instrument_type || 'Selected Instrument',
-      rows: dataset.value?.data?.length || 0,
-      columns: dataset.value?.data ? Object.keys(dataset.value.data[0] || {}).length : 0,
-      sample: dataset.value?.data?.slice(0, 3) || []
-    }
+  if (!session) {
+    reportError.value = 'No active session found.'
+    previewData.value = null
+    return
+  }
+
+  const instrument = route.query.instrument || 'money-market'
+
+  // Get data for the instrument (prefer cleaned data)
+  let data = []
+  const wf = sessionManager.getInstrumentWorkflow(session.id, instrument)
+  if (wf && wf.cleanedData && wf.cleanedData.length) {
+    data = wf.cleanedData
   } else {
-    previewData.value = {
-      type: 'Full Session Report',
-      date: new Date().toLocaleString(),
-      session: session.name || 'Current Session',
-      instruments: session.instrumentData || {},
-      totalRows: dataset.value?.data?.length || 0,
-      summary: dataset.value ? 'Loaded dataset ready for analysis' : 'No dataset loaded'
+    // Try raw data
+    const rawKey = `${instrument}_session_${session.id}_raw`
+    const savedRaw = localStorage.getItem(rawKey)
+    if (savedRaw) {
+      try { data = JSON.parse(savedRaw) } catch(e) {}
     }
   }
+
+  const preview = {
+    type: reportType === 'current' ? 'Current Instrument Report' : 'Full Session Report',
+    date: new Date().toLocaleString(),
+    session: session.name || 'Current Session',
+    instrument: instrument,
+    rows: data.length,
+    columns: data.length ? Object.keys(data[0]).length : 0,
+    sample: data.slice(0, 3)
+  }
+
+  if (reportType === 'session') {
+    // Gather all instruments
+    const allData = {}
+    const instruments = ['money-market', 'bonds', 'tbills']
+    for (const inst of instruments) {
+      const wf2 = sessionManager.getInstrumentWorkflow(session.id, inst)
+      if (wf2 && wf2.cleanedData && wf2.cleanedData.length) {
+        allData[inst] = wf2.cleanedData
+      } else {
+        const rawKey2 = `${inst}_session_${session.id}_raw`
+        const savedRaw2 = localStorage.getItem(rawKey2)
+        if (savedRaw2) {
+          try { allData[inst] = JSON.parse(savedRaw2) } catch(e) {}
+        }
+      }
+    }
+    preview.instruments = allData
+    preview.totalRows = Object.values(allData).reduce((sum, arr) => sum + arr.length, 0)
+  }
+
+  previewData.value = preview
+  reportError.value = ''
 }
 
 function buildReportHtml() {
@@ -215,7 +250,7 @@ function handleDatasetUpdate(updatedData) {
 async function loadDatasetPreview() {
   showDatasetPreview.value = true
   try {
-    // Prefer dataset from active session payload
+    // Get session and instrument
     let session = null
     try {
       const saved = localStorage.getItem('active_session')
@@ -228,58 +263,65 @@ async function loadDatasetPreview() {
       }
     } catch (e) { session = null }
 
-    if (session && session.payload && session.payload.instrumentData) {
-      const inst = session.payload.instrumentData[route.query.instrument]
-      if (inst && inst.data) {
-        dataset.value = { id: null, name: inst.name || 'Session Dataset', data: inst.data, instrument_type: route.query.instrument }
-        generatePreview()
-        return
+    if (!session) {
+      alert('No active session found.')
+      return
+    }
+
+    const instrument = route.query.instrument || 'money-market'
+    let data = []
+    // Try to get cleaned data
+    const wf = sessionManager.getInstrumentWorkflow(session.id, instrument)
+    if (wf && wf.cleanedData && wf.cleanedData.length) {
+      data = wf.cleanedData
+    } else {
+      // Fallback to raw data
+      const rawKey = `${instrument}_session_${session.id}_raw`
+      const savedRaw = localStorage.getItem(rawKey)
+      if (savedRaw) {
+        try { data = JSON.parse(savedRaw) } catch(e) {}
       }
     }
 
-    const current = JSON.parse(localStorage.getItem('currentDataset') || '{}')
-    if (current.id) {
-      const res = await datasetAPI.load(current.id)
-      if (res && res.success) {
-        dataset.value = res.data
-        generatePreview()
-        return
+    if (data.length) {
+      dataset.value = {
+        name: `${instrument} dataset`,
+        instrument_type: instrument,
+        data: data
       }
-    }
-    if (current.data) {
-      dataset.value = current
       generatePreview()
-      return
-    }
-    const stored = JSON.parse(localStorage.getItem('cleanedData') || localStorage.getItem('currentDataset') || '{}')
-    if (stored?.data) {
-      dataset.value = stored
-      generatePreview()
+    } else {
+      alert('No data found for this instrument in the session.')
     }
   } catch (err) {
     console.error('Load dataset preview error', err)
+    alert('Error loading dataset: ' + err.message)
   }
 }
 
 async function markDone() {
   try {
-    let id = null
-    if (dataset.value && dataset.value.id) id = dataset.value.id
-    else {
-      // try session payload
-      const saved = localStorage.getItem('active_session')
-      let session = null
-      try { session = saved ? (sessionManager.getSession(JSON.parse(saved).id) || JSON.parse(saved)) : (sessionManager.getAllSessions()[0] || null) } catch(e) { session = null }
-      if (session && session.payload && session.payload.datasetId) id = session.payload.datasetId
+    // Mark the session instrument as done
+    const session = sessionManager.getActiveSession()
+    if (!session) {
+      alert('No active session.')
+      return
     }
-    if (!id) return alert('No current dataset selected')
-    const res = await datasetAPI.markDone(id)
-    if (res && res.success) {
-      alert('Dataset marked done — it will no longer be available for processing')
-    } else {
-      alert('Failed to mark dataset')
+    const instrument = route.query.instrument || 'money-market'
+    // Update session instrumentData
+    if (!session.instrumentData) session.instrumentData = {}
+    session.instrumentData[instrument] = {
+      ...session.instrumentData[instrument],
+      completed: true,
+      timestamp: new Date().toISOString()
     }
-  } catch (err) { console.error(err); alert('Error marking dataset') }
+    sessionManager.updateSession(session.id, { instrumentData: session.instrumentData })
+    alert(`Marked ${instrument} as done in session.`)
+    router.push('/dashboard')
+  } catch (err) {
+    console.error(err)
+    alert('Error marking done: ' + err.message)
+  }
 }
 
 function goBack() {
@@ -287,150 +329,37 @@ function goBack() {
 }
 
 onMounted(() => {
-  generatePreview()
+  // If session and instrument are in query, auto-load
+  if (route.query.session && route.query.instrument) {
+    loadDatasetPreview()
+  } else {
+    generatePreview()
+  }
 })
 </script>
 
 <style scoped>
-.reports-page {
-  padding: 30px;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.page-header {
-  margin-bottom: 30px;
-}
-
-.back-btn {
-  background: transparent;
-  border: none;
-  color: #0B2044;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-}
-
-.page-header h1 {
-  color: #0B2044;
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.page-header p {
-  color: #666;
-  font-size: 14px;
-}
-
-.report-options {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 24px;
-  margin-bottom: 40px;
-}
-
-.option-card {
-  background: white;
-  border-radius: 16px;
-  padding: 30px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.3s;
-  border: 2px solid transparent;
-}
-
-.option-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 8px 25px rgba(0,0,0,0.1);
-  border-color: #0B2044;
-}
-
-.option-icon {
-  width: 80px;
-  height: 80px;
-  background: #f5f5f5;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 20px;
-  transition: all 0.3s;
-}
-
-.option-icon.active {
-  background: #0B2044;
-  color: white;
-}
-
-.option-card h3 {
-  color: #0B2044;
-  margin-bottom: 10px;
-}
-
-.option-card p {
-  color: #666;
-  font-size: 13px;
-}
-
-.preview-section {
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-}
-
-.preview-section h3 {
-  color: #0B2044;
-  margin-bottom: 20px;
-}
-
-.preview-content {
-  background: #f5f5f5;
-  border-radius: 8px;
-  padding: 20px;
-  overflow-x: auto;
-  margin-bottom: 20px;
-}
-
-.preview-content pre {
-  margin: 0;
-  font-size: 12px;
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #0B2044, #1E88E5);
-  color: white;
-  border: none;
-  padding: 12px 28px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.download-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.btn-secondary {
-  background: #1E88E5;
-  color: white;
-  border: none;
-  padding: 12px 28px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
+/* same as original – keep your styles */
+.reports-page { padding: 30px; max-width: 1200px; margin: 0 auto; }
+.page-header { margin-bottom: 30px; }
+.back-btn { background: transparent; border: none; color: #0B2044; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 8px; margin-bottom: 20px; }
+.page-header h1 { color: #0B2044; font-size: 28px; font-weight: 700; }
+.page-header p { color: #666; font-size: 14px; }
+.report-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-bottom: 40px; }
+.option-card { background: white; border-radius: 16px; padding: 30px; text-align: center; cursor: pointer; transition: all 0.3s; border: 2px solid transparent; }
+.option-card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); border-color: #0B2044; }
+.option-icon { width: 80px; height: 80px; background: #f5f5f5; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; transition: all 0.3s; }
+.option-icon.active { background: #0B2044; color: white; }
+.option-card h3 { color: #0B2044; margin-bottom: 10px; }
+.option-card p { color: #666; font-size: 13px; }
+.preview-section { background: white; border-radius: 16px; padding: 24px; }
+.preview-section h3 { color: #0B2044; margin-bottom: 20px; }
+.preview-content { background: #f5f5f5; border-radius: 8px; padding: 20px; overflow-x: auto; margin-bottom: 20px; }
+.preview-content pre { margin: 0; font-size: 12px; }
+.btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.download-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn-secondary { background: #1E88E5; color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.dataset-preview { background: white; border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+.dataset-info-row { display: flex; gap: 24px; margin-bottom: 16px; }
+.preview-empty { padding: 40px; text-align: center; color: #999; }
 </style>

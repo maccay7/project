@@ -92,7 +92,7 @@
       </div>
     </div>
 
-    <!-- Modal for per-instrument Excel view -->
+    <!-- Modal for per-instrument Excel view – Close button removed -->
     <v-dialog v-model="detailModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">
@@ -103,14 +103,11 @@
         <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
           <ExcelViewer :data="selectedInst?.details || []" :headers="selectedInst?.detailHeaders || []" />
         </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <button class="btn-secondary" @click="detailModalVisible = false">Close</button>
-        </v-card-actions>
+        <!-- No Close button -->
       </v-card>
     </v-dialog>
 
-    <!-- Combined Portfolio Excel view (matches export EXACTLY) -->
+    <!-- Combined Portfolio Excel view – Close button removed -->
     <v-dialog v-model="combinedModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">
@@ -158,10 +155,7 @@
             <div v-else class="empty-placeholder">No data available for this instrument.</div>
           </div>
         </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <button class="btn-secondary" @click="combinedModalVisible = false">Close</button>
-        </v-card-actions>
+        <!-- No Close button -->
       </v-card>
     </v-dialog>
 
@@ -206,7 +200,6 @@ const showExportDialog = ref(false)
 const selectedExportInstruments = ref({})
 
 // ===== FILTERED DATA FOR MODAL =====
-// Only includes instruments that are selected for export
 const filteredInstruments = computed(() => {
   return instruments.value.filter(inst => selectedExportInstruments.value[inst.id])
 })
@@ -253,7 +246,6 @@ function openDetailModal(inst) {
 }
 
 function openCombinedModal() {
-  // Auto-select all instruments with data if none are selected
   const hasSelection = Object.values(selectedExportInstruments.value).some(v => v === true)
   if (!hasSelection) {
     instruments.value.forEach(inst => {
@@ -400,7 +392,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* ========== ALL ORIGINAL STYLES – KEPT UNCHANGED ========== */
+/* ========== ALL ORIGINAL STYLES – UNCHANGED ========== */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
