@@ -42,7 +42,7 @@
         </thead>
         <tbody>
           <tr v-for="(row, idx) in paginatedData" :key="idx">
-            <td class="row-number">{{ (currentPage - 1) * pageSize + idx + 1 }}<\/td>
+            <td class="row-number">{{ (currentPage - 1) * pageSize + idx + 1 }}</td>
             <td v-for="col in displayHeaders" :key="col">
               <input
                 type="text"
@@ -50,10 +50,10 @@
                 @input="updateCell(row, col, $event.target.value)"
                 class="editable-cell"
               />
-            <\/td>
-          <\/tr>
+            </td>
+          </tr>
         </tbody>
-      <\/table>
+      </table>
     </div>
   </div>
 </template>
@@ -67,7 +67,7 @@ const props = defineProps({
   showMappingControls: { type: Boolean, default: false },
   columnMapping: { type: Object, default: () => ({}) },
   availableFileColumns: { type: Array, default: () => [] },
-  defaultMappedMode: { type: Boolean, default: false }   // NEW
+  defaultMappedMode: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['data-update', 'mapping-update'])
@@ -76,7 +76,6 @@ const pageSize = 15
 const currentPage = ref(1)
 const mappingMode = ref(props.defaultMappedMode ? 'mapped' : 'original')
 
-// Watch for changes to defaultMappedMode prop (e.g., after mapping is applied)
 watch(() => props.defaultMappedMode, (newVal) => {
   if (newVal && mappingMode.value !== 'mapped') {
     mappingMode.value = 'mapped'
@@ -141,7 +140,7 @@ function prevPage() { if (currentPage.value > 1) currentPage.value-- }
 function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
 
 watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
-<\/script>
+</script>
 
 <style scoped>
 .excel-viewer {
@@ -149,6 +148,7 @@ watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
   border-radius: 8px;
   overflow: hidden;
   background: white;
+  max-width: 100% !important;
 }
 .excel-toolbar {
   display: flex;
@@ -203,11 +203,15 @@ watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
   color: #555;
 }
 .excel-table-wrapper {
-  overflow-x: auto;
+  overflow-x: auto !important;
   max-height: 500px;
+  max-width: 100% !important;
+  width: 100% !important;
 }
 .excel-edit-table {
-  width: 100%;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+  width: 100% !important;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -216,6 +220,10 @@ watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
   border: 1px solid #ddd;
   padding: 6px 8px;
   text-align: left;
+  word-break: break-word;
+  max-width: 200px; /* adjust as needed */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .excel-edit-table th {
   background: #f0f0f0;
@@ -235,6 +243,7 @@ watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
 }
 .editable-cell {
   width: 100%;
+  min-width: 60px;
   border: none;
   padding: 4px;
   font-family: inherit;

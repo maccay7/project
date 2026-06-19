@@ -116,31 +116,29 @@ watch(() => route.path, (newPath) => {
 </script>
 
 <style scoped>
-/* ===== FLEX LAYOUT – sidebar adapts to content ===== */
+/* ===== LAYOUT FIX – SIDEBAR FIXED, MAIN SCROLLS ===== */
 .fixed-layout {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;                 /* full viewport height */
+  overflow: hidden;              /* no page scroll – only main content scrolls */
+  width: 100%;
 }
 
-/* Sidebar – now with 3D depth and auto width */
+/* Sidebar – stays fixed, never moves */
 .sidebar {
   background: linear-gradient(180deg, #0a1a33 0%, #0B2044 50%, #0e2a54 100%);
   color: white;
-  position: sticky;
-  top: 60px;
-  height: calc(100vh - 60px);
-  overflow-y: auto;
-  flex: 0 0 auto; /* width determined by content */
+  position: sticky;              /* keep it in place while main scrolls */
+  top: 60px;                     /* below the navbar */
+  height: calc(100vh - 60px);    /* full remaining height */
+  flex: 0 0 auto;                /* width from content */
   padding: 20px 12px 16px;
-  box-shadow: 
-    4px 0 20px rgba(0, 0, 0, 0.25),
-    inset -1px 0 0 rgba(255, 255, 255, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.25), inset -1px 0 0 rgba(255, 255, 255, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   border-right: 1px solid rgba(255, 255, 255, 0.04);
   z-index: 999;
   display: flex;
   flex-direction: column;
-  /* 3D effect via multiple shadows and inner glow */
+  overflow-y: auto;              /* sidebar scrolls if content overflows */
 }
 
 /* Inner glow for 3D depth */
@@ -201,7 +199,6 @@ watch(() => route.path, (newPath) => {
   position: relative;
 }
 
-/* 3D hover: lift and shadow */
 .nav-link:hover {
   background: rgba(255, 255, 255, 0.08);
   color: white;
@@ -212,9 +209,7 @@ watch(() => route.path, (newPath) => {
 .nav-link.active {
   background: rgba(30, 136, 229, 0.2);
   color: white;
-  box-shadow: 
-    inset 0 0 0 1px rgba(30, 136, 229, 0.2),
-    0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 0 0 1px rgba(30, 136, 229, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
   transform: translateX(2px);
 }
 
@@ -239,7 +234,7 @@ watch(() => route.path, (newPath) => {
   white-space: nowrap;
 }
 
-/* Scrollbar – subtle and dark */
+/* Scrollbar for sidebar */
 .sidebar::-webkit-scrollbar {
   width: 4px;
 }
@@ -251,13 +246,15 @@ watch(() => route.path, (newPath) => {
   border-radius: 4px;
 }
 
-/* Main content – fills remaining space */
+/* Main content – scrolls vertically, fills remaining space */
 .main-content {
   flex: 1;
   background: #f5f7fa;
-  min-height: 100vh;
-  padding-top: 60px;
-  margin-left: 0; /* no fixed margin, flex handles it */
+  padding-top: 60px;           /* space for fixed navbar */
+  overflow-y: auto;            /* only this scrolls */
+  height: 100vh;               /* full viewport height */
+  max-width: 100%;             /* prevent horizontal overflow */
+  overflow-x: hidden;          /* if any horizontal overflow, hide it (but we have scroll for tables) */
 }
 
 /* Responsive: on small screens, sidebar collapses to icon-only */

@@ -100,7 +100,7 @@
                   :show-mapping-controls="true"
                   :column-mapping="columnMapping"
                   :available-file-columns="fileColumns"
-                  :default-mapped-mode="mappingApplied ? 'mapped' : 'original'"
+                  :default-mapped-mode="mappingApplied"
                   @data-update="onRawExcelUpdate"
                   @mapping-update="updateColumnMapping"
                 />
@@ -204,11 +204,15 @@
 
                 <div v-if="previewData.length" class="preview-section">
                   <h4>Preview of Cleaned Data ({{ previewData.length }} rows)</h4>
-                  <ExcelViewer :data="previewData" :headers="cleanPreviewHeaders" @data-update="onCleanPreviewUpdate" />
+                  <div class="excel-scroll-wrapper">
+                    <ExcelViewer :data="previewData" :headers="cleanPreviewHeaders" @data-update="onCleanPreviewUpdate" />
+                  </div>
                 </div>
                 <div v-if="cleanedData.length && !previewData.length" class="preview-section">
                   <h4>Cleaned dataset</h4>
-                  <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
+                  <div class="excel-scroll-wrapper">
+                    <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
+                  </div>
                 </div>
 
                 <div v-if="cleanedData.length" class="highlight-box">
@@ -1072,6 +1076,35 @@ function removeFile() {
   if (fileInput.value) fileInput.value.value = ''
 }
 
+// ========== MAPPING – UNIFIED BEHAVIOR ==========
+
+// This function physically renames columns in the data
+function applyMappingToData(mapping) {
+  if (!rawData.value.length) return false
+  const mapped = rawData.value.map(row => {
+    const newRow = {}
+    requiredColumns.value.forEach(reqCol => {
+      const src = mapping[reqCol]
+      newRow[reqCol] = (src && row[src] !== undefined) ? row[src] : null
+    })
+    return newRow
+  })
+  rawData.value = mapped
+  fileColumns.value = requiredColumns.value // after renaming, the available columns are the required ones
+  mappingApplied.value = true
+  debouncedSave()
+  return true
+}
+
+// Called by the top dialog's "Apply Mapping & Close" button
+function applyColumnMappingAndClose() {
+  if (applyMappingToData(columnMapping.value)) {
+    showMappingDialog.value = false
+    alert('Columns mapped successfully!')
+  }
+}
+
+// Called by the top dialog's "Map Columns" button (auto-matching)
 function autoMatchColumns() {
   if (!rawData.value.length) return
   fileColumns.value = Object.keys(rawData.value[0])
@@ -1091,30 +1124,16 @@ function openMappingDialog() {
   showMappingDialog.value = true
 }
 
-function applyColumnMapping() {
-  if (!rawData.value.length) return
-  const mapped = rawData.value.map(row => {
-    const newRow = {}
-    requiredColumns.value.forEach(reqCol => {
-      const src = columnMapping.value[reqCol]
-      newRow[reqCol] = (src && row[src] !== undefined) ? row[src] : null
-    })
-    return newRow
-  })
-  rawData.value = mapped
-  mappingApplied.value = Object.values(columnMapping.value).some(v => v !== null)
-  debouncedSave()
-  showMappingDialog.value = false
-  if (mappingApplied.value) alert('Columns mapped successfully!')
-}
-
-function applyColumnMappingAndClose() {
-  applyColumnMapping()
-}
-
+// Called by the bottom dropdown inside ExcelViewer
 function updateColumnMapping(newMapping) {
+  console.log('🔄 Bottom dropdown changed mapping to:', newMapping) // ← VERIFY IN CONSOLE
   columnMapping.value = newMapping
-  // Do NOT auto-apply – user must click "Apply Mapping & Close"
+  // THIS IS THE KEY – apply the mapping immediately, same as the top button
+  if (applyMappingToData(newMapping)) {
+    if (previewData.value.length) {
+      previewCleanedData() // re-run cleaning preview to reflect the renamed columns
+    }
+  }
 }
 
 async function uploadData() {
@@ -1617,7 +1636,7 @@ function onRawExcelUpdate(data) { rawData.value = data; debouncedSave() }
 function onCleanPreviewUpdate(data) { previewData.value = data }
 function onCleanedExcelUpdate(data) { cleanedData.value = data; debouncedSave(); calculateMetrics() }
 function onExcelDataUpdate(data) { excelData.value = data; if (activeTab.value === 'upload') rawData.value = data; if (cleanedData.value.length) cleanedData.value = data; debouncedSave() }
-
+ 
 let saveTimeout = null
 function debouncedSave() { if (saveTimeout) clearTimeout(saveTimeout); saveTimeout = setTimeout(() => { saveSessionData() }, 500) }
 watch([rawData, cleanedData], () => debouncedSave(), { deep: true })
@@ -1859,10 +1878,76 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .excel-viewer-button { margin-bottom: 20px; text-align: right; }
 .formula-dialog-title { background: #0B2044; color: white; }
 .formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; }
+
+/* ===== FIX: Table layout – prevents zoom ===== */
+.excel-edit-table {
+  max-width: 100% !important;
+  width: 100% !important;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed !important;
+}
+.excel-edit-table th,
+.excel-edit-table td {
+  border: 1px solid #ddd;
+  padding: 6px 8px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px; /* adjust as needed */
+}
 </style>
 
+<!-- ============================================================
+     NON-SCOPED CSS – FORCED OVERRIDES (Fixed Sidebar Safe)
+     ============================================================ -->
 <style>
-/* GLOBAL OVERRIDE - Ensures filter dropdowns stay black on white */
+/* 🔒 LOCK THE ENTIRE APPLICATION – NEVER WIDER THAN VIEWPORT */
+html, body, #app, .v-application, .v-application--wrap,
+.fixed-layout, .v-main, .v-content {
+  max-width: 100vw !important;
+  overflow-x: hidden !important;
+}
+
+/* The main instrument page wrapper */
+.instrument-page {
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+/* All scrollable table wrappers */
+.instrument-page .excel-table-wrapper,
+.instrument-page .excel-preview-section,
+.instrument-page .preview-section,
+.instrument-page .excel-scroll-wrapper,
+.instrument-page .excel-dialog-content {
+  overflow-x: auto !important;
+  max-width: 100% !important;
+}
+
+.instrument-page .excel-viewer {
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+/* Force the table to stay within its container */
+.instrument-page .excel-edit-table {
+  max-width: 100% !important;
+  table-layout: fixed !important;
+  width: 100% !important;
+}
+
+/* Ensure cells don't overflow */
+.instrument-page .excel-edit-table th,
+.instrument-page .excel-edit-table td {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 200px !important;
+}
+
+/* Ensure filter dropdowns stay readable */
 .instrument-page .filters-row select,
 .instrument-page .filters-row .filter-select,
 .instrument-page .filters-row select:focus,
