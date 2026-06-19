@@ -29,7 +29,6 @@
               <input type="text" v-model="searchQuery" placeholder="Search sessions..." class="search-input"/>
               <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''"><v-icon size="14">mdi-close</v-icon></button>
             </div>
-            <!-- Scrollable sessions list – fixed height -->
             <div class="sessions-list-container">
               <div class="sessions-list">
                 <div v-if="filteredSessions.length === 0" class="empty-sessions-list">
@@ -326,7 +325,8 @@ function captureVersion(sessionId, options = {}) {
       'Calculated': '📊 Updated calculations',
       'Renamed': '✏️ Renamed session',
       'Created': '📁 Session created',
-      'Restored': '↩️ Restored previous version'
+      'Restored': '↩️ Restored previous version',
+      'Saved': '💾 Saved to session'
     }
     shortDesc = map[changeType] || changeType
   }
@@ -344,7 +344,8 @@ function captureVersion(sessionId, options = {}) {
     'Calculated': 'badge-calculated',
     'Renamed': 'badge-renamed',
     'Updated': 'badge-updated',
-    'Restored': 'badge-restored'
+    'Restored': 'badge-restored',
+    'Saved': 'badge-saved'
   }
 
   const version = {
@@ -813,6 +814,7 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .badge-renamed { background: #607D8B; }
 .badge-updated { background: #0B2044; }
 .badge-restored { background: #C62828; }
+.badge-saved { background: #0B2044; }
 
 .version-entry-details {
   font-size: 11px;

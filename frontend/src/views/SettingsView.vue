@@ -4,146 +4,76 @@
       <!-- Header Section -->
       <div class="settings-header">
         <h1 class="page-title">System Settings</h1>
-        <p class="page-subtitle">Manage your account settings and preferences</p>
+        <p class="page-subtitle">Manage your account settings and security</p>
       </div>
 
-      <!-- Settings Content -->
-      <v-row>
-        <!-- Left Column - User Profile, Quick Actions, Preferences, Security -->
-        <v-col cols="12" md="4">
-          <v-card class="profile-card" elevation="2">
-            <v-card-text>
+      <!-- Settings Content – equal height columns -->
+      <v-row class="settings-row" align="stretch">
+        <!-- Left Column -->
+        <v-col cols="12" md="4" class="settings-col">
+          <!-- Profile Card -->
+          <v-card class="settings-card profile-card">
+            <div class="card-accent"></div>
+            <v-card-text class="profile-card-text">
               <div class="profile-section">
                 <div class="avatar-container">
                   <v-avatar size="80" color="primary" class="profile-avatar">
-                    <v-icon size="40" color="white">mdi-account</v-icon>
+                    <v-img v-if="user.avatar" :src="user.avatar" />
+                    <v-icon v-else size="40" color="white">mdi-account</v-icon>
                   </v-avatar>
-                  <v-btn 
-                    class="avatar-edit-btn" 
-                    size="small" 
-                    icon 
-                    color="primary"
-                    @click="editAvatar"
-                  >
-                    <v-icon size="16">mdi-camera</v-icon>
-                  </v-btn>
                 </div>
                 
                 <div class="profile-info text-center">
-                  <h3 class="profile-name">{{ user.name || 'Makanaka Kanyai' }}</h3>
-                  <p class="profile-email">{{ user.email || 'makanakakanyai@gmail.com' }}</p>
+                  <h3 class="profile-name">{{ user.fullName || 'User' }}</h3>
+                  <p class="profile-email">{{ user.email || 'user@example.com' }}</p>
                   <p class="profile-role">{{ user.role || 'Administrator' }}</p>
                 </div>
 
                 <v-btn 
                   block 
+                  size="small"
                   variant="outlined" 
                   class="edit-profile-btn"
                   @click="editProfile"
                 >
-                  <v-icon left>mdi-pencil</v-icon>
+                  <v-icon left size="14">mdi-pencil</v-icon>
                   Edit Profile
                 </v-btn>
               </div>
             </v-card-text>
           </v-card>
 
-          <!-- Quick Actions -->
-          <v-card class="quick-actions-card" elevation="2">
+          <!-- System Information Card -->
+          <v-card class="settings-card info-card">
+            <div class="card-accent"></div>
             <v-card-title class="card-title">
-              <v-icon class="title-icon">mdi-lightning-bolt</v-icon>
-              Quick Actions
+              <v-icon class="title-icon">mdi-information</v-icon>
+              System Information
             </v-card-title>
             <v-card-text>
-              <v-btn 
-                block 
-                variant="text" 
-                class="action-btn"
-                @click="exportData"
-              >
-                <v-icon left>mdi-download</v-icon>
-                Export Data
-              </v-btn>
-              <v-btn 
-                block 
-                variant="text" 
-                class="action-btn"
-                @click="importData"
-              >
-                <v-icon left>mdi-upload</v-icon>
-                Import Data
-              </v-btn>
-              <v-btn 
-                block 
-                variant="text" 
-                class="action-btn"
-                @click="clearCache"
-              >
-                <v-icon left>mdi-delete-sweep</v-icon>
-                Clear Cache
-              </v-btn>
+              <div class="info-item">
+                <span class="info-label">Last Updated</span>
+                <span class="info-value">{{ systemInfo.lastUpdated || 'Loading...' }}</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Database</span>
+                <span class="info-value">{{ systemInfo.database || 'MySQL' }}</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">API Status</span>
+                <v-chip size="small" color="success" class="status-chip">
+                  {{ systemInfo.apiStatus || 'Online' }}
+                </v-chip>
+              </div>
             </v-card-text>
           </v-card>
+        </v-col>
 
-          <!-- Preferences -->
-          <v-card class="settings-card preferences-card" elevation="2">
-            <v-card-title class="card-title">
-              <v-icon class="title-icon">mdi-cog</v-icon>
-              Preferences
-            </v-card-title>
-            <v-card-text>
-              <v-form ref="preferencesForm">
-                <v-select
-                  v-model="preferences.language"
-                  :items="languages"
-                  label="Language"
-                  variant="outlined"
-                  prepend-inner-icon="mdi-translate"
-                  class="mb-3"
-                />
-                
-                <v-select
-                  v-model="preferences.timezone"
-                  :items="timezones"
-                  label="Timezone"
-                  variant="outlined"
-                  prepend-inner-icon="mdi-clock"
-                  class="mb-3"
-                />
-                
-                <v-select
-                  v-model="preferences.dateFormat"
-                  :items="dateFormats"
-                  label="Date Format"
-                  variant="outlined"
-                  prepend-inner-icon="mdi-calendar"
-                  class="mb-3"
-                />
-                
-                <v-select
-                  v-model="preferences.currency"
-                  :items="currencies"
-                  label="Currency"
-                  variant="outlined"
-                  prepend-inner-icon="mdi-currency-usd"
-                  class="mb-3"
-                />
-                
-                <v-btn 
-                  color="primary" 
-                  block
-                  @click="savePreferences"
-                  :loading="saving.preferences"
-                >
-                  <v-icon left>mdi-content-save</v-icon>
-                  Save Preferences
-                </v-btn>
-              </v-form>
-            </v-card-text>
-          </v-card>
-
-          <!-- Security -->
-          <v-card class="settings-card" elevation="2">
+        <!-- Right Column -->
+        <v-col cols="12" md="8" class="settings-col">
+          <!-- Security Card -->
+          <v-card class="settings-card security-card">
+            <div class="card-accent"></div>
             <v-card-title class="card-title">
               <v-icon class="title-icon">mdi-shield-lock</v-icon>
               Security
@@ -152,30 +82,20 @@
               <v-btn 
                 block 
                 variant="outlined" 
-                class="security-btn mb-3"
-                @click="changePassword"
+                class="security-btn"
+                @click="showChangePassword = true"
               >
-                <v-icon left>mdi-lock-reset</v-icon>
+                <v-icon left size="16">mdi-lock-reset</v-icon>
                 Change Password
               </v-btn>
               
               <v-btn 
                 block 
                 variant="outlined" 
-                class="security-btn mb-3"
-                @click="enable2FA"
+                class="security-btn"
+                @click="loadLoginHistory"
               >
-                <v-icon left>mdi-two-factor-authentication</v-icon>
-                2FA Authentication
-              </v-btn>
-              
-              <v-btn 
-                block 
-                variant="outlined" 
-                class="security-btn mb-3"
-                @click="viewLoginHistory"
-              >
-                <v-icon left>mdi-history</v-icon>
+                <v-icon left size="16">mdi-history</v-icon>
                 Login History
               </v-btn>
               
@@ -183,418 +103,531 @@
                 block 
                 variant="outlined" 
                 class="security-btn"
-                @click="manageSessions"
+                @click="loadActiveSessions"
               >
-                <v-icon left>mdi-devices</v-icon>
+                <v-icon left size="16">mdi-devices</v-icon>
                 Active Sessions
               </v-btn>
             </v-card-text>
           </v-card>
-        </v-col>
 
-        <!-- Right Column - Account Settings, Notifications, System Information -->
-        <v-col cols="12" md="8">
-          <!-- Account Settings - Full Width -->
-          <v-card class="settings-card" elevation="2">
-            <v-card-title class="card-title">
-              <v-icon class="title-icon">mdi-account-cog</v-icon>
-              Account Settings
-            </v-card-title>
-            <v-card-text>
-              <v-form ref="accountForm">
-                <v-row>
-                  <v-col cols="12" md="6">
-                    <v-text-field
-                      v-model="accountSettings.firstName"
-                      label="First Name"
-                      variant="outlined"
-                      prepend-inner-icon="mdi-account"
-                    />
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-text-field
-                      v-model="accountSettings.lastName"
-                      label="Last Name"
-                      variant="outlined"
-                      prepend-inner-icon="mdi-account"
-                    />
-                  </v-col>
-                </v-row>
-                
-                <v-text-field
-                  v-model="accountSettings.email"
-                  label="Email Address"
-                  type="email"
-                  variant="outlined"
-                  prepend-inner-icon="mdi-email"
-                  readonly
-                />
-                
-                <v-text-field
-                  v-model="accountSettings.phone"
-                  label="Phone Number"
-                  variant="outlined"
-                  prepend-inner-icon="mdi-phone"
-                />
-                
-                <v-btn 
-                  color="primary" 
-                  @click="saveAccountSettings"
-                  :loading="saving.account"
-                >
-                  <v-icon left>mdi-content-save</v-icon>
-                  Save Account Settings
-                </v-btn>
-              </v-form>
-            </v-card-text>
-          </v-card>
-
-          <!-- System Information - Full Width -->
-          <v-card class="settings-card" elevation="2">
-            <v-card-title class="card-title">
-              <v-icon class="title-icon">mdi-information</v-icon>
-              System Information
-            </v-card-title>
-            <v-card-text>
-              <v-row>
-                <v-col cols="12" md="6">
-                  <div class="info-item">
-                    <span class="info-label">Version:</span>
-                    <span class="info-value">v1.0.0</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Environment:</span>
-                    <span class="info-value">Development</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Last Updated:</span>
-                    <span class="info-value">{{ lastUpdated }}</span>
-                  </div>
-                </v-col>
-                <v-col cols="12" md="6">
-                  <div class="info-item">
-                    <span class="info-label">Database:</span>
-                    <span class="info-value">MySQL</span>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">API Status:</span>
-                    <v-chip size="small" color="success">Online</v-chip>
-                  </div>
-                  <div class="info-item">
-                    <span class="info-label">Storage Used:</span>
-                    <span class="info-value">2.3 GB / 10 GB</span>
-                  </div>
-                </v-col>
-              </v-row>
-            </v-card-text>
-          </v-card>
-
-          <!-- Notifications - Full Width -->
-          <v-card class="settings-card" elevation="2">
+          <!-- Notifications Card -->
+          <v-card class="settings-card notifications-card">
+            <div class="card-accent"></div>
             <v-card-title class="card-title">
               <v-icon class="title-icon">mdi-bell</v-icon>
               Notifications
             </v-card-title>
             <v-card-text>
-              <v-row>
-                <v-col cols="12" md="6">
-                  <v-switch
-                    v-model="notifications.emailNotifications"
-                    label="Email Notifications"
-                    color="primary"
-                    inset
-                    class="mb-3"
-                  />
-                  <v-switch
-                    v-model="notifications.pushNotifications"
-                    label="Push Notifications"
-                    color="primary"
-                    inset
-                    class="mb-3"
-                  />
-                </v-col>
-                <v-col cols="12" md="6">
-                  <v-switch
-                    v-model="notifications.weeklyReports"
-                    label="Weekly Reports"
-                    color="primary"
-                    inset
-                    class="mb-3"
-                  />
-                  <v-switch
-                    v-model="notifications.systemAlerts"
-                    label="System Alerts"
-                    color="primary"
-                    inset
-                    class="mb-3"
-                  />
-                </v-col>
-              </v-row>
-              
-              <v-btn 
-                color="primary" 
-                @click="saveNotifications"
-                :loading="saving.notifications"
-              >
-                <v-icon left>mdi-content-save</v-icon>
-                Save Notification Settings
-              </v-btn>
+              <div class="notification-toggle-wrapper">
+                <div class="toggle-content">
+                  <div class="toggle-icon">
+                    <v-icon size="28" :color="notifications.enabled ? '#1E88E5' : '#999'">
+                      {{ notifications.enabled ? 'mdi-bell-ring' : 'mdi-bell-off' }}
+                    </v-icon>
+                  </div>
+                  <div class="toggle-info">
+                    <div class="toggle-title">Enable Notifications</div>
+                  </div>
+                  <div class="toggle-switch">
+                    <v-switch
+                      v-model="notifications.enabled"
+                      color="primary"
+                      inset
+                      hide-details
+                      class="master-switch"
+                      @update:model-value="saveNotifications"
+                    />
+                  </div>
+                </div>
+              </div>
             </v-card-text>
           </v-card>
         </v-col>
       </v-row>
     </div>
+
+    <!-- ========== DIALOGS / MODALS ========== -->
+
+    <!-- Change Password Dialog -->
+    <v-dialog v-model="showChangePassword" max-width="450px" persistent>
+      <v-card>
+        <v-card-title class="dialog-title">
+          <v-icon>mdi-lock-reset</v-icon> Change Password
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="showChangePassword = false">✕</button>
+        </v-card-title>
+        <v-card-text class="dialog-body">
+          <v-form ref="passwordForm">
+            <v-text-field
+              v-model="passwordData.currentPassword"
+              label="Current Password"
+              type="password"
+              variant="outlined"
+              prepend-inner-icon="mdi-lock"
+              class="mb-3"
+            />
+            <v-text-field
+              v-model="passwordData.newPassword"
+              label="New Password"
+              type="password"
+              variant="outlined"
+              prepend-inner-icon="mdi-lock"
+              class="mb-3"
+              :rules="[v => v.length >= 8 || 'Password must be at least 8 characters']"
+            />
+            <v-text-field
+              v-model="passwordData.confirmPassword"
+              label="Confirm Password"
+              type="password"
+              variant="outlined"
+              prepend-inner-icon="mdi-lock"
+              class="mb-3"
+              :rules="[v => v === passwordData.newPassword || 'Passwords do not match']"
+            />
+          </v-form>
+        </v-card-text>
+        <v-card-actions class="dialog-actions">
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="showChangePassword = false">Cancel</button>
+          <button class="btn-primary" @click="changePassword" :loading="saving.password">Save</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Login History Dialog -->
+    <v-dialog v-model="showLoginHistory" max-width="650px" persistent>
+      <v-card>
+        <v-card-title class="dialog-title">
+          <v-icon>mdi-history</v-icon> Login History
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="showLoginHistory = false">✕</button>
+        </v-card-title>
+        <v-card-text class="dialog-body">
+          <div class="history-list-container">
+            <div v-if="loginHistory.length === 0" class="empty-history">
+              <v-icon size="36" color="#ccc">mdi-file-document-outline</v-icon>
+              <p>No login history found.</p>
+            </div>
+            <div v-else class="history-list">
+              <div v-for="(entry, idx) in loginHistory" :key="idx" class="history-entry">
+                <div class="history-entry-header">
+                  <div class="history-entry-time">{{ formatDate(entry.timestamp) }}</div>
+                  <div class="history-entry-badge" :class="entry.status === 'Success' ? 'badge-success' : 'badge-failed'">
+                    {{ entry.status }}
+                  </div>
+                </div>
+                <div class="history-entry-details">
+                  <div class="history-entry-row">
+                    <span class="label">IP Address</span>
+                    <span class="value">{{ entry.ip }}</span>
+                  </div>
+                  <div class="history-entry-row">
+                    <span class="label">Location</span>
+                    <span class="value">{{ entry.location || '—' }}</span>
+                  </div>
+                  <div class="history-entry-row">
+                    <span class="label">Device</span>
+                    <span class="value">{{ entry.device || '—' }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions class="dialog-actions">
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="showLoginHistory = false">Close</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Active Sessions Dialog -->
+    <v-dialog v-model="showActiveSessions" max-width="650px" persistent>
+      <v-card>
+        <v-card-title class="dialog-title">
+          <v-icon>mdi-devices</v-icon> Active Sessions
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="showActiveSessions = false">✕</button>
+        </v-card-title>
+        <v-card-text class="dialog-body">
+          <div class="history-list-container">
+            <div v-if="activeSessions.length === 0" class="empty-history">
+              <v-icon size="36" color="#ccc">mdi-device-off</v-icon>
+              <p>No active sessions found.</p>
+            </div>
+            <div v-else class="history-list">
+              <div v-for="(session, idx) in activeSessions" :key="idx" class="history-entry">
+                <div class="history-entry-header">
+                  <div class="history-entry-time">{{ formatDate(session.lastActive) }}</div>
+                  <div class="history-entry-badge badge-active">Active</div>
+                </div>
+                <div class="history-entry-details">
+                  <div class="history-entry-row">
+                    <span class="label">Device</span>
+                    <span class="value">{{ session.device }}</span>
+                  </div>
+                  <div class="history-entry-row">
+                    <span class="label">Location</span>
+                    <span class="value">{{ session.location }}</span>
+                  </div>
+                  <div class="history-entry-row">
+                    <span class="label">IP Address</span>
+                    <span class="value">{{ session.ip }}</span>
+                  </div>
+                </div>
+                <div class="history-entry-actions">
+                  <button class="btn-terminate" @click="terminateSession(idx)">Terminate</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions class="dialog-actions">
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="showActiveSessions = false">Close</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Edit Profile Dialog – includes avatar upload -->
+    <v-dialog v-model="profileDialog" max-width="450px" persistent>
+      <v-card>
+        <v-card-title class="dialog-title">
+          <v-icon>mdi-account-edit</v-icon> Edit Profile
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="profileDialog = false">✕</button>
+        </v-card-title>
+        <v-card-text class="dialog-body">
+          <div class="dialog-avatar-section">
+            <v-avatar size="64" color="primary" class="dialog-avatar">
+              <v-img v-if="profileData.avatarPreview" :src="profileData.avatarPreview" />
+              <v-icon v-else size="32" color="white">mdi-account</v-icon>
+            </v-avatar>
+            <div class="dialog-avatar-actions">
+              <v-btn size="small" color="primary" variant="tonal" @click="uploadAvatarFromDialog">
+                <v-icon left size="16">mdi-upload</v-icon>
+                Upload Photo
+              </v-btn>
+              <v-btn size="small" color="error" variant="tonal" @click="removeAvatar" v-if="profileData.avatarPreview">
+                <v-icon left size="16">mdi-close</v-icon>
+                Remove
+              </v-btn>
+              <input type="file" ref="avatarFileInput" accept="image/*" style="display:none" @change="handleAvatarFileSelect" />
+            </div>
+          </div>
+
+          <v-divider class="my-3" />
+
+          <v-text-field
+            v-model="profileData.fullName"
+            label="Full Name"
+            variant="outlined"
+            prepend-inner-icon="mdi-account"
+            class="mb-3"
+          />
+          <v-text-field
+            v-model="profileData.email"
+            label="Email"
+            type="email"
+            variant="outlined"
+            prepend-inner-icon="mdi-email"
+            class="mb-3"
+            readonly
+          />
+          <v-text-field
+            v-model="profileData.phone"
+            label="Phone Number"
+            variant="outlined"
+            prepend-inner-icon="mdi-phone"
+            class="mb-3"
+          />
+        </v-card-text>
+        <v-card-actions class="dialog-actions">
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="profileDialog = false">Cancel</button>
+          <button class="btn-primary" @click="saveProfile" :loading="saving.profile">Save</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </fixed-layout>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { userAPI, systemAPI } from '../services/api'
 import FixedLayout from '../components/FixedLayout.vue'
 
 const authStore = useAuthStore()
 
-// User data
-const user = ref(authStore.user || {})
-
-// Account settings
-const accountSettings = ref({
-  firstName: 'Makanaka',
-  lastName: 'Kanyai',
-  email: 'makanakakanyai@gmail.com',
-  phone: '+263 77 123 4567'
+// ========== State ==========
+const user = ref({
+  name: '',
+  fullName: '',
+  email: '',
+  role: '',
+  avatar: '',
+  phone: ''
 })
 
-// Preferences
-const preferences = ref({
-  language: 'English',
-  timezone: 'GMT+2',
-  dateFormat: 'DD/MM/YYYY',
-  currency: 'USD'
-})
-
-// Notifications
 const notifications = ref({
-  emailNotifications: true,
-  pushNotifications: false,
-  weeklyReports: true,
-  systemAlerts: true
+  enabled: true
 })
 
-// Loading states
+const systemInfo = ref({
+  lastUpdated: '',
+  database: 'MySQL',
+  apiStatus: 'Online'
+})
+
 const saving = ref({
-  account: false,
-  preferences: false,
-  notifications: false
+  notifications: false,
+  password: false,
+  profile: false
 })
 
-// Dialog states
 const profileDialog = ref(false)
+const showChangePassword = ref(false)
+const showLoginHistory = ref(false)
+const showActiveSessions = ref(false)
 
-// Options for selects
-const languages = ['English', 'Spanish', 'French', 'German', 'Portuguese']
-const timezones = ['GMT+0', 'GMT+1', 'GMT+2', 'GMT+3', 'GMT+4', 'GMT+5']
-const dateFormats = ['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD', 'DD-MM-YYYY']
-const currencies = ['USD', 'EUR', 'GBP', 'ZAR', 'AUD', 'CAD']
+const passwordData = reactive({
+  currentPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
 
-const lastUpdated = ref(new Date().toLocaleDateString())
+const profileData = ref({
+  fullName: '',
+  email: '',
+  phone: '',
+  avatarPreview: ''
+})
 
-// Load settings data from backend
+const avatarFileInput = ref<HTMLInputElement | null>(null)
+
+const loginHistory = ref<any[]>([])
+const activeSessions = ref<any[]>([])
+
+// ========== LOAD DATA FROM BACKEND ==========
 const loadSettingsData = async () => {
   try {
-    // Load user profile
-    const profileResponse = await userAPI.getProfile()
-    if (profileResponse.success) {
-      user.value = profileResponse.data
-      accountSettings.value.firstName = profileResponse.data.name.split(' ')[0] || ''
-      accountSettings.value.lastName = profileResponse.data.name.split(' ')[1] || ''
-      accountSettings.value.email = profileResponse.data.email
+    // 1. Profile
+    const profileRes = await userAPI.getProfile()
+    if (profileRes?.success) {
+      const data = profileRes.data
+      user.value.name = data.name || ''
+      user.value.fullName = data.name || ''
+      user.value.email = data.email || ''
+      // Role: you can set from backend if available, otherwise fallback
+      user.value.role = data.role || 'Administrator'
+      // Avatar: try from localStorage or backend
+      const savedAvatar = localStorage.getItem('user-avatar')
+      if (savedAvatar) user.value.avatar = savedAvatar
+      // Phone: backend doesn't provide phone yet, we'll keep fallback
+      user.value.phone = data.phone || ''
+      profileData.value = {
+        fullName: user.value.fullName,
+        email: user.value.email,
+        phone: user.value.phone,
+        avatarPreview: user.value.avatar
+      }
     }
 
-    // Load user preferences
-    const preferencesResponse = await userAPI.getPreferences()
-    if (preferencesResponse.success) {
-      preferences.value.language = preferencesResponse.data.language
-      preferences.value.timezone = preferencesResponse.data.timezone
-      preferences.value.dateFormat = preferencesResponse.data.date_format
-      preferences.value.currency = preferencesResponse.data.currency
+    // 2. Notification settings
+    const notifRes = await userAPI.getNotificationSettings()
+    if (notifRes?.success) {
+      const n = notifRes.data
+      notifications.value.enabled = n.emailNotifications ?? true
     }
 
-    // Load notification settings
-    const notificationsResponse = await userAPI.getNotificationSettings()
-    if (notificationsResponse.success) {
-      notifications.value.emailNotifications = notificationsResponse.data.emailNotifications
-      notifications.value.pushNotifications = notificationsResponse.data.pushNotifications
-      notifications.value.weeklyReports = notificationsResponse.data.weeklyReports
-      notifications.value.systemAlerts = notificationsResponse.data.systemAlerts
-    }
-
-    // Load system information
-    const systemResponse = await systemAPI.getInfo()
-    if (systemResponse.success) {
-      lastUpdated.value = new Date(systemResponse.data.last_updated).toLocaleDateString()
+    // 3. System info
+    const sysRes = await systemAPI.getInfo()
+    if (sysRes?.success) {
+      const s = sysRes.data
+      systemInfo.value.lastUpdated = s.last_updated || '—'
+      systemInfo.value.apiStatus = s.apiStatus || 'Online'
+      systemInfo.value.database = s.database || 'MySQL'
     }
   } catch (error) {
-    console.error('Error loading settings data:', error)
+    console.error('Error loading settings:', error)
+    // Fallback: load avatar from localStorage
+    const avatar = localStorage.getItem('user-avatar')
+    if (avatar) {
+      user.value.avatar = avatar
+      profileData.value.avatarPreview = avatar
+    }
   }
 }
 
-// Methods
-const editAvatar = () => {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = 'image/*'
-  input.onchange = (e: any) => {
-    const file = e.target.files[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (event: any) => {
-        user.value.avatar = event.target.result
-        localStorage.setItem('user-avatar', event.target.result)
-      }
-      reader.readAsDataURL(file)
+// ========== SAVE FUNCTIONS ==========
+const saveNotifications = async () => {
+  saving.value.notifications = true
+  try {
+    const payload = { enabled: notifications.value.enabled }
+    const response = await userAPI.updateNotificationSettings(payload)
+    if (!response?.success) {
+      notifications.value.enabled = !notifications.value.enabled
+      alert('Failed to save notification settings.')
     }
+  } catch {
+    notifications.value.enabled = !notifications.value.enabled
+    alert('Error saving notification settings.')
+  } finally {
+    saving.value.notifications = false
   }
-  input.click()
+}
+
+const saveProfile = async () => {
+  saving.value.profile = true
+  try {
+    const payload: any = {
+      name: profileData.value.fullName,
+      phone: profileData.value.phone
+    }
+    if (profileData.value.avatarPreview && profileData.value.avatarPreview !== user.value.avatar) {
+      payload.avatar = profileData.value.avatarPreview
+    }
+    const response = await userAPI.updateProfile(payload)
+    if (response?.success) {
+      user.value.fullName = profileData.value.fullName
+      user.value.name = profileData.value.fullName
+      if (payload.avatar) {
+        user.value.avatar = profileData.value.avatarPreview
+        localStorage.setItem('user-avatar', profileData.value.avatarPreview)
+      }
+      alert('Profile updated successfully!')
+      profileDialog.value = false
+      await loadSettingsData()
+    } else {
+      alert('Failed to update profile.')
+    }
+  } catch {
+    alert('Error updating profile.')
+  } finally {
+    saving.value.profile = false
+  }
+}
+
+// ========== AVATAR UPLOAD ==========
+const uploadAvatarFromDialog = () => {
+  avatarFileInput.value?.click()
+}
+
+const handleAvatarFileSelect = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  if (file.size > 2 * 1024 * 1024) {
+    alert('Image size must be less than 2MB.')
+    input.value = ''
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = (e: any) => {
+    profileData.value.avatarPreview = e.target.result
+    input.value = ''
+  }
+  reader.readAsDataURL(file)
+}
+
+const removeAvatar = () => {
+  profileData.value.avatarPreview = ''
+}
+
+// ========== SECURITY ==========
+const changePassword = async () => {
+  if (passwordData.newPassword !== passwordData.confirmPassword) {
+    alert('Passwords do not match.')
+    return
+  }
+  if (passwordData.newPassword.length < 8) {
+    alert('Password must be at least 8 characters.')
+    return
+  }
+  saving.value.password = true
+  try {
+    const response = await userAPI.changePassword({
+      currentPassword: passwordData.currentPassword,
+      newPassword: passwordData.newPassword
+    })
+    if (response?.success) {
+      alert('Password changed successfully!')
+      showChangePassword.value = false
+      passwordData.currentPassword = ''
+      passwordData.newPassword = ''
+      passwordData.confirmPassword = ''
+    } else {
+      alert(response?.message || 'Failed to change password.')
+    }
+  } catch {
+    alert('Error changing password.')
+  } finally {
+    saving.value.password = false
+  }
+}
+
+// ===== Mock data for login history & active sessions (backend not implemented yet) =====
+const loadLoginHistory = () => {
+  loginHistory.value = [
+    { timestamp: new Date().toISOString(), ip: '192.168.1.1', location: 'Harare, Zimbabwe', device: 'Chrome on Windows', status: 'Success' },
+    { timestamp: new Date(Date.now() - 86400000).toISOString(), ip: '192.168.1.1', location: 'Harare, Zimbabwe', device: 'Firefox on Windows', status: 'Success' }
+  ]
+  showLoginHistory.value = true
+}
+
+const loadActiveSessions = () => {
+  activeSessions.value = [
+    { device: 'Chrome on Windows', location: 'Harare, Zimbabwe', ip: '192.168.1.1', lastActive: new Date().toISOString() }
+  ]
+  showActiveSessions.value = true
+}
+
+const terminateSession = (index: number) => {
+  activeSessions.value.splice(index, 1)
+  alert('Session terminated.')
 }
 
 const editProfile = () => {
+  profileData.value = {
+    fullName: user.value.fullName || user.value.name || '',
+    email: user.value.email || '',
+    phone: user.value.phone || '',
+    avatarPreview: user.value.avatar || ''
+  }
   profileDialog.value = true
 }
 
-const saveAccountSettings = async () => {
-  saving.value.account = true
-  await new Promise(resolve => setTimeout(resolve, 1000))
-  saving.value.account = false
-  alert('Account settings saved successfully!')
-}
-
-const savePreferences = async () => {
-  saving.value.preferences = true
-  await new Promise(resolve => setTimeout(resolve, 1000))
-  saving.value.preferences = false
-  alert('Preferences saved successfully!')
-}
-
-const saveNotifications = async () => {
-  saving.value.notifications = true
-  await new Promise(resolve => setTimeout(resolve, 1000))
-  saving.value.notifications = false
-  alert('Notification settings saved successfully!')
-}
-
-const exportData = () => {
-  const data = {
-    user: user.value,
-    preferences: preferences.value,
-    notifications: notifications.value
-  }
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'settings-export.json'
-  a.click()
-  URL.revokeObjectURL(url)
-  alert('Settings exported successfully!')
-}
-
-const importData = () => {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.json'
-  input.onchange = (e: any) => {
-    const file = e.target.files[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (event: any) => {
-        try {
-          const data = JSON.parse(event.target.result)
-          if (data.user) user.value = { ...user.value, ...data.user }
-          if (data.preferences) preferences.value = { ...preferences.value, ...data.preferences }
-          if (data.notifications) notifications.value = { ...notifications.value, ...data.notifications }
-          alert('Settings imported successfully!')
-        } catch (error) {
-          alert('Error importing settings. Please check the file format.')
-        }
-      }
-      reader.readAsText(file)
-    }
-  }
-  input.click()
-}
-
-const clearCache = () => {
-  localStorage.clear()
-  sessionStorage.clear()
-  alert('Cache cleared successfully!')
-  setTimeout(() => window.location.reload(), 1000)
-}
-
-const changePassword = () => {
-  const newPassword = prompt('Enter new password:')
-  if (newPassword && newPassword.length >= 8) {
-    alert('Password changed successfully!')
-  } else {
-    alert('Password must be at least 8 characters long.')
-  }
-}
-
-const enable2FA = () => {
-  const enable = confirm('Enable Two-Factor Authentication for enhanced security?')
-  if (enable) {
-    alert('Two-factor authentication enabled! A verification code will be sent to your email on next login.')
-  }
-}
-
-const viewLoginHistory = () => {
-  const history = [
-    { date: new Date().toLocaleDateString(), time: '10:30 AM', ip: '192.168.1.1', status: 'Success' },
-    { date: new Date(Date.now() - 86400000).toLocaleDateString(), time: '09:15 AM', ip: '192.168.1.1', status: 'Success' },
-    { date: new Date(Date.now() - 172800000).toLocaleDateString(), time: '03:45 PM', ip: '192.168.1.1', status: 'Success' }
-  ]
-  alert(`Recent Login History:\n${history.map(h => `${h.date} ${h.time} - ${h.ip} (${h.status})`).join('\n')}`)
-}
-
-const manageSessions = () => {
-  const activeSessions = [
-    { device: 'Chrome on Windows', location: 'Harare, Zimbabwe', lastActive: 'Just now' },
-    { device: 'Mobile App on iPhone', location: 'Harare, Zimbabwe', lastActive: '2 hours ago' }
-  ]
-  alert(`Active Sessions:\n${activeSessions.map(s => `${s.device}\n${s.location}\nLast active: ${s.lastActive}`).join('\n\n')}`)
+const formatDate = (timestamp: string) => {
+  if (!timestamp) return ''
+  try { return new Date(timestamp).toLocaleString() } catch { return timestamp }
 }
 
 onMounted(() => {
   loadSettingsData()
   if (authStore.user) {
-    user.value = authStore.user
+    user.value = { ...user.value, ...authStore.user }
   }
 })
 </script>
 
 <style scoped>
+/* ===== LAYOUT ===== */
 .settings-view {
-  padding: 0;
-  max-width: 100%;
-}
-
-.settings-view .v-row {
-  margin: 0 !important;
-}
-
-.settings-view .v-col {
-  padding: 4px !important;
+  padding: 20px 30px;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 .settings-header {
-  margin-bottom: 12px;
+  margin-bottom: 28px;
 }
 
 .page-title {
   font-size: 28px;
   font-weight: 700;
-  color: #0B2A44;
+  color: #0B2044;
   margin-bottom: 6px;
 }
 
@@ -604,149 +637,149 @@ onMounted(() => {
   margin: 0;
 }
 
-/* Profile Card */
-.profile-card {
-  border-radius: 16px;
-  overflow: hidden;
+/* ===== ROW & COLUMN – EQUAL HEIGHT ===== */
+.settings-row {
+  margin: 0 -12px !important;
+  display: flex;
+  align-items: stretch;
 }
 
-.profile-card .v-card-text {
-  padding: 12px !important;
+.settings-col {
+  padding: 0 12px !important;
+  display: flex;
+  flex-direction: column;
 }
 
-.profile-section {
-  text-align: center;
-  padding: 0;
-}
-
-.avatar-container {
-  position: relative;
-  display: inline-block;
-  margin-bottom: 12px;
-}
-
-.profile-avatar {
-  border: 3px solid #f0f0f0;
-}
-
-.avatar-edit-btn {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  background: white !important;
-}
-
-.profile-name {
-  font-size: 18px;
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 3px;
-}
-
-.profile-email {
-  font-size: 13px;
-  color: #666;
-  margin-bottom: 3px;
-}
-
-.profile-role {
-  font-size: 11px;
-  color: #1E88E5;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 12px;
-}
-
-.edit-profile-btn {
-  border-radius: 8px;
-}
-
-/* Quick Actions Card */
-.quick-actions-card {
-  border-radius: 16px;
-  margin-top: 16px;
-}
-
-.quick-actions-card .v-card-text {
-  padding: 20px !important;
-}
-
-.quick-actions-card .v-card-title {
-  padding: 20px 20px 12px 20px !important;
-}
-
-.action-btn {
-  justify-content: flex-start;
-  margin-bottom: 6px;
-  border-radius: 8px;
-  padding: 8px 16px;
-  min-height: 40px;
-}
-
-/* Settings Cards */
+/* ===== CARDS ===== */
 .settings-card {
   border-radius: 16px;
-  margin-bottom: 16px;
-  min-height: 280px;
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  transition: transform 0.2s, box-shadow 0.2s;
+  position: relative;
+  margin-bottom: 24px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
-.preferences-card {
-  margin-top: 16px;
+.settings-card:last-child {
+  margin-bottom: 0;
+}
+
+.settings-card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.10);
+  transform: translateY(-2px);
+}
+
+.card-accent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #0B2044, #1E88E5);
+  border-radius: 16px 16px 0 0;
 }
 
 .settings-card .v-card-text {
   padding: 20px !important;
+  flex: 1;
 }
 
 .settings-card .v-card-title {
-  padding: 20px 20px 12px 20px !important;
+  padding: 16px 20px 4px 20px !important;
 }
 
 .card-title {
   font-size: 16px;
   font-weight: 600;
-  color: #0B2A44;
+  color: #0B2044;
   display: flex;
   align-items: center;
-  padding-bottom: 12px;
-}
-
-.settings-card .v-text-field,
-.settings-card .v-select {
-  margin-bottom: 16px !important;
-}
-
-.settings-card .v-switch {
-  margin-bottom: 16px !important;
+  padding-bottom: 8px;
 }
 
 .title-icon {
-  margin-right: 8px;
+  margin-right: 10px;
   color: #1E88E5;
+  font-size: 22px;
+}
+
+/* ===== PROFILE CARD ===== */
+.profile-card-text {
+  padding-bottom: 20px !important;
+}
+
+.profile-section {
+  text-align: center;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.avatar-container {
+  display: inline-block;
+  margin-bottom: 12px;
+}
+
+.profile-avatar {
+  border: 3px solid #e8ecf1;
+  background: #0B2044;
+}
+
+.profile-info {
+  margin-bottom: 10px;
+}
+
+.profile-name {
   font-size: 20px;
+  font-weight: 700;
+  color: #0B2044;
+  margin-bottom: 2px;
 }
 
-/* Security Buttons */
-.security-btn {
-  justify-content: flex-start;
+.profile-email {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 2px;
+}
+
+.profile-role {
+  font-size: 12px;
+  color: #1E88E5;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0;
+}
+
+/* ===== SMALLER EDIT PROFILE BUTTON ===== */
+.edit-profile-btn {
   border-radius: 8px;
-  border-color: #e0e0e0;
-  margin-bottom: 8px;
-  padding: 8px 16px;
-  min-height: 40px;
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  border-color: #0B2044;
+  color: #0B2044;
+  transition: all 0.2s;
+  min-height: 30px;
+  font-size: 12px;
+  padding: 4px 12px;
+  margin-top: 4px;
 }
 
-/* System Information */
+.edit-profile-btn:hover {
+  background: #0B2044;
+  color: white;
+}
+
+/* ===== SYSTEM INFO ===== */
 .info-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 0;
+  padding: 8px 0;
   border-bottom: 1px solid #f0f0f0;
 }
 
@@ -762,40 +795,363 @@ onMounted(() => {
 
 .info-value {
   font-size: 13px;
-  color: #333;
+  color: #0B2044;
   font-weight: 600;
 }
 
-/* Responsive Design */
+.status-chip {
+  background: #E8F5E9 !important;
+  color: #2E7D32 !important;
+  font-weight: 600;
+}
+
+/* ===== SECURITY CARD ===== */
+.security-card .v-card-text {
+  padding-top: 4px !important;
+}
+
+.security-btn {
+  justify-content: flex-start;
+  border-radius: 10px;
+  border-color: #e0e0e0;
+  margin-bottom: 10px;
+  padding: 10px 16px;
+  min-height: 44px;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.security-btn:last-child {
+  margin-bottom: 0;
+}
+
+.security-btn:hover {
+  border-color: #0B2044;
+  background: rgba(11, 32, 68, 0.04);
+}
+
+/* ===== NOTIFICATIONS ===== */
+.notification-toggle-wrapper {
+  background: #f8f9ff;
+  border-radius: 12px;
+  padding: 16px 20px;
+  border: 1px solid #e8ecf1;
+}
+
+.toggle-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.toggle-icon {
+  flex-shrink: 0;
+}
+
+.toggle-info {
+  flex: 1;
+  min-width: 120px;
+}
+
+.toggle-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0B2044;
+}
+
+.toggle-switch {
+  flex-shrink: 0;
+}
+
+.master-switch {
+  margin: 0;
+}
+
+/* ===== DIALOGS ===== */
+.dialog-title {
+  background: #0B2044;
+  color: white;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  font-size: 18px;
+}
+
+.btn-close-dialog {
+  background: transparent;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  transition: background 0.2s;
+  font-size: 18px;
+}
+
+.btn-close-dialog:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.dialog-body {
+  padding: 20px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.dialog-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dialog-body::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 4px;
+}
+
+.dialog-body::-webkit-scrollbar-thumb {
+  background: #0B2044;
+  border-radius: 4px;
+}
+
+.dialog-actions {
+  padding: 8px 16px 12px;
+  border-top: 1px solid #e8ecf1;
+}
+
+.btn-secondary {
+  background: white;
+  color: #0B2044;
+  border: 2px solid #0B2044;
+  padding: 6px 20px;
+  border-radius: 30px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  background: #0B2044;
+  color: white;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #0B2044, #1E88E5);
+  color: white;
+  border: none;
+  padding: 6px 20px;
+  border-radius: 30px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(11, 32, 68, 0.3);
+}
+
+/* ===== DIALOG AVATAR ===== */
+.dialog-avatar-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 0;
+}
+
+.dialog-avatar {
+  border: 3px solid #e8ecf1;
+  background: #0B2044;
+}
+
+.dialog-avatar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.dialog-avatar-actions .v-btn {
+  font-size: 12px;
+  padding: 4px 12px;
+  min-height: 30px;
+  border-radius: 6px;
+}
+
+/* ===== HISTORY LISTS ===== */
+.history-list-container {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.history-list-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.history-list-container::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 4px;
+}
+
+.history-list-container::-webkit-scrollbar-thumb {
+  background: #0B2044;
+  border-radius: 4px;
+}
+
+.empty-history {
+  text-align: center;
+  padding: 40px 0;
+  color: #999;
+}
+
+.empty-history p {
+  margin-top: 8px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-entry {
+  background: #f8f9ff;
+  border-radius: 8px;
+  padding: 10px 14px;
+  border: 1px solid #e8ecf1;
+  transition: all 0.2s;
+}
+
+.history-entry:hover {
+  border-color: #0B2044;
+}
+
+.history-entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.history-entry-time {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0B2044;
+}
+
+.history-entry-badge {
+  padding: 2px 12px;
+  border-radius: 30px;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+}
+
+.badge-success {
+  background: #4CAF50;
+}
+
+.badge-failed {
+  background: #f44336;
+}
+
+.badge-active {
+  background: #1E88E5;
+}
+
+.history-entry-details {
+  font-size: 12px;
+  color: #555;
+}
+
+.history-entry-row {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+
+.history-entry-row .label {
+  width: 72px;
+  font-weight: 600;
+  color: #0B2044;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.history-entry-row .value {
+  color: #333;
+}
+
+.history-entry-actions {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-terminate {
+  background: #f44336;
+  color: white;
+  border: none;
+  padding: 2px 14px;
+  border-radius: 30px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-terminate:hover {
+  background: #d32f2f;
+}
+
+/* ===== RESPONSIVE ===== */
 @media (max-width: 960px) {
-  .settings-header {
-    margin-bottom: 16px;
+  .settings-view {
+    padding: 16px;
   }
-  
-  .page-title {
-    font-size: 26px;
+  .settings-col {
+    padding: 0 8px !important;
+  }
+  .settings-card {
+    margin-bottom: 16px;
   }
 }
 
 @media (max-width: 600px) {
-  .profile-card,
-  .quick-actions-card,
+  .settings-view {
+    padding: 12px;
+  }
   .settings-card {
     border-radius: 12px;
   }
-  
-  .card-title {
-    font-size: 15px;
+  .page-title {
+    font-size: 24px;
   }
-  
+  .settings-col {
+    padding: 0 4px !important;
+  }
+  .settings-card .v-card-text {
+    padding: 16px !important;
+  }
   .info-item {
     flex-direction: column;
     align-items: flex-start;
-    gap: 3px;
+    gap: 2px;
   }
-  
-  .settings-card {
-    margin-bottom: 12px;
+  .dialog-title {
+    font-size: 16px;
+    padding: 10px 14px;
+  }
+  .dialog-body {
+    padding: 14px;
+  }
+  .toggle-content {
+    flex-wrap: wrap;
+    justify-content: center;
+    text-align: center;
+  }
+  .toggle-info {
+    min-width: 100%;
+    text-align: center;
   }
 }
 </style>
