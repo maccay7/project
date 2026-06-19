@@ -29,6 +29,7 @@
               <input type="text" v-model="searchQuery" placeholder="Search sessions..." class="search-input"/>
               <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''"><v-icon size="14">mdi-close</v-icon></button>
             </div>
+            <!-- Scrollable sessions list – fixed height -->
             <div class="sessions-list-container">
               <div class="sessions-list">
                 <div v-if="filteredSessions.length === 0" class="empty-sessions-list">
@@ -117,7 +118,7 @@
     </div>
 
     <!-- ========== VERSION HISTORY MODAL ========== -->
-    <v-dialog v-model="versionDialogVisible" max-width="650px">
+    <v-dialog v-model="versionDialogVisible" max-width="650px" persistent>
       <v-card>
         <v-card-title class="version-dialog-title">
           <v-icon>mdi-history</v-icon> Change History – {{ selectedSessionForVersions?.name || 'Session' }}
@@ -139,34 +140,37 @@
             </button>
           </div>
 
-          <div v-if="!filteredVersions.length" class="empty-versions">
-            <v-icon size="36" color="#ccc">mdi-file-document-outline</v-icon>
-            <p>{{ selectedSessionForVersions?.versions?.length ? 'No versions match your search.' : 'No changes recorded yet.' }}</p>
-          </div>
-          <div v-else class="version-list">
-            <div v-for="(ver, idx) in filteredVersions" :key="idx" class="version-entry" :class="{ 'latest': idx === 0 }">
-              <div class="version-entry-header">
-                <div class="version-entry-time">{{ formatVersionTime(ver.timestamp) }}</div>
-                <div class="version-entry-badge" :class="ver.changeTypeClass">{{ ver.changeType }}</div>
-              </div>
-              <div class="version-entry-details">
-                <div class="version-entry-row">
-                  <span class="label">Instrument</span>
-                  <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.instrument || '—' }}</span>
+          <!-- Scrollable version list -->
+          <div class="version-list-container">
+            <div v-if="!filteredVersions.length" class="empty-versions">
+              <v-icon size="36" color="#ccc">mdi-file-document-outline</v-icon>
+              <p>{{ selectedSessionForVersions?.versions?.length ? 'No versions match your search.' : 'No changes recorded yet.' }}</p>
+            </div>
+            <div v-else class="version-list">
+              <div v-for="(ver, idx) in filteredVersions" :key="idx" class="version-entry" :class="{ 'latest': idx === 0 }">
+                <div class="version-entry-header">
+                  <div class="version-entry-time">{{ formatVersionTime(ver.timestamp) }}</div>
+                  <div class="version-entry-badge" :class="ver.changeTypeClass">{{ ver.changeType }}</div>
                 </div>
-                <div class="version-entry-row description-row">
-                  <span class="label">Change</span>
-                  <span class="value description-text">{{ ver.shortDescription || ver.description || ver.name || 'Updated' }}</span>
+                <div class="version-entry-details">
+                  <div class="version-entry-row">
+                    <span class="label">Instrument</span>
+                    <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.instrument || '—' }}</span>
+                  </div>
+                  <div class="version-entry-row description-row">
+                    <span class="label">Change</span>
+                    <span class="value description-text">{{ ver.shortDescription || ver.description || ver.name || 'Updated' }}</span>
+                  </div>
+                  <div class="version-entry-row" v-if="ver.fieldsChanged && ver.fieldsChanged.length">
+                    <span class="label">Fields</span>
+                    <span class="value fields-tags">
+                      <span v-for="(field, fi) in ver.fieldsChanged" :key="fi" class="field-tag">{{ field }}</span>
+                    </span>
+                  </div>
                 </div>
-                <div class="version-entry-row" v-if="ver.fieldsChanged && ver.fieldsChanged.length">
-                  <span class="label">Fields</span>
-                  <span class="value fields-tags">
-                    <span v-for="(field, fi) in ver.fieldsChanged" :key="fi" class="field-tag">{{ field }}</span>
-                  </span>
+                <div class="version-entry-actions">
+                  <button class="btn-restore" @click="restoreVersion(selectedSessionForVersions.id, idx)">Restore</button>
                 </div>
-              </div>
-              <div class="version-entry-actions">
-                <button class="btn-restore" @click="restoreVersion(selectedSessionForVersions.id, idx)">Restore</button>
               </div>
             </div>
           </div>
@@ -177,7 +181,6 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-
   </div>
 </template>
 
@@ -261,7 +264,6 @@ function formatVersionTime(timestamp) {
   return new Date(timestamp).toLocaleString()
 }
 
-// Get version count safely
 function getVersionCount(session) {
   return session?.versions?.length || 0
 }
@@ -274,7 +276,6 @@ function loadSessionsFromLocalStorage() {
   if (stored) {
     try {
       sessions.value = JSON.parse(stored)
-      // Ensure each session has a versions array
       sessions.value.forEach(s => {
         if (!s.versions) s.versions = []
       })
@@ -286,7 +287,7 @@ function loadSessionsFromLocalStorage() {
 function saveActiveSessionId(id) { if (id) localStorage.setItem(ACTIVE_SESSION_ID_KEY, id); else localStorage.removeItem(ACTIVE_SESSION_ID_KEY) }
 function loadActiveSessionId() { return localStorage.getItem(ACTIVE_SESSION_ID_KEY) }
 
-// ========== VERSION CAPTURE – NOW USES DETAILS FROM EVENT ==========
+// ========== VERSION CAPTURE ==========
 function captureVersion(sessionId, options = {}) {
   const session = sessions.value.find(s => s.id === sessionId)
   if (!session) {
@@ -303,13 +304,11 @@ function captureVersion(sessionId, options = {}) {
     user = localStorage.getItem('user') || 'System'
   } = options
 
-  // Use provided instrument or detect it
   let detectedInstrument = instrument
   if (!detectedInstrument) {
     detectedInstrument = detectInstrument(sessionId)
   }
 
-  // Fallback to last version's instrument if still null
   if (!detectedInstrument && session.versions && session.versions.length > 0) {
     const lastVersion = session.versions[0]
     if (lastVersion.instrument && lastVersion.instrument !== 'Session') {
@@ -363,14 +362,12 @@ function captureVersion(sessionId, options = {}) {
 
   if (!session.versions) session.versions = []
   session.versions.unshift(version)
-  if (session.versions.length > 30) session.versions.pop()
+  if (session.versions.length > 50) session.versions.pop()
 
   console.log(`📝 Version added for session ${session.name} (${sessionId}) – ${changeType} on ${detectedInstrument}`)
-
   saveSessionsToLocalStorage()
 }
 
-// Detect instrument from workflow data (fallback)
 function detectInstrument(sessionId) {
   const instrumentMap = {
     'money-market': 'Money Market',
@@ -387,7 +384,6 @@ function detectInstrument(sessionId) {
       if (hasData) found.push(name)
     }
   }
-  // Also check session.instrumentData as fallback
   const session = sessions.value.find(s => s.id === sessionId)
   if (session && session.instrumentData) {
     for (const [key, name] of Object.entries(instrumentMap)) {
@@ -402,7 +398,6 @@ function detectInstrument(sessionId) {
   return null
 }
 
-// Open the version modal
 function openVersionModal(sessionId) {
   const session = sessions.value.find(s => s.id === sessionId)
   if (session) {
@@ -438,7 +433,7 @@ function restoreVersion(sessionId, versionIndex) {
   versionDialogVisible.value = false
 }
 
-// ========== EVENT LISTENER – RECEIVES DETAILED EVENTS ==========
+// ========== EVENT LISTENER ==========
 function onSessionUpdated(event) {
   const detail = event.detail || {}
   const { sessionId, instrument, changeType, fieldsChanged, description, shortDescription } = detail
@@ -472,7 +467,6 @@ function loadExistingSession(sessionId) {
     if (refreshed) {
       const index = sessions.value.findIndex(s => s.id === sessionId)
       if (index !== -1) {
-        // Preserve versions when refreshing
         const existingVersions = sessions.value[index]?.versions || []
         sessions.value[index] = { ...refreshed, versions: existingVersions }
         saveSessionsToLocalStorage()
@@ -589,7 +583,7 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .search-input { flex: 1; border: none; background: transparent; outline: none; font-size: 12px; }
 .clear-search { background: none; border: none; cursor: pointer; color: #999; display: flex; align-items: center; justify-content: center; padding: 2px; }
 .clear-search:hover { color: #f44336; }
-.sessions-list-container { flex: 1; overflow-y: auto; margin: 0 0 8px 0; min-height: 0; }
+.sessions-list-container { flex: 1; overflow-y: auto; margin: 0 0 8px 0; min-height: 0; max-height: 320px; }
 .sessions-list { padding: 0 8px 8px 0; }
 .sessions-list::-webkit-scrollbar { width: 4px; }
 .sessions-list::-webkit-scrollbar-track { background: #f0f0f0; border-radius: 4px; }
@@ -684,7 +678,7 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(11, 32, 68, 0.3); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ========== VERSION MODAL ========== */
+/* ========== VERSION MODAL – SCROLLABLE VERSION LIST ========== */
 .version-dialog-title {
   background: #0B2044;
   color: white;
@@ -708,20 +702,10 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 }
 
 .version-dialog-body {
-  max-height: 70vh;
-  overflow-y: auto;
   padding: 12px 16px;
-}
-.version-dialog-body::-webkit-scrollbar {
-  width: 6px;
-}
-.version-dialog-body::-webkit-scrollbar-track {
-  background: #f0f0f0;
-  border-radius: 4px;
-}
-.version-dialog-body::-webkit-scrollbar-thumb {
-  background: #0B2044;
-  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
 }
 
 .version-search-bar {
@@ -733,6 +717,7 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
   margin-bottom: 12px;
   border: 1px solid #e0e0e0;
   transition: border-color 0.2s;
+  flex-shrink: 0;
 }
 .version-search-bar:focus-within {
   border-color: #0B2044;
@@ -748,6 +733,26 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 }
 .version-search-input::placeholder {
   color: #aaa;
+}
+
+/* ===== SCROLLABLE VERSION LIST ===== */
+.version-list-container {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 420px;
+  padding-right: 4px;
+}
+.version-list-container::-webkit-scrollbar {
+  width: 6px;
+}
+.version-list-container::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-radius: 4px;
+}
+.version-list-container::-webkit-scrollbar-thumb {
+  background: #0B2044;
+  border-radius: 4px;
 }
 
 .empty-versions {
@@ -869,6 +874,7 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .version-dialog-actions {
   padding: 6px 16px 10px;
   border-top: 1px solid #e8ecf1;
+  flex-shrink: 0;
 }
 .btn-secondary {
   background: white;
@@ -892,5 +898,6 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
   .kpis-row, .instruments-row { grid-template-columns: 1fr; }
   .session-row-stats { display: none; }
   .row-delete-btn { opacity: 1; }
+  .version-list-container { max-height: 300px; }
 }
 </style>

@@ -837,6 +837,7 @@ async function loadSavedData() {
   return loaded
 }
 
+// ========== SAVE SESSION – WITH VERSION EVENT ==========
 function saveSessionData() {
   const datasetId = route.query.dataset_id
   if (datasetId) {
@@ -878,6 +879,35 @@ function saveSessionData() {
   if (uploadedFile.value) localStorage.setItem(`${instrumentType.value}_uploaded_file_name`, uploadedFile.value.name)
 
   updateSessionCompletion()
+
+  // ====== VERSION EVENT DISPATCH (FIX) ======
+  let changeType = 'Updated'
+  let shortDesc = 'Data updated'
+  const instrument = instrumentName.value || 'Unknown'
+
+  // Determine change type based on data state
+  if (rawData.value.length > 0 && cleanedData.value.length === 0 && !calculations.value.totalValue) {
+    changeType = 'Uploaded'
+    shortDesc = '📤 Uploaded file'
+  } else if (cleanedData.value.length > 0 && !calculations.value.totalValue) {
+    changeType = 'Cleaned'
+    shortDesc = '🧹 Cleaned data'
+  } else if (calculations.value.totalValue) {
+    changeType = 'Calculated'
+    shortDesc = '📊 Calculated metrics'
+  }
+
+  window.dispatchEvent(new CustomEvent('session-updated', {
+    detail: {
+      sessionId: sid,
+      instrument: instrument,
+      changeType: changeType,
+      shortDescription: shortDesc,
+      fieldsChanged: []
+    }
+  }))
+  // ==========================================
+
   window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: sid } }))
 }
 
