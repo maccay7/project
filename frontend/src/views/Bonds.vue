@@ -1,7 +1,7 @@
 <template>
   <FixedLayout>
     <div class="instrument-page">
-      <!-- Page Header with Session Name -->
+      <!-- Page Header -->
       <div class="page-header">
         <div class="header-left">
           <h1>{{ instrumentName }}</h1>
@@ -31,7 +31,7 @@
             class="progress-step"
             :class="{
               active: activeTab === step.tab,
-              completed: isStepCompleted(step.tab),
+              completed: isStepComplete(step.tab),
               disabled: index > farthestAllowedIndex
             }"
             @click="switchTab(step.tab)"
@@ -42,9 +42,9 @@
         </div>
       </div>
 
-      <!-- Content based on active tab -->
+      <!-- Tab content -->
       <div class="tab-content">
-        <!-- ==================== UPLOAD TAB ==================== -->
+        <!-- ===== UPLOAD ===== -->
         <div v-if="activeTab === 'upload'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-upload</v-icon> Upload {{ instrumentName }} Dataset</v-card-title>
@@ -62,7 +62,7 @@
                 <small>Supported: CSV, Excel (including .xlsm, .xlsb, .ods), and many other spreadsheet formats</small>
               </div>
 
-              <!-- Upload History Section -->
+              <!-- Upload History -->
               <div v-if="uploadHistory.length" class="upload-history">
                 <h4>📁 Upload History ({{ uploadHistory.length }} files)</h4>
                 <div class="history-list">
@@ -75,7 +75,6 @@
                 </div>
               </div>
 
-              <!-- Loading indicator while parsing file -->
               <div v-if="fileLoading" class="loading-container">
                 <v-icon size="48" class="spin">mdi-loading</v-icon>
                 <p>Parsing file... Please wait.</p>
@@ -90,14 +89,16 @@
                 <button class="btn-mapping" @click="openMappingDialog" :disabled="!rawData.length">Map Columns</button>
               </div>
 
-              <!-- Preview with live mapping (ExcelViewer handles display using columnMapping) -->
+              <!-- Preview – inline toggle removed -->
               <div v-if="rawData.length" class="excel-preview-section">
                 <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
                 <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
                 <ExcelViewer
                   :data="rawData.slice(0, 500)"
                   :headers="uploadPreviewHeaders"
-                  :show-mapping-controls="true"
+                  :original-data="originalRawData.slice(0, 500)"
+                  :original-headers="originalFileColumns"
+                  :show-mapping-controls="false"
                   :column-mapping="columnMapping"
                   :available-file-columns="fileColumns"
                   :default-mapped-mode="mappingApplied"
@@ -107,11 +108,14 @@
                 <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
               </div>
 
-              <!-- Column Mapping Dialog – live preview via v-model only -->
+              <!-- Manual Mapping Dialog -->
               <v-dialog v-model="showMappingDialog" max-width="700px">
                 <v-card>
                   <v-card-title>Map Columns</v-card-title>
                   <v-card-text>
+                    <div class="mapping-instructions">
+                      <p><v-icon small>mdi-hand-pointing-right</v-icon> Manually match each required system column to a column from your uploaded Excel file.</p>
+                    </div>
                     <div class="mapping-grid">
                       <div v-for="reqCol in requiredColumns" :key="reqCol" class="mapping-row">
                         <label class="required-label">{{ reqCol }}:</label>
@@ -119,13 +123,17 @@
                           <option :value="null">-- Select column --</option>
                           <option v-for="fileCol in fileColumns" :key="fileCol" :value="fileCol">{{ fileCol }}</option>
                         </select>
+                        <span v-if="columnMapping[reqCol]" class="mapped-indicator">✅</span>
                       </div>
                     </div>
-                    <div class="mapping-hint"><v-icon size="16">mdi-information</v-icon><small>Column names are matched automatically. Preview updates live.</small></div>
+                    <div class="mapping-hint">
+                      <v-icon size="16">mdi-information</v-icon>
+                      <small>Changes are applied immediately when you click "Apply Mapping".</small>
+                    </div>
                   </v-card-text>
                   <v-card-actions>
-                    <button class="btn-secondary" @click="showMappingDialog = false">Cancel</button>
-                    <button class="btn-primary" @click="applyColumnMappingAndClose">Apply Mapping & Close</button>
+                    <button class="btn-secondary" @click="closeMappingDialog">Cancel</button>
+                    <button class="btn-primary" @click="applyColumnMappingAndClose">Apply Mapping</button>
                   </v-card-actions>
                 </v-card>
               </v-dialog>
@@ -133,31 +141,32 @@
               <div class="required-columns">
                 <h4>Required Columns:</h4>
                 <div class="columns-list">
-                  <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !mappingApplied && !hasRequiredColumn(col), 'mapped-column': mappingApplied }">
+                  <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
                     <v-icon size="12">
-                      {{ mappingApplied ? 'mdi-check' : (rawData.length && hasRequiredColumn(col) ? 'mdi-circle-outline' : 'mdi-close') }}
+                      {{ hasRequiredColumn(col) ? 'mdi-check' : 'mdi-close' }}
                     </v-icon>
                     {{ col }}
                   </span>
                 </div>
-                <div v-if="rawData.length && missingColumns.length && !mappingApplied" class="warning-message">
-                  <v-icon color="warning">mdi-alert</v-icon><span>Missing required columns. Click "Map Columns".</span>
+                <div v-if="rawData.length && missingColumns.length" class="warning-message">
+                  <v-icon color="warning">mdi-alert</v-icon>
+                  <span>Missing required columns. Click "Map Columns" to manually assign them.</span>
                 </div>
-                <div v-if="mappingApplied" class="success-message">
-                  <v-icon color="success">mdi-check-circle</v-icon><span>All columns mapped. Ready to continue.</span>
+                <div v-if="rawData.length && missingColumns.length === 0 && mappingApplied" class="success-message">
+                  <v-icon color="success">mdi-check-circle</v-icon>
+                  <span>All columns mapped. Ready to continue.</span>
                 </div>
               </div>
 
               <div class="navigation-buttons">
-                <!-- Bottom "Map Columns" button removed -->
-                <button class="btn-primary" @click="continueAfterUpload" :disabled="!uploadedFile || (rawData.length && missingColumns.length && !mappingApplied)">Continue</button>
+                <button class="btn-primary" @click="continueAfterUpload" :disabled="!uploadedFile || !rawData.length || missingColumns.length > 0 || !mappingApplied">Continue</button>
                 <button class="btn-secondary" @click="goToDashboard">Cancel</button>
               </div>
             </v-card-text>
           </v-card>
         </div>
 
-        <!-- ==================== CLEANING TAB ==================== -->
+        <!-- ===== CLEANING ===== -->
         <div v-if="activeTab === 'cleaning'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-broom</v-icon> Clean {{ instrumentName }} Data</v-card-title>
@@ -202,7 +211,6 @@
                   </div>
                 </div>
 
-                <!-- Show cleaned data after cleaning -->
                 <div v-if="cleanedData.length" class="preview-section">
                   <h4>Cleaned Data ({{ cleanedData.length }} rows)</h4>
                   <div class="excel-scroll-wrapper">
@@ -226,7 +234,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== CALCULATIONS TAB ==================== -->
+        <!-- ===== CALCULATIONS ===== -->
         <div v-if="activeTab === 'calculations'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-calculator</v-icon> {{ instrumentName }} Calculations</v-card-title>
@@ -377,7 +385,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== VISUALIZATIONS TAB ==================== -->
+        <!-- ===== VISUALIZATIONS ===== -->
         <div v-if="activeTab === 'visualizations'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-chart-line</v-icon> {{ instrumentName }} – Market Yield Curves</v-card-title>
@@ -396,11 +404,10 @@
                 </div>
               </div>
 
-              <!-- Filter row with dropdown selectors -->
               <div class="filters-row">
                 <div class="filter-group">
                   <label>Country / Region</label>
-                  <select v-model="selectedCountryOption" @change="onCountrySelectChange" class="filter-select" style="display: block; background: white; color: black;">
+                  <select v-model="selectedCountryOption" @change="onCountrySelectChange" class="filter-select">
                     <option v-for="opt in countryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                     <option value="__custom__">Custom...</option>
                   </select>
@@ -415,7 +422,7 @@
                 </div>
                 <div class="filter-group">
                   <label>Currency</label>
-                  <select v-model="selectedCurrencyOption" @change="onCurrencySelectChange" class="filter-select" style="display: block; background: white; color: black;">
+                  <select v-model="selectedCurrencyOption" @change="onCurrencySelectChange" class="filter-select">
                     <option v-for="opt in currencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                     <option value="__custom__">Custom...</option>
                   </select>
@@ -446,28 +453,21 @@
                 <button class="btn-secondary refresh-btn" @click="fetchFredData" :disabled="fredLoading">Refresh chart</button>
               </div>
 
-              <!-- Loading state -->
               <div v-if="fredLoading" class="loading-container">
                 <v-icon size="48" class="spin">mdi-loading</v-icon>
                 <p>Fetching market data from FRED...</p>
               </div>
-
-              <!-- Error state -->
               <div v-else-if="fredError" class="error-container">
                 <v-icon color="error" size="48">mdi-alert-circle</v-icon>
                 <p>{{ fredError }}</p>
                 <button class="btn-primary" @click="fetchFredData">Retry</button>
               </div>
-
-              <!-- Chart display when data exists -->
               <div v-else-if="chartData.datasets && chartData.datasets.length" class="chart-container chart-container--fred">
                 <canvas ref="yieldCurveChart" width="800" height="400" style="background: white; border-radius: 8px;"></canvas>
                 <div class="chart-footer">
                   <small>Source: FRED – {{ chartSeriesLabel }} ({{ getCountryLabel(effectiveCountry) }} / {{ getCurrencyLabel(effectiveCurrency) }})</small>
                 </div>
               </div>
-
-              <!-- Empty state -->
               <div v-else class="visualization-placeholder">
                 <v-icon size="64" color="#0B2044">mdi-chart-line</v-icon>
                 <h3>No Market Data Loaded</h3>
@@ -484,7 +484,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== SUMMARY TAB ==================== -->
+        <!-- ===== SUMMARY ===== -->
         <div v-if="activeTab === 'summary'" class="content-card">
           <v-card class="summary-pro-card">
             <v-card-title><v-icon>mdi-file-document</v-icon> {{ instrumentName }} – Executive Summary</v-card-title>
@@ -532,7 +532,7 @@
           </v-card>
         </div>
 
-        <!-- ==================== REPORTS TAB ==================== -->
+        <!-- ===== REPORTS ===== -->
         <div v-if="activeTab === 'reports'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-file-pdf</v-icon> Generate Combined Report</v-card-title>
@@ -585,7 +585,7 @@
       </div>
     </div>
 
-    <!-- Excel Review Dialog – only X closes -->
+    <!-- Excel Review Dialog -->
     <v-dialog v-model="showExcelDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">
@@ -600,15 +600,18 @@
     </v-dialog>
 
     <!-- Formula Dialog -->
-    <v-dialog v-model="formulaDialog" max-width="400px">
+    <v-dialog v-model="formulaDialog" max-width="500px">
       <v-card>
         <v-card-title class="formula-dialog-title">📐 Formula Used</v-card-title>
         <v-card-text class="formula-text">{{ formulaText }}</v-card-text>
-        <v-card-actions><v-spacer></v-spacer><button class="btn-secondary" @click="formulaDialog = false">Close</button></v-card-actions>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="formulaDialog = false">Close</button>
+        </v-card-actions>
       </v-card>
     </v-dialog>
 
-    <!-- Report Preview Dialog – only X closes -->
+    <!-- Report Preview Dialog -->
     <v-dialog v-model="reportPreviewDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">
@@ -642,12 +645,179 @@ import ExcelViewer from '@/components/ExcelViewer.vue'
 import { loadFredSeriesChart, loadFredSeriesForReport } from '@/utils/fredChartHelper'
 import { renderFredLineChart } from '@/utils/renderFredChart'
 import { buildWorkflowSnapshot, applyWorkflowToPage } from '@/utils/instrumentSession.js'
+import { useInstrumentConfig } from '@/composables/useInstrumentConfig.js'
+import { autoMatchColumns as matchColumns, applyMappingToRows, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping.js'
 
+// ========== Router & Route ==========
 const router = useRouter()
 const route = useRoute()
 const activeSession = ref(null)
 
-// ========== UPLOAD HISTORY ==========
+// ========== Instrument Info ==========
+const instrumentType = computed(() => route.params.type || route.path.split('/').pop())
+const instrumentName = computed(() => ({ 'money-market': 'Money Market', bonds: 'Bonds', tbills: 'T-Bills' }[instrumentType.value] || 'Instrument'))
+const instrumentDescription = computed(() => ({
+  'money-market': 'Short-term debt instruments including treasury bills, commercial paper',
+  bonds: 'Fixed income securities including government and corporate bonds',
+  tbills: 'Treasury bills - short-term government securities'
+}[instrumentType.value] || 'Financial instrument management'))
+
+const activeTab = computed({
+  get: () => route.query.tab || 'upload',
+  set: (val) => router.push({ query: { ...route.query, tab: val } })
+})
+
+// ========== Configuration ==========
+const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInstrumentConfig()
+
+// ========== FRED ==========
+const { fredFilters, filterOptions, loadFilterOptions, seriesIdForMaturity, fetchBenchmark } = useFredMarket('1Y')
+const fredLoading = ref(false), fredError = ref(''), selectedSeries = ref('')
+const yieldCurveChart = ref(null), chartInstanceRef = { current: null }
+const chartData = ref({ labels: [], datasets: [] }), chartSeriesLabel = ref(''), currentMarketRate = ref(null)
+
+// ========== FRED Options & Computed ==========
+const selectedMaturityOption = ref(''), customMaturity = ref('')
+const selectedCountryOption = ref(''), customCountry = ref('')
+const selectedCurrencyOption = ref(''), customCurrency = ref('')
+
+const effectiveMaturity = computed(() => selectedMaturityOption.value === '__custom__' ? customMaturity.value : selectedMaturityOption.value)
+const effectiveCountry = computed(() => selectedCountryOption.value === '__custom__' ? customCountry.value : selectedCountryOption.value)
+const effectiveCurrency = computed(() => selectedCurrencyOption.value === '__custom__' ? customCurrency.value : selectedCurrencyOption.value)
+
+const countryOptions = computed(() => [
+  { value: 'USA', label: 'United States' },
+  { value: 'GBR', label: 'United Kingdom' },
+  { value: 'EUR', label: 'Eurozone' },
+  { value: 'JPN', label: 'Japan' },
+  { value: 'CAN', label: 'Canada' }
+])
+const currencyOptions = computed(() => [
+  { value: 'USD', label: 'USD' },
+  { value: 'EUR', label: 'EUR' },
+  { value: 'GBP', label: 'GBP' },
+  { value: 'JPY', label: 'JPY' },
+  { value: 'CAD', label: 'CAD' }
+])
+const maturityOptions = computed(() => {
+  let baseOptions = []
+  if (filterOptions.value.maturities?.length) baseOptions = filterOptions.value.maturities
+  else baseOptions = [
+    { value: '1M', label: '1 Month' }, { value: '3M', label: '3 Months' },
+    { value: '6M', label: '6 Months' }, { value: '1Y', label: '1 Year' },
+    { value: '2Y', label: '2 Years' }, { value: '5Y', label: '5 Years' },
+    { value: '10Y', label: '10 Years' }, { value: '30Y', label: '30 Years' },
+    { value: '4W', label: '4 Weeks' }, { value: '8W', label: '8 Weeks' },
+    { value: '13W', label: '13 Weeks' }, { value: '26W', label: '26 Weeks' },
+    { value: '52W', label: '52 Weeks' }
+  ]
+  if (instrumentType.value === 'money-market') return baseOptions.filter(opt => ['1M','3M','6M','1Y'].includes(opt.value))
+  if (instrumentType.value === 'bonds') return baseOptions.filter(opt => ['2Y','5Y','10Y','30Y'].includes(opt.value))
+  if (instrumentType.value === 'tbills') return baseOptions.filter(opt => ['4W','8W','13W','26W','52W'].includes(opt.value))
+  return baseOptions
+})
+
+// ========== Watches ==========
+watch([countryOptions, currencyOptions, maturityOptions], () => {
+  if (!effectiveCountry.value && countryOptions.value.length) {
+    const def = countryOptions.value[0].value
+    selectedCountryOption.value = def
+    fredFilters.value.country = def
+  }
+  if (!effectiveCurrency.value && currencyOptions.value.length) {
+    const def = 'USD'
+    selectedCurrencyOption.value = def
+    fredFilters.value.currency = def
+  }
+  if (!effectiveMaturity.value && maturityOptions.value.length) {
+    const def = maturityOptions.value[0]?.value
+    selectedMaturityOption.value = def
+    fredFilters.value.maturity = def
+  }
+}, { immediate: true })
+
+watch(() => instrumentType.value, () => {
+  if (activeTab.value === 'visualizations') fetchFredData()
+  if (!effectiveMaturity.value) {
+    const def = defaultMaturityForInstrument()
+    selectedMaturityOption.value = def
+    fredFilters.value.maturity = def
+  }
+}, { immediate: true })
+
+// ========== Steps ==========
+const steps = computed(() => {
+  if (workflowSteps.value.length) {
+    return workflowSteps.value.map(s => ({ tab: s.tab, name: s.name }))
+  }
+  return [
+    { tab: 'upload', name: 'Upload' },
+    { tab: 'cleaning', name: 'Clean' },
+    { tab: 'calculations', name: 'Calculate' },
+    { tab: 'visualizations', name: 'Visualize' },
+    { tab: 'summary', name: 'Summary' },
+    { tab: 'reports', name: 'Report' }
+  ]
+})
+
+// ---- Custom step completion ----
+function isStepComplete(tab) {
+  switch (tab) {
+    case 'upload':
+      return rawData.value.length > 0 && mappingApplied.value && missingColumns.value.length === 0
+    case 'cleaning':
+      return cleanedData.value.length > 0
+    case 'calculations':
+      return !!calculations.value.totalValue && calculations.value.totalValue > 0
+    case 'visualizations':
+      return chartData.value.datasets && chartData.value.datasets.length > 0
+    case 'summary':
+      return cleanedData.value.length > 0 && !!calculations.value.totalValue
+    case 'reports':
+      return cleanedData.value.length > 0 && !!calculations.value.totalValue
+    default:
+      return false
+  }
+}
+
+const farthestAllowedIndex = computed(() => {
+  for (let i = 0; i < steps.value.length; i++) {
+    if (!isStepComplete(steps.value[i].tab)) {
+      return i
+    }
+  }
+  return steps.value.length - 1
+})
+
+const currentStepIndex = computed(() => steps.value.findIndex(s => s.tab === activeTab.value))
+const totalSteps = computed(() => steps.value.length)
+
+// ========== Data refs ==========
+const uploadedFile = ref(null)
+const rawData = ref([])
+const cleanedData = ref([])
+const previewData = ref([])
+const columnMapping = ref({})
+const showMappingDialog = ref(false)
+const fileColumns = ref([])
+const fixedValuesTracker = ref(new Map())
+const calculations = ref({})
+const cleaningStats = ref({ totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 })
+const fileLoading = ref(false)
+const mappingApplied = ref(false)
+const originalRawData = ref([])
+const originalFileColumns = ref([])
+const sessionSavedAt = ref(null)
+
+const cleaningOptions = ref({
+  removeDuplicates: true, fillMissingText: true, dropRowsWithMissing: false, trimWhitespace: true,
+  convertToNumbers: true, removeOutliers: false, standardizeDates: false, removeSpecialChars: false,
+  changeCase: false, caseType: 'none', fillWithCustom: false, customFillValue: '',
+  removeColumnsAllMissing: false, capOutliers: false, removeRowsSpecificColumnEmpty: false,
+  specificColumn: '', standardizeNumericRange: false, removeEmptyRows: false, fillForward: false, fillBackward: false
+})
+
+// ========== Upload History ==========
 const uploadHistory = ref([])
 
 function loadUploadHistory() {
@@ -677,9 +847,14 @@ function loadHistoryFile(item) {
   if (confirm(`Load ${item.name}? Current unsaved data will be lost.`)) {
     const data = JSON.parse(item.data)
     rawData.value = data
+    originalRawData.value = JSON.parse(JSON.stringify(data))
+    originalFileColumns.value = Object.keys(data[0] || {})
+    fileColumns.value = [...originalFileColumns.value]
     uploadedFile.value = { name: item.name, size: 0 }
+    columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+    mappingApplied.value = false
     saveSessionData()
-    alert(`Loaded ${item.name}. You can now go to Cleaning tab.`)
+    alert(`Loaded ${item.name}. Please review and apply column mapping.`)
   }
 }
 
@@ -688,333 +863,7 @@ function deleteHistoryItem(idx) {
   saveUploadHistory()
 }
 
-// ========== PERSISTENCE ==========
-const mappingApplied = ref(false)
-
-function refreshPage() {
-  rawData.value = []
-  cleanedData.value = []
-  uploadedFile.value = null
-  previewData.value = []
-  calculations.value = {}
-  cleaningStats.value = { totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 }
-  fixedValuesTracker.value.clear()
-  columnMapping.value = {}
-  fileColumns.value = []
-  showMappingDialog.value = false
-  mappingApplied.value = false
-}
-
-function isStepCompleted(tab) {
-  if (tab === 'upload') return rawData.value.length > 0 && mappingApplied.value
-  if (tab === 'cleaning') return cleanedData.value.length > 0
-  if (tab === 'calculations') return !!calculations.value.totalValue
-  if (tab === 'visualizations') return !!(chartData.value.datasets && chartData.value.datasets.length > 0)
-  if (tab === 'summary') return !!calculations.value.totalValue
-  if (tab === 'reports') return !!calculations.value.totalValue
-  return false
-}
-
-const farthestAllowedIndex = computed(() => {
-  for (let i = 0; i < steps.length; i++) {
-    if (!isStepCompleted(steps[i].tab)) {
-      return i
-    }
-  }
-  return steps.length - 1
-})
-
-async function loadSavedData() {
-  const datasetId = route.query.dataset_id
-  if (datasetId) {
-    try {
-      const res = await api.datasetAPI.load(datasetId)
-      if (res && res.success && res.data) {
-        const last = res.data
-        rawData.value = last.data || []
-        cleanedData.value = last.data || []
-        calculations.value = {}
-        uploadedFile.value = { name: last.name || '', size: 0 }
-        cleaningStats.value = {
-          totalRows: rawData.value.length,
-          validRows: cleanedData.value.length,
-          removedRows: rawData.value.length - cleanedData.value.length,
-          fixedMissing: 0
-        }
-        const allRequiredPresent = requiredColumns.value.every(col => Object.keys(rawData.value[0] || {}).includes(col))
-        mappingApplied.value = allRequiredPresent
-        return true
-      }
-    } catch (err) { console.error(err) }
-  }
-
-  if (!activeSession.value) return false
-  const sid = activeSession.value.id
-  let loaded = false
-  let wf = sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
-  if (!wf) {
-    await sessionManager.loadSessionFromDb(sid)
-    wf = sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
-  }
-  if (wf) {
-    loaded = applyWorkflowToPage(wf, { rawData, cleanedData, calculations, uploadedFile, cleaningStats })
-    if (wf.chartData) chartData.value = wf.chartData
-    if (wf.fredFilters) {
-      fredFilters.value = { ...fredFilters.value, ...wf.fredFilters }
-      if (wf.fredFilters.maturity) {
-        const matVal = wf.fredFilters.maturity
-        const isCustom = !maturityOptions.value.some(opt => opt.value === matVal)
-        if (isCustom) {
-          selectedMaturityOption.value = '__custom__'
-          customMaturity.value = matVal
-        } else {
-          selectedMaturityOption.value = matVal
-          customMaturity.value = ''
-        }
-      }
-      if (wf.fredFilters.country) {
-        const countryVal = wf.fredFilters.country
-        const isCustom = !countryOptions.value.some(opt => opt.value === countryVal)
-        if (isCustom) {
-          selectedCountryOption.value = '__custom__'
-          customCountry.value = countryVal
-        } else {
-          selectedCountryOption.value = countryVal
-          customCountry.value = ''
-        }
-      }
-      if (wf.fredFilters.currency) {
-        const currencyVal = wf.fredFilters.currency
-        const isCustom = !currencyOptions.value.some(opt => opt.value === currencyVal)
-        if (isCustom) {
-          selectedCurrencyOption.value = '__custom__'
-          customCurrency.value = currencyVal
-        } else {
-          selectedCurrencyOption.value = currencyVal
-          customCurrency.value = ''
-        }
-      }
-    }
-    if (wf.last_tab && !route.query.tab) activeTab.value = wf.last_tab
-    if (rawData.value.length && requiredColumns.value.every(col => Object.keys(rawData.value[0] || {}).includes(col))) mappingApplied.value = true
-  }
-
-  const s = sessionManager.getSession(sid)
-  if (!loaded && s) {
-    if (s.data?.length) { rawData.value = s.data; loaded = true }
-    if (s.cleanedData?.length) { cleanedData.value = s.cleanedData; loaded = true }
-    if (s.calculations) { calculations.value = s.calculations; loaded = true }
-    if (s.uploaded_file_name) { uploadedFile.value = { name: s.uploaded_file_name, size: 0 }; loaded = true }
-  }
-
-  if (!loaded) {
-    const key = `${instrumentType.value}_session_${sid}`
-    const savedRaw = localStorage.getItem(`${key}_raw`)
-    const savedClean = localStorage.getItem(`${key}_clean`)
-    const savedCalc = localStorage.getItem(`${key}_calc`)
-    const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
-    const savedChartData = localStorage.getItem(`${key}_chartData`)
-    const savedFredFilters = localStorage.getItem(`${key}_fredFilters`)
-    if (savedRaw) { rawData.value = JSON.parse(savedRaw); loaded = true }
-    if (savedClean) { cleanedData.value = JSON.parse(savedClean); loaded = true }
-    if (savedCalc) { calculations.value = JSON.parse(savedCalc); loaded = true }
-    if (savedFileName) { uploadedFile.value = { name: savedFileName, size: 0 }; loaded = true }
-    if (savedChartData) { chartData.value = JSON.parse(savedChartData); loaded = true }
-    if (savedFredFilters) {
-      fredFilters.value = { ...fredFilters.value, ...JSON.parse(savedFredFilters) }
-      loaded = true
-    }
-  }
-
-  if (cleanedData.value.length && rawData.value.length) {
-    cleaningStats.value = {
-      totalRows: rawData.value.length,
-      validRows: cleanedData.value.length,
-      removedRows: rawData.value.length - cleanedData.value.length,
-      fixedMissing: 0
-    }
-  }
-  return loaded
-}
-
-// ========== SAVE SESSION – WITH VERSION EVENT ==========
-function saveSessionData() {
-  const datasetId = route.query.dataset_id
-  if (datasetId) {
-    const payload = {
-      name: uploadedFile.value?.name || `${instrumentType.value}_${Date.now()}`,
-      file_base64: '',
-      sheet_names: [],
-      upload_id: datasetId,
-      data: cleanedData.value.length ? cleanedData.value : rawData.value,
-      headers: Object.keys((cleanedData.value[0] || rawData.value[0]) || {})
-    }
-    api.datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, payload.data, payload.headers, instrumentType.value)
-    if (activeSession.value) sessionManager.updateSession(activeSession.value.id, { last_tab: activeTab.value })
-    else localStorage.setItem(`instrument_${instrumentType.value}_last_tab`, activeTab.value)
-    return
-  }
-
-  if (!activeSession.value) return
-  const sid = activeSession.value.id
-  const wf = buildWorkflowSnapshot({
-    rawData: rawData.value,
-    cleanedData: cleanedData.value,
-    calculations: calculations.value,
-    activeTab: activeTab.value,
-    uploadedFile: uploadedFile.value,
-    cleaningStats: cleaningStats.value,
-    chartData: chartData.value,
-    fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value }
-  })
-  sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, wf)
-  sessionManager.updateSession(sid, { last_tab: activeTab.value })
-
-  const key = `${instrumentType.value}_session_${sid}`
-  localStorage.setItem(`${key}_raw`, JSON.stringify(rawData.value))
-  localStorage.setItem(`${key}_clean`, JSON.stringify(cleanedData.value))
-  localStorage.setItem(`${key}_calc`, JSON.stringify(calculations.value))
-  localStorage.setItem(`${key}_chartData`, JSON.stringify(chartData.value))
-  localStorage.setItem(`${key}_fredFilters`, JSON.stringify({ country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value }))
-  if (uploadedFile.value) localStorage.setItem(`${instrumentType.value}_uploaded_file_name`, uploadedFile.value.name)
-
-  updateSessionCompletion()
-
-  // ====== VERSION EVENT DISPATCH (FIX) ======
-  let changeType = 'Updated'
-  let shortDesc = 'Data updated'
-  const instrument = instrumentName.value || 'Unknown'
-
-  // Determine change type based on data state
-  if (rawData.value.length > 0 && cleanedData.value.length === 0 && !calculations.value.totalValue) {
-    changeType = 'Uploaded'
-    shortDesc = '📤 Uploaded file'
-  } else if (cleanedData.value.length > 0 && !calculations.value.totalValue) {
-    changeType = 'Cleaned'
-    shortDesc = '🧹 Cleaned data'
-  } else if (calculations.value.totalValue) {
-    changeType = 'Calculated'
-    shortDesc = '📊 Calculated metrics'
-  }
-
-  window.dispatchEvent(new CustomEvent('session-updated', {
-    detail: {
-      sessionId: sid,
-      instrument: instrument,
-      changeType: changeType,
-      shortDescription: shortDesc,
-      fieldsChanged: []
-    }
-  }))
-  // ==========================================
-
-  window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: sid } }))
-}
-
-function updateSessionCompletion() {
-  if (!activeSession.value) return
-  if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
-  activeSession.value.instrumentData[instrumentType.value] = {
-    ...calculations.value,
-    completed: !!calculations.value.totalValue,
-    timestamp: new Date().toISOString(),
-    chartData: chartData.value
-  }
-
-  let totalValue = 0
-  let completedCount = 0
-  for (const [instId, data] of Object.entries(activeSession.value.instrumentData)) {
-    if (data.completed) {
-      totalValue += parseFloat(data.totalValue) || 0
-      completedCount++
-    }
-  }
-  activeSession.value.totalValue = totalValue
-  activeSession.value.instrumentCount = completedCount
-  activeSession.value.status = completedCount === 3 ? 'completed' : 'in-progress'
-
-  sessionManager.updateSession(activeSession.value.id, {
-    totalValue: activeSession.value.totalValue,
-    instrumentCount: activeSession.value.instrumentCount,
-    status: activeSession.value.status,
-    instrumentData: activeSession.value.instrumentData
-  })
-}
-
-// ========== Instrument info ==========
-const instrumentType = computed(() => route.params.type || route.path.split('/').pop())
-const instrumentName = computed(() => ({ 'money-market': 'Money Market', bonds: 'Bonds', tbills: 'T-Bills' }[instrumentType.value] || 'Instrument'))
-const instrumentDescription = computed(() => ({
-  'money-market': 'Short-term debt instruments including treasury bills, commercial paper',
-  bonds: 'Fixed income securities including government and corporate bonds',
-  tbills: 'Treasury bills - short-term government securities'
-}[instrumentType.value] || 'Financial instrument management'))
-
-const steps = [
-  { tab: 'upload', name: 'Upload' },
-  { tab: 'cleaning', name: 'Clean' },
-  { tab: 'calculations', name: 'Calculate' },
-  { tab: 'visualizations', name: 'Visualize' },
-  { tab: 'summary', name: 'Summary' },
-  { tab: 'reports', name: 'Report' }
-]
-
-const activeTab = computed({
-  get: () => route.query.tab || 'upload',
-  set: (val) => router.push({ query: { ...route.query, tab: val } })
-})
-const currentStepIndex = computed(() => steps.findIndex(s => s.tab === activeTab.value))
-const totalSteps = steps.length
-
-// ========== Data refs ==========
-const uploadedFile = ref(null)
-const rawData = ref([])
-const cleanedData = ref([])
-const previewData = ref([])
-const columnMapping = ref({})
-const showMappingDialog = ref(false)
-const fileColumns = ref([])
-const fixedValuesTracker = ref(new Map())
-const calculations = ref({})
-const cleaningStats = ref({ totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 })
-const fileLoading = ref(false)
-
-const cleaningOptions = ref({
-  removeDuplicates: true, fillMissingText: true, dropRowsWithMissing: false, trimWhitespace: true,
-  convertToNumbers: true, removeOutliers: false, standardizeDates: false, removeSpecialChars: false,
-  changeCase: false, caseType: 'none', fillWithCustom: false, customFillValue: '',
-  removeColumnsAllMissing: false, capOutliers: false, removeRowsSpecificColumnEmpty: false,
-  specificColumn: '', standardizeNumericRange: false, removeEmptyRows: false, fillForward: false, fillBackward: false
-})
-
-const requiredColumns = computed(() => {
-  if (instrumentType.value === 'money-market') return ['Date', 'Instrument', 'Rate', 'Amount', 'MaturityDate', 'DaysToMaturity', 'Principal', 'InterestRate', 'DiscountRate', 'Price', 'FaceValue']
-  if (instrumentType.value === 'bonds') return ['Date', 'BondName', 'CouponRate', 'FaceValue', 'Yield', 'MaturityDate', 'IssueDate', 'Frequency', 'Price', 'AccruedInterest', 'DaysToMaturity', 'RedemptionValue']
-  return ['Date', 'TBillName', 'DiscountRate', 'FaceValue', 'MaturityDate', 'DaysToMaturity', 'IssueDate', 'Price', 'Yield']
-})
-
-const columnVariations = {
-  Date: ['Date', 'date', 'DATE', 'Transaction Date', 'Trade Date', 'Settlement Date', 'Value Date', 'Start Date', 'Issue Date'],
-  Instrument: ['Instrument', 'instrument', 'INSTRUMENT', 'Security', 'Security Name', 'Name', 'Description', 'Asset'],
-  Rate: ['Rate', 'rate', 'RATE', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Yield', 'Return', 'APR'],
-  Amount: ['Amount', 'amount', 'AMOUNT', 'Face Value', 'FaceValue', 'Value', 'Price', 'Notional', 'Principal', 'Investment'],
-  MaturityDate: ['MaturityDate', 'Maturity Date', 'Maturity', 'Matures', 'End Date', 'Due Date', 'Expiry Date'],
-  DaysToMaturity: ['DaysToMaturity', 'Days to Maturity', 'Tenor', 'Days', 'Term', 'Duration Days'],
-  Principal: ['Principal', 'Amount', 'Face Value', 'Notional', 'Investment Amount'],
-  InterestRate: ['InterestRate', 'Interest Rate', 'Rate', 'Coupon', 'Yield'],
-  DiscountRate: ['DiscountRate', 'Discount Rate', 'discount', 'Rate'],
-  Price: ['Price', 'price', 'PRICE', 'Market Price', 'Current Price', 'Purchase Price', 'Bid Price', 'Ask Price'],
-  FaceValue: ['FaceValue', 'Face Value', 'Face', 'Value', 'Amount', 'Principal', 'Par Value', 'Nominal'],
-  BondName: ['BondName', 'Bond Name', 'bond', 'BOND', 'Security', 'Issuer', 'Description', 'Name'],
-  CouponRate: ['CouponRate', 'Coupon Rate', 'coupon', 'Rate', 'Interest Rate', 'Annual Coupon'],
-  Yield: ['Yield', 'yield', 'YIELD', 'Yield to Maturity', 'YTM', 'Return', 'Effective Yield'],
-  IssueDate: ['IssueDate', 'Issue Date', 'Issued', 'Issuance Date', 'Start Date'],
-  Frequency: ['Frequency', 'Payment Frequency', 'Coupon Frequency', 'Period', 'SemiAnnual', 'Quarterly', 'Annual'],
-  AccruedInterest: ['AccruedInterest', 'Accrued Interest', 'Accrued', 'Interest Accrued'],
-  RedemptionValue: ['RedemptionValue', 'Redemption Value', 'Call Value', 'Maturity Value'],
-  TBillName: ['TBillName', 'T-Bill Name', 'TBill', 'T Bill', 'Security', 'Instrument', 'Treasury Bill']
-}
-
+// ========== Computed Helpers ==========
 const fileSize = computed(() => {
   if (!uploadedFile.value) return ''
   const bytes = uploadedFile.value.size
@@ -1023,28 +872,64 @@ const fileSize = computed(() => {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
 })
 
-const hasRequiredColumn = (col) => rawData.value.length && Object.keys(rawData.value[0]).includes(col)
-const missingColumns = computed(() => requiredColumns.value.filter(col => !hasRequiredColumn(col)))
+const mappingContext = computed(() => ({
+  mappingApplied: mappingApplied.value,
+  columnMapping: columnMapping.value,
+  rawData: rawData.value
+}))
+
+const hasRequiredColumn = (col) => isColumnMapped(col, mappingContext.value)
+const missingColumns = computed(() => getMissingColumns(requiredColumns.value, mappingContext.value))
 const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
+const uploadPreviewHeaders = computed(() => {
+  if (mappingApplied.value) {
+    return requiredColumns.value.filter(col => isColumnMapped(col, mappingContext.value))
+  }
+  return originalFileColumns.value.length
+    ? originalFileColumns.value
+    : Object.keys(rawData.value[0] || {})
+})
+const cleanPreviewHeaders = computed(() => Object.keys((cleanedData.value[0]) || {}))
+
+const portfolioAvgRate = computed(() => instrumentType.value === 'money-market' ? calculations.value.avgRate || 0 : instrumentType.value === 'bonds' ? calculations.value.avgCouponRate || 0 : calculations.value.avgDiscountRate || 0)
+
+// ========== Navigation – FIXED ==========
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToPortfolioSummary() { saveSessionData(); router.push('/summary') }
 
-function switchTab(tab) {
-  const targetIndex = steps.findIndex(s => s.tab === tab)
-  if (targetIndex > farthestAllowedIndex.value) {
-    // Optionally show a message or just ignore
-    return
+// These functions directly set the tab without checking farthestAllowedIndex
+function goToCalculations() {
+  if (hasCleanedData.value) {
+    saveSessionData()
+    activeTab.value = 'calculations'
+  } else {
+    alert('Please clean your data first.')
   }
+}
+
+function goToVisualizations() {
+  if (hasCleanedData.value) {
+    saveSessionData()
+    activeTab.value = 'visualizations'
+  } else {
+    alert('Please clean your data first.')
+  }
+}
+
+function goToReportTab() {
+  saveSessionData()
+  activeTab.value = 'reports'
+}
+
+// switchTab now allows navigation to any tab (the progress bar still shows disabled for incomplete steps)
+function switchTab(tab) {
   saveSessionData()
   activeTab.value = tab
 }
-function goToCalculations() { if (hasCleanedData.value) { saveSessionData(); activeTab.value = 'calculations' } else alert('Please clean your data first.') }
-function goToVisualizations() { if (hasCleanedData.value) { saveSessionData(); activeTab.value = 'visualizations' } else alert('Please clean your data first.') }
-function goToReportTab() { saveSessionData(); activeTab.value = 'reports' }
 
-// ========== FILE UPLOAD & MAPPING ==========
+// ========== File Upload ==========
 const fileInput = ref(null)
 function handleFileUpload(e) { const file = e.target.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 function handleDrop(e) { const file = e.dataTransfer.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
@@ -1078,12 +963,16 @@ async function readFileData(file) {
       if (data.length === 0) throw new Error('No data found in the first sheet')
     }
     rawData.value = data
-    fileColumns.value = Object.keys(data[0] || {})
+    originalRawData.value = JSON.parse(JSON.stringify(data))
+    originalFileColumns.value = Object.keys(data[0] || {})
+    fileColumns.value = [...originalFileColumns.value]
+
+    columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+    mappingApplied.value = false
+
     addToHistory(file.name, data)
     debouncedSave()
-    mappingApplied.value = false
-    if (missingColumns.value.length) autoMatchColumns()
-    alert(`Successfully loaded ${data.length} rows.`)
+    alert(`Successfully loaded ${data.length} rows. Please review and apply column mapping.`)
   } catch (err) {
     console.error(err)
     alert(`Failed to parse file: ${err.message}`)
@@ -1097,85 +986,79 @@ async function readFileData(file) {
 function removeFile() {
   uploadedFile.value = null
   rawData.value = []
+  originalRawData.value = []
+  originalFileColumns.value = []
   cleanedData.value = []
   previewData.value = []
   calculations.value = {}
   fixedValuesTracker.value.clear()
   mappingApplied.value = false
+  columnMapping.value = {}
+  fileColumns.value = []
   debouncedSave()
   if (fileInput.value) fileInput.value.value = ''
 }
 
-// ========== MAPPING – UNIFIED BEHAVIOR ==========
-
-// This function physically renames columns in the data
+// ========== Mapping ==========
 function applyMappingToData(mapping) {
-  if (!rawData.value.length) return false
-  const mapped = rawData.value.map(row => {
-    const newRow = {}
-    requiredColumns.value.forEach(reqCol => {
-      const src = mapping[reqCol]
-      newRow[reqCol] = (src && row[src] !== undefined) ? row[src] : null
-    })
-    return newRow
-  })
-  rawData.value = mapped
-  fileColumns.value = requiredColumns.value // after renaming, the available columns are the required ones
+  if (!originalRawData.value.length) return false
+  const allMapped = requiredColumns.value.every(col => mapping[col])
+  if (!allMapped) {
+    alert('Please map all required columns before applying.')
+    return false
+  }
+  rawData.value = applyMappingToRows(originalRawData.value, requiredColumns.value, mapping)
+  fileColumns.value = requiredColumns.value.filter(c => mapping[c])
   mappingApplied.value = true
   debouncedSave()
   return true
 }
 
-// Called by the top dialog's "Apply Mapping & Close" button
 function applyColumnMappingAndClose() {
-  if (applyMappingToData(columnMapping.value)) {
+  const success = applyMappingToData(columnMapping.value)
+  if (success) {
     showMappingDialog.value = false
-    alert('Columns mapped successfully!')
+    alert('Columns mapped successfully! Data preview has been updated.')
   }
 }
 
-// Called by the top dialog's "Map Columns" button (auto-matching)
-function autoMatchColumns() {
-  if (!rawData.value.length) return
-  fileColumns.value = Object.keys(rawData.value[0])
-  const newMapping = {}
-  requiredColumns.value.forEach(reqCol => {
-    const variations = columnVariations[reqCol] || [reqCol]
-    let match = fileColumns.value.find(c => c === reqCol) ||
-                fileColumns.value.find(c => c.toLowerCase() === reqCol.toLowerCase()) ||
-                fileColumns.value.find(c => variations.some(v => c.toLowerCase().includes(v.toLowerCase()) || v.toLowerCase().includes(c.toLowerCase())))
-    newMapping[reqCol] = match || null
-  })
-  columnMapping.value = newMapping
-}
+function closeMappingDialog() { showMappingDialog.value = false }
 
 function openMappingDialog() {
-  autoMatchColumns()
+  if (!originalFileColumns.value.length) {
+    originalFileColumns.value = Object.keys((originalRawData.value[0] || rawData.value[0]) || {})
+  }
+  fileColumns.value = [...originalFileColumns.value]
+  const suggested = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+  requiredColumns.value.forEach(col => {
+    if (!columnMapping.value[col] && suggested[col]) {
+      columnMapping.value[col] = suggested[col]
+    }
+  })
   showMappingDialog.value = true
 }
 
-// Called by the bottom dropdown inside ExcelViewer
 function updateColumnMapping(newMapping) {
-  console.log('🔄 Bottom dropdown changed mapping to:', newMapping) // ← VERIFY IN CONSOLE
   columnMapping.value = newMapping
-  // THIS IS THE KEY – apply the mapping immediately, same as the top button
-  if (applyMappingToData(newMapping)) {
-    if (previewData.value.length) {
-      previewCleanedData() // re-run cleaning preview to reflect the renamed columns
-    }
-  }
 }
 
 async function continueAfterUpload() {
-  if (!uploadedFile.value) return
-  if (rawData.value.length && missingColumns.value.length === 0 && mappingApplied.value) {
-    // Mark upload step as completed
-    activeTab.value = 'cleaning'
-    debouncedSave()
-  } else alert('Please map missing columns first')
+  if (!uploadedFile.value) { alert('Please upload a file first.'); return }
+  if (!rawData.value.length) { alert('No data loaded. Please upload a valid file.'); return }
+  const missing = missingColumns.value
+  if (missing.length > 0) {
+    alert(`Please map the following required columns: ${missing.join(', ')}. Click "Map Columns" to assign them.`)
+    return
+  }
+  if (!mappingApplied.value) {
+    alert('Please apply column mapping before continuing. Click "Map Columns" and then "Apply Mapping".')
+    return
+  }
+  activeTab.value = 'cleaning'
+  debouncedSave()
 }
 
-// ========== CLEANING ==========
+// ========== Cleaning ==========
 function applyCleaning() {
   if (!rawData.value.length) return
   let data = JSON.parse(JSON.stringify(rawData.value))
@@ -1229,23 +1112,28 @@ function applyCleaning() {
   if (cleaningOptions.value.fillBackward) { for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i + 1][k] }) }
   cleanedData.value = data
   cleaningStats.value = { totalRows: rawData.value.length, validRows: cleanedData.value.length, removedRows: rawData.value.length - cleanedData.value.length, fixedMissing: 0 }
-  // Auto-save and update progress
   debouncedSave()
-  updateSessionCompletion()
 }
 
+// ========== CONTINUE AFTER CLEANING ==========
 async function continueAfterCleaning() {
-  if (!cleanedData.value.length) { alert('Please clean your data first.'); return }
-  await calculateMetrics()
-  // Mark cleaning step as completed by going to calculations
+  if (!cleanedData.value.length) {
+    alert('Please clean your data first.')
+    return
+  }
+  try {
+    await calculateMetrics()
+  } catch (err) {
+    console.error('Error calculating metrics:', err)
+    alert('There was an error calculating metrics, but you can proceed to calculations.')
+  }
   goToCalculations()
 }
 
-// ========== CALCULATIONS (fixed instrument count) ==========
+// ========== Calculations ==========
 async function calculateMetrics() {
   if (!cleanedData.value.length) return
 
-  // Count UNIQUE instruments (not rows)
   let uniqueInstrumentsCount = 0
   if (instrumentType.value === 'money-market') {
     const uniqueNames = new Set(cleanedData.value.map(row => row.Instrument).filter(v => v && v !== 'N/A'))
@@ -1253,11 +1141,11 @@ async function calculateMetrics() {
   } else if (instrumentType.value === 'bonds') {
     const uniqueNames = new Set(cleanedData.value.map(row => row.BondName).filter(v => v && v !== 'N/A'))
     uniqueInstrumentsCount = uniqueNames.size
-  } else { // tbills
+  } else {
     const uniqueNames = new Set(cleanedData.value.map(row => row.TBillName).filter(v => v && v !== 'N/A'))
     uniqueInstrumentsCount = uniqueNames.size
   }
-  if (uniqueInstrumentsCount === 0) uniqueInstrumentsCount = cleanedData.value.length // fallback
+  if (uniqueInstrumentsCount === 0) uniqueInstrumentsCount = cleanedData.value.length
 
   if (instrumentType.value === 'money-market') {
     const totalValue = cleanedData.value.reduce((s, r) => s + (parseFloat(r.Amount) || 0), 0)
@@ -1316,7 +1204,6 @@ async function calculateMetrics() {
   }
   await enrichCalculationsWithFred()
   debouncedSave()
-  updateSessionCompletion()
 }
 
 function continueToVisualizations() {
@@ -1324,12 +1211,13 @@ function continueToVisualizations() {
   goToVisualizations()
 }
 
-// ========== REPORT LOGIC ==========
+// ========== Report Logic ==========
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
 
-const lastChartDataMap = ref({})
+const reportPreviewDialog = ref(false)
+const reportPreviewHtml = ref('')
 
 function getInstrumentData(instrumentId) {
   if (!activeSession.value) return null
@@ -1391,26 +1279,12 @@ function formatMetricValue(key, value) {
   return value
 }
 
-const reportPreviewDialog = ref(false)
-const reportPreviewHtml = ref('')
-
 function buildMethodologySection(selectedInstrumentNames) {
   let methods = []
   if (selectedInstrumentNames.includes('Money Market')) methods.push(`<div class="methodology-card"><h4>Money Market Instruments</h4><p class="formula">Fair value = <sup>F</sup> &frasl; <sub>1 + r·t/365</sub></p><p>Where: <strong>F</strong> = Face value, <strong>r</strong> = annualized interest rate (%), <strong>t</strong> = days to maturity.</p><p>Simple interest convention (365 days/year). Weighted average rate = Σ (Rate × Amount) / Σ Amount.</p></div>`)
   if (selectedInstrumentNames.includes('Bonds')) methods.push(`<div class="methodology-card"><h4>Bonds</h4><p class="formula">Fair value = Σ<sub>t=1</sub><sup>n</sup> <sup>C</sup> &frasl; <sub>(1+y)<sup>t</sup></sub> + <sup>FV</sup> &frasl; <sub>(1+y)<sup>n</sup></sub></p><p>Where: <strong>C</strong> = annual coupon payment (CouponRate × FaceValue), <strong>y</strong> = yield to maturity (%), <strong>FV</strong> = face value, <strong>n</strong> = years to maturity.</p><p>Duration = Σ (t × PV(C<sub>t</sub>)) / Price. Approximated using Macaulay duration.</p></div>`)
   if (selectedInstrumentNames.includes('T-Bills')) methods.push(`<div class="methodology-card"><h4>Treasury Bills (T‑Bills)</h4><p class="formula">Discount amount = Face value × (Discount rate / 100) × (Days to maturity / 360)</p><p class="formula">Effective yield = (Face value / Price − 1) × (365 / Days to maturity) × 100</p><p>Bank discount basis (360 days/year) for discount rate; bond equivalent yield uses 365 days.</p></div>`)
   return methods.length ? methods.join('') : '<p>No methodology available for the selected instruments.</p>'
-}
-
-async function fetchFredSeriesData(seriesId, limit = 30) {
-  try {
-    const result = await api.fredAPI.getSeries(seriesId, limit, 'desc')
-    if (result?.success && result.data) {
-      const observations = result.data, reversed = [...observations].reverse()
-      return { labels: reversed.map(obs => obs.date), values: reversed.map(obs => obs.value) }
-    }
-    return null
-  } catch (err) { console.error(err); return null }
 }
 
 async function generateReportHtml() {
@@ -1478,8 +1352,6 @@ async function previewReport() {
   if (html) {
     reportPreviewHtml.value = html
     reportPreviewDialog.value = true
-  } else {
-    // Alert already shown inside generateReportHtml
   }
 }
 
@@ -1557,7 +1429,7 @@ function downloadBlob(content, filename, mimeType) {
   URL.revokeObjectURL(url)
 }
 
-// ========== EXCEL VIEWER ==========
+// ========== Excel Viewer Dialogs ==========
 const showExcelDialog = ref(false)
 const excelData = ref([])
 const excelColumns = ref([])
@@ -1567,9 +1439,8 @@ function openExcelReview(data, title) {
   excelData.value = data; excelColumns.value = Object.keys(data[0] || {}); excelDialogTitle.value = title || 'Data Review'; showExcelDialog.value = true
 }
 function closeExcelDialog() { showExcelDialog.value = false; excelData.value = [] }
-function saveToSession() { saveSessionData(); alert('Data saved to session!') }
 
-// ========== FORMULA POPUP ==========
+// ========== Formula Popup ==========
 const formulaDialog = ref(false)
 const formulaText = ref('')
 function showFormula(metricKey) {
@@ -1602,49 +1473,380 @@ function showFormula(metricKey) {
   formulaDialog.value = true
 }
 
-// ========== FRED ==========
-const { fredFilters, filterOptions, loadFilterOptions, seriesIdForMaturity, fetchBenchmark } = useFredMarket('1Y')
-const fredLoading = ref(false), fredError = ref(''), selectedSeries = ref('')
-const yieldCurveChart = ref(null), chartInstanceRef = { current: null }
-const chartData = ref({ labels: [], datasets: [] }), chartSeriesLabel = ref(''), currentMarketRate = ref(null)
-const selectedMaturityOption = ref(''), customMaturity = ref(''), effectiveMaturity = computed(() => selectedMaturityOption.value === '__custom__' ? customMaturity.value : selectedMaturityOption.value)
-const selectedCountryOption = ref(''), customCountry = ref(''), effectiveCountry = computed(() => selectedCountryOption.value === '__custom__' ? customCountry.value : selectedCountryOption.value)
-const selectedCurrencyOption = ref(''), customCurrency = ref(''), effectiveCurrency = computed(() => selectedCurrencyOption.value === '__custom__' ? customCurrency.value : selectedCurrencyOption.value)
+// ========== Save to Session (EXPLICIT SAVE) ==========
+function saveToSession() {
+  saveSessionData()
+  if (!activeSession.value) {
+    alert('No active session selected.')
+    return
+  }
+  const sid = activeSession.value.id
+  updateSessionCompletion()
+  const wf = sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
+  const versionData = {
+    instrument: instrumentName.value,
+    changeType: 'Saved',
+    changeTypeClass: 'badge-saved',
+    shortDescription: `💾 Saved ${instrumentName.value} to session`,
+    description: `Saved changes for ${instrumentName.value}`,
+    fieldsChanged: ['data', 'calculations', 'mapping'],
+    modifiedInstruments: [instrumentName.value],
+    workflows: { [instrumentType.value]: wf }
+  }
+  sessionManager.addVersion(sid, versionData)
+  window.dispatchEvent(new CustomEvent('session-updated', {
+    detail: { sessionId: sid, skipCapture: true }
+  }))
+  sessionSavedAt.value = new Date().toISOString()
+  alert('Data saved to session!')
+}
 
-function onCountrySelectChange() { if (selectedCountryOption.value !== '__custom__') { fredFilters.value.country = selectedCountryOption.value; onFredFilterChange() } else { fredFilters.value.country = customCountry.value; if (customCountry.value) onFredFilterChange() } }
-function onCustomCountryChange() { if (selectedCountryOption.value === '__custom__') { fredFilters.value.country = customCountry.value; onFredFilterChange() } }
-function onCurrencySelectChange() { if (selectedCurrencyOption.value !== '__custom__') { fredFilters.value.currency = selectedCurrencyOption.value; onFredFilterChange() } else { fredFilters.value.currency = customCurrency.value; if (customCurrency.value) onFredFilterChange() } }
-function onCustomCurrencyChange() { if (selectedCurrencyOption.value === '__custom__') { fredFilters.value.currency = customCurrency.value; onFredFilterChange() } }
-function onMaturitySelectChange() { if (selectedMaturityOption.value !== '__custom__') { fredFilters.value.maturity = selectedMaturityOption.value; onFredFilterChange() } else { fredFilters.value.maturity = customMaturity.value; if (customMaturity.value) onFredFilterChange() } }
-function onCustomMaturityChange() { if (selectedMaturityOption.value === '__custom__') { fredFilters.value.maturity = customMaturity.value; onFredFilterChange() } }
-function getCountryLabel(code) { const found = countryOptions.value.find(c => c.value === code); return found ? found.label : code }
-function getCurrencyLabel(code) { const found = currencyOptions.value.find(c => c.value === code); return found ? found.label : code }
+// ========== Session Persistence ==========
+function refreshPage() {
+  rawData.value = []
+  originalRawData.value = []
+  originalFileColumns.value = []
+  cleanedData.value = []
+  uploadedFile.value = null
+  previewData.value = []
+  calculations.value = {}
+  cleaningStats.value = { totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 }
+  fixedValuesTracker.value.clear()
+  columnMapping.value = {}
+  fileColumns.value = []
+  showMappingDialog.value = false
+  mappingApplied.value = false
+  sessionSavedAt.value = null
+}
 
-const countryOptions = computed(() => [{ value: 'USA', label: 'United States' }, { value: 'GBR', label: 'United Kingdom' }, { value: 'EUR', label: 'Eurozone' }, { value: 'JPN', label: 'Japan' }, { value: 'CAN', label: 'Canada' }])
-const currencyOptions = computed(() => [{ value: 'USD', label: 'USD' }, { value: 'EUR', label: 'EUR' }, { value: 'GBP', label: 'GBP' }, { value: 'JPY', label: 'JPY' }, { value: 'CAD', label: 'CAD' }])
-const maturityOptions = computed(() => {
-  let baseOptions = []
-  if (filterOptions.value.maturities?.length) baseOptions = filterOptions.value.maturities
-  else baseOptions = [{ value: '1M', label: '1 Month' }, { value: '3M', label: '3 Months' }, { value: '6M', label: '6 Months' }, { value: '1Y', label: '1 Year' }, { value: '2Y', label: '2 Years' }, { value: '5Y', label: '5 Years' }, { value: '10Y', label: '10 Years' }, { value: '30Y', label: '30 Years' }, { value: '4W', label: '4 Weeks' }, { value: '8W', label: '8 Weeks' }, { value: '13W', label: '13 Weeks' }, { value: '26W', label: '26 Weeks' }, { value: '52W', label: '52 Weeks' }]
-  if (instrumentType.value === 'money-market') return baseOptions.filter(opt => ['1M', '3M', '6M', '1Y'].includes(opt.value))
-  if (instrumentType.value === 'bonds') return baseOptions.filter(opt => ['2Y', '5Y', '10Y', '30Y'].includes(opt.value))
-  if (instrumentType.value === 'tbills') return baseOptions.filter(opt => ['4W', '8W', '13W', '26W', '52W'].includes(opt.value))
-  return baseOptions
+async function loadSavedData() {
+  const datasetId = route.query.dataset_id
+  if (datasetId) {
+    try {
+      const res = await api.datasetAPI.load(datasetId)
+      if (res && res.success && res.data) {
+        const last = res.data
+        rawData.value = last.data || []
+        originalRawData.value = JSON.parse(JSON.stringify(rawData.value))
+        originalFileColumns.value = Object.keys(rawData.value[0] || {})
+        fileColumns.value = [...originalFileColumns.value]
+        cleanedData.value = last.data || []
+        calculations.value = {}
+        uploadedFile.value = { name: last.name || '', size: 0 }
+        cleaningStats.value = {
+          totalRows: rawData.value.length,
+          validRows: cleanedData.value.length,
+          removedRows: rawData.value.length - cleanedData.value.length,
+          fixedMissing: 0
+        }
+        columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+        mappingApplied.value = false
+        const allPresent = requiredColumns.value.every(col => fileColumns.value.includes(col))
+        if (allPresent) {
+          const autoMap = {}
+          requiredColumns.value.forEach(col => {
+            if (fileColumns.value.includes(col)) autoMap[col] = col
+          })
+          if (Object.keys(autoMap).length === requiredColumns.value.length) {
+            columnMapping.value = autoMap
+            mappingApplied.value = true
+            rawData.value = applyMappingToRows(originalRawData.value, requiredColumns.value, autoMap)
+          }
+        }
+        return true
+      }
+    } catch (err) { console.error(err) }
+  }
+
+  if (!activeSession.value) return false
+  const sid = activeSession.value.id
+  let loaded = false
+  let wf = sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
+  if (!wf) {
+    await sessionManager.loadSessionFromDb(sid)
+    wf = sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
+  }
+  if (wf) {
+    loaded = applyWorkflowToPage(wf, {
+      rawData, cleanedData, calculations, uploadedFile, cleaningStats,
+      columnMapping, mappingApplied, originalRawData, originalFileColumns
+    })
+    if (wf.sessionSavedAt) sessionSavedAt.value = wf.sessionSavedAt
+    if (originalFileColumns.value.length) fileColumns.value = [...originalFileColumns.value]
+    else if (originalRawData.value.length) fileColumns.value = Object.keys(originalRawData.value[0] || {})
+    if (wf.chartData) chartData.value = wf.chartData
+    if (wf.fredFilters) {
+      fredFilters.value = { ...fredFilters.value, ...wf.fredFilters }
+      if (wf.fredFilters.maturity) {
+        const matVal = wf.fredFilters.maturity
+        const isCustom = !maturityOptions.value.some(opt => opt.value === matVal)
+        if (isCustom) {
+          selectedMaturityOption.value = '__custom__'
+          customMaturity.value = matVal
+        } else {
+          selectedMaturityOption.value = matVal
+          customMaturity.value = ''
+        }
+      }
+      if (wf.fredFilters.country) {
+        const countryVal = wf.fredFilters.country
+        const isCustom = !countryOptions.value.some(opt => opt.value === countryVal)
+        if (isCustom) {
+          selectedCountryOption.value = '__custom__'
+          customCountry.value = countryVal
+        } else {
+          selectedCountryOption.value = countryVal
+          customCountry.value = ''
+        }
+      }
+      if (wf.fredFilters.currency) {
+        const currencyVal = wf.fredFilters.currency
+        const isCustom = !currencyOptions.value.some(opt => opt.value === currencyVal)
+        if (isCustom) {
+          selectedCurrencyOption.value = '__custom__'
+          customCurrency.value = currencyVal
+        } else {
+          selectedCurrencyOption.value = currencyVal
+          customCurrency.value = ''
+        }
+      }
+    }
+    if (wf.last_tab && !route.query.tab) activeTab.value = wf.last_tab
+    const allMapped = requiredColumns.value.every(col => columnMapping.value[col])
+    if (allMapped && rawData.value.length) {
+      mappingApplied.value = true
+      rawData.value = applyMappingToRows(originalRawData.value, requiredColumns.value, columnMapping.value)
+    }
+  }
+
+  const s = sessionManager.getSession(sid)
+  if (!loaded && s) {
+    if (s.data?.length) {
+      rawData.value = s.data
+      originalRawData.value = JSON.parse(JSON.stringify(s.data))
+      originalFileColumns.value = Object.keys(s.data[0] || {})
+      fileColumns.value = [...originalFileColumns.value]
+      loaded = true
+    }
+    if (s.cleanedData?.length) { cleanedData.value = s.cleanedData; loaded = true }
+    if (s.calculations) { calculations.value = s.calculations; loaded = true }
+    if (s.uploaded_file_name) { uploadedFile.value = { name: s.uploaded_file_name, size: 0 }; loaded = true }
+    if (fileColumns.value.length) {
+      columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+    }
+  }
+
+  if (!loaded) {
+    const key = `${instrumentType.value}_session_${sid}`
+    const savedRaw = localStorage.getItem(`${key}_raw`)
+    const savedClean = localStorage.getItem(`${key}_clean`)
+    const savedCalc = localStorage.getItem(`${key}_calc`)
+    const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
+    const savedChartData = localStorage.getItem(`${key}_chartData`)
+    const savedFredFilters = localStorage.getItem(`${key}_fredFilters`)
+    const savedMapping = localStorage.getItem(`${key}_mapping`)
+    if (savedRaw) {
+      rawData.value = JSON.parse(savedRaw)
+      originalRawData.value = JSON.parse(JSON.stringify(rawData.value))
+      originalFileColumns.value = Object.keys(rawData.value[0] || {})
+      fileColumns.value = [...originalFileColumns.value]
+      loaded = true
+    }
+    if (savedClean) { cleanedData.value = JSON.parse(savedClean); loaded = true }
+    if (savedCalc) { calculations.value = JSON.parse(savedCalc); loaded = true }
+    if (savedFileName) { uploadedFile.value = { name: savedFileName, size: 0 }; loaded = true }
+    if (savedChartData) { chartData.value = JSON.parse(savedChartData); loaded = true }
+    if (savedFredFilters) {
+      fredFilters.value = { ...fredFilters.value, ...JSON.parse(savedFredFilters) }
+      loaded = true
+    }
+    if (savedMapping) {
+      columnMapping.value = JSON.parse(savedMapping)
+      const allMapped = requiredColumns.value.every(col => columnMapping.value[col])
+      if (allMapped && rawData.value.length) {
+        mappingApplied.value = true
+        rawData.value = applyMappingToRows(originalRawData.value, requiredColumns.value, columnMapping.value)
+      }
+    } else if (fileColumns.value.length) {
+      columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+    }
+  }
+
+  if (cleanedData.value.length && rawData.value.length) {
+    cleaningStats.value = {
+      totalRows: rawData.value.length,
+      validRows: cleanedData.value.length,
+      removedRows: rawData.value.length - cleanedData.value.length,
+      fixedMissing: 0
+    }
+  }
+  return loaded
+}
+
+function saveSessionData() {
+  const datasetId = route.query.dataset_id
+  if (datasetId) {
+    const payload = {
+      name: uploadedFile.value?.name || `${instrumentType.value}_${Date.now()}`,
+      file_base64: '',
+      sheet_names: [],
+      upload_id: datasetId,
+      data: cleanedData.value.length ? cleanedData.value : rawData.value,
+      headers: Object.keys((cleanedData.value[0] || rawData.value[0]) || {})
+    }
+    api.datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, payload.data, payload.headers, instrumentType.value)
+    if (activeSession.value) sessionManager.updateSession(activeSession.value.id, { last_tab: activeTab.value })
+    else localStorage.setItem(`instrument_${instrumentType.value}_last_tab`, activeTab.value)
+    return
+  }
+
+  if (!activeSession.value) return
+  const sid = activeSession.value.id
+  const wf = buildWorkflowSnapshot({
+    rawData: rawData.value,
+    cleanedData: cleanedData.value,
+    calculations: calculations.value,
+    activeTab: activeTab.value,
+    uploadedFile: uploadedFile.value,
+    cleaningStats: cleaningStats.value,
+    columnMapping: columnMapping.value,
+    mappingApplied: mappingApplied.value,
+    originalRawData: originalRawData.value,
+    originalFileColumns: originalFileColumns.value,
+    chartData: chartData.value,
+    fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+    sessionSavedAt: sessionSavedAt.value
+  })
+  sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, wf)
+  sessionManager.updateSession(sid, { last_tab: activeTab.value })
+
+  const key = `${instrumentType.value}_session_${sid}`
+  localStorage.setItem(`${key}_raw`, JSON.stringify(rawData.value))
+  localStorage.setItem(`${key}_original`, JSON.stringify(originalRawData.value))
+  localStorage.setItem(`${key}_clean`, JSON.stringify(cleanedData.value))
+  localStorage.setItem(`${key}_calc`, JSON.stringify(calculations.value))
+  localStorage.setItem(`${key}_chartData`, JSON.stringify(chartData.value))
+  localStorage.setItem(`${key}_mapping`, JSON.stringify(columnMapping.value))
+  localStorage.setItem(`${key}_fredFilters`, JSON.stringify({ country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value }))
+  if (uploadedFile.value) localStorage.setItem(`${instrumentType.value}_uploaded_file_name`, uploadedFile.value.name)
+}
+
+function updateSessionCompletion() {
+  if (!activeSession.value) return
+  if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
+  activeSession.value.instrumentData[instrumentType.value] = {
+    ...calculations.value,
+    completed: !!calculations.value.totalValue,
+    timestamp: new Date().toISOString(),
+    chartData: chartData.value
+  }
+
+  let totalValue = 0
+  let completedCount = 0
+  for (const [instId, data] of Object.entries(activeSession.value.instrumentData)) {
+    if (data.completed) {
+      totalValue += parseFloat(data.totalValue) || 0
+      completedCount++
+    }
+  }
+  activeSession.value.totalValue = totalValue
+  activeSession.value.instrumentCount = completedCount
+  activeSession.value.status = completedCount === 3 ? 'completed' : 'in-progress'
+
+  sessionManager.updateSession(activeSession.value.id, {
+    totalValue: activeSession.value.totalValue,
+    instrumentCount: activeSession.value.instrumentCount,
+    status: activeSession.value.status,
+    instrumentData: activeSession.value.instrumentData
+  })
+}
+
+// ========== Data Update Handlers ==========
+function onRawExcelUpdate(data, sourceData) {
+  if (sourceData?.length) originalRawData.value = sourceData
+  rawData.value = mappingApplied.value
+    ? applyMappingToRows(originalRawData.value, requiredColumns.value, columnMapping.value)
+    : [...originalRawData.value]
+  debouncedSave()
+}
+function onCleanedExcelUpdate(data) { cleanedData.value = data; debouncedSave(); calculateMetrics() }
+function onExcelDataUpdate(data) { excelData.value = data; if (activeTab.value === 'upload') rawData.value = data; if (cleanedData.value.length) cleanedData.value = data; debouncedSave() }
+
+let saveTimeout = null
+function debouncedSave() { if (saveTimeout) clearTimeout(saveTimeout); saveTimeout = setTimeout(() => { saveSessionData() }, 500) }
+
+watch([rawData, cleanedData], () => debouncedSave(), { deep: true })
+watch(cleanedData, async (newVal) => { if (newVal.length) await calculateMetrics() }, { deep: true })
+watch(chartData, async () => {
+  if (activeTab.value === 'visualizations' && yieldCurveChart.value && chartData.value.datasets?.length) {
+    await nextTick()
+    if (chartInstanceRef.current) chartInstanceRef.current.destroy()
+    await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
+  }
+}, { deep: true })
+watch(() => activeTab.value, async (newTab) => {
+  if (newTab === 'visualizations' && hasCleanedData.value && !chartData.value.datasets.length && !fredLoading.value) {
+    await fetchFredData()
+  }
 })
 
-watch([countryOptions, currencyOptions, maturityOptions], () => {
-  if (!effectiveCountry.value && countryOptions.value.length) { const def = countryOptions.value[0].value; selectedCountryOption.value = def; fredFilters.value.country = def }
-  if (!effectiveCurrency.value && currencyOptions.value.length) { const def = 'USD'; selectedCurrencyOption.value = def; fredFilters.value.currency = def }
-  if (!effectiveMaturity.value && maturityOptions.value.length) { const def = maturityOptions.value[0]?.value; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
-}, { immediate: true })
-
+// ========== FRED Functions ==========
 const fredCategories = ref({})
 const availableSeries = computed(() => fredCategories.value.interest_rates || {})
 const selectedSeriesLabel = computed(() => availableSeries.value[selectedSeries.value] || selectedSeries.value)
-const portfolioAvgRate = computed(() => instrumentType.value === 'money-market' ? calculations.value.avgRate || 0 : instrumentType.value === 'bonds' ? calculations.value.avgCouponRate || 0 : calculations.value.avgDiscountRate || 0)
+
+function getCountryLabel(code) { const found = countryOptions.value.find(c => c.value === code); return found ? found.label : code }
+function getCurrencyLabel(code) { const found = currencyOptions.value.find(c => c.value === code); return found ? found.label : code }
+
+function onCountrySelectChange() {
+  if (selectedCountryOption.value !== '__custom__') {
+    fredFilters.value.country = selectedCountryOption.value
+    onFredFilterChange()
+  } else {
+    fredFilters.value.country = customCountry.value
+    if (customCountry.value) onFredFilterChange()
+  }
+}
+function onCustomCountryChange() {
+  if (selectedCountryOption.value === '__custom__') {
+    fredFilters.value.country = customCountry.value
+    onFredFilterChange()
+  }
+}
+function onCurrencySelectChange() {
+  if (selectedCurrencyOption.value !== '__custom__') {
+    fredFilters.value.currency = selectedCurrencyOption.value
+    onFredFilterChange()
+  } else {
+    fredFilters.value.currency = customCurrency.value
+    if (customCurrency.value) onFredFilterChange()
+  }
+}
+function onCustomCurrencyChange() {
+  if (selectedCurrencyOption.value === '__custom__') {
+    fredFilters.value.currency = customCurrency.value
+    onFredFilterChange()
+  }
+}
+function onMaturitySelectChange() {
+  if (selectedMaturityOption.value !== '__custom__') {
+    fredFilters.value.maturity = selectedMaturityOption.value
+    onFredFilterChange()
+  } else {
+    fredFilters.value.maturity = customMaturity.value
+    if (customMaturity.value) onFredFilterChange()
+  }
+}
+function onCustomMaturityChange() {
+  if (selectedMaturityOption.value === '__custom__') {
+    fredFilters.value.maturity = customMaturity.value
+    onFredFilterChange()
+  }
+}
 
 async function fetchFredData() {
-  fredLoading.value = true; fredError.value = ''
+  fredLoading.value = true
+  fredError.value = ''
   try {
     const sid = await seriesIdForMaturity()
     if (!sid) throw new Error('Could not resolve FRED series')
@@ -1665,68 +1867,110 @@ async function fetchFredData() {
       if (chartInstanceRef.current) chartInstanceRef.current.destroy()
       await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
     }
-  } catch (err) { console.error(err); fredError.value = err.message || 'Failed to load market data.'; chartData.value = { labels: [], datasets: [] } }
-  finally { fredLoading.value = false }
+  } catch (err) {
+    console.error(err)
+    fredError.value = err.message || 'Failed to load market data.'
+    chartData.value = { labels: [], datasets: [] }
+  } finally {
+    fredLoading.value = false
+  }
 }
 
-function defaultMaturityForInstrument() { return instrumentType.value === 'bonds' ? '10Y' : instrumentType.value === 'money-market' ? '1Y' : instrumentType.value === 'tbills' ? '13W' : '3M' }
-async function enrichCalculationsWithFred() { try { const bench = await fetchBenchmark(instrumentType.value); if (bench?.benchmark_rate != null) { const portfolio = parseFloat(portfolioAvgRate.value) || 0; calculations.value.fred = { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2) } } } catch (e) { console.error(e) } }
-async function onFredFilterChange() { if (activeTab.value === 'visualizations') await fetchFredData(); if (Object.keys(calculations.value).length) enrichCalculationsWithFred(); debouncedSave() }
+function defaultMaturityForInstrument() {
+  return instrumentType.value === 'bonds' ? '10Y' : instrumentType.value === 'money-market' ? '1Y' : instrumentType.value === 'tbills' ? '13W' : '3M'
+}
 
-const uploadPreviewHeaders = computed(() => Object.keys(rawData.value[0] || {}))
-const cleanPreviewHeaders = computed(() => Object.keys((cleanedData.value[0]) || {}))
-function onRawExcelUpdate(data) { rawData.value = data; debouncedSave() }
-function onCleanPreviewUpdate(data) { /* not used anymore */ }
-function onCleanedExcelUpdate(data) { cleanedData.value = data; debouncedSave(); calculateMetrics() }
-function onExcelDataUpdate(data) { excelData.value = data; if (activeTab.value === 'upload') rawData.value = data; if (cleanedData.value.length) cleanedData.value = data; debouncedSave() }
+async function enrichCalculationsWithFred() {
+  try {
+    const bench = await fetchBenchmark(instrumentType.value)
+    if (bench?.benchmark_rate != null) {
+      const portfolio = parseFloat(portfolioAvgRate.value) || 0
+      calculations.value.fred = { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2) }
+    }
+  } catch (e) { console.error(e) }
+}
 
-let saveTimeout = null
-function debouncedSave() { if (saveTimeout) clearTimeout(saveTimeout); saveTimeout = setTimeout(() => { saveSessionData() }, 500) }
-watch([rawData, cleanedData], () => debouncedSave(), { deep: true })
-watch(cleanedData, async (newVal) => { if (newVal.length) await calculateMetrics() }, { deep: true })
-watch(chartData, async () => { if (activeTab.value === 'visualizations' && yieldCurveChart.value && chartData.value.datasets?.length) { await nextTick(); if (chartInstanceRef.current) chartInstanceRef.current.destroy(); await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef) } }, { deep: true })
-watch(() => instrumentType.value, () => { if (activeTab.value === 'visualizations') fetchFredData(); if (!effectiveMaturity.value) { const def = defaultMaturityForInstrument(); selectedMaturityOption.value = def; fredFilters.value.maturity = def } }, { immediate: true })
-watch(() => activeTab.value, async (newTab) => { if (newTab === 'visualizations' && hasCleanedData.value && !chartData.value.datasets.length && !fredLoading.value) await fetchFredData() })
+async function onFredFilterChange() {
+  if (activeTab.value === 'visualizations') await fetchFredData()
+  if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
+  debouncedSave()
+}
 
+// ========== Lifecycle ==========
 let lastInstrument = '', lastSessionId = ''
 async function checkAndReset() {
-  const savedSessionRaw = localStorage.getItem('active_session')
-  let currentSessionId = null
-  if (savedSessionRaw) try { currentSessionId = JSON.parse(savedSessionRaw).id } catch (e) { currentSessionId = null }
-  else { const all = sessionManager.getAllSessions() || []; if (all.length) currentSessionId = all[0].id }
+  const currentSessionId = sessionManager.getActiveSessionId() || route.query.session || null
   const currentInstrument = instrumentType.value
   if (currentInstrument !== lastInstrument || currentSessionId !== lastSessionId) {
-    lastInstrument = currentInstrument; lastSessionId = currentSessionId
-    if (currentSessionId) { const s = sessionManager.getSession(currentSessionId); activeSession.value = s || (savedSessionRaw ? JSON.parse(savedSessionRaw) : null) }
-    else activeSession.value = null
+    lastInstrument = currentInstrument
+    lastSessionId = currentSessionId
+    if (currentSessionId) {
+      const s = sessionManager.getSession(String(currentSessionId))
+      activeSession.value = s || null
+    } else {
+      activeSession.value = null
+    }
     const loaded = await loadSavedData()
-    if (!loaded) { refreshPage(); if (!route.query.tab) activeTab.value = 'upload' }
-    else { if (!route.query.tab) { const savedTab = sessionManager.getSession(activeSession.value?.id)?.payload?.last_tab || localStorage.getItem(`instrument_${instrumentType.value}_last_tab`); if (savedTab && steps.some(s => s.tab === savedTab)) activeTab.value = savedTab; else activeTab.value = 'upload' } if (cleanedData.value.length) await calculateMetrics(); if (activeTab.value === 'visualizations' && !chartData.value.datasets.length) await fetchFredData() }
+    if (!loaded) {
+      refreshPage()
+      if (!route.query.tab) activeTab.value = 'upload'
+    } else {
+      if (!route.query.tab) {
+        const savedTab = sessionManager.getInstrumentWorkflow(activeSession.value?.id, instrumentType.value)?.last_tab
+        if (savedTab && steps.value.some(s => s.tab === savedTab)) {
+          activeTab.value = savedTab
+        } else {
+          activeTab.value = 'upload'
+        }
+      }
+      if (cleanedData.value.length) await calculateMetrics()
+      if (activeTab.value === 'visualizations' && !chartData.value.datasets.length) await fetchFredData()
+    }
     debouncedSave()
   }
 }
 
 onMounted(async () => {
+  await loadConfig(instrumentType.value)
   const qSid = route.query.session
-  if (qSid) { await sessionManager.loadSessionFromDb(String(qSid)); const s = sessionManager.getSession(String(qSid)); if (s) { activeSession.value = s; sessionManager.setActiveSession(s) } }
+  if (qSid) {
+    await sessionManager.loadSessionFromDb(String(qSid))
+    const s = sessionManager.getSession(String(qSid))
+    if (s) {
+      activeSession.value = s
+      sessionManager.setActiveSession(s)
+    }
+  }
   await checkAndReset()
   loadUploadHistory()
   window.addEventListener('storage', () => checkAndReset())
   await loadFilterOptions()
-  if (!effectiveMaturity.value) { const def = defaultMaturityForInstrument(); selectedMaturityOption.value = def; fredFilters.value.maturity = def }
-  try { const res = await api.fredAPI.getCategories(); if (res?.success && res.categories) { fredCategories.value = res.categories; selectedSeries.value = (await seriesIdForMaturity()) || Object.keys(fredCategories.value.interest_rates || {})[0] } } catch (err) { console.error(err) }
+  if (!effectiveMaturity.value) {
+    const def = defaultMaturityForInstrument()
+    selectedMaturityOption.value = def
+    fredFilters.value.maturity = def
+  }
+  try {
+    const res = await api.fredAPI.getCategories()
+    if (res?.success && res.categories) {
+      fredCategories.value = res.categories
+      selectedSeries.value = (await seriesIdForMaturity()) || Object.keys(fredCategories.value.interest_rates || {})[0]
+    }
+  } catch (err) { console.error(err) }
   if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
   if (!calculations.value.totalValue && activeSession.value) await loadSavedData()
   if (cleanedData.value.length) await calculateMetrics()
   debouncedSave()
 })
 
-onBeforeUnmount(() => { window.removeEventListener('storage', () => checkAndReset()); saveSessionData() })
+onBeforeUnmount(() => {
+  window.removeEventListener('storage', () => checkAndReset())
+  saveSessionData()
+})
 watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* ========== ALL ORIGINAL STYLES – UNCHANGED ========== */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
@@ -1735,61 +1979,16 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .session-badge.warning { background: #fff3e0; color: #e65100; }
 .step-indicator { background: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; color: #0B2044; font-weight: 600; }
 
-/* ========== PROGRESS BAR – CLEAN, MINIMAL, EVENLY SPACED ========== */
-.progress-bar-container {
-  margin-bottom: 30px;
-  padding: 0 10px;
-}
-.progress-steps {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: white;
-  padding: 20px;
-  border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-}
-.progress-step {
-  flex: 1;
-  text-align: center;
-  cursor: pointer;
-}
-.progress-step.disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-.step-circle {
-  width: 36px;
-  height: 36px;
-  background: #e0e0e0;
-  color: #999;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  transition: all 0.3s;
-}
-.progress-step.active .step-circle {
-  background: #0B2044;
-  color: white;
-  box-shadow: 0 0 0 4px rgba(11,32,68,0.2);
-}
-.progress-step.completed .step-circle {
-  background: #4CAF50;
-  color: white;
-}
-.step-label {
-  font-size: 11px;
-  color: #999;
-  margin-top: 8px;
-}
-.progress-step.active .step-label {
-  color: #0B2044;
-  font-weight: 600;
-}
+.progress-bar-container { margin-bottom: 30px; padding: 0 10px; }
+.progress-steps { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+.progress-step { flex: 1; text-align: center; cursor: pointer; }
+.progress-step.disabled { cursor: not-allowed; opacity: 0.5; }
+.step-circle { width: 36px; height: 36px; background: #e0e0e0; color: #999; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; transition: all 0.3s; }
+.progress-step.active .step-circle { background: #0B2044; color: white; box-shadow: 0 0 0 4px rgba(11,32,68,0.2); }
+.progress-step.completed .step-circle { background: #4CAF50; color: white; }
+.step-label { font-size: 11px; color: #999; margin-top: 8px; }
+.progress-step.active .step-label { color: #0B2044; font-weight: 600; }
 
-/* ========== REST OF ORIGINAL STYLES – UNCHANGED ========== */
 .content-card { margin-bottom: 20px; }
 .upload-area { border: 2px dashed #ccc; border-radius: 12px; padding: 50px; text-align: center; cursor: pointer; transition: all 0.3s; }
 .upload-area:hover { border-color: #0B2044; background: #f8f9ff; }
@@ -1809,10 +2008,13 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .btn-close-dialog { background: transparent; border: none; color: white; cursor: pointer; padding: 8px; border-radius: 50%; }
 .btn-close-dialog:hover { background: rgba(255,255,255,0.1); }
 .excel-dialog-content { padding: 0; height: calc(100vh - 140px); }
+.mapping-instructions { background: #e3f2fd; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; color: #0B2044; }
+.mapping-instructions p { margin: 0; display: flex; align-items: center; gap: 8px; }
 .mapping-grid { display: flex; flex-direction: column; gap: 15px; margin: 20px 0; }
 .mapping-row { display: flex; align-items: center; gap: 15px; }
 .required-label { width: 140px; font-weight: 600; color: #0B2044; }
 .mapping-select { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+.mapped-indicator { font-size: 18px; }
 .mapping-hint { margin-top: 15px; padding: 10px; background: #f8f9ff; border-radius: 8px; display: flex; align-items: center; gap: 8px; color: #666; }
 .required-columns { margin: 20px 0; }
 .columns-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
@@ -1922,80 +2124,16 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .formula-dialog-title { background: #0B2044; color: white; }
 .formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; }
 
-/* ===== FIX: Table layout – prevents zoom ===== */
-.excel-edit-table {
-  max-width: 100% !important;
-  width: 100% !important;
-  border-collapse: collapse;
-  font-size: 13px;
-  table-layout: fixed !important;
-}
-.excel-edit-table th,
-.excel-edit-table td {
-  border: 1px solid #ddd;
-  padding: 6px 8px;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px; /* adjust as needed */
-}
+.excel-edit-table { max-width: 100% !important; width: 100% !important; border-collapse: collapse; font-size: 13px; table-layout: fixed !important; }
+.excel-edit-table th, .excel-edit-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
 </style>
 
-<!-- ============================================================
-     NON-SCOPED CSS – FORCED OVERRIDES (Fixed Sidebar Safe)
-     ============================================================ -->
 <style>
-/* 🔒 LOCK THE ENTIRE APPLICATION – NEVER WIDER THAN VIEWPORT */
-html, body, #app, .v-application, .v-application--wrap,
-.fixed-layout, .v-main, .v-content {
-  max-width: 100vw !important;
-  overflow-x: hidden !important;
-}
-
-/* The main instrument page wrapper */
-.instrument-page {
-  max-width: 100% !important;
-  overflow-x: hidden !important;
-}
-
-/* All scrollable table wrappers */
-.instrument-page .excel-table-wrapper,
-.instrument-page .excel-preview-section,
-.instrument-page .preview-section,
-.instrument-page .excel-scroll-wrapper,
-.instrument-page .excel-dialog-content {
-  overflow-x: auto !important;
-  max-width: 100% !important;
-}
-
-.instrument-page .excel-viewer {
-  max-width: 100% !important;
-  overflow-x: hidden !important;
-}
-
-/* Force the table to stay within its container */
-.instrument-page .excel-edit-table {
-  max-width: 100% !important;
-  table-layout: fixed !important;
-  width: 100% !important;
-}
-
-/* Ensure cells don't overflow */
-.instrument-page .excel-edit-table th,
-.instrument-page .excel-edit-table td {
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  max-width: 200px !important;
-}
-
-/* Ensure filter dropdowns stay readable */
-.instrument-page .filters-row select,
-.instrument-page .filters-row .filter-select,
-.instrument-page .filters-row select:focus,
-.instrument-page .filters-row .filter-select:focus {
-  color: #000000 !important;
-  background-color: #ffffff !important;
-}
+html, body, #app, .v-application, .v-application--wrap, .fixed-layout, .v-main, .v-content { max-width: 100vw !important; overflow-x: hidden !important; }
+.instrument-page { max-width: 100% !important; overflow-x: hidden !important; }
+.instrument-page .excel-table-wrapper, .instrument-page .excel-preview-section, .instrument-page .preview-section, .instrument-page .excel-scroll-wrapper, .instrument-page .excel-dialog-content { overflow-x: auto !important; max-width: 100% !important; }
+.instrument-page .excel-viewer { max-width: 100% !important; overflow-x: hidden !important; }
+.instrument-page .excel-edit-table { max-width: 100% !important; table-layout: fixed !important; width: 100% !important; }
+.instrument-page .excel-edit-table th, .instrument-page .excel-edit-table td { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; max-width: 200px !important; }
+.instrument-page .filters-row select, .instrument-page .filters-row .filter-select, .instrument-page .filters-row select:focus, .instrument-page .filters-row .filter-select:focus { color: #000000 !important; background-color: #ffffff !important; }
 </style>

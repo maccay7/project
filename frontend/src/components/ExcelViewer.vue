@@ -6,8 +6,8 @@
         <div v-if="showMappingControls" class="mapping-controls">
           <span class="mapping-label">Column mapping:</span>
           <select v-model="mappingMode" class="mapping-mode-select">
-            <option value="original">Show original columns</option>
-            <option value="mapped">Show mapped columns</option>
+            <option value="original">Original Columns</option>
+            <option value="mapped">Mapped Columns</option>
           </select>
         </div>
         <div class="pagination-controls">
@@ -17,6 +17,7 @@
         </div>
       </div>
     </div>
+    <div v-if="validationError" class="validation-banner">{{ validationError }}</div>
     <div class="excel-table-wrapper">
       <table class="excel-edit-table">
         <thead>
@@ -49,6 +50,7 @@
                 :value="getCellValue(row, col)"
                 @input="updateCell(row, col, $event.target.value)"
                 class="editable-cell"
+                :class="{ 'cell-invalid': isCellInvalid(row, col) }"
               />
             </td>
           </tr>
@@ -60,79 +62,119 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { validateCellValue } from '@/utils/instrumentMapping.js'
 
 const props = defineProps({
   data: { type: Array, required: true },
   headers: { type: Array, required: true },
+  originalData: { type: Array, default: null },
+  originalHeaders: { type: Array, default: null },
   showMappingControls: { type: Boolean, default: false },
   columnMapping: { type: Object, default: () => ({}) },
-  availableFileColumns: { type: Array, default: () => [] }
+  availableFileColumns: { type: Array, default: () => [] },
+  defaultMappedMode: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['data-update', 'mapping-update'])
+const emit = defineEmits(['data-update', 'mapping-update', 'validation-error'])
 
 const pageSize = 15
 const currentPage = ref(1)
-const mappingMode = ref('original')
+const mappingMode = ref(props.defaultMappedMode ? 'mapped' : 'original')
+const validationError = ref('')
+const invalidCells = ref(new Set())
 
-const totalPages = computed(() => Math.ceil(props.data.length / pageSize))
+const sourceData = computed(() => props.originalData?.length ? props.originalData : props.data)
+const sourceHeaders = computed(() => props.originalHeaders?.length ? props.originalHeaders : props.headers)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(props.data.length / pageSize)))
 
 const paginatedData = computed(() => {
   const start = (currentPage.value - 1) * pageSize
-  const end = start + pageSize
-  return props.data.slice(start, end)
+  return props.data.slice(start, start + pageSize)
 })
 
 const displayHeaders = computed(() => {
   if (!props.showMappingControls || mappingMode.value === 'original') {
-    return props.headers
-  } else {
-    return Object.entries(props.columnMapping)
-      .filter(([reqCol, srcCol]) => srcCol && srcCol !== '__na__')
-      .map(([reqCol]) => reqCol)
+    return sourceHeaders.value
   }
+  return Object.entries(props.columnMapping)
+    .filter(([, srcCol]) => srcCol && srcCol !== '__na__')
+    .map(([reqCol]) => reqCol)
 })
 
 function getMappingForHeader(requiredCol) {
-  return props.columnMapping[requiredCol] || null
+  return props.columnMapping[requiredCol] || '__na__'
 }
 
 function getCellValue(row, col) {
   if (!props.showMappingControls || mappingMode.value === 'original') {
-    return row[col] !== undefined ? row[col] : ''
-  } else {
-    const srcCol = props.columnMapping[col]
-    if (!srcCol || srcCol === '__na__') return ''
-    return row[srcCol] !== undefined ? row[srcCol] : ''
+    const srcRow = findSourceRow(row)
+    return srcRow?.[col] !== undefined ? srcRow[col] : ''
   }
+  const srcCol = props.columnMapping[col]
+  if (!srcCol || srcCol === '__na__') return ''
+  const srcRow = findSourceRow(row)
+  return srcRow?.[srcCol] !== undefined ? srcRow[srcCol] : ''
 }
 
-function updateCell(row, displayCol, newValue) {
-  if (!props.showMappingControls || mappingMode.value === 'original') {
-    row[displayCol] = newValue
-  } else {
+function findSourceRow(row) {
+  const idx = props.data.indexOf(row)
+  if (idx >= 0 && sourceData.value[idx]) return sourceData.value[idx]
+  return row
+}
+
+function isCellInvalid(row, col) {
+  const idx = props.data.indexOf(row)
+  const key = `${idx}-${col}`
+  return invalidCells.value.has(key)
+}
+
+function updateCell(row, displayCol, rawValue) {
+  const idx = props.data.indexOf(row)
+  const srcRow = idx >= 0 && sourceData.value[idx] ? sourceData.value[idx] : row
+
+  let targetCol = displayCol
+  if (props.showMappingControls && mappingMode.value === 'mapped') {
     const srcCol = props.columnMapping[displayCol]
-    if (srcCol && srcCol !== '__na__') {
-      row[srcCol] = newValue
+    if (!srcCol || srcCol === '__na__') return
+    targetCol = srcCol
+  }
+
+  const colForValidation = mappingMode.value === 'mapped' ? displayCol : displayCol
+  const result = validateCellValue(colForValidation, rawValue)
+  const key = `${idx}-${displayCol}`
+
+  if (!result.valid) {
+    invalidCells.value.add(key)
+    validationError.value = result.error
+    emit('validation-error', result.error)
+    srcRow[targetCol] = rawValue
+  } else {
+    invalidCells.value.delete(key)
+    if (invalidCells.value.size === 0) validationError.value = ''
+    srcRow[targetCol] = result.value
+  }
+
+  if (idx >= 0 && props.data[idx] !== srcRow) {
+    if (mappingMode.value === 'original') {
+      props.data[idx][targetCol] = srcRow[targetCol]
     }
   }
-  emit('data-update', props.data)
+
+  emit('data-update', props.data, sourceData.value)
 }
 
 function onMappingChange(requiredCol, newSrcCol) {
   const newMapping = { ...props.columnMapping }
-  if (newSrcCol === '__na__') {
-    newMapping[requiredCol] = null
-  } else {
-    newMapping[requiredCol] = newSrcCol
-  }
+  newMapping[requiredCol] = newSrcCol === '__na__' ? null : newSrcCol
   emit('mapping-update', newMapping)
 }
 
 function prevPage() { if (currentPage.value > 1) currentPage.value-- }
 function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
 
-watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
+watch(() => props.data, () => { currentPage.value = 1; invalidCells.value.clear(); validationError.value = '' }, { deep: true })
+watch(() => props.defaultMappedMode, (val) => { mappingMode.value = val ? 'mapped' : 'original' })
 </script>
 
 <style scoped>
@@ -173,6 +215,13 @@ watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
   border: 1px solid #ccc;
   background: white;
   font-size: 12px;
+}
+.validation-banner {
+  background: #fff3cd;
+  color: #856404;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid #ffc107;
 }
 .pagination-controls {
   display: flex;
@@ -235,6 +284,10 @@ watch(() => props.data, () => { currentPage.value = 1 }, { deep: true })
 .editable-cell:focus {
   outline: 1px solid #0B2044;
   background: #f8f9ff;
+}
+.cell-invalid {
+  outline: 1px solid #dc3545;
+  background: #fff5f5;
 }
 .header-dropdown {
   display: flex;

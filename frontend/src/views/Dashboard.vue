@@ -125,7 +125,6 @@
           <button class="btn-close-dialog" @click="versionDialogVisible = false">✕</button>
         </v-card-title>
         <v-card-text class="version-dialog-body">
-          <!-- Version search bar -->
           <div class="version-search-bar">
             <v-icon size="16" class="search-icon">mdi-magnify</v-icon>
             <input
@@ -139,7 +138,6 @@
             </button>
           </div>
 
-          <!-- Scrollable version list -->
           <div class="version-list-container">
             <div v-if="!filteredVersions.length" class="empty-versions">
               <v-icon size="36" color="#ccc">mdi-file-document-outline</v-icon>
@@ -148,13 +146,23 @@
             <div v-else class="version-list">
               <div v-for="(ver, idx) in filteredVersions" :key="idx" class="version-entry" :class="{ 'latest': idx === 0 }">
                 <div class="version-entry-header">
-                  <div class="version-entry-time">{{ formatVersionTime(ver.timestamp) }}</div>
+                  <div class="version-entry-time">
+                    <span v-if="ver.versionNumber" class="version-number">v{{ ver.versionNumber }}</span>
+                    {{ formatVersionTime(ver.timestamp) }}
+                  </div>
                   <div class="version-entry-badge" :class="ver.changeTypeClass">{{ ver.changeType }}</div>
                 </div>
                 <div class="version-entry-details">
+                  <!-- User row removed -->
                   <div class="version-entry-row">
                     <span class="label">Instrument</span>
                     <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.instrument || '—' }}</span>
+                  </div>
+                  <div class="version-entry-row" v-if="ver.modifiedInstruments && ver.modifiedInstruments.length">
+                    <span class="label">Modified</span>
+                    <span class="value fields-tags">
+                      <span v-for="(inst, ii) in ver.modifiedInstruments" :key="ii" class="field-tag">{{ inst }}</span>
+                    </span>
                   </div>
                   <div class="version-entry-row description-row">
                     <span class="label">Change</span>
@@ -199,7 +207,6 @@ const activeSession = ref(null)
 const renamingActive = ref(false)
 const renameInput = ref('')
 
-// Version modal state
 const versionDialogVisible = ref(false)
 const selectedSessionForVersions = ref(null)
 const versionSearchQuery = ref('')
@@ -293,28 +300,25 @@ function captureVersion(sessionId, options = {}) {
     console.warn('captureVersion: session not found', sessionId)
     return
   }
-
   const {
     instrument = null,
     changeType = 'Updated',
     fieldsChanged = [],
     description = null,
     shortDescription = null,
-    user = localStorage.getItem('user') || 'System'
+    modifiedInstruments = []
   } = options
 
   let detectedInstrument = instrument
   if (!detectedInstrument) {
     detectedInstrument = detectInstrument(sessionId)
   }
-
   if (!detectedInstrument && session.versions && session.versions.length > 0) {
     const lastVersion = session.versions[0]
     if (lastVersion.instrument && lastVersion.instrument !== 'Session') {
       detectedInstrument = lastVersion.instrument
     }
   }
-
   if (!detectedInstrument) detectedInstrument = 'Session'
 
   let shortDesc = shortDescription || description || changeType
@@ -348,7 +352,9 @@ function captureVersion(sessionId, options = {}) {
     'Saved': 'badge-saved'
   }
 
+  const versionNumber = (session.versions?.length || 0) + 1
   const version = {
+    versionNumber,
     timestamp: Date.now(),
     instrument: detectedInstrument,
     changeType: changeType,
@@ -356,7 +362,7 @@ function captureVersion(sessionId, options = {}) {
     fieldsChanged: fieldsChanged || [],
     description: description || shortDesc,
     shortDescription: shortDesc,
-    user: user,
+    modifiedInstruments: modifiedInstruments.length ? modifiedInstruments : [detectedInstrument],
     workflows: workflows,
     name: shortDesc
   }
@@ -365,8 +371,8 @@ function captureVersion(sessionId, options = {}) {
   session.versions.unshift(version)
   if (session.versions.length > 50) session.versions.pop()
 
-  console.log(`📝 Version added for session ${session.name} (${sessionId}) – ${changeType} on ${detectedInstrument}`)
   saveSessionsToLocalStorage()
+  sessionManager.updateSession(sessionId, { versions: session.versions })
 }
 
 function detectInstrument(sessionId) {
@@ -379,7 +385,7 @@ function detectInstrument(sessionId) {
   for (const [key, name] of Object.entries(instrumentMap)) {
     const wf = sessionManager.getInstrumentWorkflow(sessionId, key)
     if (wf) {
-      const hasData = (wf.rawData && wf.rawData.length > 0) ||
+      const hasData = (wf.data && wf.data.length > 0) ||
                       (wf.cleanedData && wf.cleanedData.length > 0) ||
                       (wf.calculations && Object.keys(wf.calculations).length > 0)
       if (hasData) found.push(name)
@@ -419,9 +425,7 @@ function restoreVersion(sessionId, versionIndex) {
   for (const [inst, wf] of Object.entries(version.workflows)) {
     sessionManager.saveInstrumentWorkflow(sessionId, inst, wf)
   }
-
   const restoredInstrument = detectInstrument(sessionId) || version.instrument || 'Session'
-
   captureVersion(sessionId, {
     changeType: 'Restored',
     shortDescription: `↩️ Restored version from ${formatVersionTime(version.timestamp)}`,
@@ -437,11 +441,19 @@ function restoreVersion(sessionId, versionIndex) {
 // ========== EVENT LISTENER ==========
 function onSessionUpdated(event) {
   const detail = event.detail || {}
-  const { sessionId, instrument, changeType, fieldsChanged, description, shortDescription } = detail
-  if (sessionId) {
-    console.log(`📨 Session updated event received for ${sessionId}`, detail)
-    captureVersion(sessionId, { instrument, changeType, fieldsChanged, description, shortDescription })
+  const { sessionId, skipCapture, ...options } = detail
+  if (!sessionId) return
+  if (skipCapture) {
+    const updated = sessionManager.getSession(sessionId)
+    if (updated) {
+      const idx = sessions.value.findIndex(s => s.id === sessionId)
+      if (idx !== -1) sessions.value[idx] = { ...sessions.value[idx], ...updated, versions: updated.versions || sessions.value[idx].versions }
+      else sessions.value.unshift(updated)
+      saveSessionsToLocalStorage()
+    }
+    return
   }
+  captureVersion(sessionId, options)
 }
 
 // ========== SESSION ACTIONS ==========
@@ -450,8 +462,8 @@ function createNewSession() {
   const created = sessionManager.createSession(newSessionName.value.trim())
   const newSession = {
     id: created.id, name: created.name, date: created.date || new Date().toISOString(),
-    status: created.status || 'in-progress', instrumentCount: created.instrumentCount || 0,
-    totalValue: created.totalValue || 0, versions: []
+    status: created.status || 'in-progress', instrumentCount: 0,
+    totalValue: 0, versions: []
   }
   sessions.value.unshift(newSession); saveSessionsToLocalStorage()
   activeSession.value = newSession; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id)
@@ -468,8 +480,11 @@ function loadExistingSession(sessionId) {
     if (refreshed) {
       const index = sessions.value.findIndex(s => s.id === sessionId)
       if (index !== -1) {
-        const existingVersions = sessions.value[index]?.versions || []
-        sessions.value[index] = { ...refreshed, versions: existingVersions }
+        sessions.value[index] = {
+          ...sessions.value[index],
+          ...refreshed,
+          versions: refreshed.versions?.length ? refreshed.versions : (sessions.value[index]?.versions || [])
+        }
         saveSessionsToLocalStorage()
         session = sessions.value[index]
       }

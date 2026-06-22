@@ -1,8 +1,8 @@
 // Session manager: localStorage + MySQL via /api/sessions/*
 import api from './api.js'
 
-const STORAGE_KEY = 'duracapital_sessions'
-const ACTIVE_KEY = 'active_session'
+const STORAGE_KEY = 'dura_sessions'
+const ACTIVE_KEY = 'dura_active_session_id'
 
 function parsePayload(p) {
   if (!p) return null
@@ -10,6 +10,10 @@ function parsePayload(p) {
     try { return JSON.parse(p) } catch { return null }
   }
   return p
+}
+
+function buildInstrumentWorkflows(session) {
+  return session?.instrumentWorkflow || session?.instrument_workflows || {}
 }
 
 export const sessionManager = {
@@ -20,14 +24,29 @@ export const sessionManager = {
       api.sessionsAPI.list().then(res => {
         if (res?.success && Array.isArray(res.data)) {
           const mapped = res.data.map(r => ({
-            id: r.session_id,
+            id: r.id || r.session_id,
             name: r.name,
             instrument: r.instrument,
             status: r.status,
-            date: r.created_at,
-            created_at: r.created_at
+            date: r.created_at || r.date,
+            created_at: r.created_at || r.date,
+            versions: r.versions || [],
+            instrumentCount: r.instrumentCount || 0
           }))
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(mapped))
+          const merged = [...local]
+          for (const ms of mapped) {
+            const idx = merged.findIndex(s => s.id === ms.id)
+            if (idx !== -1) {
+              merged[idx] = {
+                ...merged[idx],
+                ...ms,
+                versions: ms.versions?.length ? ms.versions : (merged[idx].versions || [])
+              }
+            } else {
+              merged.push(ms)
+            }
+          }
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
         }
       }).catch(() => {})
       return local
@@ -52,6 +71,10 @@ export const sessionManager = {
     full.name = body.name || full.name
     full.status = body.status || full.status
     full.created_at = body.created_at
+    if (body.versions?.length) full.versions = body.versions
+    if (body.instrument_workflows && Object.keys(body.instrument_workflows).length) {
+      full.instrumentWorkflow = body.instrument_workflows
+    }
 
     const list = this.getAllSessions().filter(s => s.id !== full.id)
     list.unshift(full)
@@ -64,13 +87,15 @@ export const sessionManager = {
       localStorage.removeItem(ACTIVE_KEY)
       return
     }
-    localStorage.setItem(ACTIVE_KEY, JSON.stringify({ id: session.id, name: session.name }))
+    localStorage.setItem(ACTIVE_KEY, session.id)
   },
 
   getActiveSessionId() {
     try {
       const a = localStorage.getItem(ACTIVE_KEY)
-      return a ? JSON.parse(a).id : null
+      if (!a) return null
+      if (a.startsWith('{')) return JSON.parse(a).id
+      return a
     } catch {
       return null
     }
@@ -86,7 +111,8 @@ export const sessionManager = {
       instrumentWorkflow: {},
       status: 'in-progress',
       instrumentCount: 0,
-      totalValue: 0
+      totalValue: 0,
+      versions: []
     }
     sessions.unshift(newSession)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
@@ -126,6 +152,22 @@ export const sessionManager = {
     return s?.instrumentWorkflow?.[instrumentKey] || null
   },
 
+  /** Append a version record and persist to DB */
+  addVersion(sessionId, version) {
+    const s = this.getSession(sessionId)
+    if (!s) return null
+    const versions = s.versions || []
+    const versionNumber = versions.length + 1
+    const record = {
+      versionNumber,
+      timestamp: Date.now(),
+      ...version
+    }
+    versions.unshift(record)
+    if (versions.length > 50) versions.pop()
+    return this.updateSession(sessionId, { versions })
+  },
+
   updateSessionData(id, dataType, data, rows = 0) {
     const updates = { [dataType]: data, rows }
     if (dataType === 'data') updates.status = 'in-progress'
@@ -140,7 +182,9 @@ export const sessionManager = {
       name: session.name,
       instrument: session.instrument || '',
       payload: session,
-      status: session.status || 'in-progress'
+      status: session.status || 'in-progress',
+      versions: session.versions || [],
+      instrument_workflows: buildInstrumentWorkflows(session)
     }).catch(() => {})
   },
 

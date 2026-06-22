@@ -121,6 +121,12 @@ export const fredAPI = {
     callAPI(`/api/fred/series-by-maturity?maturity=${maturity}&country=${country}`)
 }
 
+// ========== INSTRUMENT CONFIG ==========
+export const instrumentConfigAPI = {
+  getAll: () => callAPI('/api/instrument-config'),
+  get: (instrumentType) => callAPI(`/api/instrument-config/${encodeURIComponent(instrumentType)}`)
+}
+
 // ========== SESSIONS ==========
 export const sessionsAPI = {
   save: (session) => callAPI('/api/sessions/save', 'POST', session),
@@ -148,5 +154,6 @@ export default {
   dataAPI,
   datasetAPI,
   fredAPI,
+  instrumentConfigAPI,
   sessionsAPI
 }

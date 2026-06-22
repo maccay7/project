@@ -6,7 +6,14 @@ export function buildWorkflowSnapshot({
   calculations,
   activeTab,
   uploadedFile,
-  cleaningStats
+  cleaningStats,
+  columnMapping,
+  mappingApplied,
+  originalRawData,
+  originalFileColumns,
+  chartData,
+  fredFilters,
+  sessionSavedAt
 }) {
   return {
     data: rawData || [],
@@ -15,6 +22,13 @@ export function buildWorkflowSnapshot({
     last_tab: activeTab || 'upload',
     uploaded_file_name: uploadedFile?.name || null,
     cleaningStats: cleaningStats || {},
+    columnMapping: columnMapping || {},
+    mappingApplied: !!mappingApplied,
+    originalRawData: originalRawData || [],
+    originalFileColumns: originalFileColumns || [],
+    chartData: chartData || null,
+    fredFilters: fredFilters || null,
+    sessionSavedAt: sessionSavedAt || null,
     saved_at: new Date().toISOString()
   }
 }
@@ -25,6 +39,23 @@ export function applyWorkflowToPage(wf, refs) {
   if (wf.data?.length) {
     refs.rawData.value = wf.data
     ok = true
+  }
+  if (wf.originalRawData?.length) {
+    refs.originalRawData.value = JSON.parse(JSON.stringify(wf.originalRawData))
+    ok = true
+  } else if (wf.data?.length && refs.originalRawData) {
+    refs.originalRawData.value = JSON.parse(JSON.stringify(wf.data))
+  }
+  if (wf.originalFileColumns?.length && refs.originalFileColumns) {
+    refs.originalFileColumns.value = [...wf.originalFileColumns]
+  } else if (wf.data?.length && refs.originalFileColumns) {
+    refs.originalFileColumns.value = Object.keys(wf.data[0] || {})
+  }
+  if (wf.columnMapping && refs.columnMapping) {
+    refs.columnMapping.value = { ...wf.columnMapping }
+  }
+  if (refs.mappingApplied) {
+    refs.mappingApplied.value = !!wf.mappingApplied
   }
   if (wf.cleanedData?.length) {
     refs.cleanedData.value = wf.cleanedData
