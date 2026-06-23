@@ -17,7 +17,6 @@
 
     <!-- Two-column: Recent Sessions + Create Session -->
     <div class="session-management-row">
-      <!-- Recent Sessions Card -->
       <div class="recent-sessions-card">
         <v-card class="session-card">
           <v-card-title class="card-title">
@@ -25,13 +24,11 @@
             <div class="title-right"><span class="session-count">{{ filteredSessions.length }} Total</span></div>
           </v-card-title>
           <v-card-text class="card-text-flex">
-            <!-- Search bar -->
             <div class="search-bar">
               <v-icon class="search-icon" size="16">mdi-magnify</v-icon>
               <input type="text" v-model="searchQuery" placeholder="Search sessions..." class="search-input"/>
               <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''"><v-icon size="14">mdi-close</v-icon></button>
             </div>
-            <!-- Session list -->
             <div class="sessions-list-container">
               <div class="sessions-list">
                 <div v-if="filteredSessions.length === 0" class="empty-sessions-list">
@@ -49,7 +46,6 @@
                   </div>
                   <div class="session-row-stats"><span>{{ session.instrumentCount || 0 }} instruments</span></div>
                   <div class="session-row-status" :class="session.status">{{ session.status === 'completed' ? '✓' : '⟳' }}</div>
-                  <!-- History button -->
                   <button class="version-btn" @click.stop="openVersionModal(session.id)">
                     <v-icon size="12">mdi-history</v-icon>
                     <span class="version-count">History ({{ session.versions?.length || 0 }})</span>
@@ -63,7 +59,6 @@
         </v-card>
       </div>
 
-      <!-- Create New Session Card -->
       <div class="create-session-card">
         <v-card class="session-card">
           <v-card-title class="card-title"><v-icon>mdi-folder-plus</v-icon> Create New Session</v-card-title>
@@ -77,7 +72,6 @@
               </button>
             </div>
 
-            <!-- Active session info -->
             <div class="active-session-container">
               <div v-if="activeSession" class="active-session-info">
                 <div class="session-header">
@@ -100,7 +94,6 @@
             </div>
 
             <div class="flex-spacer"></div>
-            <!-- Summary stats -->
             <div class="session-stats-summary">
               <div class="stats-header"><v-icon size="16">mdi-chart-box</v-icon><span>Session Summary</span></div>
               <div class="stats-grid">
@@ -133,10 +126,9 @@
       </div>
     </div>
 
-    <!-- ========== VERSION HISTORY MODAL ========== -->
+    <!-- Version History Modal -->
     <v-dialog v-model="versionDialogVisible" max-width="650px" persistent>
       <v-card>
-        <!-- Title: shows session name + full name of logged-in user -->
         <v-card-title class="version-dialog-title">
           Change History – {{ selectedSessionForVersions?.name || 'Session' }}
           <span v-if="currentUserFullName"> ({{ currentUserFullName }})</span>
@@ -174,8 +166,6 @@
                       <span v-for="(inst, ii) in ver.modifiedInstruments" :key="ii" class="field-tag">{{ inst }}</span>
                     </span>
                   </div>
-                  <!-- "Change" row removed as requested -->
-                  <!-- "Fields" renamed to "Changed Fields" -->
                   <div class="version-entry-row" v-if="ver.fieldsChanged && ver.fieldsChanged.length">
                     <span class="label">Changed Fields</span>
                     <span class="value fields-tags">
@@ -206,34 +196,30 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
-// ----- Constants & Storage Keys -----
+// Constants & Storage Keys
 const STORAGE_KEY = 'dura_sessions'
 const ACTIVE_KEY = 'dura_active_session_id'
 
-// ----- Reactive State -----
+// Reactive State
 const sessions = ref([])
 const searchQuery = ref('')
 const newSessionName = ref('')
 const activeSession = ref(null)
 const renamingActive = ref(false)
 const renameInput = ref('')
-
-// Version modal
 const versionDialogVisible = ref(false)
 const selectedSessionForVersions = ref(null)
 const versionSearchQuery = ref('')
-
-// Logged-in user's full name (from localStorage)
 const currentUserFullName = ref('')
 
-// ----- Instruments Data -----
+// Instruments Data
 const instruments = [
   { id: 'money-market', name: 'Money Market', description: 'Short-term debt instruments', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
   { id: 'bonds', name: 'Bonds', description: 'Fixed income securities', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
   { id: 'tbills', name: 'T-Bills', description: 'Treasury bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
 ]
 
-// ----- Computed Properties -----
+// Computed
 const validSessions = computed(() => {
   const valid = sessions.value.filter(s => s.name?.trim())
   valid.forEach(s => {
@@ -274,18 +260,16 @@ const kpiStats = computed(() => [
   { title: 'Completion', value: `${Math.round((activeSession.value?.instrumentCount || 0) / 3 * 100)}%`, icon: 'mdi-database', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }
 ])
 
-// ----- Helper Functions -----
+// Helpers
 const formatDate = d => d ? new Date(d).toLocaleString() : ''
 const formatVersionTime = t => new Date(t).toLocaleString()
 
-// ----- Strip emojis from any text (so "Change" is always plain) -----
 const stripEmojis = (text) => {
   if (!text) return text
-  // Remove common emoji ranges (Unicode)
   return text.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]|[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{1FB00}-\u{1FBFF}]|[\u{1FC00}-\u{1FCFF}]|[\u{1FD00}-\u{1FDFF}]|[\u{1FE00}-\u{1FEFF}]|[\u{1FF00}-\u{1FFFF}]/gu, '').trim()
 }
 
-// ----- Local Storage Helpers -----
+// Local storage helpers
 const saveSessions = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
 const loadSessions = () => {
   const stored = localStorage.getItem(STORAGE_KEY)
@@ -299,7 +283,7 @@ const loadSessions = () => {
 const saveActiveId = id => id ? localStorage.setItem(ACTIVE_KEY, id) : localStorage.removeItem(ACTIVE_KEY)
 const loadActiveId = () => localStorage.getItem(ACTIVE_KEY)
 
-// ----- Detect which instrument has data in a session -----
+// Detect instrument with data
 const detectInstrument = (sessionId) => {
   const map = { 'money-market': 'Money Market', 'bonds': 'Bonds', 'tbills': 'T-Bills' }
   const found = []
@@ -318,18 +302,16 @@ const detectInstrument = (sessionId) => {
   return found.length === 1 ? found[0] : found.length > 1 ? found.join(', ') : null
 }
 
-// ----- Capture a new version entry (strip emojis) -----
+// Capture version
 const captureVersion = (sessionId, options = {}) => {
   const session = sessions.value.find(s => s.id === sessionId)
   if (!session) return
 
   let { instrument, changeType = 'Updated', fieldsChanged = [], description, shortDescription, modifiedInstruments = [] } = options
 
-  // Auto-detect instrument if not provided
   instrument = instrument || detectInstrument(sessionId) || (session.versions?.length ? session.versions[0].instrument : null) || 'Session'
 
   const shortDesc = shortDescription || description || changeType
-  // Plain text descriptions (no emojis)
   const defaultDescriptions = {
     'Uploaded': 'Uploaded data',
     'Cleaned': 'Cleaned data',
@@ -339,11 +321,9 @@ const captureVersion = (sessionId, options = {}) => {
     'Saved': 'Saved to session'
   }
   let finalShort = shortDesc === changeType ? (defaultDescriptions[changeType] || changeType) : shortDesc
-  // Remove any emojis that might have come from external events
   finalShort = stripEmojis(finalShort)
   if (description) description = stripEmojis(description)
 
-  // Capture current workflows for this session
   const workflows = {}
   for (const inst of ['money-market', 'bonds', 'tbills']) {
     const wf = sessionManager.getInstrumentWorkflow(sessionId, inst)
@@ -379,7 +359,7 @@ const captureVersion = (sessionId, options = {}) => {
   sessionManager.updateSession(sessionId, { versions: session.versions })
 }
 
-// ----- Version Modal -----
+// Version Modal
 const openVersionModal = (sessionId) => {
   const session = sessions.value.find(s => s.id === sessionId)
   if (session) {
@@ -411,7 +391,7 @@ const restoreVersion = (sessionId, index) => {
   versionDialogVisible.value = false
 }
 
-// ----- Event Listener for external updates -----
+// Event listener for external updates
 const onSessionUpdated = (event) => {
   const detail = event.detail || {}
   const { sessionId, skipCapture, ...options } = detail
@@ -432,7 +412,7 @@ const onSessionUpdated = (event) => {
   captureVersion(sessionId, options)
 }
 
-// ----- Session Actions -----
+// Session Actions
 const createNewSession = () => {
   if (!newSessionName.value.trim()) return
   const created = sessionManager.createSession(newSessionName.value.trim())
@@ -443,7 +423,7 @@ const createNewSession = () => {
     status: created.status || 'in-progress',
     instrumentCount: 0,
     totalValue: 0,
-    versions: []   // no version on creation
+    versions: []
   }
   sessions.value.unshift(newSession)
   saveSessions()
@@ -451,7 +431,6 @@ const createNewSession = () => {
   sessionManager.setActiveSession(activeSession.value)
   saveActiveId(activeSession.value.id)
   newSessionName.value = ''
-  // Do NOT capture a "Created" version
 }
 
 const loadExistingSession = (sessionId) => {
@@ -534,6 +513,7 @@ const deleteSession = (sessionId) => {
   }
 }
 
+// ***** FIXED NAVIGATION *****
 const goToInstrument = (instrumentId) => {
   if (!activeSession.value) {
     alert('Please create or select a session first')
@@ -552,7 +532,7 @@ const handleLogout = () => {
   window.location.href = '/login'
 }
 
-// ----- Clean up invalid sessions -----
+// Cleanup sessions
 const cleanupSessions = () => {
   let changed = false
   sessions.value = sessions.value.filter(s => {
@@ -577,7 +557,7 @@ const cleanupSessions = () => {
   if (changed) saveSessions()
 }
 
-// ----- Lifecycle Hooks -----
+// Lifecycle
 onMounted(async () => {
   // Get logged-in user's full name from localStorage
   try {
@@ -606,14 +586,13 @@ onMounted(async () => {
     saveSessions()
   }
 
-  // Restore active session
-  const activeId = loadActiveId()
+  // Restore active session – ensure it is set
+  let activeId = loadActiveId()
   if (activeId) {
     const session = sessions.value.find(s => s.id === activeId)
     if (session) {
       activeSession.value = session
       sessionManager.setActiveSession(activeSession.value)
-      sessionManager.loadSessionFromDb(activeId).catch(() => {})
     } else {
       const managerSession = sessionManager.getSession(activeId)
       if (managerSession) {
@@ -623,13 +602,20 @@ onMounted(async () => {
         cleanupSessions()
         saveSessions()
       } else {
+        // If active ID is invalid, clear it and fallback to first session
         saveActiveId(null)
+        activeId = null
       }
     }
-  } else if (sessions.value.length && !activeSession.value) {
+  }
+
+  // If still no active session, pick the first available session or null
+  if (!activeSession.value && sessions.value.length > 0) {
     activeSession.value = sessions.value[0]
     sessionManager.setActiveSession(activeSession.value)
     saveActiveId(activeSession.value.id)
+  } else if (!activeSession.value && sessions.value.length === 0) {
+    // No sessions at all – keep null
   }
 
   window.addEventListener('session-updated', onSessionUpdated)
@@ -641,7 +627,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* ===== All original styles – kept exactly as they were ===== */
+/* (All styles unchanged – keep your existing dashboard styles) */
 .dashboard { min-height: 100vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px 40px; }
 .top-navbar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: white; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); z-index: 1000; }
 .logo-placeholder { display: flex; align-items: center; }
@@ -761,7 +747,7 @@ onBeforeUnmount(() => {
 .version-entry-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
 .version-entry-time { font-size: 11px; font-weight: 600; color: #0B2044; }
 .version-entry-badge { padding: 1px 10px; border-radius: 30px; font-size: 9px; font-weight: 600; color: white; letter-spacing: 0.2px; text-transform: uppercase; }
-.badge-created { background: #2E7D32; }  /* kept for backward compatibility */
+.badge-created { background: #2E7D32; }
 .badge-uploaded { background: #0B2044; }
 .badge-cleaned { background: #FF9800; }
 .badge-calculated { background: #1E88E5; }

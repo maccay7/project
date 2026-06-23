@@ -83,7 +83,7 @@
               <div v-if="uploadedFile" class="file-info">
                 <v-icon>mdi-file-excel</v-icon>
                 <span>{{ uploadedFile.name }}</span>
-                <span class="file-size">{{ fileSize }}</span>
+                <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
                 <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData.length">Review Excel</button>
                 <button class="btn-mapping" @click="openMappingDialog" :disabled="!rawData.length">Map Columns</button>
@@ -159,7 +159,7 @@
               </div>
 
               <div class="navigation-buttons">
-                <button class="btn-primary" @click="continueAfterUpload" :disabled="!uploadedFile || !rawData.length || missingColumns.length > 0 || !mappingApplied">Continue</button>
+                <button class="btn-primary" @click="continueAfterUpload" :disabled="!uploadedFile || !rawData.length">Continue</button>
                 <button class="btn-secondary" @click="goToDashboard">Cancel</button>
               </div>
             </v-card-text>
@@ -764,7 +764,7 @@ const steps = computed(() => {
 function isStepComplete(tab) {
   switch (tab) {
     case 'upload':
-      return rawData.value.length > 0 && mappingApplied.value && missingColumns.value.length === 0
+      return rawData.value.length > 0   // Only need raw data – mapping optional
     case 'cleaning':
       return cleanedData.value.length > 0
     case 'calculations':
@@ -854,7 +854,7 @@ function loadHistoryFile(item) {
     columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
     mappingApplied.value = false
     saveSessionData()
-    alert(`Loaded ${item.name}. Please review and apply column mapping.`)
+    // Removed alert
   }
 }
 
@@ -867,6 +867,7 @@ function deleteHistoryItem(idx) {
 const fileSize = computed(() => {
   if (!uploadedFile.value) return ''
   const bytes = uploadedFile.value.size
+  if (bytes === 0) return ''  // Hide 0B
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
@@ -972,7 +973,7 @@ async function readFileData(file) {
 
     addToHistory(file.name, data)
     debouncedSave()
-    alert(`Successfully loaded ${data.length} rows. Please review and apply column mapping.`)
+    // Removed success alert
   } catch (err) {
     console.error(err)
     alert(`Failed to parse file: ${err.message}`)
@@ -1018,7 +1019,7 @@ function applyColumnMappingAndClose() {
   const success = applyMappingToData(columnMapping.value)
   if (success) {
     showMappingDialog.value = false
-    alert('Columns mapped successfully! Data preview has been updated.')
+    // Removed alert
   }
 }
 
@@ -1045,15 +1046,7 @@ function updateColumnMapping(newMapping) {
 async function continueAfterUpload() {
   if (!uploadedFile.value) { alert('Please upload a file first.'); return }
   if (!rawData.value.length) { alert('No data loaded. Please upload a valid file.'); return }
-  const missing = missingColumns.value
-  if (missing.length > 0) {
-    alert(`Please map the following required columns: ${missing.join(', ')}. Click "Map Columns" to assign them.`)
-    return
-  }
-  if (!mappingApplied.value) {
-    alert('Please apply column mapping before continuing. Click "Map Columns" and then "Apply Mapping".')
-    return
-  }
+  // No longer requires mapping
   activeTab.value = 'cleaning'
   debouncedSave()
 }
@@ -1498,7 +1491,7 @@ function saveToSession() {
     detail: { sessionId: sid, skipCapture: true }
   }))
   sessionSavedAt.value = new Date().toISOString()
-  alert('Data saved to session!')
+  // Removed alert
 }
 
 // ========== Session Persistence ==========
@@ -2124,8 +2117,9 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .formula-dialog-title { background: #0B2044; color: white; }
 .formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; }
 
-.excel-edit-table { max-width: 100% !important; width: 100% !important; border-collapse: collapse; font-size: 13px; table-layout: fixed !important; }
-.excel-edit-table th, .excel-edit-table td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+/* Resizable Excel columns and rows – applies to all ExcelViewer instances */
+.excel-edit-table th { resize: horizontal; overflow: auto; }
+.excel-edit-table td { resize: vertical; overflow: auto; }
 </style>
 
 <style>
