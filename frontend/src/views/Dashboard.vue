@@ -15,6 +15,7 @@
 
     <div class="dashboard-title"><h1>Dashboard</h1></div>
 
+    <!-- Two-column: Recent Sessions + Create Session -->
     <div class="session-management-row">
       <!-- Recent Sessions Card -->
       <div class="recent-sessions-card">
@@ -24,11 +25,13 @@
             <div class="title-right"><span class="session-count">{{ filteredSessions.length }} Total</span></div>
           </v-card-title>
           <v-card-text class="card-text-flex">
+            <!-- Search bar -->
             <div class="search-bar">
               <v-icon class="search-icon" size="16">mdi-magnify</v-icon>
               <input type="text" v-model="searchQuery" placeholder="Search sessions..." class="search-input"/>
               <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''"><v-icon size="14">mdi-close</v-icon></button>
             </div>
+            <!-- Session list -->
             <div class="sessions-list-container">
               <div class="sessions-list">
                 <div v-if="filteredSessions.length === 0" class="empty-sessions-list">
@@ -37,20 +40,20 @@
                   <p class="empty-hint">Create a session using the form on the right</p>
                 </div>
                 <div v-for="session in filteredSessions" :key="session.id" class="session-row-item" :class="{ 'active-session-row': activeSession && activeSession.id === session.id }">
-                  <div class="session-row-icon" :style="{ background: '#0B2044' }" @click="loadExistingSession(session.id)"><v-icon size="14" color="white">mdi-folder</v-icon></div>
+                  <div class="session-row-icon" :style="{ background: '#0B2044' }" @click="loadExistingSession(session.id)">
+                    <v-icon size="14" color="white">mdi-folder</v-icon>
+                  </div>
                   <div class="session-row-info" @click="loadExistingSession(session.id)">
                     <div class="session-row-name">{{ session.name }}</div>
                     <div class="session-row-meta">{{ formatDate(session.date) }}</div>
                   </div>
                   <div class="session-row-stats"><span>{{ session.instrumentCount || 0 }} instruments</span></div>
                   <div class="session-row-status" :class="session.status">{{ session.status === 'completed' ? '✓' : '⟳' }}</div>
-
                   <!-- History button -->
                   <button class="version-btn" @click.stop="openVersionModal(session.id)">
                     <v-icon size="12">mdi-history</v-icon>
-                    <span class="version-count">History ({{ getVersionCount(session) }})</span>
+                    <span class="version-count">History ({{ session.versions?.length || 0 }})</span>
                   </button>
-
                   <button class="row-rename-btn" @click.stop="openRename(session)" title="Rename"><v-icon size="12">mdi-pencil</v-icon></button>
                   <button class="row-delete-btn" @click.stop="deleteSession(session.id)"><v-icon size="12">mdi-close</v-icon></button>
                 </div>
@@ -65,9 +68,16 @@
         <v-card class="session-card">
           <v-card-title class="card-title"><v-icon>mdi-folder-plus</v-icon> Create New Session</v-card-title>
           <v-card-text class="create-session-content">
-            <div class="create-session-input"><input v-model="newSessionName" placeholder="Enter session name " class="session-input" @keyup.enter="createNewSession"/></div>
-            <div class="create-session-action"><button class="btn-primary full-width" @click="createNewSession" :disabled="!newSessionName.trim()"><v-icon>mdi-plus</v-icon> Create Session</button></div>
+            <div class="create-session-input">
+              <input v-model="newSessionName" placeholder="Enter session name" class="session-input" @keyup.enter="createNewSession"/>
+            </div>
+            <div class="create-session-action">
+              <button class="btn-primary full-width" @click="createNewSession" :disabled="!newSessionName.trim()">
+                <v-icon>mdi-plus</v-icon> Create Session
+              </button>
+            </div>
 
+            <!-- Active session info -->
             <div class="active-session-container">
               <div v-if="activeSession" class="active-session-info">
                 <div class="session-header">
@@ -78,12 +88,19 @@
                   <button v-else class="btn-rename-sm" @click="saveRename">Save</button>
                   <span class="session-status-badge" :class="activeSession.status">{{ activeSession.status === 'completed' ? 'Completed' : 'In Progress' }}</span>
                 </div>
-                <div class="session-details"><span>Created: {{ formatDate(activeSession.date) }}</span><span>Instruments: {{ activeSession.instrumentCount || 0 }}/3</span></div>
+                <div class="session-details">
+                  <span>Created: {{ formatDate(activeSession.date) }}</span>
+                  <span>Instruments: {{ activeSession.instrumentCount || 0 }}/3</span>
+                </div>
               </div>
-              <div v-else class="no-session-warning"><v-icon color="warning" size="16">mdi-alert</v-icon><span>No active session selected</span></div>
+              <div v-else class="no-session-warning">
+                <v-icon color="warning" size="16">mdi-alert</v-icon>
+                <span>No active session selected</span>
+              </div>
             </div>
 
             <div class="flex-spacer"></div>
+            <!-- Summary stats -->
             <div class="session-stats-summary">
               <div class="stats-header"><v-icon size="16">mdi-chart-box</v-icon><span>Session Summary</span></div>
               <div class="stats-grid">
@@ -119,25 +136,19 @@
     <!-- ========== VERSION HISTORY MODAL ========== -->
     <v-dialog v-model="versionDialogVisible" max-width="650px" persistent>
       <v-card>
+        <!-- Title: shows session name + full name of logged-in user -->
         <v-card-title class="version-dialog-title">
-          <v-icon>mdi-history</v-icon> Change History – {{ selectedSessionForVersions?.name || 'Session' }}
+          Change History – {{ selectedSessionForVersions?.name || 'Session' }}
+          <span v-if="currentUserFullName"> ({{ currentUserFullName }})</span>
           <v-spacer></v-spacer>
           <button class="btn-close-dialog" @click="versionDialogVisible = false">✕</button>
         </v-card-title>
         <v-card-text class="version-dialog-body">
           <div class="version-search-bar">
             <v-icon size="16" class="search-icon">mdi-magnify</v-icon>
-            <input
-              type="text"
-              v-model="versionSearchQuery"
-              placeholder="Search versions by instrument, change type, or description..."
-              class="version-search-input"
-            />
-            <button v-if="versionSearchQuery" class="clear-search" @click="versionSearchQuery = ''">
-              <v-icon size="14">mdi-close</v-icon>
-            </button>
+            <input type="text" v-model="versionSearchQuery" placeholder="Search versions..." class="version-search-input"/>
+            <button v-if="versionSearchQuery" class="clear-search" @click="versionSearchQuery = ''"><v-icon size="14">mdi-close</v-icon></button>
           </div>
-
           <div class="version-list-container">
             <div v-if="!filteredVersions.length" class="empty-versions">
               <v-icon size="36" color="#ccc">mdi-file-document-outline</v-icon>
@@ -153,7 +164,6 @@
                   <div class="version-entry-badge" :class="ver.changeTypeClass">{{ ver.changeType }}</div>
                 </div>
                 <div class="version-entry-details">
-                  <!-- User row removed -->
                   <div class="version-entry-row">
                     <span class="label">Instrument</span>
                     <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.instrument || '—' }}</span>
@@ -164,12 +174,10 @@
                       <span v-for="(inst, ii) in ver.modifiedInstruments" :key="ii" class="field-tag">{{ inst }}</span>
                     </span>
                   </div>
-                  <div class="version-entry-row description-row">
-                    <span class="label">Change</span>
-                    <span class="value description-text">{{ ver.shortDescription || ver.description || ver.name || 'Updated' }}</span>
-                  </div>
+                  <!-- "Change" row removed as requested -->
+                  <!-- "Fields" renamed to "Changed Fields" -->
                   <div class="version-entry-row" v-if="ver.fieldsChanged && ver.fieldsChanged.length">
-                    <span class="label">Fields</span>
+                    <span class="label">Changed Fields</span>
                     <span class="value fields-tags">
                       <span v-for="(field, fi) in ver.fieldsChanged" :key="fi" class="field-tag">{{ field }}</span>
                     </span>
@@ -197,9 +205,12 @@ import sessionManager from '@/services/sessionManager.js'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const SESSIONS_STORAGE_KEY = 'dura_sessions'
-const ACTIVE_SESSION_ID_KEY = 'dura_active_session_id'
 
+// ----- Constants & Storage Keys -----
+const STORAGE_KEY = 'dura_sessions'
+const ACTIVE_KEY = 'dura_active_session_id'
+
+// ----- Reactive State -----
 const sessions = ref([])
 const searchQuery = ref('')
 const newSessionName = ref('')
@@ -207,49 +218,50 @@ const activeSession = ref(null)
 const renamingActive = ref(false)
 const renameInput = ref('')
 
+// Version modal
 const versionDialogVisible = ref(false)
 const selectedSessionForVersions = ref(null)
 const versionSearchQuery = ref('')
 
+// Logged-in user's full name (from localStorage)
+const currentUserFullName = ref('')
+
+// ----- Instruments Data -----
 const instruments = [
   { id: 'money-market', name: 'Money Market', description: 'Short-term debt instruments', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
   { id: 'bonds', name: 'Bonds', description: 'Fixed income securities', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
   { id: 'tbills', name: 'T-Bills', description: 'Treasury bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
 ]
 
-const validSessions = computed(() => sessions.value.filter(s => {
-  if (!s.name || s.name.trim().length === 0) return false
-  if (s.versions) {
-    s.versions.forEach(v => {
-      if (v.name && v.name.includes('Auto-save')) {
-        v.name = v.name.replace(/Auto-save\s*/g, '').trim()
-        v.displayName = v.name
-      }
-      if (!v.displayName) v.displayName = v.name
-    })
-  }
-  return true
-}))
+// ----- Computed Properties -----
+const validSessions = computed(() => {
+  const valid = sessions.value.filter(s => s.name?.trim())
+  valid.forEach(s => {
+    if (s.versions) {
+      s.versions.forEach(v => {
+        if (v.name?.includes('Auto-save')) {
+          v.name = v.name.replace(/Auto-save\s*/g, '').trim()
+        }
+        if (!v.displayName) v.displayName = v.name
+      })
+    }
+  })
+  return valid
+})
 
 const filteredSessions = computed(() => {
-  if (!searchQuery.value) return validSessions.value
-  const query = searchQuery.value.toLowerCase()
-  return validSessions.value.filter(session => session.name.toLowerCase().includes(query))
+  const q = searchQuery.value.toLowerCase()
+  return q ? validSessions.value.filter(s => s.name.toLowerCase().includes(q)) : validSessions.value
 })
 
 const filteredVersions = computed(() => {
-  if (!selectedSessionForVersions.value?.versions) return []
-  const versions = selectedSessionForVersions.value.versions
-  if (!versionSearchQuery.value) return versions
-  const query = versionSearchQuery.value.toLowerCase()
-  return versions.filter(v => {
-    return (v.instrument && v.instrument.toLowerCase().includes(query)) ||
-           (v.changeType && v.changeType.toLowerCase().includes(query)) ||
-           (v.shortDescription && v.shortDescription.toLowerCase().includes(query)) ||
-           (v.description && v.description.toLowerCase().includes(query)) ||
-           (v.name && v.name.toLowerCase().includes(query)) ||
-           (v.fieldsChanged && v.fieldsChanged.some(f => f.toLowerCase().includes(query)))
-  })
+  const versions = selectedSessionForVersions.value?.versions || []
+  const q = versionSearchQuery.value.toLowerCase()
+  if (!q) return versions
+  return versions.filter(v =>
+    [v.instrument, v.changeType, v.shortDescription, v.description, v.name, ...(v.fieldsChanged || [])]
+      .some(f => f?.toLowerCase().includes(q))
+  )
 })
 
 const totalSessions = computed(() => validSessions.value.length)
@@ -262,150 +274,113 @@ const kpiStats = computed(() => [
   { title: 'Completion', value: `${Math.round((activeSession.value?.instrumentCount || 0) / 3 * 100)}%`, icon: 'mdi-database', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }
 ])
 
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  try { return new Date(dateStr).toLocaleString() } catch { return dateStr }
-}
-function formatVersionTime(timestamp) {
-  return new Date(timestamp).toLocaleString()
+// ----- Helper Functions -----
+const formatDate = d => d ? new Date(d).toLocaleString() : ''
+const formatVersionTime = t => new Date(t).toLocaleString()
+
+// ----- Strip emojis from any text (so "Change" is always plain) -----
+const stripEmojis = (text) => {
+  if (!text) return text
+  // Remove common emoji ranges (Unicode)
+  return text.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]|[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{1FB00}-\u{1FBFF}]|[\u{1FC00}-\u{1FCFF}]|[\u{1FD00}-\u{1FDFF}]|[\u{1FE00}-\u{1FEFF}]|[\u{1FF00}-\u{1FFFF}]/gu, '').trim()
 }
 
-function getVersionCount(session) {
-  return session?.versions?.length || 0
-}
-
-function saveSessionsToLocalStorage() {
-  localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions.value))
-}
-function loadSessionsFromLocalStorage() {
-  const stored = localStorage.getItem(SESSIONS_STORAGE_KEY)
+// ----- Local Storage Helpers -----
+const saveSessions = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
+const loadSessions = () => {
+  const stored = localStorage.getItem(STORAGE_KEY)
   if (stored) {
     try {
       sessions.value = JSON.parse(stored)
-      sessions.value.forEach(s => {
-        if (!s.versions) s.versions = []
-      })
-    } catch(e) { console.error(e) }
-  } else {
-    sessions.value = []
+      sessions.value.forEach(s => { if (!s.versions) s.versions = [] })
+    } catch (e) {}
   }
 }
-function saveActiveSessionId(id) { if (id) localStorage.setItem(ACTIVE_SESSION_ID_KEY, id); else localStorage.removeItem(ACTIVE_SESSION_ID_KEY) }
-function loadActiveSessionId() { return localStorage.getItem(ACTIVE_SESSION_ID_KEY) }
+const saveActiveId = id => id ? localStorage.setItem(ACTIVE_KEY, id) : localStorage.removeItem(ACTIVE_KEY)
+const loadActiveId = () => localStorage.getItem(ACTIVE_KEY)
 
-// ========== VERSION CAPTURE ==========
-function captureVersion(sessionId, options = {}) {
+// ----- Detect which instrument has data in a session -----
+const detectInstrument = (sessionId) => {
+  const map = { 'money-market': 'Money Market', 'bonds': 'Bonds', 'tbills': 'T-Bills' }
+  const found = []
+  for (const [key, name] of Object.entries(map)) {
+    const wf = sessionManager.getInstrumentWorkflow(sessionId, key)
+    if (wf && ((wf.data?.length) || (wf.cleanedData?.length) || (wf.calculations && Object.keys(wf.calculations).length))) {
+      found.push(name)
+    }
+  }
   const session = sessions.value.find(s => s.id === sessionId)
-  if (!session) {
-    console.warn('captureVersion: session not found', sessionId)
-    return
-  }
-  const {
-    instrument = null,
-    changeType = 'Updated',
-    fieldsChanged = [],
-    description = null,
-    shortDescription = null,
-    modifiedInstruments = []
-  } = options
-
-  let detectedInstrument = instrument
-  if (!detectedInstrument) {
-    detectedInstrument = detectInstrument(sessionId)
-  }
-  if (!detectedInstrument && session.versions && session.versions.length > 0) {
-    const lastVersion = session.versions[0]
-    if (lastVersion.instrument && lastVersion.instrument !== 'Session') {
-      detectedInstrument = lastVersion.instrument
+  if (session?.instrumentData) {
+    for (const [key, name] of Object.entries(map)) {
+      if (session.instrumentData[key]?.completed && !found.includes(name)) found.push(name)
     }
   }
-  if (!detectedInstrument) detectedInstrument = 'Session'
+  return found.length === 1 ? found[0] : found.length > 1 ? found.join(', ') : null
+}
 
-  let shortDesc = shortDescription || description || changeType
-  if (!shortDesc || shortDesc === changeType) {
-    const map = {
-      'Uploaded': '📤 Uploaded data',
-      'Cleaned': '🧹 Cleaned data',
-      'Calculated': '📊 Updated calculations',
-      'Renamed': '✏️ Renamed session',
-      'Created': '📁 Session created',
-      'Restored': '↩️ Restored previous version',
-      'Saved': '💾 Saved to session'
-    }
-    shortDesc = map[changeType] || changeType
+// ----- Capture a new version entry (strip emojis) -----
+const captureVersion = (sessionId, options = {}) => {
+  const session = sessions.value.find(s => s.id === sessionId)
+  if (!session) return
+
+  let { instrument, changeType = 'Updated', fieldsChanged = [], description, shortDescription, modifiedInstruments = [] } = options
+
+  // Auto-detect instrument if not provided
+  instrument = instrument || detectInstrument(sessionId) || (session.versions?.length ? session.versions[0].instrument : null) || 'Session'
+
+  const shortDesc = shortDescription || description || changeType
+  // Plain text descriptions (no emojis)
+  const defaultDescriptions = {
+    'Uploaded': 'Uploaded data',
+    'Cleaned': 'Cleaned data',
+    'Calculated': 'Updated calculations',
+    'Renamed': 'Renamed session',
+    'Restored': 'Restored previous version',
+    'Saved': 'Saved to session'
   }
+  let finalShort = shortDesc === changeType ? (defaultDescriptions[changeType] || changeType) : shortDesc
+  // Remove any emojis that might have come from external events
+  finalShort = stripEmojis(finalShort)
+  if (description) description = stripEmojis(description)
 
+  // Capture current workflows for this session
   const workflows = {}
   for (const inst of ['money-market', 'bonds', 'tbills']) {
     const wf = sessionManager.getInstrumentWorkflow(sessionId, inst)
     if (wf) workflows[inst] = wf
   }
 
-  const changeTypeClassMap = {
-    'Created': 'badge-created',
-    'Uploaded': 'badge-uploaded',
-    'Cleaned': 'badge-cleaned',
-    'Calculated': 'badge-calculated',
-    'Renamed': 'badge-renamed',
-    'Updated': 'badge-updated',
-    'Restored': 'badge-restored',
+  const badgeMap = {
+    'Uploaded': 'badge-uploaded', 'Cleaned': 'badge-cleaned',
+    'Calculated': 'badge-calculated', 'Renamed': 'badge-renamed',
+    'Updated': 'badge-updated', 'Restored': 'badge-restored',
     'Saved': 'badge-saved'
   }
 
-  const versionNumber = (session.versions?.length || 0) + 1
   const version = {
-    versionNumber,
+    versionNumber: (session.versions?.length || 0) + 1,
     timestamp: Date.now(),
-    instrument: detectedInstrument,
-    changeType: changeType,
-    changeTypeClass: changeTypeClassMap[changeType] || 'badge-updated',
+    instrument,
+    changeType,
+    changeTypeClass: badgeMap[changeType] || 'badge-updated',
     fieldsChanged: fieldsChanged || [],
-    description: description || shortDesc,
-    shortDescription: shortDesc,
-    modifiedInstruments: modifiedInstruments.length ? modifiedInstruments : [detectedInstrument],
-    workflows: workflows,
-    name: shortDesc
+    description: description || finalShort,
+    shortDescription: finalShort,
+    modifiedInstruments: modifiedInstruments.length ? modifiedInstruments : [instrument],
+    workflows,
+    name: finalShort
   }
 
   if (!session.versions) session.versions = []
   session.versions.unshift(version)
   if (session.versions.length > 50) session.versions.pop()
 
-  saveSessionsToLocalStorage()
+  saveSessions()
   sessionManager.updateSession(sessionId, { versions: session.versions })
 }
 
-function detectInstrument(sessionId) {
-  const instrumentMap = {
-    'money-market': 'Money Market',
-    'bonds': 'Bonds',
-    'tbills': 'T-Bills'
-  }
-  const found = []
-  for (const [key, name] of Object.entries(instrumentMap)) {
-    const wf = sessionManager.getInstrumentWorkflow(sessionId, key)
-    if (wf) {
-      const hasData = (wf.data && wf.data.length > 0) ||
-                      (wf.cleanedData && wf.cleanedData.length > 0) ||
-                      (wf.calculations && Object.keys(wf.calculations).length > 0)
-      if (hasData) found.push(name)
-    }
-  }
-  const session = sessions.value.find(s => s.id === sessionId)
-  if (session && session.instrumentData) {
-    for (const [key, name] of Object.entries(instrumentMap)) {
-      const instKey = Object.keys(instrumentMap).find(k => instrumentMap[k] === name)
-      if (instKey && session.instrumentData[instKey]?.completed) {
-        if (!found.includes(name)) found.push(name)
-      }
-    }
-  }
-  if (found.length === 1) return found[0]
-  if (found.length > 1) return found.join(', ')
-  return null
-}
-
-function openVersionModal(sessionId) {
+// ----- Version Modal -----
+const openVersionModal = (sessionId) => {
   const session = sessions.value.find(s => s.id === sessionId)
   if (session) {
     selectedSessionForVersions.value = session
@@ -414,10 +389,10 @@ function openVersionModal(sessionId) {
   }
 }
 
-function restoreVersion(sessionId, versionIndex) {
+const restoreVersion = (sessionId, index) => {
   const session = sessions.value.find(s => s.id === sessionId)
-  if (!session || !session.versions || !session.versions[versionIndex]) return
-  const version = session.versions[versionIndex]
+  if (!session?.versions?.[index]) return
+  const version = session.versions[index]
   if (!version.workflows) {
     alert('This version does not contain workflow data to restore.')
     return
@@ -428,18 +403,16 @@ function restoreVersion(sessionId, versionIndex) {
   const restoredInstrument = detectInstrument(sessionId) || version.instrument || 'Session'
   captureVersion(sessionId, {
     changeType: 'Restored',
-    shortDescription: `↩️ Restored version from ${formatVersionTime(version.timestamp)}`,
+    shortDescription: `Restored version from ${formatVersionTime(version.timestamp)}`,
     instrument: restoredInstrument
   })
   alert(`Restored version from ${formatVersionTime(version.timestamp)}`)
-  if (activeSession.value && activeSession.value.id === sessionId) {
-    loadExistingSession(sessionId)
-  }
+  if (activeSession.value?.id === sessionId) loadExistingSession(sessionId)
   versionDialogVisible.value = false
 }
 
-// ========== EVENT LISTENER ==========
-function onSessionUpdated(event) {
+// ----- Event Listener for external updates -----
+const onSessionUpdated = (event) => {
   const detail = event.detail || {}
   const { sessionId, skipCapture, ...options } = detail
   if (!sessionId) return
@@ -447,134 +420,228 @@ function onSessionUpdated(event) {
     const updated = sessionManager.getSession(sessionId)
     if (updated) {
       const idx = sessions.value.findIndex(s => s.id === sessionId)
-      if (idx !== -1) sessions.value[idx] = { ...sessions.value[idx], ...updated, versions: updated.versions || sessions.value[idx].versions }
-      else sessions.value.unshift(updated)
-      saveSessionsToLocalStorage()
+      if (idx !== -1) {
+        sessions.value[idx] = { ...sessions.value[idx], ...updated, versions: updated.versions || sessions.value[idx].versions }
+      } else {
+        sessions.value.unshift(updated)
+      }
+      saveSessions()
     }
     return
   }
   captureVersion(sessionId, options)
 }
 
-// ========== SESSION ACTIONS ==========
-function createNewSession() {
+// ----- Session Actions -----
+const createNewSession = () => {
   if (!newSessionName.value.trim()) return
   const created = sessionManager.createSession(newSessionName.value.trim())
   const newSession = {
-    id: created.id, name: created.name, date: created.date || new Date().toISOString(),
-    status: created.status || 'in-progress', instrumentCount: 0,
-    totalValue: 0, versions: []
+    id: created.id,
+    name: created.name,
+    date: created.date || new Date().toISOString(),
+    status: created.status || 'in-progress',
+    instrumentCount: 0,
+    totalValue: 0,
+    versions: []   // no version on creation
   }
-  sessions.value.unshift(newSession); saveSessionsToLocalStorage()
-  activeSession.value = newSession; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id)
+  sessions.value.unshift(newSession)
+  saveSessions()
+  activeSession.value = newSession
+  sessionManager.setActiveSession(activeSession.value)
+  saveActiveId(activeSession.value.id)
   newSessionName.value = ''
-  captureVersion(newSession.id, { changeType: 'Created', shortDescription: '📁 Session created' })
+  // Do NOT capture a "Created" version
 }
 
-function loadExistingSession(sessionId) {
+const loadExistingSession = (sessionId) => {
   let session = sessions.value.find(s => s.id === sessionId)
-  if (!session) { const full = sessionManager.getSession(sessionId); if (full) session = full }
+  if (!session) {
+    const full = sessionManager.getSession(sessionId)
+    if (full) session = full
+  }
   if (!session) return
-  sessionManager.loadSessionFromDb(sessionId).then(() => {
-    const refreshed = sessionManager.getSession(sessionId)
-    if (refreshed) {
-      const index = sessions.value.findIndex(s => s.id === sessionId)
-      if (index !== -1) {
-        sessions.value[index] = {
-          ...sessions.value[index],
-          ...refreshed,
-          versions: refreshed.versions?.length ? refreshed.versions : (sessions.value[index]?.versions || [])
+
+  sessionManager.loadSessionFromDb(sessionId)
+    .then(() => {
+      const refreshed = sessionManager.getSession(sessionId)
+      if (refreshed) {
+        const idx = sessions.value.findIndex(s => s.id === sessionId)
+        if (idx !== -1) {
+          sessions.value[idx] = {
+            ...sessions.value[idx],
+            ...refreshed,
+            versions: refreshed.versions?.length ? refreshed.versions : (sessions.value[idx]?.versions || [])
+          }
+          saveSessions()
+          session = sessions.value[idx]
         }
-        saveSessionsToLocalStorage()
-        session = sessions.value[index]
       }
-    }
-    activeSession.value = session; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id)
-  }).catch(() => { activeSession.value = session; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id) })
+      activeSession.value = session
+      sessionManager.setActiveSession(activeSession.value)
+      saveActiveId(activeSession.value.id)
+    })
+    .catch(() => {
+      activeSession.value = session
+      sessionManager.setActiveSession(activeSession.value)
+      saveActiveId(activeSession.value.id)
+    })
 }
 
-function openRename(session) {
+const openRename = (session) => {
   const name = prompt('Rename session:', session.name)
-  if (name && name.trim()) {
+  if (name?.trim()) {
     sessionManager.renameSession(session.id, name.trim())
-    const index = sessions.value.findIndex(s => s.id === session.id)
-    if (index !== -1) {
-      sessions.value[index].name = name.trim()
-      saveSessionsToLocalStorage()
-      captureVersion(session.id, { changeType: 'Renamed', shortDescription: `✏️ Renamed to "${name.trim()}"` })
+    const idx = sessions.value.findIndex(s => s.id === session.id)
+    if (idx !== -1) {
+      sessions.value[idx].name = name.trim()
+      saveSessions()
+      captureVersion(session.id, { changeType: 'Renamed', shortDescription: `Renamed to "${name.trim()}"` })
     }
-    if (activeSession.value?.id === session.id) activeSession.value = sessions.value[index]
+    if (activeSession.value?.id === session.id) activeSession.value = sessions.value[idx]
   }
 }
-function startRenameActive() { if (!activeSession.value) return; renameInput.value = activeSession.value.name; renamingActive.value = true }
-function saveRename() {
+
+const startRenameActive = () => {
+  if (activeSession.value) {
+    renameInput.value = activeSession.value.name
+    renamingActive.value = true
+  }
+}
+
+const saveRename = () => {
   if (!activeSession.value || !renameInput.value.trim()) return
   sessionManager.renameSession(activeSession.value.id, renameInput.value.trim())
-  const index = sessions.value.findIndex(s => s.id === activeSession.value.id)
-  if (index !== -1) {
-    sessions.value[index].name = renameInput.value.trim()
-    saveSessionsToLocalStorage()
-    captureVersion(activeSession.value.id, { changeType: 'Renamed', shortDescription: `✏️ Renamed to "${renameInput.value.trim()}"` })
-    activeSession.value = sessions.value[index]
+  const idx = sessions.value.findIndex(s => s.id === activeSession.value.id)
+  if (idx !== -1) {
+    sessions.value[idx].name = renameInput.value.trim()
+    saveSessions()
+    captureVersion(activeSession.value.id, { changeType: 'Renamed', shortDescription: `Renamed to "${renameInput.value.trim()}"` })
+    activeSession.value = sessions.value[idx]
   }
   renamingActive.value = false
 }
-function deleteSession(sessionId) {
+
+const deleteSession = (sessionId) => {
   if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
     sessionManager.deleteSession(sessionId)
-    sessions.value = sessions.value.filter(s => s.id !== sessionId); saveSessionsToLocalStorage()
-    if (activeSession.value && activeSession.value.id === sessionId) { activeSession.value = null; saveActiveSessionId(null) }
+    sessions.value = sessions.value.filter(s => s.id !== sessionId)
+    saveSessions()
+    if (activeSession.value?.id === sessionId) {
+      activeSession.value = null
+      saveActiveId(null)
+    }
   }
 }
-function goToInstrument(instrumentId) {
-  if (!activeSession.value) { alert('Please create or select a session first'); return }
+
+const goToInstrument = (instrumentId) => {
+  if (!activeSession.value) {
+    alert('Please create or select a session first')
+    return
+  }
   sessionManager.setActiveSession(activeSession.value)
   router.push({ path: `/instrument/${instrumentId}`, query: { session: activeSession.value.id } })
 }
-function goToSettings() { router.push('/settings') }
-function handleLogout() { localStorage.removeItem('auth_token'); localStorage.removeItem('user'); sessionStorage.clear(); window.location.href = '/login' }
 
-function cleanupSessions() {
+const goToSettings = () => router.push('/settings')
+
+const handleLogout = () => {
+  localStorage.removeItem('auth_token')
+  localStorage.removeItem('user')
+  sessionStorage.clear()
+  window.location.href = '/login'
+}
+
+// ----- Clean up invalid sessions -----
+const cleanupSessions = () => {
   let changed = false
-  sessions.value = sessions.value.filter(s => { if (!s.name || s.name.trim().length === 0) { console.warn('Removing session without name', s); changed = true; return false } return true })
+  sessions.value = sessions.value.filter(s => {
+    if (!s.name?.trim()) {
+      changed = true
+      return false
+    }
+    return true
+  })
   sessions.value.forEach(s => {
     if (s.versions) {
       s.versions.forEach(v => {
-        if (v.name && v.name.includes('Auto-save')) { v.name = v.name.replace(/Auto-save\s*/g, '').trim(); v.displayName = v.name; changed = true }
+        if (v.name?.includes('Auto-save')) {
+          v.name = v.name.replace(/Auto-save\s*/g, '').trim()
+          v.displayName = v.name
+          changed = true
+        }
         if (!v.displayName) v.displayName = v.name
       })
     }
   })
-  if (changed) saveSessionsToLocalStorage()
+  if (changed) saveSessions()
 }
 
+// ----- Lifecycle Hooks -----
 onMounted(async () => {
-  loadSessionsFromLocalStorage(); cleanupSessions()
+  // Get logged-in user's full name from localStorage
+  try {
+    const user = JSON.parse(localStorage.getItem('user'))
+    if (user) {
+      const firstName = user.firstName || ''
+      const lastName = user.lastName || ''
+      currentUserFullName.value = (firstName + ' ' + lastName).trim()
+    }
+  } catch (e) {}
+
+  loadSessions()
+  cleanupSessions()
+
+  // Merge sessions from sessionManager
   const managerSessions = sessionManager.getAllSessions()
-  if (managerSessions.length > 0) {
+  if (managerSessions.length) {
     const merged = [...sessions.value]
     for (const ms of managerSessions) {
-      const existingIndex = merged.findIndex(s => s.id === ms.id)
-      if (existingIndex !== -1) merged[existingIndex] = { ...merged[existingIndex], ...ms }
+      const idx = merged.findIndex(s => s.id === ms.id)
+      if (idx !== -1) merged[idx] = { ...merged[idx], ...ms }
       else merged.push(ms)
     }
-    sessions.value = merged; cleanupSessions(); saveSessionsToLocalStorage()
+    sessions.value = merged
+    cleanupSessions()
+    saveSessions()
   }
-  const activeId = loadActiveSessionId()
+
+  // Restore active session
+  const activeId = loadActiveId()
   if (activeId) {
     const session = sessions.value.find(s => s.id === activeId)
-    if (session) { activeSession.value = session; sessionManager.setActiveSession(activeSession.value); sessionManager.loadSessionFromDb(activeId).catch(()=>{}) }
-    else { const managerSession = sessionManager.getSession(activeId); if (managerSession) { activeSession.value = managerSession; sessionManager.setActiveSession(activeSession.value); sessions.value.unshift(managerSession); cleanupSessions(); saveSessionsToLocalStorage() } else { saveActiveSessionId(null) } }
-  } else if (sessions.value.length > 0 && !activeSession.value) {
-    activeSession.value = sessions.value[0]; sessionManager.setActiveSession(activeSession.value); saveActiveSessionId(activeSession.value.id)
+    if (session) {
+      activeSession.value = session
+      sessionManager.setActiveSession(activeSession.value)
+      sessionManager.loadSessionFromDb(activeId).catch(() => {})
+    } else {
+      const managerSession = sessionManager.getSession(activeId)
+      if (managerSession) {
+        activeSession.value = managerSession
+        sessionManager.setActiveSession(activeSession.value)
+        sessions.value.unshift(managerSession)
+        cleanupSessions()
+        saveSessions()
+      } else {
+        saveActiveId(null)
+      }
+    }
+  } else if (sessions.value.length && !activeSession.value) {
+    activeSession.value = sessions.value[0]
+    sessionManager.setActiveSession(activeSession.value)
+    saveActiveId(activeSession.value.id)
   }
+
   window.addEventListener('session-updated', onSessionUpdated)
 })
-onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionUpdated) })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('session-updated', onSessionUpdated)
+})
 </script>
 
 <style scoped>
-/* ========== ALL ORIGINAL STYLES – UNCHANGED ========== */
+/* ===== All original styles – kept exactly as they were ===== */
 .dashboard { min-height: 100vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px 40px; }
 .top-navbar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: white; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); z-index: 1000; }
 .logo-placeholder { display: flex; align-items: center; }
@@ -615,29 +682,9 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .session-row-status { width: 24px; text-align: center; padding: 2px 0; border-radius: 10px; font-size: 9px; font-weight: 600; }
 .session-row-status.in-progress { background: #FFF3E0; color: #FF9800; }
 .session-row-status.completed { background: #E8F5E9; color: #4CAF50; }
-
-/* History button */
-.version-btn {
-  background: #e8ecf1;
-  border: none;
-  border-radius: 20px;
-  padding: 4px 10px;
-  font-size: 10px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.2s;
-  color: #0B2044;
-  white-space: nowrap;
-}
-.version-btn:hover {
-  background: #d0d5dd;
-}
-.version-count {
-  font-weight: 600;
-}
-
+.version-btn { background: #e8ecf1; border: none; border-radius: 20px; padding: 4px 10px; font-size: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: all 0.2s; color: #0B2044; white-space: nowrap; }
+.version-btn:hover { background: #d0d5dd; }
+.version-count { font-weight: 600; }
 .row-rename-btn { background: #0B2044; border: none; color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; margin-right: 4px; }
 .session-row-item:hover .row-rename-btn { opacity: 1; }
 .session-rename-input { flex: 1; min-width: 120px; padding: 4px 8px; border: 1px solid #0B2044; border-radius: 6px; font-size: 13px; }
@@ -693,136 +740,28 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.3s; }
 .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(11, 32, 68, 0.3); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* ========== VERSION MODAL – SCROLLABLE VERSION LIST ========== */
-.version-dialog-title {
-  background: #0B2044;
-  color: white;
-  padding: 14px 20px;
-  display: flex;
-  align-items: center;
-  font-size: 18px;
-}
-.btn-close-dialog {
-  background: transparent;
-  border: none;
-  color: white;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 50%;
-  transition: background 0.2s;
-  font-size: 18px;
-}
-.btn-close-dialog:hover {
-  background: rgba(255,255,255,0.1);
-}
-
-.version-dialog-body {
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  max-height: 70vh;
-}
-
-.version-search-bar {
-  display: flex;
-  align-items: center;
-  background: #f5f5f5;
-  border-radius: 8px;
-  padding: 5px 10px;
-  margin-bottom: 12px;
-  border: 1px solid #e0e0e0;
-  transition: border-color 0.2s;
-  flex-shrink: 0;
-}
-.version-search-bar:focus-within {
-  border-color: #0B2044;
-  background: white;
-}
-.version-search-input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  outline: none;
-  font-size: 13px;
-  padding: 6px 0;
-}
-.version-search-input::placeholder {
-  color: #aaa;
-}
-
-/* ===== SCROLLABLE VERSION LIST ===== */
-.version-list-container {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-  max-height: 420px;
-  padding-right: 4px;
-}
-.version-list-container::-webkit-scrollbar {
-  width: 6px;
-}
-.version-list-container::-webkit-scrollbar-track {
-  background: #f0f0f0;
-  border-radius: 4px;
-}
-.version-list-container::-webkit-scrollbar-thumb {
-  background: #0B2044;
-  border-radius: 4px;
-}
-
-.empty-versions {
-  text-align: center;
-  padding: 30px 0;
-  color: #999;
-}
-.empty-versions p {
-  margin-top: 8px;
-}
-
-.version-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 2px 0;
-}
-
-.version-entry {
-  background: #f8f9ff;
-  border-radius: 6px;
-  padding: 8px 12px;
-  border: 1px solid #e8ecf1;
-  transition: all 0.2s;
-}
-.version-entry.latest {
-  border-color: #0B2044;
-  background: #f0f4ff;
-}
-.version-entry:hover {
-  border-color: #0B2044;
-}
-
-.version-entry-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2px;
-}
-.version-entry-time {
-  font-size: 11px;
-  font-weight: 600;
-  color: #0B2044;
-}
-.version-entry-badge {
-  padding: 1px 10px;
-  border-radius: 30px;
-  font-size: 9px;
-  font-weight: 600;
-  color: white;
-  letter-spacing: 0.2px;
-  text-transform: uppercase;
-}
-.badge-created { background: #2E7D32; }
+.version-dialog-title { background: #0B2044; color: white; padding: 14px 20px; display: flex; align-items: center; font-size: 18px; }
+.btn-close-dialog { background: transparent; border: none; color: white; cursor: pointer; padding: 6px; border-radius: 50%; transition: background 0.2s; font-size: 18px; }
+.btn-close-dialog:hover { background: rgba(255,255,255,0.1); }
+.version-dialog-body { padding: 12px 16px; display: flex; flex-direction: column; max-height: 70vh; }
+.version-search-bar { display: flex; align-items: center; background: #f5f5f5; border-radius: 8px; padding: 5px 10px; margin-bottom: 12px; border: 1px solid #e0e0e0; transition: border-color 0.2s; flex-shrink: 0; }
+.version-search-bar:focus-within { border-color: #0B2044; background: white; }
+.version-search-input { flex: 1; border: none; background: transparent; outline: none; font-size: 13px; padding: 6px 0; }
+.version-search-input::placeholder { color: #aaa; }
+.version-list-container { flex: 1; overflow-y: auto; min-height: 0; max-height: 420px; padding-right: 4px; }
+.version-list-container::-webkit-scrollbar { width: 6px; }
+.version-list-container::-webkit-scrollbar-track { background: #f0f0f0; border-radius: 4px; }
+.version-list-container::-webkit-scrollbar-thumb { background: #0B2044; border-radius: 4px; }
+.empty-versions { text-align: center; padding: 30px 0; color: #999; }
+.empty-versions p { margin-top: 8px; }
+.version-list { display: flex; flex-direction: column; gap: 6px; padding: 2px 0; }
+.version-entry { background: #f8f9ff; border-radius: 6px; padding: 8px 12px; border: 1px solid #e8ecf1; transition: all 0.2s; }
+.version-entry.latest { border-color: #0B2044; background: #f0f4ff; }
+.version-entry:hover { border-color: #0B2044; }
+.version-entry-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+.version-entry-time { font-size: 11px; font-weight: 600; color: #0B2044; }
+.version-entry-badge { padding: 1px 10px; border-radius: 30px; font-size: 9px; font-weight: 600; color: white; letter-spacing: 0.2px; text-transform: uppercase; }
+.badge-created { background: #2E7D32; }  /* kept for backward compatibility */
 .badge-uploaded { background: #0B2044; }
 .badge-cleaned { background: #FF9800; }
 .badge-calculated { background: #1E88E5; }
@@ -830,85 +769,19 @@ onBeforeUnmount(() => { window.removeEventListener('session-updated', onSessionU
 .badge-updated { background: #0B2044; }
 .badge-restored { background: #C62828; }
 .badge-saved { background: #0B2044; }
-
-.version-entry-details {
-  font-size: 11px;
-  color: #555;
-}
-.version-entry-row {
-  display: flex;
-  align-items: baseline;
-  margin-bottom: 1px;
-}
-.version-entry-row .label {
-  width: 68px;
-  font-weight: 600;
-  color: #0B2044;
-  font-size: 10px;
-  flex-shrink: 0;
-}
-.version-entry-row .value {
-  color: #333;
-  font-size: 11px;
-}
-.description-row .description-text {
-  font-weight: 500;
-  color: #0B2044;
-}
-.fields-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-.field-tag {
-  background: #e8ecf1;
-  padding: 0 8px;
-  border-radius: 20px;
-  font-size: 9px;
-  color: #0B2044;
-  line-height: 1.6;
-}
-
-.version-entry-actions {
-  margin-top: 4px;
-  display: flex;
-  justify-content: flex-end;
-}
-.btn-restore {
-  background: #0B2044;
-  color: white;
-  border: none;
-  padding: 1px 12px;
-  border-radius: 30px;
-  font-size: 10px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.btn-restore:hover {
-  background: #1a3a6e;
-}
-
-.version-dialog-actions {
-  padding: 6px 16px 10px;
-  border-top: 1px solid #e8ecf1;
-  flex-shrink: 0;
-}
-.btn-secondary {
-  background: white;
-  color: #0B2044;
-  border: 2px solid #0B2044;
-  padding: 4px 16px;
-  border-radius: 30px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.btn-secondary:hover {
-  background: #0B2044;
-  color: white;
-}
-
+.version-entry-details { font-size: 11px; color: #555; }
+.version-entry-row { display: flex; align-items: baseline; margin-bottom: 1px; }
+.version-entry-row .label { width: 68px; font-weight: 600; color: #0B2044; font-size: 10px; flex-shrink: 0; }
+.version-entry-row .value { color: #333; font-size: 11px; }
+.description-row .description-text { font-weight: 500; color: #0B2044; }
+.fields-tags { display: flex; flex-wrap: wrap; gap: 3px; }
+.field-tag { background: #e8ecf1; padding: 0 8px; border-radius: 20px; font-size: 9px; color: #0B2044; line-height: 1.6; }
+.version-entry-actions { margin-top: 4px; display: flex; justify-content: flex-end; }
+.btn-restore { background: #0B2044; color: white; border: none; padding: 1px 12px; border-radius: 30px; font-size: 10px; cursor: pointer; transition: background 0.2s; }
+.btn-restore:hover { background: #1a3a6e; }
+.version-dialog-actions { padding: 6px 16px 10px; border-top: 1px solid #e8ecf1; flex-shrink: 0; }
+.btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; padding: 4px 16px; border-radius: 30px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.btn-secondary:hover { background: #0B2044; color: white; }
 @media (max-width: 900px) {
   .dashboard { padding: 20px; }
   .session-management-row { grid-template-columns: 1fr; gap: 20px; }
