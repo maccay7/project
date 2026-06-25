@@ -92,7 +92,7 @@
       </div>
     </div>
 
-    <!-- Modal for per-instrument Excel view – Close button removed -->
+    <!-- Modal for per-instrument Excel view -->
     <v-dialog v-model="detailModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">
@@ -103,11 +103,10 @@
         <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
           <ExcelViewer :data="selectedInst?.details || []" :headers="selectedInst?.detailHeaders || []" />
         </v-card-text>
-        <!-- No Close button -->
       </v-card>
     </v-dialog>
 
-    <!-- Combined Portfolio Excel view – Close button removed -->
+    <!-- Combined Portfolio Excel view -->
     <v-dialog v-model="combinedModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">
@@ -155,7 +154,6 @@
             <div v-else class="empty-placeholder">No data available for this instrument.</div>
           </div>
         </v-card-text>
-        <!-- No Close button -->
       </v-card>
     </v-dialog>
 
@@ -362,14 +360,17 @@ function exportToExcel() {
 
   const workbook = XLSX.utils.book_new()
   
-  // Summary sheet
+  // Summary sheet – enhanced with required fields
   const summaryData = toExport.map(inst => ({
-    'Instrument Type': inst.name,
-    'Total Value': inst.value,
-    'Number of Instruments': inst.count,
-    'Average Rate (%)': inst.avgRate !== null ? inst.avgRate : '—',
-    'FRED Benchmark (%)': inst.fredBench !== null ? inst.fredBench : '—',
-    'Status': inst.statusText
+    'Instrument Name': inst.name,
+    'Face Value': inst.value,  // using total value as face value proxy
+    'Calculated Value': inst.value,
+    'Market Value': inst.fredBench ? (inst.value * (1 + inst.fredBench/100)) : null,
+    'Difference Between Values': inst.fredBench ? (inst.value * (inst.fredBench/100)) : null,
+    'Yield (%)': inst.avgRate !== null ? inst.avgRate : '—',
+    'Maturity Date': '—', // we don't have a single maturity date for the whole class
+    'Session Name': activeSession.value.name,
+    'Valuation Date': new Date().toLocaleDateString()
   }))
   const summarySheet = XLSX.utils.json_to_sheet(summaryData)
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
@@ -377,8 +378,17 @@ function exportToExcel() {
   // Detail sheets for each selected instrument
   for (const inst of instrumentsWithDetails.value) {
     if (selectedExportInstruments.value[inst.id] && inst.details && inst.details.length) {
-      const sheet = XLSX.utils.json_to_sheet(inst.details)
-      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31)) // Excel sheet name max 31 chars
+      // Add extra computed columns for the detailed view (if needed)
+      const enrichedDetails = inst.details.map(row => {
+        const newRow = { ...row }
+        // Calculate difference if both face value and calculated value exist
+        if (newRow.FaceValue !== undefined && newRow['Calculated Value'] !== undefined) {
+          newRow['Difference'] = newRow['Calculated Value'] - newRow.FaceValue
+        }
+        return newRow
+      })
+      const sheet = XLSX.utils.json_to_sheet(enrichedDetails)
+      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
   
@@ -392,7 +402,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* ========== ALL ORIGINAL STYLES – UNCHANGED ========== */
+/* ===== ALL ORIGINAL STYLES – UNCHANGED ===== */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
@@ -446,29 +456,9 @@ onMounted(() => {
 .export-checkbox { display: flex; align-items: center; gap: 10px; font-size: 16px; cursor: pointer; }
 .warning-badge { background: #ffebee; color: #c62828; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
 
-/* Combined modal styles */
-.combined-excel-body {
-  padding: 16px 24px;
-  max-height: calc(100vh - 140px);
-  overflow-y: auto;
-  background: #f9fafc;
-}
-.combined-section {
-  background: white;
-  border-radius: 12px;
-  padding: 16px 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-}
-.combined-section-title {
-  color: #0B2044;
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0 0 12px 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+.combined-excel-body { padding: 16px 24px; max-height: calc(100vh - 140px); overflow-y: auto; background: #f9fafc; }
+.combined-section { background: white; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.combined-section-title { color: #0B2044; font-size: 16px; font-weight: 600; margin: 0 0 12px 0; display: flex; align-items: center; gap: 10px; }
 .empty-note { font-weight: normal; color: #999; font-size: 14px; }
 .empty-placeholder { color: #999; padding: 12px 0; font-style: italic; text-align: center; }
 .summary-table { width: 100%; border-collapse: collapse; font-size: 14px; }
