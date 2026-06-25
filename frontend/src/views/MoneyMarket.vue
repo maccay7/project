@@ -812,6 +812,9 @@ const sessionSavedAt = ref(null)
 // Control inline preview visibility
 const showPreview = ref(false)
 
+// ---- Force progress update ----
+const forceUpdate = ref(0)
+
 const cleaningOptions = ref({
   removeDuplicates: true, fillMissingText: true, dropRowsWithMissing: false, trimWhitespace: true,
   convertToNumbers: true, removeOutliers: false, standardizeDates: false, removeSpecialChars: false,
@@ -860,6 +863,7 @@ function loadHistoryFile(item) {
     // Reset preview visibility when loading history
     showPreview.value = false
     saveSessionData()
+    forceUpdate.value++ // progress update
   }
 }
 
@@ -910,6 +914,7 @@ function goToCalculations() {
   if (hasCleanedData.value) {
     saveSessionData()
     activeTab.value = 'calculations'
+    forceUpdate.value++
   } else {
     alert('Please clean your data first.')
   }
@@ -919,6 +924,7 @@ function goToVisualizations() {
   if (hasCleanedData.value) {
     saveSessionData()
     activeTab.value = 'visualizations'
+    forceUpdate.value++
   } else {
     alert('Please clean your data first.')
   }
@@ -927,11 +933,13 @@ function goToVisualizations() {
 function goToReportTab() {
   saveSessionData()
   activeTab.value = 'reports'
+  forceUpdate.value++
 }
 
 function switchTab(tab) {
   saveSessionData()
   activeTab.value = tab
+  forceUpdate.value++
 }
 
 // ========== File Upload ==========
@@ -982,6 +990,7 @@ async function readFileData(file) {
 
     addToHistory(file.name, data)
     debouncedSave()
+    forceUpdate.value++ // progress update
   } catch (err) {
     console.error(err)
     alert(`Failed to parse file: ${err.message}`)
@@ -1006,6 +1015,7 @@ function removeFile() {
   fileColumns.value = []
   showPreview.value = false
   debouncedSave()
+  forceUpdate.value++
   if (fileInput.value) fileInput.value.value = ''
 }
 
@@ -1064,6 +1074,7 @@ function closeMappingDialog() {
 function applyColumnMappingAndClose() {
   applyCurrentMapping()
   showMappingDialog.value = false
+  forceUpdate.value++
 }
 
 async function continueAfterUpload() {
@@ -1071,6 +1082,7 @@ async function continueAfterUpload() {
   if (!rawData.value.length) { alert('No data loaded. Please upload a valid file.'); return }
   activeTab.value = 'cleaning'
   debouncedSave()
+  forceUpdate.value++
 }
 
 // ========== Cleaning ==========
@@ -1128,6 +1140,7 @@ function applyCleaning() {
   cleanedData.value = data
   cleaningStats.value = { totalRows: rawData.value.length, validRows: cleanedData.value.length, removedRows: rawData.value.length - cleanedData.value.length, fixedMissing: 0 }
   debouncedSave()
+  forceUpdate.value++
 }
 
 // ========== CONTINUE AFTER CLEANING ==========
@@ -1143,6 +1156,7 @@ async function continueAfterCleaning() {
     alert('There was an error calculating metrics, but you can proceed to calculations.')
   }
   goToCalculations()
+  forceUpdate.value++
 }
 
 // ========== Calculations ==========
@@ -1219,11 +1233,13 @@ async function calculateMetrics() {
   }
   await enrichCalculationsWithFred()
   debouncedSave()
+  forceUpdate.value++
 }
 
 function continueToVisualizations() {
   if (!hasCleanedData.value) { alert('Please clean your data first.'); return }
   goToVisualizations()
+  forceUpdate.value++
 }
 
 // ========== Report Logic ==========
@@ -1519,6 +1535,7 @@ function saveToSession() {
     detail: { sessionId: sid, skipCapture: true }
   }))
   sessionSavedAt.value = new Date().toISOString()
+  forceUpdate.value++ // force progress update after save
 }
 
 // ========== Session Persistence ==========
@@ -1564,6 +1581,7 @@ async function loadSavedData() {
         applyCurrentMapping()
         // Hide preview initially
         showPreview.value = false
+        forceUpdate.value++
         return true
       }
     } catch (err) { console.error(err) }
@@ -1626,6 +1644,7 @@ async function loadSavedData() {
     applyCurrentMapping()
     // Don't auto-show preview; it will be shown via button
     showPreview.value = false
+    forceUpdate.value++
   }
 
   const s = sessionManager.getSession(sid)
@@ -1645,6 +1664,7 @@ async function loadSavedData() {
       applyCurrentMapping()
     }
     showPreview.value = false
+    forceUpdate.value++
   }
 
   if (!loaded) {
@@ -1679,6 +1699,7 @@ async function loadSavedData() {
       applyCurrentMapping()
     }
     showPreview.value = false
+    forceUpdate.value++
   }
 
   if (cleanedData.value.length && rawData.value.length) {
@@ -1799,6 +1820,11 @@ watch(() => activeTab.value, async (newTab) => {
   }
 })
 
+// ---- Force progress update when key data changes ----
+watch([rawData, cleanedData, calculations, chartData], () => {
+  forceUpdate.value++
+}, { deep: true })
+
 // ========== FRED Functions ==========
 const fredCategories = ref({})
 const availableSeries = computed(() => fredCategories.value.interest_rates || {})
@@ -1853,10 +1879,28 @@ function onCustomMaturityChange() {
   }
 }
 
+// ---- Cached FRED fetch ----
+const CACHE_KEY = 'fred_chart_cache'
+const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+
 async function fetchFredData() {
   fredLoading.value = true
   fredError.value = ''
   try {
+    const cacheKey = `${CACHE_KEY}_${instrumentType.value}_${effectiveCountry.value}_${effectiveCurrency.value}_${effectiveMaturity.value}`
+    const cached = localStorage.getItem(cacheKey)
+    if (cached) {
+      const parsed = JSON.parse(cached)
+      if (Date.now() - parsed.timestamp < CACHE_DURATION) {
+        chartData.value = parsed.data
+        currentMarketRate.value = parsed.data.latest
+        chartSeriesLabel.value = parsed.seriesLabel || 'FRED'
+        fredLoading.value = false
+        forceUpdate.value++
+        return
+      }
+    }
+
     const sid = await seriesIdForMaturity()
     if (!sid) throw new Error('Could not resolve FRED series')
     selectedSeries.value = sid
@@ -1865,6 +1909,14 @@ async function fetchFredData() {
     if (!loaded) throw new Error('No FRED data')
     chartData.value = loaded
     currentMarketRate.value = loaded.latest
+
+    // Cache the response
+    localStorage.setItem(cacheKey, JSON.stringify({
+      timestamp: Date.now(),
+      data: loaded,
+      seriesLabel: chartSeriesLabel.value
+    }))
+
     if (activeSession.value) {
       if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
       if (!activeSession.value.instrumentData[instrumentType.value]) activeSession.value.instrumentData[instrumentType.value] = {}
@@ -1876,6 +1928,7 @@ async function fetchFredData() {
       if (chartInstanceRef.current) chartInstanceRef.current.destroy()
       await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
     }
+    forceUpdate.value++
   } catch (err) {
     console.error(err)
     fredError.value = err.message || 'Failed to load market data.'
@@ -2139,7 +2192,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 /* ============================================================
    ULTRA-STRONG VISIBILITY FIX – FORCE BLACK TEXT & WHITE BG
    ============================================================ */
-/* Target every possible cell element */
 .excel-viewer,
 .excel-viewer *,
 .excel-viewer td,
@@ -2160,7 +2212,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   background-color: #ffffff !important;
 }
 
-/* Formula bar and inputs */
 .excel-viewer .formula-input,
 .excel-viewer .formula-bar input,
 .excel-viewer .cell-input,
@@ -2169,13 +2220,11 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   background-color: #ffffff !important;
 }
 
-/* Selected cell – keep black text, keep highlight background */
 .excel-viewer .selected-cell {
   color: #000000 !important;
   background-color: #e3f2fd !important;
 }
 
-/* Headers and row numbers */
 .excel-viewer .row-number,
 .excel-viewer .header-text,
 .excel-viewer .header-label {
@@ -2183,7 +2232,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   background-color: #f5f5f5 !important;
 }
 
-/* Global overrides for instrument page */
 html, body, #app, .v-application, .v-application--wrap, .fixed-layout, .v-main, .v-content { max-width: 100vw !important; overflow-x: hidden !important; }
 .instrument-page { max-width: 100% !important; overflow-x: hidden !important; }
 .instrument-page .excel-table-wrapper, .instrument-page .excel-preview-section, .instrument-page .preview-section, .instrument-page .excel-scroll-wrapper, .instrument-page .excel-dialog-content { overflow-x: auto !important; max-width: 100% !important; }
