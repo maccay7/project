@@ -1,188 +1,722 @@
 <template>
-  <div class="excel-viewer">
+  <div class="excel-viewer" :class="{ 'has-mapping': showMappingControls }">
+    <!-- Formula Bar -->
+    <div class="formula-bar" v-if="displayData.length">
+      <div class="formula-cell-ref">{{ selectedCellRef }}</div>
+      <div class="formula-input-wrapper">
+        <span class="formula-prefix">fx</span>
+        <input
+          ref="formulaInput"
+          type="text"
+          :value="formulaBarValue"
+          @input="updateFormulaBarValue($event.target.value)"
+          @blur="applyFormulaBarEdit"
+          @keydown.enter.prevent="applyFormulaBarEdit"
+          class="formula-input"
+          :placeholder="selectedCell ? 'Enter value or formula' : ''"
+          style="color: #000000 !important; background: #ffffff !important;"
+        />
+      </div>
+    </div>
+
+    <!-- Toolbar -->
     <div class="excel-toolbar">
-      <span>{{ data.length }} rows × {{ displayHeaders.length }} columns</span>
+      <span>{{ displayData.length }} rows × {{ displayHeaders.length }} columns</span>
       <div class="toolbar-right">
-        <div v-if="showMappingControls" class="mapping-controls">
-          <span class="mapping-label">Column mapping:</span>
-          <select v-model="mappingMode" class="mapping-mode-select">
-            <option value="original">Original Columns</option>
-            <option value="mapped">Mapped Columns</option>
-          </select>
-        </div>
         <div class="pagination-controls">
-          <button class="page-btn" @click="prevPage" :disabled="currentPage === 1">← Previous</button>
+          <button class="page-btn" @click="prevPage" :disabled="currentPage === 1">←</button>
           <span class="page-info">Page {{ currentPage }} of {{ totalPages }}</span>
-          <button class="page-btn" @click="nextPage" :disabled="currentPage === totalPages">Next →</button>
+          <button class="page-btn" @click="nextPage" :disabled="currentPage === totalPages">→</button>
         </div>
       </div>
     </div>
-    <div v-if="validationError" class="validation-banner">{{ validationError }}</div>
-    <div class="excel-table-wrapper">
-      <table class="excel-edit-table">
+
+    <!-- Excel table -->
+    <div class="excel-table-wrapper" @scroll="handleScroll">
+      <table class="excel-edit-table" :style="tableStyle" style="color: #000000 !important; background: #ffffff !important;">
         <thead>
           <tr>
-            <th class="row-number-col">#</th>
-            <th v-for="(col, idx) in displayHeaders" :key="idx">
-              <div v-if="showMappingControls && mappingMode === 'mapped'" class="header-dropdown">
+            <th class="row-number-col" style="width:50px; min-width:50px; max-width:50px; color: #000000 !important; background: #f5f5f5 !important;">#</th>
+            <th
+              v-for="(header, colIndex) in displayHeaders"
+              :key="header"
+              :style="headerStyle(header, colIndex)"
+              class="header-cell"
+              :class="{ 'resizing': resizingColumn === header }"
+            >
+              <!-- Header dropdown: show for required columns only -->
+              <div v-if="showMappingControls && isRequiredColumn(header)" class="header-dropdown">
                 <select
-                  :value="getMappingForHeader(col)"
-                  @change="onMappingChange(col, $event.target.value)"
+                  :value="getMappingForHeader(header)"
+                  @change="onMappingChange(header, $event.target.value)"
                   class="mapping-dropdown"
+                  @click.stop
+                  style="color: #000000 !important; background: #ffffff !important;"
                 >
-                  <option value="__na__">— N/A (hide column) —</option>
+                  <option value="__na__">— Select source —</option>
                   <option v-for="fileCol in availableFileColumns" :key="fileCol" :value="fileCol">
                     {{ fileCol }}
                   </option>
                 </select>
-                <span class="header-label">{{ col }}</span>
+                <span class="header-label" style="color: #000000 !important;">{{ header }}</span>
               </div>
-              <span v-else>{{ col }}</span>
+              <span v-else class="header-text" style="color: #000000 !important;">{{ header }}</span>
+
+              <!-- Column resizer -->
+              <div
+                class="column-resizer"
+                @mousedown.stop="startColumnResize($event, header, colIndex)"
+              ></div>
             </th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, idx) in paginatedData" :key="idx">
-            <td class="row-number">{{ (currentPage - 1) * pageSize + idx + 1 }}</td>
-            <td v-for="col in displayHeaders" :key="col">
-              <input
-                type="text"
-                :value="getCellValue(row, col)"
-                @input="updateCell(row, col, $event.target.value)"
-                class="editable-cell"
-                :class="{ 'cell-invalid': isCellInvalid(row, col) }"
-              />
-            </td>
-          </tr>
+          <template v-for="(row, rowIndex) in paginatedData" :key="rowIndex">
+            <tr
+              :style="rowStyle(rowIndex)"
+              :class="{ 'selected-row': isRowSelected(rowIndex) }"
+              @mousedown="handleRowMouseDown($event, rowIndex)"
+            >
+              <td class="row-number" style="color: #000000 !important; background: #f8f9ff !important;">
+                {{ (currentPage - 1) * pageSize + rowIndex + 1 }}
+              </td>
+              <td
+                v-for="(header, colIndex) in displayHeaders"
+                :key="header"
+                :class="{
+                  'selected-cell': isCellSelected(rowIndex, colIndex),
+                  'editing-cell': isEditingCell(rowIndex, colIndex),
+                }"
+                :style="cellStyle(rowIndex, colIndex)"
+                @click="handleCellClick($event, rowIndex, colIndex)"
+                @dblclick="handleCellDblClick($event, rowIndex, colIndex)"
+                @mousedown="handleCellMouseDown($event, rowIndex, colIndex)"
+                style="color: #000000 !important; background: #ffffff !important;"
+              >
+                <!-- Directly display the value from the row using the header key -->
+                <div v-if="!isEditingCell(rowIndex, colIndex)" class="cell-content" style="color: #000000 !important; background: #ffffff !important;">
+                  {{ row[header] !== undefined ? row[header] : '' }}
+                </div>
+                <input
+                  v-else
+                  ref="editInput"
+                  :value="editValue"
+                  @input="editValue = $event.target.value"
+                  @blur="finishEditing(true)"
+                  @keydown="handleEditKeydown($event)"
+                  class="cell-input"
+                  type="text"
+                  autofocus
+                  style="color: #000000 !important; background: #ffffff !important;"
+                />
+              </td>
+            </tr>
+            <!-- Row resizer handle -->
+            <tr
+              v-if="rowIndex < paginatedData.length - 1"
+              class="row-resizer-row"
+              @mousedown.stop="startRowResize($event, rowIndex)"
+            >
+              <td colspan="100" class="row-resizer-cell"></td>
+            </tr>
+          </template>
         </tbody>
       </table>
+    </div>
+
+    <!-- Footer -->
+    <div class="excel-footer" v-if="displayData.length">
+      <span style="color: #000000 !important;">{{ displayData.length }} rows · {{ displayHeaders.length }} columns</span>
+      <span v-if="selectedCell" style="color: #000000 !important;">Cell: {{ selectedCellRef }}</span>
     </div>
   </div>
 </template>
 
-<script setup>
-import { ref, computed, watch } from 'vue'
-import { validateCellValue } from '@/utils/instrumentMapping.js'
+<script>
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
-const props = defineProps({
-  data: { type: Array, required: true },
-  headers: { type: Array, required: true },
-  originalData: { type: Array, default: null },
-  originalHeaders: { type: Array, default: null },
-  showMappingControls: { type: Boolean, default: false },
-  columnMapping: { type: Object, default: () => ({}) },
-  availableFileColumns: { type: Array, default: () => [] },
-  defaultMappedMode: { type: Boolean, default: false }
-})
+export default {
+  name: 'ExcelViewer',
+  props: {
+    data: { type: Array, required: true },
+    headers: { type: Array, default: () => [] },
+    originalData: { type: Array, default: () => [] },
+    originalHeaders: { type: Array, default: () => [] },
+    showMappingControls: { type: Boolean, default: false },
+    columnMapping: { type: Object, default: () => ({}) },
+    availableFileColumns: { type: Array, default: () => [] },
+    requiredColumns: { type: Array, default: () => [] },
+  },
+  emits: ['data-update', 'mapping-update'],
+  setup(props, { emit }) {
+    // ─── Internal state ──────────────────────────────────
+    const internalData = ref([])
+    const selectedCell = ref(null)
+    const selectedRange = ref(null)
+    const editingCell = ref(null)
+    const editValue = ref('')
+    const editInput = ref(null)
 
-const emit = defineEmits(['data-update', 'mapping-update', 'validation-error'])
+    // Formula bar
+    const formulaInput = ref(null)
+    const formulaBarValue = ref('')
 
-const pageSize = 15
-const currentPage = ref(1)
-const mappingMode = ref(props.defaultMappedMode ? 'mapped' : 'original')
-const validationError = ref('')
-const invalidCells = ref(new Set())
+    // Column widths & row heights
+    const columnWidths = ref({})
+    const rowHeights = ref({})
 
-const sourceData = computed(() => props.originalData?.length ? props.originalData : props.data)
-const sourceHeaders = computed(() => props.originalHeaders?.length ? props.originalHeaders : props.headers)
+    const resizingColumn = ref(null)
+    const resizingRow = ref(null)
+    const resizeStartX = ref(0)
+    const resizeStartY = ref(0)
+    const resizeStartWidth = ref(0)
+    const resizeStartHeight = ref(0)
 
-const totalPages = computed(() => Math.max(1, Math.ceil(props.data.length / pageSize)))
+    const scrollLeft = ref(0)
 
-const paginatedData = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return props.data.slice(start, start + pageSize)
-})
+    // Pagination
+    const pageSize = 20
+    const currentPage = ref(1)
 
-const displayHeaders = computed(() => {
-  if (!props.showMappingControls || mappingMode.value === 'original') {
-    return sourceHeaders.value
-  }
-  return Object.entries(props.columnMapping)
-    .filter(([, srcCol]) => srcCol && srcCol !== '__na__')
-    .map(([reqCol]) => reqCol)
-})
+    // ─── Computed ─────────────────────────────────────────
+    const displayData = computed(() => internalData.value)
 
-function getMappingForHeader(requiredCol) {
-  return props.columnMapping[requiredCol] || '__na__'
-}
+    // ***** FIX: Always use data keys for display headers *****
+    const displayHeaders = computed(() => {
+      if (displayData.value.length) {
+        const keys = Object.keys(displayData.value[0])
+        if (keys.length) return keys
+      }
+      // Fallback to props (for empty data)
+      if (props.headers && props.headers.length) return props.headers
+      if (props.originalHeaders && props.originalHeaders.length) return props.originalHeaders
+      if (props.availableFileColumns && props.availableFileColumns.length) return props.availableFileColumns
+      return []
+    })
 
-function getCellValue(row, col) {
-  if (!props.showMappingControls || mappingMode.value === 'original') {
-    const srcRow = findSourceRow(row)
-    return srcRow?.[col] !== undefined ? srcRow[col] : ''
-  }
-  const srcCol = props.columnMapping[col]
-  if (!srcCol || srcCol === '__na__') return ''
-  const srcRow = findSourceRow(row)
-  return srcRow?.[srcCol] !== undefined ? srcRow[srcCol] : ''
-}
+    const totalPages = computed(() => Math.max(1, Math.ceil(displayData.value.length / pageSize)))
+    const paginatedData = computed(() => {
+      const start = (currentPage.value - 1) * pageSize
+      return displayData.value.slice(start, start + pageSize)
+    })
 
-function findSourceRow(row) {
-  const idx = props.data.indexOf(row)
-  if (idx >= 0 && sourceData.value[idx]) return sourceData.value[idx]
-  return row
-}
+    const defaultColumnWidth = 120
+    const defaultRowHeight = 32
 
-function isCellInvalid(row, col) {
-  const idx = props.data.indexOf(row)
-  const key = `${idx}-${col}`
-  return invalidCells.value.has(key)
-}
+    const selectedCellRef = computed(() => {
+      if (!selectedCell.value) return ''
+      const colLetter = String.fromCharCode(65 + selectedCell.value.col)
+      const rowNum = (currentPage.value - 1) * pageSize + selectedCell.value.row + 1
+      return colLetter + rowNum
+    })
 
-function updateCell(row, displayCol, rawValue) {
-  const idx = props.data.indexOf(row)
-  const srcRow = idx >= 0 && sourceData.value[idx] ? sourceData.value[idx] : row
-
-  let targetCol = displayCol
-  if (props.showMappingControls && mappingMode.value === 'mapped') {
-    const srcCol = props.columnMapping[displayCol]
-    if (!srcCol || srcCol === '__na__') return
-    targetCol = srcCol
-  }
-
-  const colForValidation = mappingMode.value === 'mapped' ? displayCol : displayCol
-  const result = validateCellValue(colForValidation, rawValue)
-  const key = `${idx}-${displayCol}`
-
-  if (!result.valid) {
-    invalidCells.value.add(key)
-    validationError.value = result.error
-    emit('validation-error', result.error)
-    srcRow[targetCol] = rawValue
-  } else {
-    invalidCells.value.delete(key)
-    if (invalidCells.value.size === 0) validationError.value = ''
-    srcRow[targetCol] = result.value
-  }
-
-  if (idx >= 0 && props.data[idx] !== srcRow) {
-    if (mappingMode.value === 'original') {
-      props.data[idx][targetCol] = srcRow[targetCol]
+    // ─── Helpers for mapping dropdown ────────────────────
+    function isRequiredColumn(header) {
+      return props.requiredColumns.includes(header)
     }
-  }
 
-  emit('data-update', props.data, sourceData.value)
+    function getMappingForHeader(header) {
+      return props.columnMapping[header] || '__na__'
+    }
+
+    // Raw value used by Formula Bar
+    function getCellRawValue(row, col) {
+      const header = displayHeaders.value[col]
+      if (!header) return ''
+      return row[header] !== undefined ? row[header] : ''
+    }
+
+    function setCellValue(row, col, newValue) {
+      const header = displayHeaders.value[col]
+      if (!header) return
+      const rowData = displayData.value[row]
+      if (rowData) {
+        rowData[header] = newValue
+        emit('data-update', internalData.value, props.originalData)
+      }
+    }
+
+    // ─── Selection ─────────────────────────────────────────
+    function isCellSelected(rowIndex, colIndex) {
+      if (!selectedCell.value) return false
+      if (selectedRange.value) {
+        const { startRow, startCol, endRow, endCol } = selectedRange.value
+        const minRow = Math.min(startRow, endRow)
+        const maxRow = Math.max(startRow, endRow)
+        const minCol = Math.min(startCol, endCol)
+        const maxCol = Math.max(startCol, endCol)
+        return rowIndex >= minRow && rowIndex <= maxRow &&
+               colIndex >= minCol && colIndex <= maxCol
+      }
+      return selectedCell.value.row === rowIndex && selectedCell.value.col === colIndex
+    }
+
+    function isRowSelected(rowIndex) {
+      if (!selectedRange.value) return false
+      const { startRow, endRow } = selectedRange.value
+      const minRow = Math.min(startRow, endRow)
+      const maxRow = Math.max(startRow, endRow)
+      return rowIndex >= minRow && rowIndex <= maxRow
+    }
+
+    function selectCell(row, col, extend = false) {
+      if (row < 0 || row >= paginatedData.value.length) return
+      if (col < 0 || col >= displayHeaders.value.length) return
+
+      if (extend && selectedCell.value) {
+        const anchorRow = selectedCell.value.row
+        const anchorCol = selectedCell.value.col
+        selectedRange.value = {
+          startRow: anchorRow,
+          startCol: anchorCol,
+          endRow: row,
+          endCol: col,
+        }
+        selectedCell.value = { row, col }
+      } else {
+        selectedCell.value = { row, col }
+        selectedRange.value = null
+      }
+      updateFormulaBarFromSelection()
+      if (editingCell.value) cancelEditing()
+    }
+
+    // ─── Formula Bar ──────────────────────────────────────
+    function updateFormulaBarFromSelection() {
+      if (!selectedCell.value) {
+        formulaBarValue.value = ''
+        return
+      }
+      const { row, col } = selectedCell.value
+      const val = getCellRawValue(paginatedData.value[row], col)
+      formulaBarValue.value = val !== undefined ? val : ''
+    }
+
+    function updateFormulaBarValue(newVal) {
+      formulaBarValue.value = newVal
+    }
+
+    function applyFormulaBarEdit() {
+      if (!selectedCell.value) return
+      const { row, col } = selectedCell.value
+      const newVal = formulaBarValue.value
+      setCellValue(row, col, newVal)
+    }
+
+    // ─── Click / Dblclick ──────────────────────────────────
+    let clickTimer = null
+    const CLICK_DELAY = 200
+
+    function handleCellClick(event, rowIndex, colIndex) {
+      if (editingCell.value) {
+        const { row: editRow, col: editCol } = editingCell.value
+        if (editRow !== rowIndex || editCol !== colIndex) {
+          finishEditing(true)
+        }
+      }
+
+      if (clickTimer) {
+        clearTimeout(clickTimer)
+        clickTimer = null
+        return
+      }
+
+      clickTimer = setTimeout(() => {
+        clickTimer = null
+        if (event.shiftKey) {
+          selectCell(rowIndex, colIndex, true)
+        } else {
+          selectCell(rowIndex, colIndex, false)
+        }
+      }, CLICK_DELAY)
+    }
+
+    function handleCellDblClick(event, rowIndex, colIndex) {
+      if (clickTimer) {
+        clearTimeout(clickTimer)
+        clickTimer = null
+      }
+      selectCell(rowIndex, colIndex, false)
+      startEditing(rowIndex, colIndex)
+    }
+
+    function handleCellMouseDown(event, rowIndex, colIndex) {}
+    function handleRowMouseDown(event, rowIndex) {}
+
+    // ─── Editing ──────────────────────────────────────────
+    function isEditingCell(rowIndex, colIndex) {
+      if (!editingCell.value) return false
+      return editingCell.value.row === rowIndex && editingCell.value.col === colIndex
+    }
+
+    function startEditing(row, col) {
+      if (row < 0 || row >= paginatedData.value.length) return
+      if (col < 0 || col >= displayHeaders.value.length) return
+      const val = getCellRawValue(paginatedData.value[row], col)
+      editingCell.value = { row, col }
+      editValue.value = val !== undefined ? val : ''
+      nextTick(() => {
+        if (editInput.value) {
+          editInput.value.focus()
+          editInput.value.select()
+        }
+      })
+    }
+
+    function finishEditing(save) {
+      if (!editingCell.value) return
+      const { row, col } = editingCell.value
+      if (save) {
+        const newVal = editValue.value
+        setCellValue(row, col, newVal)
+        updateFormulaBarFromSelection()
+      }
+      editingCell.value = null
+      editValue.value = ''
+    }
+
+    function cancelEditing() {
+      finishEditing(false)
+    }
+
+    function handleEditKeydown(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        finishEditing(true)
+        if (selectedCell.value) {
+          const { row, col } = selectedCell.value
+          const nextRow = Math.min(paginatedData.value.length - 1, row + 1)
+          selectCell(nextRow, col, false)
+        }
+      } else if (event.key === 'Escape') {
+        cancelEditing()
+      } else if (event.key === 'Tab') {
+        event.preventDefault()
+        finishEditing(true)
+        const { row, col } = editingCell.value || selectedCell.value
+        let newCol
+        if (event.shiftKey) {
+          newCol = Math.max(0, col - 1)
+        } else {
+          newCol = Math.min(displayHeaders.value.length - 1, col + 1)
+        }
+        if (newCol !== col) {
+          selectCell(row, newCol, false)
+          startEditing(row, newCol)
+        }
+      }
+    }
+
+    // ─── Keyboard Navigation ─────────────────────────────
+    function handleKeyDown(event) {
+      if (editingCell.value) return
+      if (!selectedCell.value) return
+      const { row, col } = selectedCell.value
+      let newRow = row, newCol = col
+      let handled = true
+      switch (event.key) {
+        case 'ArrowUp': newRow = Math.max(0, row - 1); break
+        case 'ArrowDown': newRow = Math.min(paginatedData.value.length - 1, row + 1); break
+        case 'ArrowLeft': newCol = Math.max(0, col - 1); break
+        case 'ArrowRight': newCol = Math.min(displayHeaders.value.length - 1, col + 1); break
+        case 'Enter':
+          startEditing(row, col)
+          handled = false
+          break
+        case 'Tab':
+          event.preventDefault()
+          if (event.shiftKey) {
+            newCol = Math.max(0, col - 1)
+          } else {
+            newCol = Math.min(displayHeaders.value.length - 1, col + 1)
+          }
+          break
+        default:
+          handled = false
+      }
+      if (handled) {
+        event.preventDefault()
+        if (newRow !== row || newCol !== col) {
+          selectCell(newRow, newCol, event.shiftKey)
+        }
+      }
+    }
+
+    // ─── Column Resizing ──────────────────────────────────
+    function startColumnResize(event, header, colIndex) {
+      resizingColumn.value = header
+      resizeStartX.value = event.clientX
+      resizeStartWidth.value = columnWidths.value[header] || defaultColumnWidth
+      document.addEventListener('mousemove', onColumnResize)
+      document.addEventListener('mouseup', stopColumnResize)
+      event.preventDefault()
+    }
+
+    function onColumnResize(event) {
+      if (!resizingColumn.value) return
+      const delta = event.clientX - resizeStartX.value
+      const newWidth = Math.max(40, resizeStartWidth.value + delta)
+      columnWidths.value = {
+        ...columnWidths.value,
+        [resizingColumn.value]: newWidth,
+      }
+    }
+
+    function stopColumnResize() {
+      resizingColumn.value = null
+      document.removeEventListener('mousemove', onColumnResize)
+      document.removeEventListener('mouseup', stopColumnResize)
+    }
+
+    function headerStyle(header, colIndex) {
+      const width = columnWidths.value[header] || defaultColumnWidth
+      return {
+        width: width + 'px',
+        minWidth: width + 'px',
+        maxWidth: width + 'px',
+        position: 'sticky',
+        top: 0,
+        zIndex: 2,
+        background: '#f5f5f5',
+        borderBottom: '2px solid #0B2044',
+        padding: '8px 4px',
+        textAlign: 'left',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        boxSizing: 'border-box',
+        color: '#000000 !important',
+      }
+    }
+
+    // ─── Row Resizing ─────────────────────────────────────
+    function startRowResize(event, rowIndex) {
+      const globalIndex = (currentPage.value - 1) * pageSize + rowIndex
+      resizingRow.value = globalIndex
+      resizeStartY.value = event.clientY
+      resizeStartHeight.value = rowHeights.value[globalIndex] || defaultRowHeight
+      document.addEventListener('mousemove', onRowResize)
+      document.addEventListener('mouseup', stopRowResize)
+      event.preventDefault()
+    }
+
+    function onRowResize(event) {
+      if (resizingRow.value === null) return
+      const delta = event.clientY - resizeStartY.value
+      const newHeight = Math.max(20, resizeStartHeight.value + delta)
+      rowHeights.value = {
+        ...rowHeights.value,
+        [resizingRow.value]: newHeight,
+      }
+    }
+
+    function stopRowResize() {
+      resizingRow.value = null
+      document.removeEventListener('mousemove', onRowResize)
+      document.removeEventListener('mouseup', stopRowResize)
+    }
+
+    function rowStyle(rowIndex) {
+      const globalIndex = (currentPage.value - 1) * pageSize + rowIndex
+      const height = rowHeights.value[globalIndex] || defaultRowHeight
+      return {
+        height: height + 'px',
+        maxHeight: height + 'px',
+      }
+    }
+
+    function cellStyle(rowIndex, colIndex) {
+      const globalIndex = (currentPage.value - 1) * pageSize + rowIndex
+      const height = rowHeights.value[globalIndex] || defaultRowHeight
+      return {
+        padding: '4px 8px',
+        borderRight: '1px solid #e0e0e0',
+        borderBottom: '1px solid #e0e0e0',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        position: 'relative',
+        height: height + 'px',
+        maxHeight: height + 'px',
+        color: '#000000 !important',
+        background: '#ffffff !important',
+      }
+    }
+
+    // ─── Scroll ────────────────────────────────────────────
+    function handleScroll(event) {
+      scrollLeft.value = event.target.scrollLeft
+    }
+
+    const tableStyle = computed(() => ({
+      width: '100%',
+      borderCollapse: 'collapse',
+      tableLayout: 'fixed',
+      color: '#000000 !important',
+      background: '#ffffff !important',
+    }))
+
+    // ─── Pagination ──────────────────────────────────────
+    function prevPage() { if (currentPage.value > 1) currentPage.value-- }
+    function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
+
+    // ─── Mapping change from header dropdown ──────────────
+    function onMappingChange(header, newSrcCol) {
+      const newMapping = { ...props.columnMapping }
+      newMapping[header] = newSrcCol === '__na__' ? null : newSrcCol
+      emit('mapping-update', newMapping)
+    }
+
+    // ─── Watchers ──────────────────────────────────────────
+    watch(
+      () => props.data,
+      (newData) => {
+        internalData.value = newData.map(row => ({ ...row }))
+        // Reset selection and editing
+        selectedCell.value = null
+        selectedRange.value = null
+        editingCell.value = null
+        currentPage.value = 1
+      },
+      { immediate: true, deep: true }
+    )
+
+    watch(selectedCell, () => {
+      updateFormulaBarFromSelection()
+    })
+
+    // ─── Lifecycle ─────────────────────────────────────────
+    onMounted(() => {
+      document.addEventListener('keydown', handleKeyDown)
+    })
+
+    onBeforeUnmount(() => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('mousemove', onColumnResize)
+      document.removeEventListener('mouseup', stopColumnResize)
+      document.removeEventListener('mousemove', onRowResize)
+      document.removeEventListener('mouseup', stopRowResize)
+    })
+
+    // ─── Expose ────────────────────────────────────────────
+    return {
+      internalData,
+      displayData,
+      displayHeaders,
+      paginatedData,
+      totalPages,
+      currentPage,
+      pageSize,
+      selectedCell,
+      selectedRange,
+      editingCell,
+      editValue,
+      editInput,
+      formulaInput,
+      formulaBarValue,
+      columnWidths,
+      rowHeights,
+      resizingColumn,
+      resizingRow,
+      scrollLeft,
+      defaultColumnWidth,
+      defaultRowHeight,
+      tableStyle,
+      selectedCellRef,
+      isRequiredColumn,
+      getMappingForHeader,
+      setCellValue,
+      isCellSelected,
+      isRowSelected,
+      isEditingCell,
+      selectCell,
+      handleCellClick,
+      handleCellDblClick,
+      handleCellMouseDown,
+      handleRowMouseDown,
+      startEditing,
+      finishEditing,
+      cancelEditing,
+      handleEditKeydown,
+      startColumnResize,
+      onColumnResize,
+      stopColumnResize,
+      headerStyle,
+      startRowResize,
+      onRowResize,
+      stopRowResize,
+      rowStyle,
+      cellStyle,
+      handleScroll,
+      prevPage,
+      nextPage,
+      onMappingChange,
+      updateFormulaBarFromSelection,
+      updateFormulaBarValue,
+      applyFormulaBarEdit,
+    }
+  },
 }
-
-function onMappingChange(requiredCol, newSrcCol) {
-  const newMapping = { ...props.columnMapping }
-  newMapping[requiredCol] = newSrcCol === '__na__' ? null : newSrcCol
-  emit('mapping-update', newMapping)
-}
-
-function prevPage() { if (currentPage.value > 1) currentPage.value-- }
-function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
-
-watch(() => props.data, () => { currentPage.value = 1; invalidCells.value.clear(); validationError.value = '' }, { deep: true })
-watch(() => props.defaultMappedMode, (val) => { mappingMode.value = val ? 'mapped' : 'original' })
 </script>
 
 <style scoped>
+/* same as before – unchanged */
 .excel-viewer {
   border: 1px solid #ddd;
   border-radius: 8px;
   overflow: hidden;
   background: white;
+  font-size: 13px;
+  max-width: 100%;
+}
+.formula-bar {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: #fafafa;
+  border-bottom: 1px solid #ddd;
+  gap: 8px;
+  font-size: 13px;
+}
+.formula-cell-ref {
+  min-width: 60px;
+  font-weight: 600;
+  color: #0B2044;
+  background: white;
+  padding: 2px 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-align: center;
+}
+.formula-input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.formula-prefix {
+  font-weight: 600;
+  color: #0B2044;
+  margin-right: 4px;
+  padding: 0 4px;
+  background: #f0f0f0;
+  border-radius: 3px;
+}
+.formula-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  min-height: 28px;
+}
+.formula-input:focus {
+  background: #fff;
 }
 .excel-toolbar {
   display: flex;
@@ -200,29 +734,6 @@ watch(() => props.defaultMappedMode, (val) => { mappingMode.value = val ? 'mappe
   align-items: center;
   flex-wrap: wrap;
 }
-.mapping-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.mapping-label {
-  font-size: 12px;
-  color: #555;
-}
-.mapping-mode-select {
-  padding: 4px 8px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  background: white;
-  font-size: 12px;
-}
-.validation-banner {
-  background: #fff3cd;
-  color: #856404;
-  padding: 8px 16px;
-  font-size: 13px;
-  border-bottom: 1px solid #ffc107;
-}
 .pagination-controls {
   display: flex;
   gap: 12px;
@@ -234,6 +745,7 @@ watch(() => props.defaultMappedMode, (val) => { mappingMode.value = val ? 'mappe
   padding: 4px 12px;
   border-radius: 6px;
   cursor: pointer;
+  font-size: 13px;
 }
 .page-btn:disabled {
   opacity: 0.5;
@@ -244,55 +756,45 @@ watch(() => props.defaultMappedMode, (val) => { mappingMode.value = val ? 'mappe
   color: #555;
 }
 .excel-table-wrapper {
-  overflow-x: auto;
+  overflow: auto;
   max-height: 500px;
+  width: 100%;
+  position: relative;
 }
 .excel-edit-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  table-layout: fixed;
 }
 .excel-edit-table th,
 .excel-edit-table td {
-  border: 1px solid #ddd;
-  padding: 6px 8px;
-  text-align: left;
+  border: 1px solid #e0e0e0;
+  box-sizing: border-box;
 }
 .excel-edit-table th {
-  background: #f0f0f0;
+  background: #f5f5f5;
+  font-weight: 600;
+  color: #0B2044;
+  user-select: none;
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 2;
 }
-.row-number-col {
-  background: #f8f9ff;
-  width: 50px;
-  text-align: center;
+.header-cell {
+  position: relative;
+  padding-right: 8px;
 }
-.row-number {
-  background: #f8f9ff;
-  font-weight: 500;
-  text-align: center;
-}
-.editable-cell {
-  width: 100%;
-  border: none;
-  padding: 4px;
-  font-family: inherit;
-  background: transparent;
-}
-.editable-cell:focus {
-  outline: 1px solid #0B2044;
-  background: #f8f9ff;
-}
-.cell-invalid {
-  outline: 1px solid #dc3545;
-  background: #fff5f5;
+.header-text {
+  display: inline-block;
+  width: calc(100% - 12px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .header-dropdown {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .mapping-dropdown {
   font-size: 11px;
@@ -304,5 +806,101 @@ watch(() => props.defaultMappedMode, (val) => { mappingMode.value = val ? 'mappe
 .header-label {
   font-weight: normal;
   font-size: 12px;
+}
+.column-resizer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 3;
+  transition: background 0.1s;
+}
+.column-resizer:hover,
+.column-resizer.active {
+  background: #0B2044;
+  opacity: 0.4;
+}
+.row-resizer-row {
+  height: 6px;
+  cursor: row-resize;
+  background: transparent;
+  transition: background 0.1s;
+}
+.row-resizer-row:hover {
+  background: #0B2044;
+  opacity: 0.15;
+}
+.row-resizer-cell {
+  padding: 0 !important;
+  border: none !important;
+  height: 6px;
+}
+.row-resizer-handle {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  cursor: row-resize;
+}
+.row-number-col {
+  background: #f8f9ff;
+  width: 50px;
+  min-width: 50px;
+  max-width: 50px;
+  text-align: center;
+}
+.row-number {
+  background: #f8f9ff;
+  font-weight: 500;
+  text-align: center;
+}
+.selected-cell {
+  background: #e3f2fd !important;
+  outline: 2px solid #0B2044;
+  outline-offset: -2px;
+}
+.selected-row {
+  background: #f5f8ff;
+}
+.editing-cell {
+  padding: 0 !important;
+}
+.cell-content {
+  padding: 4px 8px;
+  min-height: 24px;
+  word-break: break-all;
+}
+.cell-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  padding: 4px 8px;
+  background: white;
+  font-family: inherit;
+  font-size: inherit;
+  box-sizing: border-box;
+}
+.excel-footer {
+  padding: 6px 12px;
+  background: #fafafa;
+  border-top: 1px solid #e0e0e0;
+  font-size: 12px;
+  color: #666;
+  display: flex;
+  justify-content: space-between;
+}
+</style>
+
+<style>
+/* Additional global override – just in case */
+.excel-viewer td,
+.excel-viewer td *,
+.excel-viewer .cell-content,
+.excel-viewer .cell-content * {
+  color: #000000 !important;
+  background: #ffffff !important;
 }
 </style>

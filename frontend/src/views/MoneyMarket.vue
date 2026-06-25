@@ -89,8 +89,8 @@
                 <button class="btn-mapping" @click="openMappingDialog" :disabled="!rawData.length">Map Columns</button>
               </div>
 
-              <!-- Preview – inline toggle removed -->
-              <div v-if="rawData.length" class="excel-preview-section">
+              <!-- Preview with header dropdowns – shown only after clicking "Review Excel" -->
+              <div v-if="rawData.length && showPreview" class="excel-preview-section">
                 <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
                 <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
                 <ExcelViewer
@@ -98,17 +98,17 @@
                   :headers="uploadPreviewHeaders"
                   :original-data="originalRawData.slice(0, 500)"
                   :original-headers="originalFileColumns"
-                  :show-mapping-controls="false"
+                  :show-mapping-controls="true"
                   :column-mapping="columnMapping"
                   :available-file-columns="fileColumns"
-                  :default-mapped-mode="mappingApplied"
+                  :required-columns="requiredColumns"
                   @data-update="onRawExcelUpdate"
                   @mapping-update="updateColumnMapping"
                 />
                 <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
               </div>
 
-              <!-- Manual Mapping Dialog -->
+              <!-- Manual Mapping Dialog (no ticks) -->
               <v-dialog v-model="showMappingDialog" max-width="700px">
                 <v-card>
                   <v-card-title>Map Columns</v-card-title>
@@ -123,7 +123,7 @@
                           <option :value="null">-- Select column --</option>
                           <option v-for="fileCol in fileColumns" :key="fileCol" :value="fileCol">{{ fileCol }}</option>
                         </select>
-                        <span v-if="columnMapping[reqCol]" class="mapped-indicator">✅</span>
+                        <!-- tick removed -->
                       </div>
                     </div>
                     <div class="mapping-hint">
@@ -150,7 +150,7 @@
                 </div>
                 <div v-if="rawData.length && missingColumns.length" class="warning-message">
                   <v-icon color="warning">mdi-alert</v-icon>
-                  <span>Missing required columns. Click "Map Columns" to manually assign them.</span>
+                  <span>Missing required columns. Use the dropdowns on the column headers or click "Map Columns" to assign them.</span>
                 </div>
                 <div v-if="rawData.length && missingColumns.length === 0 && mappingApplied" class="success-message">
                   <v-icon color="success">mdi-check-circle</v-icon>
@@ -764,7 +764,7 @@ const steps = computed(() => {
 function isStepComplete(tab) {
   switch (tab) {
     case 'upload':
-      return rawData.value.length > 0   // Only need raw data – mapping optional
+      return rawData.value.length > 0
     case 'cleaning':
       return cleanedData.value.length > 0
     case 'calculations':
@@ -809,6 +809,9 @@ const originalRawData = ref([])
 const originalFileColumns = ref([])
 const sessionSavedAt = ref(null)
 
+// Control inline preview visibility
+const showPreview = ref(false)
+
 const cleaningOptions = ref({
   removeDuplicates: true, fillMissingText: true, dropRowsWithMissing: false, trimWhitespace: true,
   convertToNumbers: true, removeOutliers: false, standardizeDates: false, removeSpecialChars: false,
@@ -851,10 +854,12 @@ function loadHistoryFile(item) {
     originalFileColumns.value = Object.keys(data[0] || {})
     fileColumns.value = [...originalFileColumns.value]
     uploadedFile.value = { name: item.name, size: 0 }
+    // Auto-match columns
     columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-    mappingApplied.value = false
+    applyCurrentMapping()
+    // Reset preview visibility when loading history
+    showPreview.value = false
     saveSessionData()
-    // Removed alert
   }
 }
 
@@ -867,7 +872,7 @@ function deleteHistoryItem(idx) {
 const fileSize = computed(() => {
   if (!uploadedFile.value) return ''
   const bytes = uploadedFile.value.size
-  if (bytes === 0) return ''  // Hide 0B
+  if (bytes === 0) return ''
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
@@ -885,8 +890,9 @@ const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
 const uploadPreviewHeaders = computed(() => {
-  if (mappingApplied.value) {
-    return requiredColumns.value.filter(col => isColumnMapped(col, mappingContext.value))
+  // Show required columns if mapping is applied (or partially applied)
+  if (Object.values(columnMapping.value).some(v => v)) {
+    return requiredColumns.value
   }
   return originalFileColumns.value.length
     ? originalFileColumns.value
@@ -896,11 +902,10 @@ const cleanPreviewHeaders = computed(() => Object.keys((cleanedData.value[0]) ||
 
 const portfolioAvgRate = computed(() => instrumentType.value === 'money-market' ? calculations.value.avgRate || 0 : instrumentType.value === 'bonds' ? calculations.value.avgCouponRate || 0 : calculations.value.avgDiscountRate || 0)
 
-// ========== Navigation – FIXED ==========
+// ========== Navigation ==========
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToPortfolioSummary() { saveSessionData(); router.push('/summary') }
 
-// These functions directly set the tab without checking farthestAllowedIndex
 function goToCalculations() {
   if (hasCleanedData.value) {
     saveSessionData()
@@ -924,7 +929,6 @@ function goToReportTab() {
   activeTab.value = 'reports'
 }
 
-// switchTab now allows navigation to any tab (the progress bar still shows disabled for incomplete steps)
 function switchTab(tab) {
   saveSessionData()
   activeTab.value = tab
@@ -968,12 +972,16 @@ async function readFileData(file) {
     originalFileColumns.value = Object.keys(data[0] || {})
     fileColumns.value = [...originalFileColumns.value]
 
+    // Auto-match columns
     columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-    mappingApplied.value = false
+    // Apply mapping immediately
+    applyCurrentMapping()
+
+    // Reset preview visibility (hide until "Review Excel" clicked)
+    showPreview.value = false
 
     addToHistory(file.name, data)
     debouncedSave()
-    // Removed success alert
   } catch (err) {
     console.error(err)
     alert(`Failed to parse file: ${err.message}`)
@@ -996,57 +1004,71 @@ function removeFile() {
   mappingApplied.value = false
   columnMapping.value = {}
   fileColumns.value = []
+  showPreview.value = false
   debouncedSave()
   if (fileInput.value) fileInput.value.value = ''
 }
 
 // ========== Mapping ==========
-function applyMappingToData(mapping) {
-  if (!originalRawData.value.length) return false
-  const allMapped = requiredColumns.value.every(col => mapping[col])
-  if (!allMapped) {
-    alert('Please map all required columns before applying.')
-    return false
-  }
-  rawData.value = applyMappingToRows(originalRawData.value, requiredColumns.value, mapping)
-  fileColumns.value = requiredColumns.value.filter(c => mapping[c])
-  mappingApplied.value = true
-  debouncedSave()
-  return true
-}
+// Applies the current columnMapping to originalRawData and updates rawData
+function applyCurrentMapping() {
+  if (!originalRawData.value.length) return
 
-function applyColumnMappingAndClose() {
-  const success = applyMappingToData(columnMapping.value)
-  if (success) {
-    showMappingDialog.value = false
-    // Removed alert
+  // Check if any mapping exists
+  const hasAnyMapping = requiredColumns.value.some(col => columnMapping.value[col])
+  if (!hasAnyMapping) {
+    // No mapping: show original data as-is
+    rawData.value = originalRawData.value
+    mappingApplied.value = false
+    return
   }
-}
 
-function closeMappingDialog() { showMappingDialog.value = false }
-
-function openMappingDialog() {
-  if (!originalFileColumns.value.length) {
-    originalFileColumns.value = Object.keys((originalRawData.value[0] || rawData.value[0]) || {})
-  }
-  fileColumns.value = [...originalFileColumns.value]
-  const suggested = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-  requiredColumns.value.forEach(col => {
-    if (!columnMapping.value[col] && suggested[col]) {
-      columnMapping.value[col] = suggested[col]
-    }
+  // Build mapped rows
+  const mappedData = originalRawData.value.map(row => {
+    const newRow = {}
+    requiredColumns.value.forEach(col => {
+      const srcCol = columnMapping.value[col]
+      if (srcCol) {
+        newRow[col] = row[srcCol] !== undefined ? row[srcCol] : ''
+      } else {
+        newRow[col] = ''
+      }
+    })
+    return newRow
   })
+  rawData.value = mappedData
+  const allMapped = requiredColumns.value.every(col => columnMapping.value[col])
+  mappingApplied.value = allMapped
+}
+
+// Called when a mapping dropdown changes (emitted from ExcelViewer)
+function updateColumnMapping(newMapping) {
+  columnMapping.value = { ...newMapping }
+  applyCurrentMapping()
+  debouncedSave()
+}
+
+// Manual mapping dialog
+function openMappingDialog() {
+  // Ensure fileColumns is populated
+  if (!fileColumns.value.length) {
+    fileColumns.value = originalFileColumns.value.length ? [...originalFileColumns.value] : Object.keys(rawData.value[0] || {})
+  }
   showMappingDialog.value = true
 }
 
-function updateColumnMapping(newMapping) {
-  columnMapping.value = newMapping
+function closeMappingDialog() {
+  showMappingDialog.value = false
+}
+
+function applyColumnMappingAndClose() {
+  applyCurrentMapping()
+  showMappingDialog.value = false
 }
 
 async function continueAfterUpload() {
   if (!uploadedFile.value) { alert('Please upload a file first.'); return }
   if (!rawData.value.length) { alert('No data loaded. Please upload a valid file.'); return }
-  // No longer requires mapping
   activeTab.value = 'cleaning'
   debouncedSave()
 }
@@ -1430,6 +1452,12 @@ const excelDialogTitle = ref('')
 function openExcelReview(data, title) {
   if (!data?.length) { if (cleanedData.value.length) data = cleanedData.value; else if (rawData.value.length) data = rawData.value; else { alert('No data'); return } }
   excelData.value = data; excelColumns.value = Object.keys(data[0] || {}); excelDialogTitle.value = title || 'Data Review'; showExcelDialog.value = true
+  // Show the inline preview when "Review Excel" is clicked
+  if (data === rawData.value || data === originalRawData.value) {
+    showPreview.value = true
+  } else {
+    // For cleaned data or other dialogs, keep preview as is
+  }
 }
 function closeExcelDialog() { showExcelDialog.value = false; excelData.value = [] }
 
@@ -1466,7 +1494,7 @@ function showFormula(metricKey) {
   formulaDialog.value = true
 }
 
-// ========== Save to Session (EXPLICIT SAVE) ==========
+// ========== Save to Session ==========
 function saveToSession() {
   saveSessionData()
   if (!activeSession.value) {
@@ -1491,7 +1519,6 @@ function saveToSession() {
     detail: { sessionId: sid, skipCapture: true }
   }))
   sessionSavedAt.value = new Date().toISOString()
-  // Removed alert
 }
 
 // ========== Session Persistence ==========
@@ -1510,6 +1537,7 @@ function refreshPage() {
   showMappingDialog.value = false
   mappingApplied.value = false
   sessionSavedAt.value = null
+  showPreview.value = false
 }
 
 async function loadSavedData() {
@@ -1533,19 +1561,9 @@ async function loadSavedData() {
           fixedMissing: 0
         }
         columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-        mappingApplied.value = false
-        const allPresent = requiredColumns.value.every(col => fileColumns.value.includes(col))
-        if (allPresent) {
-          const autoMap = {}
-          requiredColumns.value.forEach(col => {
-            if (fileColumns.value.includes(col)) autoMap[col] = col
-          })
-          if (Object.keys(autoMap).length === requiredColumns.value.length) {
-            columnMapping.value = autoMap
-            mappingApplied.value = true
-            rawData.value = applyMappingToRows(originalRawData.value, requiredColumns.value, autoMap)
-          }
-        }
+        applyCurrentMapping()
+        // Hide preview initially
+        showPreview.value = false
         return true
       }
     } catch (err) { console.error(err) }
@@ -1605,11 +1623,9 @@ async function loadSavedData() {
       }
     }
     if (wf.last_tab && !route.query.tab) activeTab.value = wf.last_tab
-    const allMapped = requiredColumns.value.every(col => columnMapping.value[col])
-    if (allMapped && rawData.value.length) {
-      mappingApplied.value = true
-      rawData.value = applyMappingToRows(originalRawData.value, requiredColumns.value, columnMapping.value)
-    }
+    applyCurrentMapping()
+    // Don't auto-show preview; it will be shown via button
+    showPreview.value = false
   }
 
   const s = sessionManager.getSession(sid)
@@ -1626,7 +1642,9 @@ async function loadSavedData() {
     if (s.uploaded_file_name) { uploadedFile.value = { name: s.uploaded_file_name, size: 0 }; loaded = true }
     if (fileColumns.value.length) {
       columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+      applyCurrentMapping()
     }
+    showPreview.value = false
   }
 
   if (!loaded) {
@@ -1655,14 +1673,12 @@ async function loadSavedData() {
     }
     if (savedMapping) {
       columnMapping.value = JSON.parse(savedMapping)
-      const allMapped = requiredColumns.value.every(col => columnMapping.value[col])
-      if (allMapped && rawData.value.length) {
-        mappingApplied.value = true
-        rawData.value = applyMappingToRows(originalRawData.value, requiredColumns.value, columnMapping.value)
-      }
+      applyCurrentMapping()
     } else if (fileColumns.value.length) {
       columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+      applyCurrentMapping()
     }
+    showPreview.value = false
   }
 
   if (cleanedData.value.length && rawData.value.length) {
@@ -1708,7 +1724,8 @@ function saveSessionData() {
     originalFileColumns: originalFileColumns.value,
     chartData: chartData.value,
     fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
-    sessionSavedAt: sessionSavedAt.value
+    sessionSavedAt: sessionSavedAt.value,
+    showPreview: showPreview.value
   })
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, wf)
   sessionManager.updateSession(sid, { last_tab: activeTab.value })
@@ -1721,6 +1738,7 @@ function saveSessionData() {
   localStorage.setItem(`${key}_chartData`, JSON.stringify(chartData.value))
   localStorage.setItem(`${key}_mapping`, JSON.stringify(columnMapping.value))
   localStorage.setItem(`${key}_fredFilters`, JSON.stringify({ country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value }))
+  localStorage.setItem(`${key}_showPreview`, JSON.stringify(showPreview.value))
   if (uploadedFile.value) localStorage.setItem(`${instrumentType.value}_uploaded_file_name`, uploadedFile.value.name)
 }
 
@@ -1757,9 +1775,7 @@ function updateSessionCompletion() {
 // ========== Data Update Handlers ==========
 function onRawExcelUpdate(data, sourceData) {
   if (sourceData?.length) originalRawData.value = sourceData
-  rawData.value = mappingApplied.value
-    ? applyMappingToRows(originalRawData.value, requiredColumns.value, columnMapping.value)
-    : [...originalRawData.value]
+  rawData.value = data
   debouncedSave()
 }
 function onCleanedExcelUpdate(data) { cleanedData.value = data; debouncedSave(); calculateMetrics() }
@@ -2007,7 +2023,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .mapping-row { display: flex; align-items: center; gap: 15px; }
 .required-label { width: 140px; font-weight: 600; color: #0B2044; }
 .mapping-select { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
-.mapped-indicator { font-size: 18px; }
 .mapping-hint { margin-top: 15px; padding: 10px; background: #f8f9ff; border-radius: 8px; display: flex; align-items: center; gap: 8px; color: #666; }
 .required-columns { margin: 20px 0; }
 .columns-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
@@ -2016,14 +2031,12 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .column-badge.mapped-column { background: #E8F5E9; color: #2E7D32; }
 .success-message { margin-top: 10px; padding: 8px 12px; background: #E8F5E9; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #2E7D32; }
 .warning-message { margin-top: 10px; padding: 8px 12px; background: #FFF3E0; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E65100; }
-.btn-warning { background: #FF9800; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
 .cleaning-options-panel { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
 .filter-scroll-container { max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px; background: #fafafa; margin: 12px 0; padding: 8px 4px; scrollbar-width: thin; }
 .options-list { display: flex; flex-direction: column; gap: 8px; }
 .option-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 8px; border-radius: 4px; transition: background 0.1s; }
 .option-checkbox:hover { background: #f0f0f0; }
 .option-checkbox select, .option-checkbox input[type="text"] { margin-left: 4px; padding: 2px 6px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
-.filter-scroll-container { background: linear-gradient(white 30%, rgba(255,255,255,0)), linear-gradient(rgba(255,255,255,0), white 70%) 0 100%, radial-gradient(farthest-side at 50% 0, rgba(0,0,0,0.1), rgba(0,0,0,0)), radial-gradient(farthest-side at 50% 100%, rgba(0,0,0,0.1), rgba(0,0,0,0)) 0 100%; background-repeat: no-repeat; background-size: 100% 20px, 100% 20px, 100% 8px, 100% 8px; background-attachment: local, local, scroll, scroll; }
 .cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; }
 .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
 .summary-card { background: linear-gradient(135deg, #1B5E20, #4CAF50); padding: 20px; border-radius: 16px; color: white; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s; }
@@ -2117,12 +2130,60 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .formula-dialog-title { background: #0B2044; color: white; }
 .formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; }
 
-/* Resizable Excel columns and rows – applies to all ExcelViewer instances */
+/* Resizable Excel columns and rows */
 .excel-edit-table th { resize: horizontal; overflow: auto; }
 .excel-edit-table td { resize: vertical; overflow: auto; }
 </style>
 
 <style>
+/* ============================================================
+   ULTRA-STRONG VISIBILITY FIX – FORCE BLACK TEXT & WHITE BG
+   ============================================================ */
+/* Target every possible cell element */
+.excel-viewer,
+.excel-viewer *,
+.excel-viewer td,
+.excel-viewer .excel-edit-table td,
+.excel-viewer .cell-content,
+.excel-viewer .excel-edit-table .cell-content,
+.excel-viewer td *,
+.excel-viewer .excel-edit-table td *,
+.excel-viewer .cell-content *,
+.excel-viewer .excel-edit-table .cell-content *,
+.excel-viewer .cell-content div,
+.excel-viewer .excel-edit-table .cell-content div,
+.excel-viewer .cell-content span,
+.excel-viewer .excel-edit-table .cell-content span,
+.excel-viewer .cell-content p,
+.excel-viewer .excel-edit-table .cell-content p {
+  color: #000000 !important;
+  background-color: #ffffff !important;
+}
+
+/* Formula bar and inputs */
+.excel-viewer .formula-input,
+.excel-viewer .formula-bar input,
+.excel-viewer .cell-input,
+.excel-viewer .excel-edit-table input {
+  color: #000000 !important;
+  background-color: #ffffff !important;
+}
+
+/* Selected cell – keep black text, keep highlight background */
+.excel-viewer .selected-cell {
+  color: #000000 !important;
+  background-color: #e3f2fd !important;
+}
+
+/* Headers and row numbers */
+.excel-viewer .row-number,
+.excel-viewer .header-text,
+.excel-viewer .header-label {
+  color: #000000 !important;
+  background-color: #f5f5f5 !important;
+}
+
+/* Global overrides for instrument page */
 html, body, #app, .v-application, .v-application--wrap, .fixed-layout, .v-main, .v-content { max-width: 100vw !important; overflow-x: hidden !important; }
 .instrument-page { max-width: 100% !important; overflow-x: hidden !important; }
 .instrument-page .excel-table-wrapper, .instrument-page .excel-preview-section, .instrument-page .preview-section, .instrument-page .excel-scroll-wrapper, .instrument-page .excel-dialog-content { overflow-x: auto !important; max-width: 100% !important; }
