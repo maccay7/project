@@ -7,11 +7,11 @@
           <h1>{{ instrumentName }}</h1>
           <p>{{ instrumentDescription }}</p>
           <div v-if="activeSession" class="session-badge">
-            <v-icon small>mdi-folder</v-icon>
+            <v-icon small>mdi-folder-outline</v-icon>
             Session: <strong>{{ activeSession.name }}</strong>
           </div>
           <div v-else class="session-badge warning">
-            <v-icon small>mdi-alert</v-icon>
+            <v-icon small>mdi-alert-outline</v-icon>
             No active session – please select a session from Dashboard
           </div>
         </div>
@@ -47,7 +47,7 @@
         <!-- ===== UPLOAD ===== -->
         <div v-if="activeTab === 'upload'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-upload</v-icon> Upload {{ instrumentName }} Dataset</v-card-title>
+            <v-card-title><v-icon>mdi-cloud-upload-outline</v-icon> Upload {{ instrumentName }} Dataset</v-card-title>
             <v-card-text>
               <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
                 <input
@@ -57,17 +57,17 @@
                   accept=".csv,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.xlam,.ods,.xml,.html,.prn,.dif,.slk,.dbf"
                   style="display: none"
                 >
-                <v-icon size="48" color="#0B2044">mdi-cloud-upload</v-icon>
+                <v-icon size="48" color="#0B2044" class="upload-icon">mdi-cloud-upload-outline</v-icon>
                 <p>Drag & drop or <span class="browse-link" @click="$refs.fileInput.click()">browse</span></p>
                 <small>Supported: CSV, Excel (including .xlsm, .xlsb, .ods), and many other spreadsheet formats</small>
               </div>
 
               <!-- Upload History -->
               <div v-if="uploadHistory.length" class="upload-history">
-                <h4>📁 Upload History ({{ uploadHistory.length }} files)</h4>
+                <h4><v-icon small>mdi-history</v-icon> Upload History ({{ uploadHistory.length }} files)</h4>
                 <div class="history-list">
                   <div v-for="(item, idx) in uploadHistory" :key="idx" class="history-item" @click="loadHistoryFile(item)">
-                    <v-icon small>mdi-file-excel</v-icon>
+                    <v-icon small>mdi-file-excel-outline</v-icon>
                     <span>{{ item.name }}</span>
                     <small>{{ new Date(item.date).toLocaleString() }}</small>
                     <button class="btn-delete-history" @click.stop="deleteHistoryItem(idx)">🗑️</button>
@@ -81,7 +81,7 @@
               </div>
 
               <div v-if="uploadedFile" class="file-info">
-                <v-icon>mdi-file-excel</v-icon>
+                <v-icon>mdi-file-excel-outline</v-icon>
                 <span>{{ uploadedFile.name }}</span>
                 <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
@@ -90,7 +90,7 @@
                 <button class="btn-mapping" @click="openMappingDialog" :disabled="!rawData.length">Map Columns</button>
               </div>
 
-              <!-- Preview with header dropdowns – controlled by showPreview -->
+              <!-- Preview -->
               <div v-if="rawData.length && showPreview" class="excel-preview-section">
                 <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
                 <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
@@ -109,10 +109,10 @@
                 <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
               </div>
 
-              <!-- Manual Mapping Dialog -->
+              <!-- Mapping Dialog -->
               <v-dialog v-model="showMappingDialog" max-width="800px">
                 <v-card>
-                  <v-card-title>Map Columns</v-card-title>
+                  <v-card-title><v-icon>mdi-arrow-split-horizontal</v-icon> Map Columns</v-card-title>
                   <v-card-text>
                     <div class="mapping-instructions">
                       <p><v-icon small>mdi-hand-pointing-right</v-icon> Match each required system column to a column from your uploaded file.</p>
@@ -126,8 +126,6 @@
                         </select>
                       </div>
                     </div>
-
-                    <!-- Button to open saved mappings popup -->
                     <div style="margin: 16px 0;">
                       <button class="btn-secondary" @click="showSavedMappingsDialog = true">Manage Saved Mappings</button>
                     </div>
@@ -139,16 +137,15 @@
                 </v-card>
               </v-dialog>
 
-              <!-- Saved Mappings Popup (separate dialog) -->
+              <!-- Saved Mappings Popup -->
               <v-dialog v-model="showSavedMappingsDialog" max-width="700px">
                 <v-card>
                   <v-card-title class="saved-mappings-popup-title">
-                    <v-icon left>mdi-content-save</v-icon> Saved Mappings
+                    <v-icon left>mdi-content-save-outline</v-icon> Saved Mappings
                     <v-spacer></v-spacer>
                     <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">✕</button>
                   </v-card-title>
                   <v-card-text>
-                    <!-- Save section at the top -->
                     <div class="save-section">
                       <h4>Save current mapping as template</h4>
                       <div class="save-row">
@@ -156,8 +153,6 @@
                         <button class="btn-primary" @click="saveCurrentMappingAsTemplate" :disabled="!newTemplateName">Save</button>
                       </div>
                     </div>
-
-                    <!-- List of saved templates below -->
                     <div v-if="Object.keys(savedTemplates).length" class="saved-list">
                       <div v-for="(tmpl, name) in savedTemplates" :key="name" class="saved-item">
                         <div class="template-info">
@@ -184,18 +179,15 @@
                 <h4>Required Columns:</h4>
                 <div class="columns-list">
                   <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
-                    <v-icon size="12">
-                      {{ hasRequiredColumn(col) ? 'mdi-check' : 'mdi-close' }}
-                    </v-icon>
-                    {{ col }}
+                    <v-icon size="12">{{ hasRequiredColumn(col) ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline' }}</v-icon> {{ col }}
                   </span>
                 </div>
                 <div v-if="rawData.length && missingColumns.length" class="warning-message">
-                  <v-icon color="warning">mdi-alert</v-icon>
+                  <v-icon color="warning">mdi-alert-outline</v-icon>
                   <span>Missing required columns. Use the dropdowns on the column headers or click "Map Columns" to assign them.</span>
                 </div>
                 <div v-if="rawData.length && missingColumns.length === 0 && mappingApplied" class="success-message">
-                  <v-icon color="success">mdi-check-circle</v-icon>
+                  <v-icon color="success">mdi-check-circle-outline</v-icon>
                   <span>All columns mapped. Ready to continue.</span>
                 </div>
               </div>
@@ -214,7 +206,7 @@
             <v-card-title><v-icon>mdi-broom</v-icon> Clean {{ instrumentName }} Data</v-card-title>
             <v-card-text>
               <div v-if="!hasData" class="empty-state">
-                <v-icon size="48" color="#ccc">mdi-database</v-icon>
+                <v-icon size="48" color="#ccc">mdi-database-outline</v-icon>
                 <p>No data uploaded yet.</p>
                 <button class="btn-primary" @click="switchTab('upload')">Go to Upload</button>
               </div>
@@ -252,20 +244,17 @@
                     <button class="btn-primary" @click="applyCleaning">Clean Data</button>
                   </div>
                 </div>
-
                 <div v-if="cleanedData.length" class="preview-section">
                   <h4>Cleaned Data ({{ cleanedData.length }} rows)</h4>
                   <div class="excel-scroll-wrapper">
                     <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
                   </div>
                 </div>
-
                 <div v-if="cleanedData.length" class="highlight-box">
                   <p>✓ Removed {{ cleaningStats.removedRows }} invalid rows</p>
                   <p>✓ Fixed {{ cleaningStats.fixedMissing }} missing values</p>
                   <p class="success-text">✓ Data is now clean and ready for calculations</p>
                 </div>
-
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('upload')">Previous</button>
                   <button class="btn-primary" @click="continueAfterCleaning" :disabled="!cleanedData.length">Continue</button>
@@ -279,10 +268,10 @@
         <!-- ===== CALCULATIONS ===== -->
         <div v-if="activeTab === 'calculations'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-calculator</v-icon> {{ instrumentName }} Calculations</v-card-title>
+            <v-card-title><v-icon>mdi-calculator-variant-outline</v-icon> {{ instrumentName }} Calculations</v-card-title>
             <v-card-text>
               <div v-if="!hasCleanedData" class="empty-state">
-                <v-icon size="48" color="#ccc">mdi-calculator</v-icon>
+                <v-icon size="48" color="#ccc">mdi-calculator-variant-outline</v-icon>
                 <p>No cleaned data. Please clean first.</p>
                 <button class="btn-primary" @click="switchTab('cleaning')">Go to Cleaning</button>
               </div>
@@ -293,23 +282,14 @@
                     <div class="card-value">${{ calculations.totalValue?.toLocaleString() || 0 }}</div>
                   </div>
                   <div class="summary-card rate" @click="showFormula('Average Rate')">
-                    <div class="card-label">
-                      {{ instrumentType === 'money-market' ? 'Avg Interest Rate' : instrumentType === 'bonds' ? 'Avg Coupon Rate' : 'Avg Discount Rate' }}
-                    </div>
-                    <div class="card-value">
-                      {{
-                        instrumentType === 'money-market' ? (calculations.avgRate || 0) :
-                        instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) :
-                        (calculations.avgDiscountRate || 0)
-                      }}%
-                    </div>
+                    <div class="card-label">{{ instrumentType === 'money-market' ? 'Avg Interest Rate' : instrumentType === 'bonds' ? 'Avg Coupon Rate' : 'Avg Discount Rate' }}</div>
+                    <div class="card-value">{{ instrumentType === 'money-market' ? (calculations.avgRate || 0) : instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) : (calculations.avgDiscountRate || 0) }}%</div>
                   </div>
                   <div class="summary-card count" @click="showFormula('Number of Instruments')">
                     <div class="card-label">Number of Instruments</div>
                     <div class="card-value">{{ calculations.instrumentCount || 0 }}</div>
                   </div>
                 </div>
-
                 <div v-if="calculations.fred?.benchmark_rate" class="comparison-card fred-calc-card">
                   <div class="comparison-item">
                     <span class="comparison-label">FRED market benchmark ({{ calculations.fred.series_label }}):</span>
@@ -317,14 +297,11 @@
                   </div>
                   <div class="comparison-item">
                     <span class="comparison-label">Spread vs your portfolio:</span>
-                    <span class="comparison-value" :class="(calculations.fred.spread_vs_market || 0) >= 0 ? 'negative' : 'positive'">
-                      {{ calculations.fred.spread_vs_market }}%
-                    </span>
+                    <span class="comparison-value" :class="(calculations.fred.spread_vs_market || 0) >= 0 ? 'negative' : 'positive'">{{ calculations.fred.spread_vs_market }}%</span>
                   </div>
                   <small class="fred-meta">{{ calculations.fred.country_name || calculations.fred.country }} · {{ calculations.fred.currency }} · {{ calculations.fred.maturity }} · FRED</small>
                   <small v-if="calculations.fred.note" class="fred-meta">{{ calculations.fred.note }}</small>
                 </div>
-
                 <div class="calculations-section">
                   <h3>{{ instrumentName }} Calculations</h3>
                   <div class="calculations-grid">
@@ -416,7 +393,6 @@
                     </template>
                   </div>
                 </div>
-
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('cleaning')">Previous</button>
                   <button class="btn-primary" @click="continueToVisualizations">Continue</button>
@@ -430,19 +406,19 @@
         <!-- ===== VISUALIZATIONS ===== -->
         <div v-if="activeTab === 'visualizations'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-chart-line</v-icon> {{ instrumentName }} – Market Yield Curves</v-card-title>
+            <v-card-title><v-icon>mdi-chart-line</v-icon> {{ instrumentName }} – Yield Curve</v-card-title>
             <v-card-text>
-              <div v-if="hasCleanedData && currentMarketRate" class="comparison-card">
+              <div v-if="hasCleanedData && yieldCurveData.length" class="comparison-card">
                 <div class="comparison-item">
                   <span class="comparison-label">Portfolio Average Rate:</span>
                   <span class="comparison-value portfolio">{{ portfolioAvgRate }}%</span>
                 </div>
                 <div class="comparison-item">
-                  <span class="comparison-label">Current {{ selectedSeriesLabel }}:</span>
-                  <span class="comparison-value market">{{ currentMarketRate }}%</span>
+                  <span class="comparison-label">Benchmark Yield ({{ selectedMaturityOptionLabel }}):</span>
+                  <span class="comparison-value market">{{ getRateForMaturity(effectiveMaturity) }}%</span>
                 </div>
-                <div class="comparison-difference" :class="{ 'positive': (currentMarketRate - portfolioAvgRate) > 0, 'negative': (currentMarketRate - portfolioAvgRate) < 0 }">
-                  Difference: {{ (currentMarketRate - portfolioAvgRate).toFixed(2) }}%
+                <div class="comparison-difference" :class="{ 'positive': (getRateForMaturity(effectiveMaturity) - portfolioAvgRate) > 0, 'negative': (getRateForMaturity(effectiveMaturity) - portfolioAvgRate) < 0 }">
+                  Difference: {{ (getRateForMaturity(effectiveMaturity) - portfolioAvgRate).toFixed(2) }}%
                 </div>
               </div>
 
@@ -453,14 +429,8 @@
                     <option v-for="opt in countryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                     <option value="__custom__">Custom...</option>
                   </select>
-                  <input
-                    v-if="selectedCountryOption === '__custom__'"
-                    v-model="customCountry"
-                    @change="onCustomCountryChange"
-                    type="text"
-                    class="filter-select custom-maturity-input"
-                    placeholder="e.g., DEU, FRA, CHN, AUS"
-                  />
+                  <span class="filter-arrow">▼</span>
+                  <input v-if="selectedCountryOption === '__custom__'" v-model="customCountry" @change="onCustomCountryChange" type="text" class="filter-select custom-maturity-input" placeholder="e.g., DEU, FRA, CHN, AUS" />
                 </div>
                 <div class="filter-group">
                   <label>Currency</label>
@@ -468,14 +438,8 @@
                     <option v-for="opt in currencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                     <option value="__custom__">Custom...</option>
                   </select>
-                  <input
-                    v-if="selectedCurrencyOption === '__custom__'"
-                    v-model="customCurrency"
-                    @change="onCustomCurrencyChange"
-                    type="text"
-                    class="filter-select custom-maturity-input"
-                    placeholder="e.g., CHF, SEK, NZD"
-                  />
+                  <span class="filter-arrow">▼</span>
+                  <input v-if="selectedCurrencyOption === '__custom__'" v-model="customCurrency" @change="onCustomCurrencyChange" type="text" class="filter-select custom-maturity-input" placeholder="e.g., CHF, SEK, NZD" />
                 </div>
                 <div class="filter-group">
                   <label>Maturity</label>
@@ -483,28 +447,22 @@
                     <option v-for="opt in maturityOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                     <option value="__custom__">Custom...</option>
                   </select>
-                  <input
-                    v-if="selectedMaturityOption === '__custom__'"
-                    v-model="customMaturity"
-                    @change="onCustomMaturityChange"
-                    type="text"
-                    class="filter-select custom-maturity-input"
-                    placeholder="e.g., 18M, 2Y, 3M"
-                  />
+                  <span class="filter-arrow">▼</span>
+                  <input v-if="selectedMaturityOption === '__custom__'" v-model="customMaturity" @change="onCustomMaturityChange" type="text" class="filter-select custom-maturity-input" placeholder="e.g., 18M, 2Y, 3M" />
                 </div>
-                <button class="btn-secondary refresh-btn" @click="fetchFredData" :disabled="fredLoading">Refresh chart</button>
+                <button class="btn-secondary refresh-btn" @click="fetchYieldCurve" :disabled="yieldCurveLoading">Refresh curve</button>
               </div>
 
-              <div v-if="fredLoading" class="loading-container">
+              <div v-if="yieldCurveLoading" class="loading-container">
                 <v-icon size="48" class="spin">mdi-loading</v-icon>
-                <p>Fetching market data from FRED...</p>
+                <p>Fetching yield curve from FRED...</p>
               </div>
-              <div v-else-if="fredError" class="error-container">
-                <v-icon color="error" size="48">mdi-alert-circle</v-icon>
-                <p>{{ fredError }}</p>
-                <button class="btn-primary" @click="fetchFredData">Retry</button>
+              <div v-else-if="yieldCurveError" class="error-container">
+                <v-icon color="error" size="48">mdi-alert-circle-outline</v-icon>
+                <p>{{ yieldCurveError }}</p>
+                <button class="btn-primary" @click="fetchYieldCurve">Retry</button>
               </div>
-              <div v-else-if="chartData.datasets && chartData.datasets.length" class="chart-container chart-container--fred">
+              <div v-else-if="yieldCurveData.length" class="chart-container chart-container--fred">
                 <canvas ref="yieldCurveChart" width="800" height="400" style="background: white; border-radius: 8px;"></canvas>
                 <div class="chart-footer">
                   <small>Source: FRED – {{ chartSeriesLabel }} ({{ getCountryLabel(effectiveCountry) }} / {{ getCurrencyLabel(effectiveCurrency) }})</small>
@@ -512,9 +470,9 @@
               </div>
               <div v-else class="visualization-placeholder">
                 <v-icon size="64" color="#0B2044">mdi-chart-line</v-icon>
-                <h3>No Market Data Loaded</h3>
-                <p>Click the <strong>Refresh chart</strong> button above to fetch the latest yield curve.</p>
-                <button class="btn-primary" @click="fetchFredData" style="margin-top: 16px;">Load Market Data</button>
+                <h3>No Yield Curve Loaded</h3>
+                <p>Click the <strong>Refresh curve</strong> button above to fetch the latest yield curve.</p>
+                <button class="btn-primary" @click="fetchYieldCurve" style="margin-top: 16px;">Load Yield Curve</button>
               </div>
 
               <div class="navigation-buttons">
@@ -529,7 +487,7 @@
         <!-- ===== SUMMARY ===== -->
         <div v-if="activeTab === 'summary'" class="content-card">
           <v-card class="summary-pro-card">
-            <v-card-title><v-icon>mdi-file-document</v-icon> {{ instrumentName }} – Executive Summary</v-card-title>
+            <v-card-title><v-icon>mdi-file-document-outline</v-icon> {{ instrumentName }} – Executive Summary</v-card-title>
             <v-card-text>
               <div class="summary-hero">
                 <div class="hero-stat">
@@ -547,7 +505,7 @@
               </div>
               <div class="summary-grid">
                 <div class="summary-section card-panel">
-                  <h3><v-icon size="20">mdi-database</v-icon> Data quality</h3>
+                  <h3><v-icon size="20">mdi-database-outline</v-icon> Data quality</h3>
                   <p><strong>Records processed:</strong> {{ cleanedData.length }}</p>
                   <p><strong>Rows removed:</strong> {{ cleaningStats.removedRows }}</p>
                   <p><strong>Missing values fixed:</strong> {{ cleaningStats.fixedMissing }}</p>
@@ -560,9 +518,7 @@
                 </div>
               </div>
               <div class="excel-viewer-button" style="margin-bottom: 20px; text-align: right;">
-                <button class="btn-secondary" @click="openExcelReview(cleanedData, `${instrumentName} - Cleaned Data`)">
-                  📊 View Instrument Data as Excel
-                </button>
+                <button class="btn-secondary" @click="openExcelReview(cleanedData, `${instrumentName} - Cleaned Data`)">📊 View Instrument Data as Excel</button>
               </div>
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('visualizations')">Previous</button>
@@ -577,7 +533,7 @@
         <!-- ===== REPORTS ===== -->
         <div v-if="activeTab === 'reports'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-file-pdf</v-icon> Generate Combined Report</v-card-title>
+            <v-card-title><v-icon>mdi-file-pdf-box</v-icon> Generate Combined Report</v-card-title>
             <v-card-text>
               <div class="report-options">
                 <div class="instrument-selection">
@@ -586,17 +542,17 @@
                     <div class="selection-card" :class="{ active: selectedInstruments.moneyMarket }" @click="selectedInstruments.moneyMarket = !selectedInstruments.moneyMarket">
                       <v-icon size="28" color="#1E88E5">mdi-chart-line</v-icon>
                       <span>Money Market</span>
-                      <div class="check-indicator" v-if="selectedInstruments.moneyMarket"><v-icon size="16" color="#4CAF50">mdi-check-circle</v-icon></div>
+                      <div class="check-indicator" v-if="selectedInstruments.moneyMarket"><v-icon size="16" color="#4CAF50">mdi-check-circle-outline</v-icon></div>
                     </div>
                     <div class="selection-card" :class="{ active: selectedInstruments.bonds }" @click="selectedInstruments.bonds = !selectedInstruments.bonds">
                       <v-icon size="28" color="#4CAF50">mdi-chart-timeline</v-icon>
                       <span>Bonds</span>
-                      <div class="check-indicator" v-if="selectedInstruments.bonds"><v-icon size="16" color="#4CAF50">mdi-check-circle</v-icon></div>
+                      <div class="check-indicator" v-if="selectedInstruments.bonds"><v-icon size="16" color="#4CAF50">mdi-check-circle-outline</v-icon></div>
                     </div>
                     <div class="selection-card" :class="{ active: selectedInstruments.tbills }" @click="selectedInstruments.tbills = !selectedInstruments.tbills">
                       <v-icon size="28" color="#FF9800">mdi-finance</v-icon>
                       <span>T-Bills</span>
-                      <div class="check-indicator" v-if="selectedInstruments.tbills"><v-icon size="16" color="#4CAF50">mdi-check-circle</v-icon></div>
+                      <div class="check-indicator" v-if="selectedInstruments.tbills"><v-icon size="16" color="#4CAF50">mdi-check-circle-outline</v-icon></div>
                     </div>
                   </div>
                   <div class="selection-actions">
@@ -604,7 +560,6 @@
                     <button class="btn-secondary" @click="deselectAllInstruments">Deselect All</button>
                   </div>
                 </div>
-
                 <p class="report-hint">Click <strong>Preview Report</strong> to see the full professional report with cover, TOC, methodology, appendix, and live FRED charts. Downloads match the preview.</p>
                 <div class="report-actions">
                   <button class="btn-preview" @click="previewReport">Preview Report</button>
@@ -689,8 +644,9 @@ import { renderFredLineChart } from '@/utils/renderFredChart'
 import { buildWorkflowSnapshot, applyWorkflowToPage } from '@/utils/instrumentSession.js'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig.js'
 import { autoMatchColumns as matchColumns, applyMappingToRows, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping.js'
-// ===== NEW: import intelligent parser =====
 import { parseExcel } from '@/utils/intelligentParser.js'
+import Chart from 'chart.js/auto'
+import logoUrl from '@/assets/DuraCapital logo.png'
 
 // ========== Router & Route ==========
 const router = useRouter()
@@ -714,13 +670,20 @@ const activeTab = computed({
 // ========== Configuration ==========
 const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInstrumentConfig()
 
-// ========== FRED ==========
+// ========== FRED Market (for benchmark) ==========
 const { fredFilters, filterOptions, loadFilterOptions, seriesIdForMaturity, fetchBenchmark } = useFredMarket('1Y')
-const fredLoading = ref(false), fredError = ref(''), selectedSeries = ref('')
-const yieldCurveChart = ref(null), chartInstanceRef = { current: null }
-const chartData = ref({ labels: [], datasets: [] }), chartSeriesLabel = ref(''), currentMarketRate = ref(null)
+const yieldCurveLoading = ref(false)
+const yieldCurveError = ref('')
+const selectedSeries = ref('')
+const yieldCurveChart = ref(null)
+const chartInstanceRef = { current: null }
 
-// ========== FRED Options & Computed ==========
+// ========== Yield Curve Data ==========
+const yieldCurveData = ref([]) // array of {maturity: number, rate: number}
+const chartSeriesLabel = ref('')
+const currentMarketRate = ref(null)
+
+// ========== FRED Options ==========
 const selectedMaturityOption = ref(''), customMaturity = ref('')
 const selectedCountryOption = ref(''), customCountry = ref('')
 const selectedCurrencyOption = ref(''), customCurrency = ref('')
@@ -728,6 +691,11 @@ const selectedCurrencyOption = ref(''), customCurrency = ref('')
 const effectiveMaturity = computed(() => selectedMaturityOption.value === '__custom__' ? customMaturity.value : selectedMaturityOption.value)
 const effectiveCountry = computed(() => selectedCountryOption.value === '__custom__' ? customCountry.value : selectedCountryOption.value)
 const effectiveCurrency = computed(() => selectedCurrencyOption.value === '__custom__' ? customCurrency.value : selectedCurrencyOption.value)
+const selectedMaturityOptionLabel = computed(() => {
+  if (selectedMaturityOption.value === '__custom__') return customMaturity.value
+  const opt = maturityOptions.value.find(o => o.value === selectedMaturityOption.value)
+  return opt ? opt.label : selectedMaturityOption.value
+})
 
 const countryOptions = computed(() => [
   { value: 'USA', label: 'United States' },
@@ -781,7 +749,7 @@ watch([countryOptions, currencyOptions, maturityOptions], () => {
 }, { immediate: true })
 
 watch(() => instrumentType.value, () => {
-  if (activeTab.value === 'visualizations') fetchFredData()
+  if (activeTab.value === 'visualizations') fetchYieldCurve()
   if (!effectiveMaturity.value) {
     const def = defaultMaturityForInstrument()
     selectedMaturityOption.value = def
@@ -804,31 +772,21 @@ const steps = computed(() => {
   ]
 })
 
-// ---- Custom step completion ----
 function isStepComplete(tab) {
   switch (tab) {
-    case 'upload':
-      return rawData.value.length > 0
-    case 'cleaning':
-      return cleanedData.value.length > 0
-    case 'calculations':
-      return !!calculations.value.totalValue && calculations.value.totalValue > 0
-    case 'visualizations':
-      return chartData.value.datasets && chartData.value.datasets.length > 0
-    case 'summary':
-      return cleanedData.value.length > 0 && !!calculations.value.totalValue
-    case 'reports':
-      return cleanedData.value.length > 0 && !!calculations.value.totalValue
-    default:
-      return false
+    case 'upload': return rawData.value.length > 0
+    case 'cleaning': return cleanedData.value.length > 0
+    case 'calculations': return !!calculations.value.totalValue && calculations.value.totalValue > 0
+    case 'visualizations': return yieldCurveData.value.length > 0
+    case 'summary': return cleanedData.value.length > 0 && !!calculations.value.totalValue
+    case 'reports': return cleanedData.value.length > 0 && !!calculations.value.totalValue
+    default: return false
   }
 }
 
 const farthestAllowedIndex = computed(() => {
   for (let i = 0; i < steps.value.length; i++) {
-    if (!isStepComplete(steps.value[i].tab)) {
-      return i
-    }
+    if (!isStepComplete(steps.value[i].tab)) return i
   }
   return steps.value.length - 1
 })
@@ -843,7 +801,7 @@ const cleanedData = ref([])
 const previewData = ref([])
 const columnMapping = ref({})
 const showMappingDialog = ref(false)
-const showSavedMappingsDialog = ref(false) // new dialog for saved mappings
+const showSavedMappingsDialog = ref(false)
 const fileColumns = ref([])
 const fixedValuesTracker = ref(new Map())
 const calculations = ref({})
@@ -853,11 +811,7 @@ const mappingApplied = ref(false)
 const originalRawData = ref([])
 const originalFileColumns = ref([])
 const sessionSavedAt = ref(null)
-
-// Control inline preview visibility
 const showPreview = ref(false)
-
-// ---- Force progress update ----
 const forceUpdate = ref(0)
 
 // ---- Mapping Templates ----
@@ -875,18 +829,15 @@ const cleaningOptions = ref({
 
 // ========== Upload History ==========
 const uploadHistory = ref([])
-
 function loadUploadHistory() {
   const key = `${instrumentType.value}_upload_history`
   const saved = localStorage.getItem(key)
   uploadHistory.value = saved ? JSON.parse(saved) : []
 }
-
 function saveUploadHistory() {
   const key = `${instrumentType.value}_upload_history`
   localStorage.setItem(key, JSON.stringify(uploadHistory.value))
 }
-
 function addToHistory(filename, data) {
   const existing = uploadHistory.value.find(h => h.name === filename && (Date.now() - h.date) < 5000)
   if (existing) return
@@ -898,7 +849,6 @@ function addToHistory(filename, data) {
   if (uploadHistory.value.length > 10) uploadHistory.value.pop()
   saveUploadHistory()
 }
-
 function loadHistoryFile(item) {
   if (confirm(`Load ${item.name}? Current unsaved data will be lost.`)) {
     const data = JSON.parse(item.data)
@@ -907,7 +857,6 @@ function loadHistoryFile(item) {
     originalFileColumns.value = Object.keys(data[0] || {})
     fileColumns.value = [...originalFileColumns.value]
     uploadedFile.value = { name: item.name, size: 0 }
-    // Auto-match columns (intelligent suggestions)
     columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
     applyCurrentMapping()
     showPreview.value = false
@@ -915,7 +864,6 @@ function loadHistoryFile(item) {
     forceUpdate.value++
   }
 }
-
 function deleteHistoryItem(idx) {
   uploadHistory.value.splice(idx, 1)
   saveUploadHistory()
@@ -927,24 +875,20 @@ function loadSavedTemplates() {
   const saved = localStorage.getItem(key)
   savedTemplates.value = saved ? JSON.parse(saved) : {}
 }
-
 function saveTemplates() {
   const key = `${instrumentType.value}_mapping_templates`
   localStorage.setItem(key, JSON.stringify(savedTemplates.value))
 }
-
 function saveCurrentMappingAsTemplate() {
   if (!newTemplateName.value) {
     alert('Please enter a template name.')
     return
   }
-  // Check if at least one mapping exists
   const hasAnyMapping = requiredColumns.value.some(col => columnMapping.value[col])
   if (!hasAnyMapping) {
     alert('Cannot save template: no columns are mapped.')
     return
   }
-  // Store the mapping with a timestamp
   savedTemplates.value[newTemplateName.value] = {
     mapping: { ...columnMapping.value },
     timestamp: Date.now()
@@ -952,22 +896,16 @@ function saveCurrentMappingAsTemplate() {
   saveTemplates()
   alert(`Template "${newTemplateName.value}" saved.`)
   newTemplateName.value = ''
-  // refresh the popup list automatically
 }
-
 function applyTemplate() {
   if (!selectedTemplate.value) return
   const template = savedTemplates.value[selectedTemplate.value]
   if (!template) return
   columnMapping.value = { ...template.mapping }
   applyCurrentMapping()
-  if (showPreview.value) {
-    // The data is already updated via applyCurrentMapping; the ExcelViewer will re-render
-  }
   debouncedSave()
   forceUpdate.value++
 }
-
 function deleteTemplate() {
   if (!selectedTemplate.value) return
   if (confirm(`Delete template "${selectedTemplate.value}"?`)) {
@@ -976,19 +914,15 @@ function deleteTemplate() {
     selectedTemplate.value = ''
   }
 }
-
-// ---- New functions for the popup ----
 function loadTemplateFromPopup(name) {
   selectedTemplate.value = name
   applyTemplate()
-  showSavedMappingsDialog.value = false // close popup after loading
+  showSavedMappingsDialog.value = false
 }
-
 function deleteTemplateFromPopup(name) {
   if (confirm(`Delete template "${name}"?`)) {
     delete savedTemplates.value[name]
     saveTemplates()
-    // if currently selected, clear it
     if (selectedTemplate.value === name) selectedTemplate.value = ''
   }
 }
@@ -1002,34 +936,27 @@ const fileSize = computed(() => {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
 })
-
 const mappingContext = computed(() => ({
   mappingApplied: mappingApplied.value,
   columnMapping: columnMapping.value,
   rawData: rawData.value
 }))
-
 const hasRequiredColumn = (col) => isColumnMapped(col, mappingContext.value)
 const missingColumns = computed(() => getMissingColumns(requiredColumns.value, mappingContext.value))
 const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
-
 const uploadPreviewHeaders = computed(() => {
   if (Object.values(columnMapping.value).some(v => v)) {
     return requiredColumns.value
   }
-  return originalFileColumns.value.length
-    ? originalFileColumns.value
-    : Object.keys(rawData.value[0] || {})
+  return originalFileColumns.value.length ? originalFileColumns.value : Object.keys(rawData.value[0] || {})
 })
 const cleanPreviewHeaders = computed(() => Object.keys((cleanedData.value[0]) || {}))
-
 const portfolioAvgRate = computed(() => instrumentType.value === 'money-market' ? calculations.value.avgRate || 0 : instrumentType.value === 'bonds' ? calculations.value.avgCouponRate || 0 : calculations.value.avgDiscountRate || 0)
 
 // ========== Navigation ==========
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToPortfolioSummary() { saveSessionData(); router.push('/summary') }
-
 function goToCalculations() {
   if (hasCleanedData.value) {
     saveSessionData()
@@ -1039,7 +966,6 @@ function goToCalculations() {
     alert('Please clean your data first.')
   }
 }
-
 function goToVisualizations() {
   if (hasCleanedData.value) {
     saveSessionData()
@@ -1049,15 +975,12 @@ function goToVisualizations() {
     alert('Please clean your data first.')
   }
 }
-
 function goToReportTab() {
   saveSessionData()
   activeTab.value = 'reports'
   forceUpdate.value++
 }
-
 function switchTab(tab) {
-  // Prevent skipping ahead beyond allowed steps
   const idx = steps.value.findIndex(s => s.tab === tab)
   if (idx > farthestAllowedIndex.value) {
     alert('You cannot skip ahead. Complete the current step first.')
@@ -1073,7 +996,6 @@ const fileInput = ref(null)
 function handleFileUpload(e) { const file = e.target.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 function handleDrop(e) { const file = e.dataTransfer.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 
-// ===== MODIFIED readFileData to use intelligent parser =====
 async function readFileData(file) {
   fileLoading.value = true
   const ext = file.name.split('.').pop().toLowerCase()
@@ -1095,46 +1017,37 @@ async function readFileData(file) {
         return row
       })
     } else {
-      // ---- USE INTELLIGENT PARSER FOR EXCEL FILES ----
       const buffer = await file.arrayBuffer()
       try {
         const parsed = await parseExcel(file, instrumentType.value)
         if (parsed && parsed.length) {
           data = parsed
-          // Set original columns to match parsed keys
           originalFileColumns.value = Object.keys(data[0] || {})
           fileColumns.value = [...originalFileColumns.value]
-          // Auto-match columns based on required fields
           columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
           applyCurrentMapping()
           addToHistory(file.name, data)
           debouncedSave()
           forceUpdate.value++
           fileLoading.value = false
-          // Skip the rest of the function
           return
         }
       } catch (err) {
         console.warn('Intelligent parser failed, falling back to regular parser:', err)
       }
-      // Fallback to regular parser
       const workbook = XLSX.read(buffer, { type: 'array', cellDates: false, cellNF: false, cellText: false, sheetRows: 5000, defval: "" })
       const sheetName = workbook.SheetNames[0]
       const sheet = workbook.Sheets[sheetName]
       data = XLSX.utils.sheet_to_json(sheet, { defval: "" })
       if (data.length === 0) throw new Error('No data found in the first sheet')
     }
-    // Continue with common processing
     rawData.value = data
     originalRawData.value = JSON.parse(JSON.stringify(data))
     originalFileColumns.value = Object.keys(data[0] || {})
     fileColumns.value = [...originalFileColumns.value]
-
-    // Intelligent auto-match
     columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
     applyCurrentMapping()
     showPreview.value = false
-
     addToHistory(file.name, data)
     debouncedSave()
     forceUpdate.value++
@@ -1147,7 +1060,6 @@ async function readFileData(file) {
     fileLoading.value = false
   }
 }
-
 function removeFile() {
   uploadedFile.value = null
   rawData.value = []
@@ -1169,14 +1081,12 @@ function removeFile() {
 // ========== Mapping ==========
 function applyCurrentMapping() {
   if (!originalRawData.value.length) return
-
   const hasAnyMapping = requiredColumns.value.some(col => columnMapping.value[col])
   if (!hasAnyMapping) {
     rawData.value = originalRawData.value
     mappingApplied.value = false
     return
   }
-
   const mappedData = originalRawData.value.map(row => {
     const newRow = {}
     requiredColumns.value.forEach(col => {
@@ -1193,34 +1103,26 @@ function applyCurrentMapping() {
   const allMapped = requiredColumns.value.every(col => columnMapping.value[col])
   mappingApplied.value = allMapped
 }
-
 function updateColumnMapping(newMapping) {
   columnMapping.value = { ...newMapping }
   applyCurrentMapping()
   debouncedSave()
 }
-
 function openMappingDialog() {
   if (!fileColumns.value.length) {
     fileColumns.value = originalFileColumns.value.length ? [...originalFileColumns.value] : Object.keys(rawData.value[0] || {})
   }
   showMappingDialog.value = true
 }
-
 function closeMappingDialog() {
   showMappingDialog.value = false
 }
-
 function applyColumnMappingAndClose() {
   applyCurrentMapping()
-  // Show preview if not already visible
-  if (rawData.value.length) {
-    showPreview.value = true
-  }
+  if (rawData.value.length) showPreview.value = true
   showMappingDialog.value = false
   forceUpdate.value++
 }
-
 async function continueAfterUpload() {
   if (!uploadedFile.value) { alert('Please upload a file first.'); return }
   if (!rawData.value.length) { alert('No data loaded. Please upload a valid file.'); return }
@@ -1286,8 +1188,6 @@ function applyCleaning() {
   debouncedSave()
   forceUpdate.value++
 }
-
-// ========== CONTINUE AFTER CLEANING ==========
 async function continueAfterCleaning() {
   if (!cleanedData.value.length) {
     alert('Please clean your data first.')
@@ -1306,7 +1206,6 @@ async function continueAfterCleaning() {
 // ========== Calculations ==========
 async function calculateMetrics() {
   if (!cleanedData.value.length) return
-
   let uniqueInstrumentsCount = 0
   if (instrumentType.value === 'money-market') {
     const uniqueNames = new Set(cleanedData.value.map(row => row.Instrument).filter(v => v && v !== 'N/A'))
@@ -1379,18 +1278,269 @@ async function calculateMetrics() {
   debouncedSave()
   forceUpdate.value++
 }
-
 function continueToVisualizations() {
   if (!hasCleanedData.value) { alert('Please clean your data first.'); return }
   goToVisualizations()
   forceUpdate.value++
 }
 
-// ========== Report Logic ==========
+// ========== Yield Curve ==========
+// Fallback mapping for common FRED series IDs
+const SERIES_MAP = {
+  '1M': 'DGS1MO',
+  '3M': 'DGS3MO',
+  '6M': 'DGS6MO',
+  '1Y': 'DGS1',
+  '2Y': 'DGS2',
+  '5Y': 'DGS5',
+  '10Y': 'DGS10',
+  '30Y': 'DGS30',
+  '4W': 'DGS4W',
+  '8W': 'DGS8W',
+  '13W': 'DGS3MO',
+  '26W': 'DGS6MO',
+  '52W': 'DGS1'
+}
+
+function getMaturitiesForInstrument() {
+  if (instrumentType.value === 'money-market') return ['1M','3M','6M','1Y']
+  if (instrumentType.value === 'bonds') return ['2Y','5Y','10Y','30Y']
+  if (instrumentType.value === 'tbills') return ['4W','8W','13W','26W','52W']
+  return ['1M','3M','6M','1Y','2Y','5Y','10Y','30Y']
+}
+
+function parseMaturityToYears(mat) {
+  const num = parseFloat(mat)
+  if (mat.endsWith('M')) return num / 12
+  if (mat.endsWith('W')) return num / 52
+  if (mat.endsWith('Y')) return num
+  return num
+}
+
+function getRateForMaturity(mat) {
+  const point = yieldCurveData.value.find(d => d.maturityLabel === mat)
+  return point ? point.rate : null
+}
+
+async function fetchYieldCurve() {
+  yieldCurveLoading.value = true
+  yieldCurveError.value = ''
+  try {
+    const maturities = getMaturitiesForInstrument()
+    const cacheKey = `yieldcurve_${instrumentType.value}_${effectiveCountry.value}_${effectiveCurrency.value}`
+    const cached = localStorage.getItem(cacheKey)
+    if (cached) {
+      const parsed = JSON.parse(cached)
+      if (Date.now() - parsed.timestamp < 5 * 60 * 1000) {
+        yieldCurveData.value = parsed.data
+        chartSeriesLabel.value = parsed.seriesLabel || 'FRED'
+        yieldCurveLoading.value = false
+        await renderYieldCurveChart()
+        return
+      }
+    }
+
+    const points = []
+    for (const mat of maturities) {
+      let seriesId = null
+      try {
+        seriesId = await seriesIdForMaturity(mat)
+      } catch { /* ignore */ }
+      if (!seriesId) {
+        seriesId = SERIES_MAP[mat] || null
+      }
+      if (!seriesId) {
+        console.warn(`No series ID for maturity ${mat}`)
+        continue
+      }
+
+      try {
+        const chartData = await loadFredSeriesChart(seriesId)
+        if (chartData && chartData.datasets && chartData.datasets.length) {
+          const dataset = chartData.datasets[0]
+          if (dataset.data && dataset.data.length) {
+            const lastPoint = dataset.data[dataset.data.length - 1]
+            if (lastPoint && lastPoint.y != null) {
+              points.push({
+                maturity: parseMaturityToYears(mat),
+                maturityLabel: mat,
+                rate: lastPoint.y
+              })
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to fetch series', seriesId, e)
+      }
+    }
+
+    if (points.length === 0) throw new Error('No data returned from FRED. Please check your internet connection and try again.')
+
+    points.sort((a,b) => a.maturity - b.maturity)
+    yieldCurveData.value = points
+    chartSeriesLabel.value = 'Yield Curve'
+
+    localStorage.setItem(cacheKey, JSON.stringify({
+      timestamp: Date.now(),
+      data: points,
+      seriesLabel: chartSeriesLabel.value
+    }))
+
+    await renderYieldCurveChart()
+    currentMarketRate.value = points[points.length-1]?.rate || null
+
+    const selectedMat = effectiveMaturity.value
+    const benchRate = getRateForMaturity(selectedMat)
+    if (benchRate != null) {
+      calculations.value.fred = {
+        benchmark_rate: benchRate,
+        series_label: selectedMat,
+        spread_vs_market: +(portfolioAvgRate.value - benchRate).toFixed(2),
+        country: effectiveCountry.value,
+        currency: effectiveCurrency.value,
+        maturity: selectedMat
+      }
+    }
+    debouncedSave()
+    forceUpdate.value++
+  } catch (err) {
+    console.error(err)
+    yieldCurveError.value = err.message || 'Failed to load yield curve.'
+  } finally {
+    yieldCurveLoading.value = false
+  }
+}
+
+async function renderYieldCurveChart() {
+  if (!yieldCurveChart.value || !yieldCurveData.value.length) return
+  await nextTick()
+  if (chartInstanceRef.current) chartInstanceRef.current.destroy()
+
+  const ctx = yieldCurveChart.value.getContext('2d')
+  const labels = yieldCurveData.value.map(d => d.maturity.toFixed(1))
+  const data = yieldCurveData.value.map(d => d.rate)
+
+  const maxMat = Math.max(...yieldCurveData.value.map(d => d.maturity))
+  const step = Math.ceil(maxMat / 10) || 1
+
+  chartInstanceRef.current = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Yield (%)',
+        data: data,
+        borderColor: '#0B2044',
+        backgroundColor: 'rgba(11,32,68,0.1)',
+        fill: true,
+        tension: 0.3,
+        pointBackgroundColor: '#1E88E5',
+        pointRadius: 5
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `Yield: ${ctx.parsed.y.toFixed(2)}%`
+          }
+        }
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Maturity (years)' },
+          ticks: {
+            stepSize: step > 0 ? step : 1,
+            max: maxMat + 0.5
+          }
+        },
+        y: {
+          title: { display: true, text: 'Rate (%)' },
+          ticks: {
+            callback: (val) => val.toFixed(2) + '%'
+          }
+        }
+      }
+    }
+  })
+}
+
+// ========== FRED Filter Handlers ==========
+function onCountrySelectChange() {
+  if (selectedCountryOption.value !== '__custom__') {
+    fredFilters.value.country = selectedCountryOption.value
+    onFredFilterChange()
+  } else {
+    fredFilters.value.country = customCountry.value
+    if (customCountry.value) onFredFilterChange()
+  }
+}
+function onCustomCountryChange() {
+  if (selectedCountryOption.value === '__custom__') {
+    fredFilters.value.country = customCountry.value
+    onFredFilterChange()
+  }
+}
+function onCurrencySelectChange() {
+  if (selectedCurrencyOption.value !== '__custom__') {
+    fredFilters.value.currency = selectedCurrencyOption.value
+    onFredFilterChange()
+  } else {
+    fredFilters.value.currency = customCurrency.value
+    if (customCurrency.value) onFredFilterChange()
+  }
+}
+function onCustomCurrencyChange() {
+  if (selectedCurrencyOption.value === '__custom__') {
+    fredFilters.value.currency = customCurrency.value
+    onFredFilterChange()
+  }
+}
+function onMaturitySelectChange() {
+  if (selectedMaturityOption.value !== '__custom__') {
+    fredFilters.value.maturity = selectedMaturityOption.value
+    onFredFilterChange()
+  } else {
+    fredFilters.value.maturity = customMaturity.value
+    if (customMaturity.value) onFredFilterChange()
+  }
+}
+function onCustomMaturityChange() {
+  if (selectedMaturityOption.value === '__custom__') {
+    fredFilters.value.maturity = customMaturity.value
+    onFredFilterChange()
+  }
+}
+
+async function onFredFilterChange() {
+  if (activeTab.value === 'visualizations') await fetchYieldCurve()
+  if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
+  debouncedSave()
+}
+
+function getCountryLabel(code) { const found = countryOptions.value.find(c => c.value === code); return found ? found.label : code }
+function getCurrencyLabel(code) { const found = currencyOptions.value.find(c => c.value === code); return found ? found.label : code }
+function defaultMaturityForInstrument() {
+  return instrumentType.value === 'bonds' ? '10Y' : instrumentType.value === 'money-market' ? '1Y' : instrumentType.value === 'tbills' ? '13W' : '3M'
+}
+
+async function enrichCalculationsWithFred() {
+  try {
+    const bench = await fetchBenchmark(instrumentType.value)
+    if (bench?.benchmark_rate != null) {
+      const portfolio = parseFloat(portfolioAvgRate.value) || 0
+      calculations.value.fred = { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2) }
+    }
+  } catch (e) { console.error(e) }
+}
+
+// ========== Report Generation ==========
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
-
 const reportPreviewDialog = ref(false)
 const reportPreviewHtml = ref('')
 
@@ -1407,7 +1557,6 @@ function getInstrumentData(instrumentId) {
   }
   return wf.calculations || null
 }
-
 const reportPreviewData = computed(() => {
   const instrumentsData = []
   if (selectedInstruments.value.moneyMarket) {
@@ -1462,6 +1611,31 @@ function buildMethodologySection(selectedInstrumentNames) {
   return methods.length ? methods.join('') : '<p>No methodology available for the selected instruments.</p>'
 }
 
+function captureChartImage() {
+  return new Promise((resolve) => {
+    // First try to get the canvas from the ref
+    const canvas = yieldCurveChart.value
+    if (canvas && canvas.toDataURL) {
+      try {
+        const dataUrl = canvas.toDataURL('image/png')
+        resolve(dataUrl)
+        return
+      } catch (e) { console.warn('Canvas capture failed', e) }
+    }
+    // Fallback: find canvas by class
+    const canvasEl = document.querySelector('.chart-container--fred canvas')
+    if (canvasEl && canvasEl.toDataURL) {
+      try {
+        const dataUrl = canvasEl.toDataURL('image/png')
+        resolve(dataUrl)
+        return
+      } catch (e) { console.warn('DOM canvas capture failed', e) }
+    }
+    // If still no canvas, return empty
+    resolve('')
+  })
+}
+
 async function generateReportHtml() {
   await loadSavedData()
   const report = reportPreviewData.value
@@ -1470,34 +1644,20 @@ async function generateReportHtml() {
     return null
   }
 
-  const chartDataMap = {}
-  for (const inst of report.instruments) {
-    const instKey = inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills'
-    const instSessionData = activeSession.value?.instrumentData?.[instKey]
-    if (instSessionData?.chartData && instSessionData.chartData.datasets?.length) chartDataMap[inst.name] = instSessionData.chartData
-    else {
-      try {
-        const sid = await seriesIdForMaturity()
-        const loaded = await loadFredSeriesForReport(sid)
-        if (loaded) {
-          chartDataMap[inst.name] = loaded
-          if (activeSession.value?.instrumentData) {
-            if (!activeSession.value.instrumentData[instKey]) activeSession.value.instrumentData[instKey] = {}
-            activeSession.value.instrumentData[instKey].chartData = loaded
-          }
-        }
-      } catch (err) { console.error('FRED chart for report', inst.name, err) }
-    }
+  // Capture chart image – now it will work
+  let chartImageData = ''
+  try {
+    chartImageData = await captureChartImage()
+    console.log('Chart image captured, length:', chartImageData.length)
+  } catch (e) {
+    console.warn('Chart capture failed', e)
   }
 
-  // Build professional report HTML (with all sections)
-  const origin = window.location.origin
-  const logoHtml = `<div style="font-size:32px;font-weight:700;color:#0B2044;letter-spacing:1px;">Dura<span style="color:#1E88E5;">Capital</span></div><div style="font-size:12px;color:#666;margin-top:-4px;">Valuation</div>`
   const valuationDate = new Date().toISOString().split('T')[0]
+  const reportDate = new Date().toLocaleString()
   const totalPortfolioValue = report.instruments.reduce((sum, inst) => sum + (parseFloat(inst.calculations.totalValue) || 0), 0)
   const totalInstrumentCount = report.instruments.reduce((sum, inst) => sum + (parseInt(inst.calculations.instrumentCount) || 0), 0)
 
-  // Build instrument details table for appendix
   let appendixRows = ''
   let allDataRows = []
   for (const inst of report.instruments) {
@@ -1520,7 +1680,6 @@ async function generateReportHtml() {
       })
     }
   }
-
   if (allDataRows.length) {
     appendixRows = allDataRows.map(r => `
       <tr>
@@ -1536,6 +1695,12 @@ async function generateReportHtml() {
   }
 
   const methodologyHtml = buildMethodologySection(report.instruments.map(i => i.name))
+  const chartHtml = chartImageData ? `
+    <div class="chart-container">
+      <img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" />
+      <p class="chart-caption">FRED Yield Curve – ${report.instruments.map(i => i.name).join(', ')}</p>
+    </div>
+  ` : '<p>Yield curve chart not available.</p>'
 
   const html = `<!DOCTYPE html>
 <html>
@@ -1547,12 +1712,42 @@ async function generateReportHtml() {
     body { font-family: 'Arial', sans-serif; color: #333; background: white; line-height: 1.6; }
     .page { page-break-after: always; padding: 60px 80px; min-height: 100vh; }
     .page:last-child { page-break-after: auto; }
-    .cover-page { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; background: linear-gradient(135deg, #0B2044 0%, #1a3a6e 100%); color: white; }
-    .cover-content { max-width: 800px; }
-    .logo { margin-bottom: 40px; }
-    .cover-title { font-size: 48px; font-weight: 700; letter-spacing: 2px; margin-bottom: 20px; }
+    .cover-page {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      background: linear-gradient(135deg, #0B2044 0%, #1a3a6e 40%, #2a5a8e 100%);
+      color: white;
+      position: relative;
+      overflow: hidden;
+    }
+    .cover-page::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.05) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .cover-content {
+      max-width: 800px;
+      position: relative;
+      z-index: 1;
+      background: rgba(11,32,68,0.4);
+      padding: 40px 60px;
+      border-radius: 20px;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .logo { margin-bottom: 30px; }
+    .logo img { max-width: 180px; height: auto; border-radius: 8px; background: white; padding: 8px; }
+    .cover-title { font-size: 48px; font-weight: 700; letter-spacing: 2px; margin-bottom: 20px; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
     .cover-subtitle { font-size: 24px; font-weight: 300; opacity: 0.9; margin-bottom: 40px; }
-    .cover-meta { font-size: 14px; opacity: 0.8; line-height: 1.8; }
+    .cover-meta { font-size: 14px; opacity: 0.85; line-height: 2; }
     .cover-meta strong { opacity: 1; }
     .toc-page h1 { font-size: 28px; color: #0B2044; border-bottom: 3px solid #0B2044; padding-bottom: 15px; margin-bottom: 30px; }
     .toc-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px dotted #ddd; font-size: 16px; }
@@ -1570,11 +1765,19 @@ async function generateReportHtml() {
     .appendix-table { font-size: 12px; }
     .appendix-table th { background: #1a3a6e; }
     .appendix-table td { padding: 6px 8px; }
-    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999; text-align: center; }
+    .footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #ddd;
+      font-size: 12px;
+      color: #999;
+      text-align: center;
+      line-height: 1.8;
+    }
     .reference-list { list-style: none; padding: 0; }
     .reference-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
-    .chart-container { margin: 20px 0; text-align: center; max-height: 360px; overflow: hidden; }
-    .chart-container canvas { max-width: 100%; height: auto; max-height: 300px; background: #f8f9ff; border-radius: 8px; padding: 10px; }
+    .chart-container { margin: 20px 0; text-align: center; }
+    .chart-container img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid #e0e0e0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
     .chart-caption { font-size: 12px; color: #666; margin-top: 5px; }
     @media print {
       .page { padding: 40px 60px; }
@@ -1588,13 +1791,15 @@ async function generateReportHtml() {
 <!-- COVER PAGE -->
 <div class="page cover-page">
   <div class="cover-content">
-    <div class="logo">${logoHtml}</div>
+    <div class="logo">
+      <img src="${logoUrl}" alt="Dura Capital Logo" />
+    </div>
     <h1 class="cover-title">Valuation Assessment Report</h1>
     <p class="cover-subtitle">${report.instruments.map(i => i.name).join(' & ')}</p>
     <div class="cover-meta">
-      <p><strong>Prepared for:</strong> ${report.session}</p>
+      <p><strong>${report.session}</strong></p>
       <p><strong>Valuation Date:</strong> ${valuationDate}</p>
-      <p><strong>Report Date:</strong> ${report.date}</p>
+      <p><strong>Report Date:</strong> ${reportDate}</p>
       <p><strong>Prepared by:</strong> Dura Capital (Private) Limited</p>
     </div>
   </div>
@@ -1608,9 +1813,10 @@ async function generateReportHtml() {
   <div class="toc-item"><span>Methodology</span><span>3</span></div>
   <div class="toc-item"><span>Market Inputs</span><span>4</span></div>
   <div class="toc-item"><span>Results</span><span>5</span></div>
-  <div class="toc-item"><span>Conclusion</span><span>6</span></div>
-  <div class="toc-item"><span>Appendix</span><span>7</span></div>
-  <div class="toc-item"><span>Reference</span><span>8</span></div>
+  <div class="toc-item"><span>Yield Curve</span><span>6</span></div>
+  <div class="toc-item"><span>Conclusion</span><span>7</span></div>
+  <div class="toc-item"><span>Appendix</span><span>8</span></div>
+  <div class="toc-item"><span>Reference</span><span>9</span></div>
 </div>
 
 <!-- INTRODUCTION -->
@@ -1713,6 +1919,13 @@ async function generateReportHtml() {
   </table>
 </div>
 
+<!-- YIELD CURVE -->
+<div class="page">
+  <h1 class="section-title">Yield Curve</h1>
+  <p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>
+  ${chartHtml}
+</div>
+
 <!-- CONCLUSION -->
 <div class="page">
   <h1 class="section-title">Conclusion</h1>
@@ -1770,6 +1983,9 @@ async function generateReportHtml() {
   </ul>
   <br>
   <div class="footer">
+    <p><strong>Valuation Date:</strong> ${valuationDate}</p>
+    <p><strong>Report Date:</strong> ${reportDate}</p>
+    <p><strong>Prepared by:</strong> Dura Capital (Private) Limited</p>
     <p>© ${new Date().getFullYear()} Dura Capital (Private) Limited. All rights reserved.</p>
     <p>This report is confidential and prepared solely for the use of the client.</p>
   </div>
@@ -1813,7 +2029,6 @@ async function exportToRealExcel() {
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryData)
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
 
-  // Appendix sheet
   const appendixData = [
     ['APPENDIX – Detailed Instrument Data'],
     ['Valuation Date:', new Date().toISOString().split('T')[0]],
@@ -1821,7 +2036,6 @@ async function exportToRealExcel() {
     [],
     ['Asset Class', 'Instrument Name', 'BB Ticker', 'Face Value ($)', 'Rate (%)', 'Term (Yrs)', 'Valuation Date']
   ]
-
   for (const inst of report.instruments) {
     const instKey = inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills'
     let instrumentData = []
@@ -1842,12 +2056,10 @@ async function exportToRealExcel() {
       })
     }
   }
-
   const appendixSheet = XLSX.utils.aoa_to_sheet(appendixData)
   appendixSheet['!cols'] = [{ wch: 18 }, { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 18 }]
   XLSX.utils.book_append_sheet(workbook, appendixSheet, 'Appendix')
 
-  // Detail sheets for each instrument
   for (const inst of report.instruments) {
     const instKey = inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills'
     let instrumentData = []
@@ -1862,7 +2074,6 @@ async function exportToRealExcel() {
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
-
   XLSX.writeFile(workbook, `portfolio_report_${Date.now()}.xlsx`)
 }
 
@@ -1911,7 +2122,6 @@ function openExcelReview(data, title) {
   excelData.value = data; excelColumns.value = Object.keys(data[0] || {}); excelDialogTitle.value = title || 'Data Review'; showExcelDialog.value = true
 }
 function closeExcelDialog() { showExcelDialog.value = false; excelData.value = [] }
-
 function togglePreview() {
   if (!rawData.value.length) return
   showPreview.value = !showPreview.value
@@ -2042,7 +2252,7 @@ async function loadSavedData() {
     if (wf.sessionSavedAt) sessionSavedAt.value = wf.sessionSavedAt
     if (originalFileColumns.value.length) fileColumns.value = [...originalFileColumns.value]
     else if (originalRawData.value.length) fileColumns.value = Object.keys(originalRawData.value[0] || {})
-    if (wf.chartData) chartData.value = wf.chartData
+    if (wf.yieldCurveData) yieldCurveData.value = wf.yieldCurveData
     if (wf.fredFilters) {
       fredFilters.value = { ...fredFilters.value, ...wf.fredFilters }
       if (wf.fredFilters.maturity) {
@@ -2111,7 +2321,7 @@ async function loadSavedData() {
     const savedClean = localStorage.getItem(`${key}_clean`)
     const savedCalc = localStorage.getItem(`${key}_calc`)
     const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
-    const savedChartData = localStorage.getItem(`${key}_chartData`)
+    const savedYieldCurve = localStorage.getItem(`${key}_yieldCurve`)
     const savedFredFilters = localStorage.getItem(`${key}_fredFilters`)
     const savedMapping = localStorage.getItem(`${key}_mapping`)
     if (savedRaw) {
@@ -2124,7 +2334,7 @@ async function loadSavedData() {
     if (savedClean) { cleanedData.value = JSON.parse(savedClean); loaded = true }
     if (savedCalc) { calculations.value = JSON.parse(savedCalc); loaded = true }
     if (savedFileName) { uploadedFile.value = { name: savedFileName, size: 0 }; loaded = true }
-    if (savedChartData) { chartData.value = JSON.parse(savedChartData); loaded = true }
+    if (savedYieldCurve) { yieldCurveData.value = JSON.parse(savedYieldCurve); loaded = true }
     if (savedFredFilters) {
       fredFilters.value = { ...fredFilters.value, ...JSON.parse(savedFredFilters) }
       loaded = true
@@ -2181,7 +2391,7 @@ function saveSessionData() {
     mappingApplied: mappingApplied.value,
     originalRawData: originalRawData.value,
     originalFileColumns: originalFileColumns.value,
-    chartData: chartData.value,
+    yieldCurveData: yieldCurveData.value,
     fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
     sessionSavedAt: sessionSavedAt.value,
     showPreview: showPreview.value
@@ -2194,7 +2404,7 @@ function saveSessionData() {
   localStorage.setItem(`${key}_original`, JSON.stringify(originalRawData.value))
   localStorage.setItem(`${key}_clean`, JSON.stringify(cleanedData.value))
   localStorage.setItem(`${key}_calc`, JSON.stringify(calculations.value))
-  localStorage.setItem(`${key}_chartData`, JSON.stringify(chartData.value))
+  localStorage.setItem(`${key}_yieldCurve`, JSON.stringify(yieldCurveData.value))
   localStorage.setItem(`${key}_mapping`, JSON.stringify(columnMapping.value))
   localStorage.setItem(`${key}_fredFilters`, JSON.stringify({ country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value }))
   localStorage.setItem(`${key}_showPreview`, JSON.stringify(showPreview.value))
@@ -2208,7 +2418,7 @@ function updateSessionCompletion() {
     ...calculations.value,
     completed: !!calculations.value.totalValue,
     timestamp: new Date().toISOString(),
-    chartData: chartData.value
+    yieldCurveData: yieldCurveData.value
   }
 
   let totalValue = 0
@@ -2245,153 +2455,21 @@ function debouncedSave() { if (saveTimeout) clearTimeout(saveTimeout); saveTimeo
 
 watch([rawData, cleanedData], () => debouncedSave(), { deep: true })
 watch(cleanedData, async (newVal) => { if (newVal.length) await calculateMetrics() }, { deep: true })
-watch(chartData, async () => {
-  if (activeTab.value === 'visualizations' && yieldCurveChart.value && chartData.value.datasets?.length) {
+watch(yieldCurveData, async () => {
+  if (activeTab.value === 'visualizations' && yieldCurveChart.value && yieldCurveData.value.length) {
     await nextTick()
-    if (chartInstanceRef.current) chartInstanceRef.current.destroy()
-    await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
+    await renderYieldCurveChart()
   }
 }, { deep: true })
 watch(() => activeTab.value, async (newTab) => {
-  if (newTab === 'visualizations' && hasCleanedData.value && !chartData.value.datasets.length && !fredLoading.value) {
-    await fetchFredData()
+  if (newTab === 'visualizations' && hasCleanedData.value && !yieldCurveData.value.length && !yieldCurveLoading.value) {
+    await fetchYieldCurve()
   }
 })
 
-watch([rawData, cleanedData, calculations, chartData], () => {
+watch([rawData, cleanedData, calculations, yieldCurveData], () => {
   forceUpdate.value++
 }, { deep: true })
-
-// ========== FRED Functions ==========
-const fredCategories = ref({})
-const availableSeries = computed(() => fredCategories.value.interest_rates || {})
-const selectedSeriesLabel = computed(() => availableSeries.value[selectedSeries.value] || selectedSeries.value)
-
-function getCountryLabel(code) { const found = countryOptions.value.find(c => c.value === code); return found ? found.label : code }
-function getCurrencyLabel(code) { const found = currencyOptions.value.find(c => c.value === code); return found ? found.label : code }
-
-function onCountrySelectChange() {
-  if (selectedCountryOption.value !== '__custom__') {
-    fredFilters.value.country = selectedCountryOption.value
-    onFredFilterChange()
-  } else {
-    fredFilters.value.country = customCountry.value
-    if (customCountry.value) onFredFilterChange()
-  }
-}
-function onCustomCountryChange() {
-  if (selectedCountryOption.value === '__custom__') {
-    fredFilters.value.country = customCountry.value
-    onFredFilterChange()
-  }
-}
-function onCurrencySelectChange() {
-  if (selectedCurrencyOption.value !== '__custom__') {
-    fredFilters.value.currency = selectedCurrencyOption.value
-    onFredFilterChange()
-  } else {
-    fredFilters.value.currency = customCurrency.value
-    if (customCurrency.value) onFredFilterChange()
-  }
-}
-function onCustomCurrencyChange() {
-  if (selectedCurrencyOption.value === '__custom__') {
-    fredFilters.value.currency = customCurrency.value
-    onFredFilterChange()
-  }
-}
-function onMaturitySelectChange() {
-  if (selectedMaturityOption.value !== '__custom__') {
-    fredFilters.value.maturity = selectedMaturityOption.value
-    onFredFilterChange()
-  } else {
-    fredFilters.value.maturity = customMaturity.value
-    if (customMaturity.value) onFredFilterChange()
-  }
-}
-function onCustomMaturityChange() {
-  if (selectedMaturityOption.value === '__custom__') {
-    fredFilters.value.maturity = customMaturity.value
-    onFredFilterChange()
-  }
-}
-
-const CACHE_KEY = 'fred_chart_cache'
-const CACHE_DURATION = 5 * 60 * 1000
-
-async function fetchFredData() {
-  fredLoading.value = true
-  fredError.value = ''
-  try {
-    const cacheKey = `${CACHE_KEY}_${instrumentType.value}_${effectiveCountry.value}_${effectiveCurrency.value}_${effectiveMaturity.value}`
-    const cached = localStorage.getItem(cacheKey)
-    if (cached) {
-      const parsed = JSON.parse(cached)
-      if (Date.now() - parsed.timestamp < CACHE_DURATION) {
-        chartData.value = parsed.data
-        currentMarketRate.value = parsed.data.latest
-        chartSeriesLabel.value = parsed.seriesLabel || 'FRED'
-        fredLoading.value = false
-        forceUpdate.value++
-        return
-      }
-    }
-
-    const sid = await seriesIdForMaturity()
-    if (!sid) throw new Error('Could not resolve FRED series')
-    selectedSeries.value = sid
-    chartSeriesLabel.value = availableSeries.value[sid] || sid
-    const loaded = await loadFredSeriesChart(sid)
-    if (!loaded) throw new Error('No FRED data')
-    chartData.value = loaded
-    currentMarketRate.value = loaded.latest
-
-    localStorage.setItem(cacheKey, JSON.stringify({
-      timestamp: Date.now(),
-      data: loaded,
-      seriesLabel: chartSeriesLabel.value
-    }))
-
-    if (activeSession.value) {
-      if (!activeSession.value.instrumentData) activeSession.value.instrumentData = {}
-      if (!activeSession.value.instrumentData[instrumentType.value]) activeSession.value.instrumentData[instrumentType.value] = {}
-      activeSession.value.instrumentData[instrumentType.value].chartData = loaded
-      sessionManager.updateSession(activeSession.value.id, { instrumentData: activeSession.value.instrumentData })
-    }
-    await nextTick()
-    if (yieldCurveChart.value) {
-      if (chartInstanceRef.current) chartInstanceRef.current.destroy()
-      await renderFredLineChart(yieldCurveChart, chartData.value, chartInstanceRef)
-    }
-    forceUpdate.value++
-  } catch (err) {
-    console.error(err)
-    fredError.value = err.message || 'Failed to load market data.'
-    chartData.value = { labels: [], datasets: [] }
-  } finally {
-    fredLoading.value = false
-  }
-}
-
-function defaultMaturityForInstrument() {
-  return instrumentType.value === 'bonds' ? '10Y' : instrumentType.value === 'money-market' ? '1Y' : instrumentType.value === 'tbills' ? '13W' : '3M'
-}
-
-async function enrichCalculationsWithFred() {
-  try {
-    const bench = await fetchBenchmark(instrumentType.value)
-    if (bench?.benchmark_rate != null) {
-      const portfolio = parseFloat(portfolioAvgRate.value) || 0
-      calculations.value.fred = { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2) }
-    }
-  } catch (e) { console.error(e) }
-}
-
-async function onFredFilterChange() {
-  if (activeTab.value === 'visualizations') await fetchFredData()
-  if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
-  debouncedSave()
-}
 
 // ========== Lifecycle ==========
 let lastInstrument = '', lastSessionId = ''
@@ -2421,7 +2499,7 @@ async function checkAndReset() {
         }
       }
       if (cleanedData.value.length) await calculateMetrics()
-      if (activeTab.value === 'visualizations' && !chartData.value.datasets.length) await fetchFredData()
+      if (activeTab.value === 'visualizations' && !yieldCurveData.value.length) await fetchYieldCurve()
     }
     debouncedSave()
   }
@@ -2448,13 +2526,6 @@ onMounted(async () => {
     selectedMaturityOption.value = def
     fredFilters.value.maturity = def
   }
-  try {
-    const res = await api.fredAPI.getCategories()
-    if (res?.success && res.categories) {
-      fredCategories.value = res.categories
-      selectedSeries.value = (await seriesIdForMaturity()) || Object.keys(fredCategories.value.interest_rates || {})[0]
-    }
-  } catch (err) { console.error(err) }
   if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
   if (!calculations.value.totalValue && activeSession.value) await loadSavedData()
   if (cleanedData.value.length) await calculateMetrics()
@@ -2628,6 +2699,49 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   padding: 20px 0;
 }
 
+/* ===== FILTER DROPDOWN ARROWS & 3D STYLING ===== */
+.filter-group {
+  position: relative;
+}
+.filter-select {
+  width: 100%;
+  padding: 10px 32px 10px 12px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: linear-gradient(to bottom, #ffffff 0%, #f5f7fa 100%);
+  color: #0B2044;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 2px rgba(255,255,255,0.8);
+  appearance: none;
+  -webkit-appearance: none;
+}
+.filter-select:focus {
+  outline: none;
+  border-color: #0B2044;
+  box-shadow: 0 0 0 3px rgba(11,32,68,0.15), 0 4px 8px rgba(0,0,0,0.1);
+}
+.filter-group .filter-arrow {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  font-size: 14px;
+  color: #0B2044;
+  font-weight: bold;
+  line-height: 1;
+}
+.filter-group .filter-select option {
+  color: #0B2044;
+  background: white;
+}
+.custom-maturity-input {
+  margin-top: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
 /* ===== REST OF ORIGINAL STYLES – UNCHANGED ===== */
 .required-columns { margin: 20px 0; }
 .columns-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
@@ -2709,10 +2823,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .filters-row { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap; }
 .filter-group { flex: 1; min-width: 150px; }
 .filter-group label { display: block; font-size: 12px; font-weight: 600; color: #0B2044; margin-bottom: 4px; }
-.filter-select { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; background: white; color: #0B2044; font-size: 14px; cursor: pointer; transition: border 0.2s; }
-.filter-select:focus { outline: none; border-color: #0B2044; }
-.filter-select option { color: #0B2044; background: white; }
-.custom-maturity-input { margin-top: 8px; }
 .refresh-btn { flex-shrink: 0; align-self: flex-end; }
 .report-hint { font-size: 14px; color: #555; margin-bottom: 16px; padding: 12px; background: #f0f4f8; border-radius: 8px; }
 .summary-hero { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 24px; margin-bottom: 24px; padding: 30px 20px; background: linear-gradient(135deg, #0B2044, #1E88E5); border-radius: 16px; color: white; text-align: center; }
@@ -2748,5 +2858,4 @@ html, body, #app, .v-application, .v-application--wrap, .fixed-layout, .v-main, 
 .instrument-page .excel-viewer { max-width: 100% !important; overflow-x: hidden !important; }
 .instrument-page .excel-edit-table { max-width: 100% !important; table-layout: fixed !important; width: 100% !important; }
 .instrument-page .excel-edit-table th, .instrument-page .excel-edit-table td { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; max-width: 200px !important; }
-.instrument-page .filters-row select, .instrument-page .filters-row .filter-select, .instrument-page .filters-row select:focus, .instrument-page .filters-row .filter-select:focus { color: #000000 !important; background-color: #ffffff !important; }
 </style>
