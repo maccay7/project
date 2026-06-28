@@ -5,7 +5,6 @@ import uuid
 from datetime import datetime, timedelta
 
 def auth_routes(app):
-    # -------------------- REGISTER --------------------
     @app.route('/api/register', methods=['POST', 'OPTIONS'])
     def register():
         if request.method == 'OPTIONS':
@@ -69,7 +68,6 @@ def auth_routes(app):
             print(f"Registration error: {e}")
             return jsonify({'success': False, 'message': str(e)}), 500
 
-    # -------------------- LOGIN --------------------
     @app.route('/api/login', methods=['POST', 'OPTIONS'])
     def login():
         if request.method == 'OPTIONS':
@@ -114,7 +112,6 @@ def auth_routes(app):
             print(f"Login error: {e}")
             return jsonify({'success': False, 'message': 'Login failed'}), 500
 
-    # -------------------- LOGOUT --------------------
     @app.route('/api/logout', methods=['POST', 'OPTIONS'])
     def logout():
         if request.method == 'OPTIONS':
@@ -134,7 +131,6 @@ def auth_routes(app):
                 pass
         return jsonify({'success': True})
 
-    # -------------------- SESSION CHECK --------------------
     @app.route('/api/session', methods=['GET', 'OPTIONS'])
     def check_session():
         if request.method == 'OPTIONS':
@@ -169,7 +165,6 @@ def auth_routes(app):
         except:
             return jsonify({'authenticated': False}), 401
 
-    # -------------------- FORGOT PASSWORD --------------------
     @app.route('/api/forgot-password', methods=['POST', 'OPTIONS'])
     def forgot_password():
         if request.method == 'OPTIONS':
@@ -189,17 +184,14 @@ def auth_routes(app):
                 return jsonify({'success': True, 'message': 'If the email exists, a reset link has been sent.'})
             reset_token = str(uuid.uuid4())
             expires = datetime.now() + timedelta(hours=1)
-            # Create password_resets table if not exists (you already have it)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS password_resets (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL,
-                    token VARCHAR(255) NOT NULL,
-                    expires_at TIMESTAMP NOT NULL,
-                    used BOOLEAN DEFAULT FALSE,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                )
-            ''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS password_resets (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                token VARCHAR(255) NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT FALSE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )''')
             cursor.execute(
                 'INSERT INTO password_resets (user_id, token, expires_at) VALUES (%s, %s, %s)',
                 (user['id'], reset_token, expires)
@@ -212,7 +204,6 @@ def auth_routes(app):
             print(f"Forgot password error: {e}")
             return jsonify({'success': False, 'message': 'Server error'}), 500
 
-    # -------------------- RESET PASSWORD --------------------
     @app.route('/api/reset-password', methods=['POST', 'OPTIONS'])
     def reset_password():
         if request.method == 'OPTIONS':
@@ -246,7 +237,6 @@ def auth_routes(app):
             print(f"Reset password error: {e}")
             return jsonify({'success': False, 'message': 'Server error'}), 500
 
-    # -------------------- CHANGE PASSWORD (authenticated) --------------------
     @app.route('/api/change-password', methods=['POST', 'OPTIONS'])
     def change_password():
         if request.method == 'OPTIONS':

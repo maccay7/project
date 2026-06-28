@@ -1,7 +1,6 @@
 import { ref, computed } from 'vue'
 import { fredAPI } from '@/services/api'
 
-/** FRED market filters: country, currency, maturity. */
 export function useFredMarket(defaultMaturity = '1Y') {
   const fredFilters = ref({
     country: 'US',

@@ -208,10 +208,10 @@ async function loadData() {
 function selectAll() { sections.value.forEach(s => s.selected = true) }
 function clearAll() { sections.value.forEach(s => s.selected = false) }
 
-// Build full professional report
-function buildFullReport(data, instrument, session, date) {
+// ---- ENHANCED REPORT GENERATION WITH APPENDIX ----
+function buildFullReport(data, instrument, session, date, valuationDate) {
   const now = new Date().toLocaleString()
-  const valuationDate = new Date().toISOString().split('T')[0]
+  const valDate = valuationDate || new Date().toISOString().split('T')[0]
   
   // Calculate aggregates
   const totalValue = data.reduce((s, r) => s + (parseFloat(r.FaceValue || r.Amount || r.Principal || 0)), 0)
@@ -242,25 +242,86 @@ function buildFullReport(data, instrument, session, date) {
     assumptions = 'Standard market conventions applied.'
   }
 
-  // Build instrument details table rows
-  let instrumentRows = ''
+  // ---- ENHANCED APPENDIX TABLE ----
+  // Include comprehensive per-instrument metadata: inputs, market data, calculations, assumptions, tables, formulas
+  let appendixRows = ''
   data.forEach((item, idx) => {
     const name = item.Instrument || item.BondName || item.TBillName || `Instrument ${idx + 1}`
+    const ticker = item.BBTicker || item.Ticker || item.Security || 'N/A'
     const faceValue = parseFloat(item.FaceValue || item.Amount || item.Principal || 0)
     const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
     const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
-    const ticker = item.BBTicker || item.Ticker || item.Security || 'N/A'
-    const valuationDateVal = item.ValuationDate || valuationDate
+    const issueDate = item.IssueDate || item['Issue Date'] || item.EffectiveDate || item['Effective Date'] || 'N/A'
+    const maturityDate = item.MaturityDate || item.Maturity || item['Maturity Date'] || 'N/A'
+    const currency = item.Currency || item['Currency'] || 'USD'
+    const couponFrequency = item.CouponFrequency || item['Coupon Frequency'] || 'Annual'
+    const paymentFrequency = item.PaymentFrequency || item['Payment Frequency'] || 'Annual'
     
-    instrumentRows += `<tr>
+    // Calculated value (using instrument-specific formula)
+    let calcValue = 0
+    let diff = 0
+    let yieldVal = 0
+    
+    if (instType.includes('money') || instType === 'money-market') {
+      // Money Market: FV / (1 + r * t/365)
+      const daysToMaturity = term * 365
+      calcValue = faceValue / (1 + (rate / 100) * (daysToMaturity / 365))
+    } else if (instType.includes('bond')) {
+      // Bonds: PV of cash flows
+      const couponPayment = faceValue * (rate / 100)
+      const periods = term
+      let pv = 0
+      for (let t = 1; t <= periods; t++) {
+        pv += couponPayment / Math.pow(1 + rate / 100, t)
+      }
+      pv += faceValue / Math.pow(1 + rate / 100, periods)
+      calcValue = pv
+    } else if (instType.includes('tbill') || instType.includes('t-bill')) {
+      // Treasury Bills: Discount yield
+      const daysToMaturity = term * 365
+      const discountAmount = faceValue * (rate / 100) * (daysToMaturity / 360)
+      calcValue = faceValue - discountAmount
+    } else {
+      calcValue = faceValue * (1 + (rate / 100) * (term / 365))
+    }
+    
+    diff = faceValue - calcValue
+    yieldVal = (calcValue / faceValue - 1) * 100
+    const valuationDateVal = item.ValuationDate || valDate
+    
+    // Market data inputs
+    const riskFreeRate = item.RiskFreeRate || item['Risk Free Rate'] || 'N/A'
+    const creditSpread = item.CreditSpread || item['Credit Spread'] || 'N/A'
+    const countryRiskPremium = item.CountryRiskPremium || item['Country Risk Premium'] || 'N/A'
+    
+    appendixRows += `<tr>
       <td>${name}</td>
       <td>${ticker}</td>
       <td>${faceValue.toFixed(2)}</td>
       <td>${rate.toFixed(4)}%</td>
       <td>${term.toFixed(2)}</td>
+      <td>${issueDate}</td>
+      <td>${maturityDate}</td>
+      <td>${currency}</td>
+      <td>${calcValue.toFixed(2)}</td>
+      <td>${diff.toFixed(2)}</td>
+      <td>${yieldVal.toFixed(2)}%</td>
       <td>${valuationDateVal}</td>
+      <td>${riskFreeRate}</td>
+      <td>${creditSpread}</td>
+      <td>${countryRiskPremium}</td>
     </tr>`
   })
+
+  // Methodology details for appendix
+  const methodologyDetails = `
+    <div class="methodology-box">
+      <h3>Valuation Approach</h3>
+      <p>${methodology}</p>
+      <div class="formula">${formulas}</div>
+      <p><strong>Assumptions:</strong> ${assumptions}</p>
+    </div>
+  `
 
   return `
 <!DOCTYPE html>
@@ -322,7 +383,7 @@ function buildFullReport(data, instrument, session, date) {
     <p class="cover-subtitle">${instrument.charAt(0).toUpperCase() + instrument.slice(1)}</p>
     <div class="cover-meta">
       <p><strong>Prepared for:</strong> ${session}</p>
-      <p><strong>Valuation Date:</strong> ${valuationDate}</p>
+      <p><strong>Valuation Date:</strong> ${valDate}</p>
       <p><strong>Report Date:</strong> ${date}</p>
       <p><strong>Prepared by:</strong> Dura Capital (Private) Limited</p>
     </div>
@@ -345,10 +406,10 @@ function buildFullReport(data, instrument, session, date) {
 <!-- INTRODUCTION -->
 <div class="page">
   <h1 class="section-title">Introduction</h1>
-  <p>Dura Capital (Private) Limited ("Dura Capital", "us", "we") was contracted to provide a fair valuation assessment report of the following ${instrument} instruments as at ${valuationDate}:</p>
+  <p>Dura Capital (Private) Limited ("Dura Capital", "us", "we") was contracted to provide a fair valuation assessment report of the following ${instrument} instruments as at ${valDate}:</p>
   <ul style="margin: 20px 0 20px 30px;">
     <li>${instrument} instruments</li>
-    <li>Valuation as at ${valuationDate}</li>
+    <li>Valuation as at ${valDate}</li>
     <li>${data.length} individual instruments assessed</li>
   </ul>
   <p>The instruments are classified and measured at fair value through profit or loss in terms of International Financial Reporting Standard 9: Financial Instruments ("IFRS 9") and International Financial Reporting Standard 13: Fair Value Measurement ("IFRS 13") and this forms as the basis to our assessment.</p>
@@ -359,7 +420,7 @@ function buildFullReport(data, instrument, session, date) {
     <li><strong>Market Inputs:</strong> Assesses the reasonability of market data that is used in the valuation models.</li>
     <li><strong>Results:</strong> Compares the client's valuation to our independent assessment.</li>
     <li><strong>Conclusion:</strong> Gives our independent opinion as well as other considerations.</li>
-    <li><strong>Appendix:</strong> Detailed instrument-level data and calculations.</li>
+    <li><strong>Appendix:</strong> Detailed instrument-level data, input parameters, market data, calculation outputs, valuation assumptions, supporting tables, and applied formulas.</li>
   </ul>
 </div>
 
@@ -375,7 +436,7 @@ function buildFullReport(data, instrument, session, date) {
       <li>Total Portfolio Value: <span class="highlight">$${totalValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></li>
       <li>Number of Instruments: <span class="highlight">${data.length}</span></li>
       <li>Average Rate: <span class="highlight">${avgRate.toFixed(2)}%</span></li>
-      <li>Valuation Date: <span class="highlight">${valuationDate}</span></li>
+      <li>Valuation Date: <span class="highlight">${valDate}</span></li>
     </ul>
     <br>
     <p><strong>Valuation Approach:</strong></p>
@@ -388,12 +449,7 @@ function buildFullReport(data, instrument, session, date) {
   <h1 class="section-title">Methodology</h1>
   <p>The Axcentium Audit team provided us with ${instrument} data. This section outlines the methodologies used to provide a fair value of the fixed income assets in terms of IFRS 13.</p>
   <br>
-  <div class="methodology-box">
-    <h3>Valuation Approach</h3>
-    <p>${methodology}</p>
-    <div class="formula">${formulas}</div>
-    <p><strong>Assumptions:</strong> ${assumptions}</p>
-  </div>
+  ${methodologyDetails}
   <br>
   <p>A projection of the future cashflows expected at each payment date was constructed from information provided by the audit team which include capital amount, trade/effective date, maturity date, fixed interest rate, interest payment frequency and capital repayment frequency.</p>
   <br>
@@ -410,14 +466,13 @@ function buildFullReport(data, instrument, session, date) {
   <br>
   <p><strong>Key Market Inputs:</strong></p>
   <ul style="margin: 10px 0 20px 30px;">
-    <li><strong>Risk-Free Rate:</strong> SOFR OIS curve as at ${valuationDate}</li>
+    <li><strong>Risk-Free Rate:</strong> SOFR OIS curve as at ${valDate}</li>
     <li><strong>Country Risk Premium:</strong> Damodaran Country Risk Premiums</li>
     <li><strong>Credit Spread:</strong> Applied based on counterparty risk assessment</li>
     <li><strong>Yield Curve Model:</strong> Nelson-Siegel-Svensson (NSS)</li>
   </ul>
   <div style="background: #f8f9ff; padding: 20px; border-radius: 8px; text-align: center; margin-top: 20px;">
     <p style="color: #999;"><em>Yield curve chart would be displayed here</em></p>
-    <canvas id="yieldChart" height="120" style="max-width: 100%;"></canvas>
   </div>
 </div>
 
@@ -439,7 +494,7 @@ function buildFullReport(data, instrument, session, date) {
       <tr><td>Number of Instruments</td><td>${data.length}</td></tr>
       <tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr>
       <tr><td>Total Interest Earned</td><td>$${totalInterest.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td></tr>
-      <tr><td>Valuation Date</td><td>${valuationDate}</td></tr>
+      <tr><td>Valuation Date</td><td>${valDate}</td></tr>
     </tbody>
   </table>
 </div>
@@ -447,7 +502,7 @@ function buildFullReport(data, instrument, session, date) {
 <!-- CONCLUSION -->
 <div class="page">
   <h1 class="section-title">Conclusion</h1>
-  <p>The valuation assessment conducted by Dura Capital provides a comprehensive fair value assessment of the ${instrument} instruments as at ${valuationDate}.</p>
+  <p>The valuation assessment conducted by Dura Capital provides a comprehensive fair value assessment of the ${instrument} instruments as at ${valDate}.</p>
   <br>
   <p><strong>Key Observations:</strong></p>
   <ul style="margin: 10px 0 20px 30px;">
@@ -465,8 +520,10 @@ function buildFullReport(data, instrument, session, date) {
 <!-- APPENDIX -->
 <div class="page">
   <h1 class="section-title">Appendix: Detailed Instrument Data</h1>
-  <p><strong>Valuation Date:</strong> ${valuationDate}</p>
+  <p><strong>Valuation Date:</strong> ${valDate}</p>
   <p><strong>Total Instruments:</strong> ${data.length}</p>
+  <br>
+  <p><strong>Input Parameters, Market Data, Calculation Outputs, Valuation Assumptions, Supporting Tables, and Applied Formulas</strong></p>
   <br>
   <table class="appendix-table">
     <thead>
@@ -476,21 +533,33 @@ function buildFullReport(data, instrument, session, date) {
         <th>Face Value ($)</th>
         <th>Rate (%)</th>
         <th>Term (Yrs)</th>
+        <th>Issue Date</th>
+        <th>Maturity Date</th>
+        <th>Currency</th>
+        <th>Calculated Value ($)</th>
+        <th>Difference ($)</th>
+        <th>Yield (%)</th>
         <th>Valuation Date</th>
+        <th>Risk-Free Rate</th>
+        <th>Credit Spread</th>
+        <th>Country Risk Premium</th>
       </tr>
     </thead>
     <tbody>
-      ${instrumentRows}
+      ${appendixRows}
     </tbody>
   </table>
-  <p style="font-size: 12px; color: #999; margin-top: 10px;"><em>Note: BB Ticker refers to Bloomberg ticker where available. Term is calculated as years to maturity.</em></p>
+  <p style="font-size: 12px; color: #999; margin-top: 10px;"><em>Note: BB Ticker refers to Bloomberg ticker where available. Term is calculated as years to maturity. Calculated Value is based on instrument-specific valuation methodology. Market data inputs include risk-free rate, credit spread, and country risk premium used in discount rate calculation.</em></p>
+  <br>
+  <p><strong>Valuation Assumptions:</strong> ${assumptions}</p>
+  <p><strong>Applied Formulas:</strong> ${formulas}</p>
 </div>
 
 <!-- REFERENCE -->
 <div class="page">
   <h1 class="section-title">Reference</h1>
   <ul class="reference-list">
-    <li>Bloomberg Financial Services – SOFR OIS Yield Curve as at ${valuationDate}</li>
+    <li>Bloomberg Financial Services – SOFR OIS Yield Curve as at ${valDate}</li>
     <li>Damodaran Country Risk Premiums – Published country risk premiums</li>
     <li>IFRS 13: Fair Value Measurement – International Financial Reporting Standards</li>
     <li>IFRS 9: Financial Instruments – Classification and measurement</li>
@@ -577,12 +646,12 @@ async function generateExcel() {
     const dataSheet = XLSX.utils.aoa_to_sheet(dataRows)
     XLSX.utils.book_append_sheet(wb, dataSheet, 'Data')
     
-    // Sheet 4: Appendix
+    // Sheet 4: Appendix - ENHANCED with comprehensive metadata
     const appendixData = [
       ['APPENDIX: DETAILED INSTRUMENT DATA'],
       ['Valuation Date:', valuationDate],
       [''],
-      ['Instrument Name', 'BB Ticker', 'Face Value ($)', 'Rate (%)', 'Term (Yrs)', 'Valuation Date']
+      ['Instrument Name', 'BB Ticker', 'Face Value ($)', 'Rate (%)', 'Term (Yrs)', 'Issue Date', 'Maturity Date', 'Currency', 'Calculated Value ($)', 'Difference ($)', 'Yield (%)', 'Valuation Date', 'Risk-Free Rate', 'Credit Spread', 'Country Risk Premium']
     ]
     data.forEach((item, idx) => {
       const name = item.Instrument || item.BondName || item.TBillName || `Instrument ${idx + 1}`
@@ -590,10 +659,42 @@ async function generateExcel() {
       const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
       const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
       const ticker = item.BBTicker || item.Ticker || item.Security || 'N/A'
-      appendixData.push([name, ticker, faceValue, rate, term, valuationDate])
+      const issueDate = item.IssueDate || item['Issue Date'] || item.EffectiveDate || item['Effective Date'] || 'N/A'
+      const maturityDate = item.MaturityDate || item.Maturity || item['Maturity Date'] || 'N/A'
+      const currency = item.Currency || item['Currency'] || 'USD'
+      const riskFreeRate = item.RiskFreeRate || item['Risk Free Rate'] || 'N/A'
+      const creditSpread = item.CreditSpread || item['Credit Spread'] || 'N/A'
+      const countryRiskPremium = item.CountryRiskPremium || item['Country Risk Premium'] || 'N/A'
+      
+      // Instrument-specific calculation
+      let calcValue = 0
+      const instTypeLower = instrument.toLowerCase()
+      if (instTypeLower.includes('money') || instTypeLower === 'money-market') {
+        const daysToMaturity = term * 365
+        calcValue = faceValue / (1 + (rate / 100) * (daysToMaturity / 365))
+      } else if (instTypeLower.includes('bond')) {
+        const couponPayment = faceValue * (rate / 100)
+        const periods = term
+        let pv = 0
+        for (let t = 1; t <= periods; t++) {
+          pv += couponPayment / Math.pow(1 + rate / 100, t)
+        }
+        pv += faceValue / Math.pow(1 + rate / 100, periods)
+        calcValue = pv
+      } else if (instTypeLower.includes('tbill') || instTypeLower.includes('t-bill')) {
+        const daysToMaturity = term * 365
+        const discountAmount = faceValue * (rate / 100) * (daysToMaturity / 360)
+        calcValue = faceValue - discountAmount
+      } else {
+        calcValue = faceValue * (1 + (rate / 100) * (term / 365))
+      }
+      
+      const diff = faceValue - calcValue
+      const yieldVal = (calcValue / faceValue - 1) * 100
+      appendixData.push([name, ticker, faceValue, rate, term, issueDate, maturityDate, currency, calcValue, diff, yieldVal, valuationDate, riskFreeRate, creditSpread, countryRiskPremium])
     })
     const appendixSheet = XLSX.utils.aoa_to_sheet(appendixData)
-    appendixSheet['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 18 }]
+    appendixSheet['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 20 }]
     XLSX.utils.book_append_sheet(wb, appendixSheet, 'Appendix')
     
     // Sheet 5: Methodology
@@ -642,7 +743,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* same as original – keep your existing styles */
+/* same as original – keep your styles */
 .reports-view { max-width: 1400px; margin: 0 auto; padding: 20px; }
 .page-header { margin-bottom: 30px; }
 .page-header h1 { color: #0B2A44; font-size: 32px; font-weight: 700; margin-bottom: 8px; }

@@ -177,6 +177,10 @@ const compareCanvas = ref(null)
 let yieldChart = null
 let compareChart = null
 
+// Yield curve cache for performance optimization
+const yieldCurveCache = ref(new Map())
+const lastYieldCurveRequest = ref({})
+
 // KPI Stats
 const kpiStats = ref([
   { title: 'Records', value: 0, icon: 'mdi-database', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
@@ -266,6 +270,28 @@ function chartDatasets(payload) {
 async function loadYieldCurve() {
   yieldError.value = ''
   try {
+    // Create cache key based on request parameters
+    const cacheKey = `${selectedInstrument.value}_${fredFilters.value.country}_${fredFilters.value.currency}`
+    
+    // Check cache first
+    if (yieldCurveCache.value.has(cacheKey)) {
+      const cached = yieldCurveCache.value.get(cacheKey)
+      // Use cached data if less than 5 minutes old
+      if (Date.now() - cached.timestamp < 300000) {
+        yieldData.value = cached.data
+        await nextTick()
+        renderYieldChart()
+        return
+      }
+    }
+    
+    // Prevent duplicate requests
+    const requestKey = `${cacheKey}_${Date.now()}`
+    if (lastYieldCurveRequest.value[cacheKey] && Date.now() - lastYieldCurveRequest.value[cacheKey] < 1000) {
+      return // Debounce: don't request if already requested within last second
+    }
+    lastYieldCurveRequest.value[cacheKey] = Date.now()
+    
     const res = await api.fredAPI.getYieldCurve(
       selectedInstrument.value,
       fredFilters.value.country,
@@ -273,6 +299,11 @@ async function loadYieldCurve() {
     )
     if (res?.success && res.data?.labels?.length) {
       yieldData.value = res.data
+      // Cache the result
+      yieldCurveCache.value.set(cacheKey, {
+        data: res.data,
+        timestamp: Date.now()
+      })
     } else {
       yieldError.value = res?.data?.error || 'No FRED data. Check API key in backend .env'
       yieldData.value = null
@@ -289,9 +320,15 @@ function renderYieldChart() {
   if (!yieldCanvas.value || !yieldData.value) return
   if (yieldChart) yieldChart.destroy()
   const ctx = yieldCanvas.value.getContext('2d')
+  
+  // Generate dynamic X-axis based on maximum maturity
+  const labels = yieldData.value.labels || []
+  const maxMaturity = extractMaxMaturity(labels)
+  const dynamicLabels = generateDynamicXAxis(maxMaturity)
+  
   yieldChart = new Chart(ctx, {
     type: 'line',
-    data: { labels: yieldData.value.labels, datasets: chartDatasets(yieldData.value) },
+    data: { labels: dynamicLabels, datasets: chartDatasets(yieldData.value) },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -308,10 +345,49 @@ function renderYieldChart() {
       },
       scales: {
         y: { title: { display: true, text: 'Yield (%)' } },
-        x: { title: { display: true, text: 'Maturity' } }
+        x: { 
+          title: { display: true, text: 'Maturity (Years)' },
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: 12
+          }
+        }
       }
     }
   })
+}
+
+// Extract maximum maturity from labels (e.g., "30Y" -> 30, "5Y" -> 5)
+function extractMaxMaturity(labels) {
+  let maxYears = 30 // Default to 30 years
+  labels.forEach(label => {
+    const match = label.match(/(\d+)(Y|M)/i)
+    if (match) {
+      const value = parseInt(match[1])
+      const unit = match[2].toUpperCase()
+      if (unit === 'Y') {
+        maxYears = Math.max(maxYears, value)
+      } else if (unit === 'M') {
+        maxYears = Math.max(maxYears, Math.ceil(value / 12))
+      }
+    }
+  })
+  return maxYears
+}
+
+// Generate dynamic X-axis labels based on maximum maturity
+function generateDynamicXAxis(maxYears) {
+  const labels = []
+  if (maxYears <= 5) {
+    for (let i = 1; i <= maxYears; i++) labels.push(`${i}Y`)
+  } else if (maxYears <= 10) {
+    for (let i = 1; i <= maxYears; i++) labels.push(`${i}Y`)
+  } else if (maxYears <= 20) {
+    for (let i = 1; i <= maxYears; i += 2) labels.push(`${i}Y`)
+  } else {
+    for (let i = 1; i <= maxYears; i += 5) labels.push(`${i}Y`)
+  }
+  return labels
 }
 
 async function loadComparisonChart() {

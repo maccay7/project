@@ -2,14 +2,13 @@ from utils.db import get_db
 
 
 def get_user_profile(user_id=1):
-    """Return the current user's profile (name, email). Returns empty dict if not found."""
     conn = get_db()
     if not conn:
         return {}
 
     try:
         cursor = conn.cursor()
-        cursor.execute('SELECT first_name, last_name, email FROM users WHERE id = %s', (user_id,))
+        cursor.execute('SELECT first_name, last_name, email, phone FROM users WHERE id = %s', (user_id,))
         user = cursor.fetchone()
         cursor.close()
         conn.close()
@@ -23,14 +22,14 @@ def get_user_profile(user_id=1):
         name = ' '.join(name_parts) if name_parts else ''
         return {
             'name': name,
-            'email': user.get('email', '')
+            'email': user.get('email', ''),
+            'phone': user.get('phone', '')
         }
     except Exception:
         return {}
 
 
 def get_user_preferences(user_id=1):
-    """Return user preferences (language, timezone, dateFormat, currency). Returns empty dict if none."""
     conn = get_db()
     if not conn:
         return {}
@@ -54,7 +53,6 @@ def get_user_preferences(user_id=1):
 
 
 def get_notification_settings(user_id=1):
-    """Return notification settings (camelCase keys). Returns empty dict if none."""
     conn = get_db()
     if not conn:
         return {}
@@ -81,7 +79,6 @@ def get_notification_settings(user_id=1):
 
 
 def get_system_info():
-    """Return system info (last_updated, version, apiStatus). Returns empty dict if none."""
     conn = get_db()
     if not conn:
         return {}
@@ -98,7 +95,8 @@ def get_system_info():
         return {
             'last_updated': result.get('updated_at') or result.get('created_at'),
             'version': result.get('version'),
-            'apiStatus': result.get('api_status')
+            'apiStatus': result.get('api_status'),
+            'database': 'MySQL'
         }
     except Exception:
         return {}

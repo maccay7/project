@@ -86,6 +86,9 @@
                   <span>Created: {{ formatDate(activeSession.date) }}</span>
                   <span>Instruments: {{ activeSession.instrumentCount || 0 }}/3</span>
                 </div>
+                <button class="btn-save-session" @click="saveToSession">
+                  <v-icon size="14">mdi-content-save</v-icon> Save to Session
+                </button>
               </div>
               <div v-else class="no-session-warning">
                 <v-icon color="warning" size="16">mdi-alert</v-icon>
@@ -394,7 +397,7 @@ const restoreVersion = (sessionId, index) => {
 // Event listener for external updates
 const onSessionUpdated = (event) => {
   const detail = event.detail || {}
-  const { sessionId, skipCapture, ...options } = detail
+  const { sessionId, skipCapture, explicitSave, ...options } = detail
   if (!sessionId) return
   if (skipCapture) {
     const updated = sessionManager.getSession(sessionId)
@@ -409,7 +412,22 @@ const onSessionUpdated = (event) => {
     }
     return
   }
-  captureVersion(sessionId, options)
+  // Only capture version if explicitly saving to session
+  if (explicitSave) {
+    captureVersion(sessionId, options)
+  } else {
+    // Just update session data without creating a version
+    const updated = sessionManager.getSession(sessionId)
+    if (updated) {
+      const idx = sessions.value.findIndex(s => s.id === sessionId)
+      if (idx !== -1) {
+        sessions.value[idx] = { ...sessions.value[idx], ...updated, versions: updated.versions || sessions.value[idx].versions }
+      } else {
+        sessions.value.unshift(updated)
+      }
+      saveSessions()
+    }
+  }
 }
 
 // Session Actions
@@ -511,6 +529,24 @@ const deleteSession = (sessionId) => {
       saveActiveId(null)
     }
   }
+}
+
+// Explicit Save to Session - creates version record
+const saveToSession = () => {
+  if (!activeSession.value) return
+  
+  // Dispatch event with explicitSave flag
+  window.dispatchEvent(new CustomEvent('session-updated', {
+    detail: {
+      sessionId: activeSession.value.id,
+      explicitSave: true,
+      changeType: 'Saved',
+      shortDescription: 'Saved to session',
+      instrument: detectInstrument(activeSession.value.id) || 'Session'
+    }
+  }))
+  
+  alert('Session saved successfully!')
 }
 
 // ***** FIXED NAVIGATION *****
@@ -695,6 +731,8 @@ onBeforeUnmount(() => {
 .session-status-badge.in-progress { background: #FFF3E0; color: #FF9800; }
 .session-status-badge.completed { background: #E8F5E9; color: #4CAF50; }
 .session-details { display: flex; gap: 10px; font-size: 9px; color: #555; }
+.btn-save-session { margin-top: 8px; width: 100%; padding: 8px 12px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; }
+.btn-save-session:hover { background: #45a049; transform: translateY(-1px); }
 .no-session-warning { padding: 10px 10px; background: #FFF3E0; border-radius: 8px; display: flex; align-items: center; gap: 6px; color: #E65100; font-size: 10px; margin-bottom: 12px; }
 .flex-spacer { flex: 1; min-height: 10px; }
 .session-stats-summary { background: #f8f9ff; margin: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(11, 32, 68, 0.08); }

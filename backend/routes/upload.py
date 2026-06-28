@@ -19,8 +19,8 @@ def upload_routes(app):
         uploaded_file = request.files.get('file')
         if not uploaded_file:
             return jsonify({'success': False, 'message': 'No file uploaded'}), 400
-        encoded = parse_upload_file(uploaded_file)
-        return jsonify({'success': True, 'data': {'file_base64': encoded}})
+        parsed = parse_upload_file(uploaded_file)
+        return jsonify({'success': True, 'data': parsed})
 
     @app.route('/api/clean', methods=['POST', 'OPTIONS'])
     def clean_route():

@@ -359,41 +359,95 @@ function exportToExcel() {
   if (toExport.length === 0) { alert('No instruments selected for export'); return }
 
   const workbook = XLSX.utils.book_new()
+  const valuationDate = new Date().toISOString().split('T')[0]
   
-  // Summary sheet – enhanced with required fields
-  const summaryData = toExport.map(inst => ({
-    'Instrument Name': inst.name,
-    'Face Value': inst.value,  // using total value as face value proxy
-    'Calculated Value': inst.value,
-    'Market Value': inst.fredBench ? (inst.value * (1 + inst.fredBench/100)) : null,
-    'Difference Between Values': inst.fredBench ? (inst.value * (inst.fredBench/100)) : null,
-    'Yield (%)': inst.avgRate !== null ? inst.avgRate : '—',
-    'Maturity Date': '—', // we don't have a single maturity date for the whole class
-    'Session Name': activeSession.value.name,
-    'Valuation Date': new Date().toLocaleDateString()
-  }))
-  const summarySheet = XLSX.utils.json_to_sheet(summaryData)
-  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
+  // ---- ENHANCED SUMMARY SHEET ----
+  const summaryRows = toExport.map(inst => {
+    const calculatedValue = inst.value;
+    // For difference, we need to get the actual face value from details if possible
+    let totalFaceValue = calculatedValue;
+    let maturityDate = '—'
+    const detailInst = instrumentsWithDetails.value.find(d => d.id === inst.id);
+    if (detailInst && detailInst.details && detailInst.details.length) {
+      const faceSum = detailInst.details.reduce((s, row) => s + (parseFloat(row.FaceValue || row.Amount || row.Principal || 0)), 0);
+      if (faceSum > 0) totalFaceValue = faceSum;
+      
+      // Get maturity date from first row if available
+      const firstRow = detailInst.details[0]
+      if (firstRow) {
+        maturityDate = firstRow.MaturityDate || firstRow.Maturity || firstRow['Maturity Date'] || '—'
+      }
+    }
+    const diff = totalFaceValue - calculatedValue;
+    return {
+      'Instrument Name': inst.name,
+      'Face Value': totalFaceValue,
+      'Calculated Value': calculatedValue,
+      'Difference': diff,
+      'Yield (%)': inst.avgRate !== null ? inst.avgRate : '—',
+      'Valuation Date': valuationDate,
+      'Maturity Date': maturityDate
+    };
+  });
 
-  // Detail sheets for each selected instrument
+  // Add totals row
+  const totals = {
+    'Instrument Name': 'TOTAL',
+    'Face Value': summaryRows.reduce((s, r) => s + r['Face Value'], 0),
+    'Calculated Value': summaryRows.reduce((s, r) => s + r['Calculated Value'], 0),
+    'Difference': summaryRows.reduce((s, r) => s + r['Difference'], 0),
+    'Yield (%)': '—',
+    'Valuation Date': '',
+    'Maturity Date': ''
+  };
+  summaryRows.push(totals);
+  const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+
+  // ---- DETAIL SHEETS WITH ENHANCED FIELDS ----
   for (const inst of instrumentsWithDetails.value) {
     if (selectedExportInstruments.value[inst.id] && inst.details && inst.details.length) {
-      // Add extra computed columns for the detailed view (if needed)
+      // Enrich details with all required fields per instrument
       const enrichedDetails = inst.details.map(row => {
-        const newRow = { ...row }
-        // Calculate difference if both face value and calculated value exist
-        if (newRow.FaceValue !== undefined && newRow['Calculated Value'] !== undefined) {
-          newRow['Difference'] = newRow['Calculated Value'] - newRow.FaceValue
-        }
-        return newRow
-      })
-      const sheet = XLSX.utils.json_to_sheet(enrichedDetails)
-      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
+        const newRow = { ...row };
+        const face = parseFloat(row.FaceValue || row.Amount || row.Principal || 0);
+        const calcVal = parseFloat(row['Calculated Value']) || (inst.value / inst.details.length);
+        newRow['Calculated Value'] = calcVal;
+        newRow['Difference'] = face - calcVal;
+        newRow['Yield (%)'] = row.Yield || row['Yield'] || row.Rate || row['Rate'] || row.CouponRate || row['Coupon Rate'] || row.DiscountRate || row['Discount Rate'] || '—';
+        newRow['Valuation Date'] = row.ValuationDate || row['Valuation Date'] || valuationDate;
+        newRow['Maturity Date'] = row.MaturityDate || row.Maturity || row['Maturity Date'] || '—';
+        return newRow;
+      });
+      const sheet = XLSX.utils.json_to_sheet(enrichedDetails);
+      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31));
     }
   }
   
-  XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name || 'session'}.xlsx`)
-  showExportDialog.value = false
+  // ---- INSTRUMENT-SPECIFIC TOTALS SHEET ----
+  const instrumentTotals = []
+  toExport.forEach(inst => {
+    const detailInst = instrumentsWithDetails.value.find(d => d.id === inst.id);
+    if (detailInst && detailInst.details && detailInst.details.length) {
+      const faceSum = detailInst.details.reduce((s, row) => s + (parseFloat(row.FaceValue || row.Amount || row.Principal || 0)), 0);
+      const calcSum = detailInst.details.reduce((s, row) => s + (parseFloat(row['Calculated Value']) || 0), 0);
+      instrumentTotals.push({
+        'Instrument Type': inst.name,
+        'Total Face Value': faceSum,
+        'Total Calculated Value': calcSum,
+        'Total Difference': faceSum - calcSum,
+        'Average Yield (%)': inst.avgRate || '—',
+        'Instrument Count': inst.count || detailInst.details.length
+      })
+    }
+  })
+  if (instrumentTotals.length > 0) {
+    const totalsSheet = XLSX.utils.json_to_sheet(instrumentTotals)
+    XLSX.utils.book_append_sheet(workbook, totalsSheet, 'Instrument Totals')
+  }
+  
+  XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name || 'session'}_${valuationDate}.xlsx`);
+  showExportDialog.value = false;
 }
 
 onMounted(() => {

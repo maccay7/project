@@ -660,9 +660,9 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
-import * as XLSX from 'xlsx'
 import api from '@/services/api.js'
 import sessionManager from '@/services/sessionManager.js'
+import mappingTemplateManager from '@/services/mappingTemplateManager.js'
 import { useFredMarket } from '@/composables/useFredMarket'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import { loadFredSeriesChart, loadFredSeriesForReport } from '@/utils/fredChartHelper'
@@ -900,39 +900,55 @@ function deleteHistoryItem(idx) {
 }
 
 // ========== Mapping Templates ==========
-function loadSavedTemplates() {
-  const key = `${instrumentType.value}_mapping_templates`
-  const saved = localStorage.getItem(key)
-  savedTemplates.value = saved ? JSON.parse(saved) : {}
+async function loadSavedTemplates() {
+  const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
+  savedTemplates.value = {}
+  templates.forEach(t => {
+    savedTemplates.value[t.name] = t.column_mapping
+  })
 }
 
 function saveTemplates() {
-  const key = `${instrumentType.value}_mapping_templates`
-  localStorage.setItem(key, JSON.stringify(savedTemplates.value))
+  // Templates are now managed by mappingTemplateManager via backend API
+  // This function is kept for compatibility but delegates to the manager
 }
 
-function saveCurrentMappingAsTemplate() {
+async function saveCurrentMappingAsTemplate() {
   if (!newTemplateName.value) {
     alert('Please enter a template name.')
     return
   }
-  // Check if at least one mapping exists (optional)
+  // Check if at least one mapping exists
   const hasAnyMapping = requiredColumns.value.some(col => columnMapping.value[col])
   if (!hasAnyMapping) {
     alert('Cannot save template: no columns are mapped.')
     return
   }
-  savedTemplates.value[newTemplateName.value] = { ...columnMapping.value }
-  saveTemplates()
-  alert(`Template "${newTemplateName.value}" saved.`)
-  newTemplateName.value = ''
+  
+  const template = await mappingTemplateManager.saveTemplate(
+    newTemplateName.value,
+    instrumentType.value,
+    columnMapping.value,
+    requiredColumns.value,
+    fileColumns.value
+  )
+  
+  if (template) {
+    savedTemplates.value[template.name] = template.column_mapping
+    alert(`Template "${newTemplateName.value}" saved.`)
+    newTemplateName.value = ''
+    await loadSavedTemplates()
+  } else {
+    alert('Failed to save template.')
+  }
 }
 
-function applyTemplate() {
+async function applyTemplate() {
   if (!selectedTemplate.value) return
-  const template = savedTemplates.value[selectedTemplate.value]
+  const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
+  const template = templates.find(t => t.name === selectedTemplate.value)
   if (!template) return
-  columnMapping.value = { ...template }
+  columnMapping.value = { ...template.column_mapping }
   applyCurrentMapping()
   if (showPreview.value) {
     // The data is already updated via applyCurrentMapping; the ExcelViewer will re-render
@@ -941,37 +957,53 @@ function applyTemplate() {
   forceUpdate.value++
 }
 
-function deleteTemplate() {
+async function deleteTemplate() {
   if (!selectedTemplate.value) return
+  const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
+  const template = templates.find(t => t.name === selectedTemplate.value)
+  if (!template) return
+  
   if (confirm(`Delete template "${selectedTemplate.value}"?`)) {
-    delete savedTemplates.value[selectedTemplate.value]
-    saveTemplates()
-    selectedTemplate.value = ''
+    const success = await mappingTemplateManager.deleteTemplate(template.id)
+    if (success) {
+      delete savedTemplates.value[selectedTemplate.value]
+      selectedTemplate.value = ''
+      await loadSavedTemplates()
+    } else {
+      alert('Failed to delete template.')
+    }
   }
 }
 
 // ---- Dialog-specific template actions ----
-function loadSelectedTemplate() {
-  applyTemplate()
+async function loadSelectedTemplate() {
+  await applyTemplate()
 }
 
-function deleteSelectedTemplate() {
-  deleteTemplate()
+async function deleteSelectedTemplate() {
+  await deleteTemplate()
 }
 
-function overwriteSelectedTemplate() {
+async function overwriteSelectedTemplate() {
   if (!selectedTemplate.value) {
     alert('No template selected to overwrite.')
     return
   }
-  if (!newTemplateName.value) {
-    alert('Please enter a name for the overwritten template.')
-    return
+  const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
+  const template = templates.find(t => t.name === selectedTemplate.value)
+  if (!template) return
+  
+  const updated = await mappingTemplateManager.updateTemplate(template.id, {
+    columnMapping: columnMapping.value,
+    fileColumns: fileColumns.value
+  })
+  
+  if (updated) {
+    savedTemplates.value[selectedTemplate.value] = { ...columnMapping.value }
+    alert(`Template "${selectedTemplate.value}" overwritten.`)
+  } else {
+    alert('Failed to overwrite template.')
   }
-  // Overwrite the selected template with current mapping
-  savedTemplates.value[selectedTemplate.value] = { ...columnMapping.value }
-  saveTemplates()
-  alert(`Template "${selectedTemplate.value}" overwritten.`)
 }
 
 // ========== Computed Helpers ==========
@@ -1050,35 +1082,28 @@ function handleDrop(e) { const file = e.dataTransfer.files[0]; if (file) { uploa
 
 async function readFileData(file) {
   fileLoading.value = true
-  const ext = file.name.split('.').pop().toLowerCase()
-  let data = []
   try {
     if (file.size > 20 * 1024 * 1024 && !confirm(`File is ${(file.size / (1024 * 1024)).toFixed(2)} MB. Continue?`)) {
       fileLoading.value = false; uploadedFile.value = null; return
     }
-    if (ext === 'csv') {
-      const text = await file.text()
-      const lines = text.split(/\r?\n/).filter(l => l.trim())
-      if (lines.length === 0) throw new Error('Empty file')
-      let delimiter = ','; if (lines[0].includes(';') && !lines[0].includes(',')) delimiter = ';'
-      const headers = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ''))
-      data = lines.slice(1).map(line => {
-        const vals = line.split(delimiter).map(v => v.trim().replace(/^"|"$/g, ''))
-        const row = {}
-        headers.forEach((h, i) => { row[h] = vals[i] !== undefined ? vals[i] : '' })
-        return row
-      })
-    } else {
-      const buffer = await file.arrayBuffer()
-      const workbook = XLSX.read(buffer, { type: 'array', cellDates: false, cellNF: false, cellText: false, sheetRows: 5000, defval: "" })
-      const sheetName = workbook.SheetNames[0]
-      const sheet = workbook.Sheets[sheetName]
-      data = XLSX.utils.sheet_to_json(sheet, { defval: "" })
-      if (data.length === 0) throw new Error('No data found in the first sheet')
+
+    // Use backend API for file parsing
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await fetch('http://localhost:5000/api/upload', {
+      method: 'POST',
+      body: formData
+    })
+    const result = await response.json()
+
+    if (!result.success || !result.data.success) {
+      throw new Error(result.data?.error || 'Failed to parse file')
     }
+
+    const data = result.data.data || []
     rawData.value = data
     originalRawData.value = JSON.parse(JSON.stringify(data))
-    originalFileColumns.value = Object.keys(data[0] || {})
+    originalFileColumns.value = result.data.headers || Object.keys(data[0] || {})
     fileColumns.value = [...originalFileColumns.value]
 
     // Intelligent auto-match
@@ -1181,61 +1206,33 @@ async function continueAfterUpload() {
 }
 
 // ========== Cleaning ==========
-function applyCleaning() {
+async function applyCleaning() {
   if (!rawData.value.length) return
-  let data = JSON.parse(JSON.stringify(rawData.value))
-  if (cleaningOptions.value.removeDuplicates) {
-    const seen = new Set()
-    data = data.filter(row => { const key = JSON.stringify(row); if (seen.has(key)) return false; seen.add(key); return true })
-  }
-  if (cleaningOptions.value.removeEmptyRows) data = data.filter(row => Object.values(row).some(v => v !== null && v !== '' && v !== undefined))
-  if (cleaningOptions.value.trimWhitespace) data = data.map(row => { const newRow = {}; Object.keys(row).forEach(k => { newRow[k] = typeof row[k] === 'string' ? row[k].trim() : row[k] }); return newRow })
-  if (cleaningOptions.value.convertToNumbers) data = data.map(row => { const newRow = { ...row }; Object.keys(newRow).forEach(k => { if (typeof newRow[k] === 'string' && !isNaN(newRow[k]) && newRow[k].trim() !== '') newRow[k] = parseFloat(newRow[k]) }); return newRow })
-  if (cleaningOptions.value.fillMissingText) data = data.map(row => { Object.keys(row).forEach(k => { if (row[k] === undefined || row[k] === null || row[k] === '') row[k] = 'N/A' }); return row })
-  if (cleaningOptions.value.dropRowsWithMissing) data = data.filter(row => Object.values(row).every(v => v !== null && v !== '' && v !== undefined && (typeof v !== 'number' || !isNaN(v))))
-  if (cleaningOptions.value.removeOutliers) {
-    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
-    for (const col of numericCols) {
-      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
-      const mean = values.reduce((a, b) => a + b, 0) / values.length
-      const std = Math.sqrt(values.map(v => Math.pow(v - mean, 2)).reduce((a, b) => a + b, 0) / values.length)
-      const threshold = 3 * std
-      data = data.filter(row => Math.abs(row[col] - mean) <= threshold)
+  
+  try {
+    // Use backend API for data cleaning
+    const response = await fetch('http://localhost:5000/api/clean', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        data: rawData.value,
+        options: cleaningOptions.value
+      })
+    })
+    const result = await response.json()
+
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to clean data')
     }
+
+    cleanedData.value = result.data || []
+    cleaningStats.value = result.stats || { totalRows: rawData.value.length, validRows: 0, removedRows: 0, fixedMissing: 0 }
+    debouncedSave()
+    forceUpdate.value++
+  } catch (err) {
+    console.error('Cleaning error:', err)
+    alert(`Failed to clean data: ${err.message}`)
   }
-  if (cleaningOptions.value.standardizeDates) data = data.map(row => { Object.keys(row).forEach(k => { if (k.toLowerCase().includes('date') && row[k]) { const d = new Date(row[k]); if (!isNaN(d)) row[k] = d.toISOString().split('T')[0] } }); return row })
-  if (cleaningOptions.value.removeSpecialChars) data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].replace(/[^a-zA-Z0-9\s]/g, '') }); return row })
-  if (cleaningOptions.value.changeCase && cleaningOptions.value.caseType !== 'none') data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') { if (cleaningOptions.value.caseType === 'upper') row[k] = row[k].toUpperCase(); else if (cleaningOptions.value.caseType === 'lower') row[k] = row[k].toLowerCase(); else if (cleaningOptions.value.caseType === 'title') row[k] = row[k].replace(/\b\w/g, l => l.toUpperCase()) } }); return row })
-  if (cleaningOptions.value.fillWithCustom && cleaningOptions.value.customFillValue) data = data.map(row => { Object.keys(row).forEach(k => { if (row[k] === undefined || row[k] === null || row[k] === '') row[k] = cleaningOptions.value.customFillValue }); return row })
-  if (cleaningOptions.value.removeColumnsAllMissing) {
-    const colsToKeep = Object.keys(data[0] || {}).filter(col => data.some(row => row[col] !== null && row[col] !== '' && row[col] !== undefined))
-    data = data.map(row => { const newRow = {}; colsToKeep.forEach(c => newRow[c] = row[c]); return newRow })
-  }
-  if (cleaningOptions.value.capOutliers) {
-    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
-    for (const col of numericCols) {
-      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
-      const mean = values.reduce((a, b) => a + b, 0) / values.length
-      const std = Math.sqrt(values.map(v => Math.pow(v - mean, 2)).reduce((a, b) => a + b, 0) / values.length)
-      const upper = mean + 3 * std, lower = mean - 3 * std
-      data = data.map(row => { if (row[col] > upper) row[col] = upper; if (row[col] < lower) row[col] = lower; return row })
-    }
-  }
-  if (cleaningOptions.value.removeRowsSpecificColumnEmpty && cleaningOptions.value.specificColumn) data = data.filter(row => row[cleaningOptions.value.specificColumn] !== null && row[cleaningOptions.value.specificColumn] !== '')
-  if (cleaningOptions.value.standardizeNumericRange) {
-    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
-    for (const col of numericCols) {
-      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
-      const min = Math.min(...values), max = Math.max(...values)
-      if (max !== min) data = data.map(row => { if (typeof row[col] === 'number') row[col] = (row[col] - min) / (max - min); return row })
-    }
-  }
-  if (cleaningOptions.value.fillForward) { for (let i = 1; i < data.length; i++) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i - 1][k] }) }
-  if (cleaningOptions.value.fillBackward) { for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i + 1][k] }) }
-  cleanedData.value = data
-  cleaningStats.value = { totalRows: rawData.value.length, validRows: cleanedData.value.length, removedRows: rawData.value.length - cleanedData.value.length, fixedMissing: 0 }
-  debouncedSave()
-  forceUpdate.value++
 }
 
 // ========== CONTINUE AFTER CLEANING ==========
@@ -1258,77 +1255,32 @@ async function continueAfterCleaning() {
 async function calculateMetrics() {
   if (!cleanedData.value.length) return
 
-  let uniqueInstrumentsCount = 0
-  if (instrumentType.value === 'money-market') {
-    const uniqueNames = new Set(cleanedData.value.map(row => row.Instrument).filter(v => v && v !== 'N/A'))
-    uniqueInstrumentsCount = uniqueNames.size
-  } else if (instrumentType.value === 'bonds') {
-    const uniqueNames = new Set(cleanedData.value.map(row => row.BondName).filter(v => v && v !== 'N/A'))
-    uniqueInstrumentsCount = uniqueNames.size
-  } else {
-    const uniqueNames = new Set(cleanedData.value.map(row => row.TBillName).filter(v => v && v !== 'N/A'))
-    uniqueInstrumentsCount = uniqueNames.size
-  }
-  if (uniqueInstrumentsCount === 0) uniqueInstrumentsCount = cleanedData.value.length
+  try {
+    // Use backend API for calculations
+    const response = await fetch(`http://localhost:5000/api/calculate/${instrumentType.value}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        data: cleanedData.value,
+        country: effectiveCountry.value || 'USA',
+        currency: effectiveCurrency.value || 'USD',
+        maturity: effectiveMaturity.value || '1Y'
+      })
+    })
+    const result = await response.json()
 
-  if (instrumentType.value === 'money-market') {
-    const totalValue = cleanedData.value.reduce((s, r) => s + (parseFloat(r.Amount) || 0), 0)
-    const totalRate = cleanedData.value.reduce((s, r) => s + (parseFloat(r.Rate) || 0), 0)
-    const weightedSum = cleanedData.value.reduce((s, r) => s + ((parseFloat(r.Rate) || 0) * (parseFloat(r.Amount) || 0)), 0)
-    const avgRateVal = totalRate / cleanedData.value.length
-    calculations.value = {
-      totalValue, instrumentCount: uniqueInstrumentsCount,
-      avgRate: avgRateVal.toFixed(2),
-      weightedAvgRate: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
-      totalInterest: (totalValue * avgRateVal / 100).toFixed(2),
-      interestEarned: (totalValue * avgRateVal / 100 * 90 / 365).toFixed(2),
-      annualYield: ((Math.pow(1 + avgRateVal / 100, 365 / 90) - 1) * 100).toFixed(2),
-      effectiveAnnualRate: ((Math.pow(1 + avgRateVal / 100, 1) - 1) * 100).toFixed(2),
-      avgDaysToMaturity: 90,
-      totalPrincipal: totalValue
+    if (!result.success) {
+      throw new Error(result.message || 'Failed to calculate metrics')
     }
-  } else if (instrumentType.value === 'bonds') {
-    const totalValue = cleanedData.value.reduce((s, r) => s + (parseFloat(r.FaceValue) || 0), 0)
-    const totalRate = cleanedData.value.reduce((s, r) => s + (parseFloat(r.CouponRate) || 0), 0)
-    const weightedSum = cleanedData.value.reduce((s, r) => s + ((parseFloat(r.CouponRate) || 0) * (parseFloat(r.FaceValue) || 0)), 0)
-    const totalYield = cleanedData.value.reduce((s, r) => s + (parseFloat(r.Yield) || 0), 0)
-    const avgCoupon = totalRate / cleanedData.value.length
-    const avgYieldVal = totalYield / cleanedData.value.length
-    calculations.value = {
-      totalValue, instrumentCount: uniqueInstrumentsCount,
-      avgCouponRate: avgCoupon.toFixed(2),
-      weightedAvgCoupon: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
-      totalAnnualIncome: (totalValue * avgCoupon / 100).toFixed(2),
-      avgYTM: avgYieldVal.toFixed(2),
-      duration: (10 * 0.7).toFixed(2)
-    }
-  } else {
-    const totalValue = cleanedData.value.reduce((s, r) => s + (parseFloat(r.FaceValue) || 0), 0)
-    const totalRate = cleanedData.value.reduce((s, r) => s + (parseFloat(r.DiscountRate) || 0), 0)
-    const weightedSum = cleanedData.value.reduce((s, r) => s + ((parseFloat(r.DiscountRate) || 0) * (parseFloat(r.FaceValue) || 0)), 0)
-    const avgDiscount = totalRate / cleanedData.value.length
-    const discountAmount = totalValue * (avgDiscount / 100) * 91 / 360
-    const price = totalValue - discountAmount
-    calculations.value = {
-      totalValue, instrumentCount: uniqueInstrumentsCount,
-      avgDiscountRate: avgDiscount.toFixed(2),
-      weightedAvgDiscount: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
-      totalDiscount: discountAmount.toFixed(2),
-      effectiveYield: ((Math.pow(1 + discountAmount / price, 365 / 91) - 1) * 100).toFixed(2),
-      bondEquivalentYield: ((discountAmount / price) * (365 / 91) * 100).toFixed(2),
-      discountYield: ((discountAmount / totalValue) * (360 / 91) * 100).toFixed(2),
-      moneyMarketYield: ((discountAmount / price) * (360 / 91) * 100).toFixed(2),
-      pricePer100: (100 * (1 - (avgDiscount / 100) * (91 / 360))).toFixed(2),
-      totalPurchasePrice: price.toFixed(2),
-      avgInvestment: (price / cleanedData.value.length).toFixed(2),
-      holdingPeriodYield: ((discountAmount / price) * 100).toFixed(2),
-      annualizedYield: ((discountAmount / price) * (365 / 91) * 100).toFixed(2),
-      avgDaysToMaturity: 91
-    }
+
+    calculations.value = result.data || {}
+    await enrichCalculationsWithFred()
+    debouncedSave()
+    forceUpdate.value++
+  } catch (err) {
+    console.error('Calculation error:', err)
+    alert(`Failed to calculate metrics: ${err.message}`)
   }
-  await enrichCalculationsWithFred()
-  debouncedSave()
-  forceUpdate.value++
 }
 
 function continueToVisualizations() {
@@ -2391,7 +2343,7 @@ onMounted(async () => {
   }
   await checkAndReset()
   loadUploadHistory()
-  loadSavedTemplates()
+  await loadSavedTemplates()
   window.addEventListener('storage', () => checkAndReset())
   await loadFilterOptions()
   if (!effectiveMaturity.value) {

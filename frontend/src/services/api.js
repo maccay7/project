@@ -1,4 +1,3 @@
-// API Service for DuraCapital
 import { API_BASE_URL, RATE_LIMIT_MESSAGE } from '../config.js'
 
 async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = false) {
@@ -40,14 +39,12 @@ async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = fal
   }
 }
 
-// ========== AUTH ==========
 export const authAPI = {
   login: (email, password) => callAPI('/api/login', 'POST', { email, password }),
   logout: () => callAPI('/api/logout', 'POST'),
   register: (userData) => callAPI('/api/register', 'POST', userData)
 }
 
-// ========== DASHBOARD ==========
 export const dashboardAPI = {
   getKPI: () => callAPI('/api/dashboard/kpi'),
   getRecentActivity: () => callAPI('/api/dashboard/recent-activity'),
@@ -55,7 +52,6 @@ export const dashboardAPI = {
   getCharts: () => callAPI('/api/dashboard/charts')
 }
 
-// ========== CALCULATIONS ==========
 export const calculationsAPI = {
   execute: (type, data = [], params = {}, datasetId = null) =>
     callAPI('/api/calculate', 'POST', { instrument_type: type, data, params, dataset_id: datasetId }),
@@ -63,7 +59,6 @@ export const calculationsAPI = {
   getLatest: (datasetId) => callAPI(`/api/calculations/latest?dataset_id=${encodeURIComponent(datasetId)}`)
 }
 
-// ========== USER ==========
 export const userAPI = {
   getProfile: () => callAPI('/api/user/profile'),
   updateProfile: (profile) => callAPI('/api/user/profile', 'PUT', profile),
@@ -73,13 +68,11 @@ export const userAPI = {
   updateNotificationSettings: (settings) => callAPI('/api/user/notifications/settings', 'PUT', settings)
 }
 
-// ========== SYSTEM ==========
 export const systemAPI = {
   getInfo: () => callAPI('/api/system/info'),
   getHealth: () => callAPI('/api/health')
 }
 
-// ========== DATA OPERATIONS ==========
 export const dataAPI = {
   upload: async (file, type) => {
     console.log('Uploading:', file.name)
@@ -93,7 +86,6 @@ export const dataAPI = {
   deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { upload_id: id })
 }
 
-// ========== DATASET MANAGEMENT ==========
 export const datasetAPI = {
   save: (name, file_base64, sheet_names, upload_id, data = null, headers = null, instrument_type = null) =>
     callAPI('/api/save-dataset', 'POST', { name, file_base64, sheet_names, upload_id, data, headers, instrument_type }),
@@ -103,7 +95,6 @@ export const datasetAPI = {
   markDone: (id) => callAPI('/api/dataset/done', 'POST', { dataset_id: id, done: true })
 }
 
-// ========== FRED (NEW) ==========
 export const fredAPI = {
   getSeries: (seriesId, limit = 365, sortOrder = 'desc') =>
     callAPI(`/api/fred/series/${seriesId}?limit=${limit}&sort_order=${sortOrder}`),
@@ -121,13 +112,11 @@ export const fredAPI = {
     callAPI(`/api/fred/series-by-maturity?maturity=${maturity}&country=${country}`)
 }
 
-// ========== INSTRUMENT CONFIG ==========
 export const instrumentConfigAPI = {
   getAll: () => callAPI('/api/instrument-config'),
   get: (instrumentType) => callAPI(`/api/instrument-config/${encodeURIComponent(instrumentType)}`)
 }
 
-// ========== SESSIONS ==========
 export const sessionsAPI = {
   save: (session) => callAPI('/api/sessions/save', 'POST', session),
   get: async (session_id) => {
@@ -144,7 +133,6 @@ export const sessionsAPI = {
   delete: (session_id) => callAPI('/api/sessions/delete', 'POST', { session_id })
 }
 
-// ========== EXPORT ALL ==========
 export default {
   authAPI,
   dashboardAPI,

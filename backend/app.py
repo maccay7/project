@@ -13,6 +13,15 @@ from routes.settings import settings_routes
 from routes.fred import fred_routes
 from routes.sessions import sessions_routes
 from routes.instrument_config import instrument_config_routes
+from routes.mapping_templates import mapping_templates_routes
+from routes.dataset import dataset_routes
+from routes.data_processing import data_processing_routes
+from routes.portfolio import portfolio_routes
+from routes.mapping import mapping_routes
+from routes.session_management import session_management_routes
+from routes.version_history import version_history_routes
+from routes.reports import reports_routes
+from routes.visualization import visualization_routes
 
 app = Flask(__name__)
 
@@ -21,6 +30,10 @@ allowed_origins = [
     "http://127.0.0.1:3000",
     "http://localhost:3001",
     "http://127.0.0.1:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3002",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "http://192.168.0.125:3000",
     "http://192.168.100.4:3001"
 ]
@@ -39,6 +52,15 @@ settings_routes(app)
 fred_routes(app)
 sessions_routes(app)
 instrument_config_routes(app)
+mapping_templates_routes(app)
+dataset_routes(app)
+data_processing_routes(app)
+portfolio_routes(app)
+mapping_routes(app)
+session_management_routes(app)
+version_history_routes(app)
+reports_routes(app)
+visualization_routes(app)
 
 @app.route('/')
 def home():
