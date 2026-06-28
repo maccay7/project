@@ -109,13 +109,13 @@
                 <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
               </div>
 
-              <!-- Manual Mapping Dialog (with Saved Mappings) -->
+              <!-- Manual Mapping Dialog -->
               <v-dialog v-model="showMappingDialog" max-width="800px">
                 <v-card>
                   <v-card-title>Map Columns</v-card-title>
                   <v-card-text>
                     <div class="mapping-instructions">
-                      <p><v-icon small>mdi-hand-pointing-right</v-icon> Manually match each required system column to a column from your uploaded Excel file. The system suggests likely matches – you can override any selection.</p>
+                      <p><v-icon small>mdi-hand-pointing-right</v-icon> Match each required system column to a column from your uploaded file.</p>
                     </div>
                     <div class="mapping-grid">
                       <div v-for="reqCol in requiredColumns" :key="reqCol" class="mapping-row">
@@ -127,36 +127,55 @@
                       </div>
                     </div>
 
-                    <!-- ===== SAVED MAPPINGS SECTION ===== -->
-                    <div class="saved-mappings-section">
-                      <h4 class="saved-mappings-title">💾 Saved Mappings</h4>
-                      <div class="saved-mappings-row">
-                        <select v-model="selectedTemplate" class="template-select" style="flex:1; margin-right:8px;">
-                          <option value="">-- Load template --</option>
-                          <option v-for="(tmpl, name) in savedTemplates" :key="name" :value="name">{{ name }}</option>
-                        </select>
-                        <button class="btn-secondary" @click="loadSelectedTemplate" :disabled="!selectedTemplate">Load</button>
-                        <button class="btn-secondary" @click="deleteSelectedTemplate" :disabled="!selectedTemplate">Delete</button>
-                      </div>
-                      <div class="saved-mappings-row" style="margin-top:8px;">
-                        <input type="text" v-model="newTemplateName" placeholder="Template name" class="template-input" style="flex:1; margin-right:8px;" />
-                        <button class="btn-primary" @click="saveCurrentMappingAsTemplate" :disabled="!newTemplateName">Save</button>
-                        <button class="btn-secondary" @click="overwriteSelectedTemplate" :disabled="!selectedTemplate || !newTemplateName">Overwrite</button>
-                      </div>
-                      <div class="mapping-hint" style="margin-top:8px;">
-                        <v-icon size="16">mdi-information</v-icon>
-                        <small>Load a template to apply its mapping. Click "Apply Mapping" to preview.</small>
-                      </div>
-                    </div>
-
-                    <div class="mapping-hint" style="margin-top:16px;">
-                      <v-icon size="16">mdi-information</v-icon>
-                      <small>Changes are applied only when you click "Apply Mapping". The Preview Excel will update instantly.</small>
+                    <!-- Button to open saved mappings popup -->
+                    <div style="margin: 16px 0;">
+                      <button class="btn-secondary" @click="showSavedMappingsDialog = true">Manage Saved Mappings</button>
                     </div>
                   </v-card-text>
                   <v-card-actions>
                     <button class="btn-secondary" @click="closeMappingDialog">Cancel</button>
                     <button class="btn-primary" @click="applyColumnMappingAndClose">Apply Mapping</button>
+                  </v-card-actions>
+                </v-card>
+              </v-dialog>
+
+              <!-- Saved Mappings Popup (separate dialog) -->
+              <v-dialog v-model="showSavedMappingsDialog" max-width="700px">
+                <v-card>
+                  <v-card-title class="saved-mappings-popup-title">
+                    <v-icon left>mdi-content-save</v-icon> Saved Mappings
+                    <v-spacer></v-spacer>
+                    <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">✕</button>
+                  </v-card-title>
+                  <v-card-text>
+                    <!-- Save section at the top -->
+                    <div class="save-section">
+                      <h4>Save current mapping as template</h4>
+                      <div class="save-row">
+                        <input type="text" v-model="newTemplateName" placeholder="Template name" class="template-input" />
+                        <button class="btn-primary" @click="saveCurrentMappingAsTemplate" :disabled="!newTemplateName">Save</button>
+                      </div>
+                    </div>
+
+                    <!-- List of saved templates below -->
+                    <div v-if="Object.keys(savedTemplates).length" class="saved-list">
+                      <div v-for="(tmpl, name) in savedTemplates" :key="name" class="saved-item">
+                        <div class="template-info">
+                          <span class="template-name">{{ name }}</span>
+                          <span class="template-timestamp">Saved: {{ tmpl.timestamp ? new Date(tmpl.timestamp).toLocaleString() : 'unknown' }}</span>
+                        </div>
+                        <div class="template-actions">
+                          <button class="btn-secondary small" @click="loadTemplateFromPopup(name)">Load</button>
+                          <button class="btn-danger small" @click="deleteTemplateFromPopup(name)">Delete</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-else class="empty-saved">
+                      <p>No saved mappings yet.</p>
+                    </div>
+                  </v-card-text>
+                  <v-card-actions>
+                    <button class="btn-secondary" @click="showSavedMappingsDialog = false">Close</button>
                   </v-card-actions>
                 </v-card>
               </v-dialog>
@@ -660,9 +679,9 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
+import * as XLSX from 'xlsx'
 import api from '@/services/api.js'
 import sessionManager from '@/services/sessionManager.js'
-import mappingTemplateManager from '@/services/mappingTemplateManager.js'
 import { useFredMarket } from '@/composables/useFredMarket'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import { loadFredSeriesChart, loadFredSeriesForReport } from '@/utils/fredChartHelper'
@@ -670,6 +689,8 @@ import { renderFredLineChart } from '@/utils/renderFredChart'
 import { buildWorkflowSnapshot, applyWorkflowToPage } from '@/utils/instrumentSession.js'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig.js'
 import { autoMatchColumns as matchColumns, applyMappingToRows, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping.js'
+// ===== NEW: import intelligent parser =====
+import { parseExcel } from '@/utils/intelligentParser.js'
 
 // ========== Router & Route ==========
 const router = useRouter()
@@ -822,6 +843,7 @@ const cleanedData = ref([])
 const previewData = ref([])
 const columnMapping = ref({})
 const showMappingDialog = ref(false)
+const showSavedMappingsDialog = ref(false) // new dialog for saved mappings
 const fileColumns = ref([])
 const fixedValuesTracker = ref(new Map())
 const calculations = ref({})
@@ -900,20 +922,18 @@ function deleteHistoryItem(idx) {
 }
 
 // ========== Mapping Templates ==========
-async function loadSavedTemplates() {
-  const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
-  savedTemplates.value = {}
-  templates.forEach(t => {
-    savedTemplates.value[t.name] = t.column_mapping
-  })
+function loadSavedTemplates() {
+  const key = `${instrumentType.value}_mapping_templates`
+  const saved = localStorage.getItem(key)
+  savedTemplates.value = saved ? JSON.parse(saved) : {}
 }
 
 function saveTemplates() {
-  // Templates are now managed by mappingTemplateManager via backend API
-  // This function is kept for compatibility but delegates to the manager
+  const key = `${instrumentType.value}_mapping_templates`
+  localStorage.setItem(key, JSON.stringify(savedTemplates.value))
 }
 
-async function saveCurrentMappingAsTemplate() {
+function saveCurrentMappingAsTemplate() {
   if (!newTemplateName.value) {
     alert('Please enter a template name.')
     return
@@ -924,31 +944,22 @@ async function saveCurrentMappingAsTemplate() {
     alert('Cannot save template: no columns are mapped.')
     return
   }
-  
-  const template = await mappingTemplateManager.saveTemplate(
-    newTemplateName.value,
-    instrumentType.value,
-    columnMapping.value,
-    requiredColumns.value,
-    fileColumns.value
-  )
-  
-  if (template) {
-    savedTemplates.value[template.name] = template.column_mapping
-    alert(`Template "${newTemplateName.value}" saved.`)
-    newTemplateName.value = ''
-    await loadSavedTemplates()
-  } else {
-    alert('Failed to save template.')
+  // Store the mapping with a timestamp
+  savedTemplates.value[newTemplateName.value] = {
+    mapping: { ...columnMapping.value },
+    timestamp: Date.now()
   }
+  saveTemplates()
+  alert(`Template "${newTemplateName.value}" saved.`)
+  newTemplateName.value = ''
+  // refresh the popup list automatically
 }
 
-async function applyTemplate() {
+function applyTemplate() {
   if (!selectedTemplate.value) return
-  const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
-  const template = templates.find(t => t.name === selectedTemplate.value)
+  const template = savedTemplates.value[selectedTemplate.value]
   if (!template) return
-  columnMapping.value = { ...template.column_mapping }
+  columnMapping.value = { ...template.mapping }
   applyCurrentMapping()
   if (showPreview.value) {
     // The data is already updated via applyCurrentMapping; the ExcelViewer will re-render
@@ -957,52 +968,28 @@ async function applyTemplate() {
   forceUpdate.value++
 }
 
-async function deleteTemplate() {
+function deleteTemplate() {
   if (!selectedTemplate.value) return
-  const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
-  const template = templates.find(t => t.name === selectedTemplate.value)
-  if (!template) return
-  
   if (confirm(`Delete template "${selectedTemplate.value}"?`)) {
-    const success = await mappingTemplateManager.deleteTemplate(template.id)
-    if (success) {
-      delete savedTemplates.value[selectedTemplate.value]
-      selectedTemplate.value = ''
-      await loadSavedTemplates()
-    } else {
-      alert('Failed to delete template.')
-    }
+    delete savedTemplates.value[selectedTemplate.value]
+    saveTemplates()
+    selectedTemplate.value = ''
   }
 }
 
-// ---- Dialog-specific template actions ----
-async function loadSelectedTemplate() {
-  await applyTemplate()
+// ---- New functions for the popup ----
+function loadTemplateFromPopup(name) {
+  selectedTemplate.value = name
+  applyTemplate()
+  showSavedMappingsDialog.value = false // close popup after loading
 }
 
-async function deleteSelectedTemplate() {
-  await deleteTemplate()
-}
-
-async function overwriteSelectedTemplate() {
-  if (!selectedTemplate.value) {
-    alert('No template selected to overwrite.')
-    return
-  }
-  const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
-  const template = templates.find(t => t.name === selectedTemplate.value)
-  if (!template) return
-  
-  const updated = await mappingTemplateManager.updateTemplate(template.id, {
-    columnMapping: columnMapping.value,
-    fileColumns: fileColumns.value
-  })
-  
-  if (updated) {
-    savedTemplates.value[selectedTemplate.value] = { ...columnMapping.value }
-    alert(`Template "${selectedTemplate.value}" overwritten.`)
-  } else {
-    alert('Failed to overwrite template.')
+function deleteTemplateFromPopup(name) {
+  if (confirm(`Delete template "${name}"?`)) {
+    delete savedTemplates.value[name]
+    saveTemplates()
+    // if currently selected, clear it
+    if (selectedTemplate.value === name) selectedTemplate.value = ''
   }
 }
 
@@ -1070,6 +1057,12 @@ function goToReportTab() {
 }
 
 function switchTab(tab) {
+  // Prevent skipping ahead beyond allowed steps
+  const idx = steps.value.findIndex(s => s.tab === tab)
+  if (idx > farthestAllowedIndex.value) {
+    alert('You cannot skip ahead. Complete the current step first.')
+    return
+  }
   saveSessionData()
   activeTab.value = tab
   forceUpdate.value++
@@ -1080,30 +1073,61 @@ const fileInput = ref(null)
 function handleFileUpload(e) { const file = e.target.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 function handleDrop(e) { const file = e.dataTransfer.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 
+// ===== MODIFIED readFileData to use intelligent parser =====
 async function readFileData(file) {
   fileLoading.value = true
+  const ext = file.name.split('.').pop().toLowerCase()
+  let data = []
   try {
     if (file.size > 20 * 1024 * 1024 && !confirm(`File is ${(file.size / (1024 * 1024)).toFixed(2)} MB. Continue?`)) {
       fileLoading.value = false; uploadedFile.value = null; return
     }
-
-    // Use backend API for file parsing
-    const formData = new FormData()
-    formData.append('file', file)
-    const response = await fetch('http://localhost:5000/api/upload', {
-      method: 'POST',
-      body: formData
-    })
-    const result = await response.json()
-
-    if (!result.success || !result.data.success) {
-      throw new Error(result.data?.error || 'Failed to parse file')
+    if (ext === 'csv') {
+      const text = await file.text()
+      const lines = text.split(/\r?\n/).filter(l => l.trim())
+      if (lines.length === 0) throw new Error('Empty file')
+      let delimiter = ','; if (lines[0].includes(';') && !lines[0].includes(',')) delimiter = ';'
+      const headers = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ''))
+      data = lines.slice(1).map(line => {
+        const vals = line.split(delimiter).map(v => v.trim().replace(/^"|"$/g, ''))
+        const row = {}
+        headers.forEach((h, i) => { row[h] = vals[i] !== undefined ? vals[i] : '' })
+        return row
+      })
+    } else {
+      // ---- USE INTELLIGENT PARSER FOR EXCEL FILES ----
+      const buffer = await file.arrayBuffer()
+      try {
+        const parsed = await parseExcel(file, instrumentType.value)
+        if (parsed && parsed.length) {
+          data = parsed
+          // Set original columns to match parsed keys
+          originalFileColumns.value = Object.keys(data[0] || {})
+          fileColumns.value = [...originalFileColumns.value]
+          // Auto-match columns based on required fields
+          columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+          applyCurrentMapping()
+          addToHistory(file.name, data)
+          debouncedSave()
+          forceUpdate.value++
+          fileLoading.value = false
+          // Skip the rest of the function
+          return
+        }
+      } catch (err) {
+        console.warn('Intelligent parser failed, falling back to regular parser:', err)
+      }
+      // Fallback to regular parser
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: false, cellNF: false, cellText: false, sheetRows: 5000, defval: "" })
+      const sheetName = workbook.SheetNames[0]
+      const sheet = workbook.Sheets[sheetName]
+      data = XLSX.utils.sheet_to_json(sheet, { defval: "" })
+      if (data.length === 0) throw new Error('No data found in the first sheet')
     }
-
-    const data = result.data.data || []
+    // Continue with common processing
     rawData.value = data
     originalRawData.value = JSON.parse(JSON.stringify(data))
-    originalFileColumns.value = result.data.headers || Object.keys(data[0] || {})
+    originalFileColumns.value = Object.keys(data[0] || {})
     fileColumns.value = [...originalFileColumns.value]
 
     // Intelligent auto-match
@@ -1206,33 +1230,61 @@ async function continueAfterUpload() {
 }
 
 // ========== Cleaning ==========
-async function applyCleaning() {
+function applyCleaning() {
   if (!rawData.value.length) return
-  
-  try {
-    // Use backend API for data cleaning
-    const response = await fetch('http://localhost:5000/api/clean', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        data: rawData.value,
-        options: cleaningOptions.value
-      })
-    })
-    const result = await response.json()
-
-    if (!result.success) {
-      throw new Error(result.message || 'Failed to clean data')
-    }
-
-    cleanedData.value = result.data || []
-    cleaningStats.value = result.stats || { totalRows: rawData.value.length, validRows: 0, removedRows: 0, fixedMissing: 0 }
-    debouncedSave()
-    forceUpdate.value++
-  } catch (err) {
-    console.error('Cleaning error:', err)
-    alert(`Failed to clean data: ${err.message}`)
+  let data = JSON.parse(JSON.stringify(rawData.value))
+  if (cleaningOptions.value.removeDuplicates) {
+    const seen = new Set()
+    data = data.filter(row => { const key = JSON.stringify(row); if (seen.has(key)) return false; seen.add(key); return true })
   }
+  if (cleaningOptions.value.removeEmptyRows) data = data.filter(row => Object.values(row).some(v => v !== null && v !== '' && v !== undefined))
+  if (cleaningOptions.value.trimWhitespace) data = data.map(row => { const newRow = {}; Object.keys(row).forEach(k => { newRow[k] = typeof row[k] === 'string' ? row[k].trim() : row[k] }); return newRow })
+  if (cleaningOptions.value.convertToNumbers) data = data.map(row => { const newRow = { ...row }; Object.keys(newRow).forEach(k => { if (typeof newRow[k] === 'string' && !isNaN(newRow[k]) && newRow[k].trim() !== '') newRow[k] = parseFloat(newRow[k]) }); return newRow })
+  if (cleaningOptions.value.fillMissingText) data = data.map(row => { Object.keys(row).forEach(k => { if (row[k] === undefined || row[k] === null || row[k] === '') row[k] = 'N/A' }); return row })
+  if (cleaningOptions.value.dropRowsWithMissing) data = data.filter(row => Object.values(row).every(v => v !== null && v !== '' && v !== undefined && (typeof v !== 'number' || !isNaN(v))))
+  if (cleaningOptions.value.removeOutliers) {
+    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+    for (const col of numericCols) {
+      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
+      const mean = values.reduce((a, b) => a + b, 0) / values.length
+      const std = Math.sqrt(values.map(v => Math.pow(v - mean, 2)).reduce((a, b) => a + b, 0) / values.length)
+      const threshold = 3 * std
+      data = data.filter(row => Math.abs(row[col] - mean) <= threshold)
+    }
+  }
+  if (cleaningOptions.value.standardizeDates) data = data.map(row => { Object.keys(row).forEach(k => { if (k.toLowerCase().includes('date') && row[k]) { const d = new Date(row[k]); if (!isNaN(d)) row[k] = d.toISOString().split('T')[0] } }); return row })
+  if (cleaningOptions.value.removeSpecialChars) data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].replace(/[^a-zA-Z0-9\s]/g, '') }); return row })
+  if (cleaningOptions.value.changeCase && cleaningOptions.value.caseType !== 'none') data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') { if (cleaningOptions.value.caseType === 'upper') row[k] = row[k].toUpperCase(); else if (cleaningOptions.value.caseType === 'lower') row[k] = row[k].toLowerCase(); else if (cleaningOptions.value.caseType === 'title') row[k] = row[k].replace(/\b\w/g, l => l.toUpperCase()) } }); return row })
+  if (cleaningOptions.value.fillWithCustom && cleaningOptions.value.customFillValue) data = data.map(row => { Object.keys(row).forEach(k => { if (row[k] === undefined || row[k] === null || row[k] === '') row[k] = cleaningOptions.value.customFillValue }); return row })
+  if (cleaningOptions.value.removeColumnsAllMissing) {
+    const colsToKeep = Object.keys(data[0] || {}).filter(col => data.some(row => row[col] !== null && row[col] !== '' && row[col] !== undefined))
+    data = data.map(row => { const newRow = {}; colsToKeep.forEach(c => newRow[c] = row[c]); return newRow })
+  }
+  if (cleaningOptions.value.capOutliers) {
+    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+    for (const col of numericCols) {
+      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
+      const mean = values.reduce((a, b) => a + b, 0) / values.length
+      const std = Math.sqrt(values.map(v => Math.pow(v - mean, 2)).reduce((a, b) => a + b, 0) / values.length)
+      const upper = mean + 3 * std, lower = mean - 3 * std
+      data = data.map(row => { if (row[col] > upper) row[col] = upper; if (row[col] < lower) row[col] = lower; return row })
+    }
+  }
+  if (cleaningOptions.value.removeRowsSpecificColumnEmpty && cleaningOptions.value.specificColumn) data = data.filter(row => row[cleaningOptions.value.specificColumn] !== null && row[cleaningOptions.value.specificColumn] !== '')
+  if (cleaningOptions.value.standardizeNumericRange) {
+    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+    for (const col of numericCols) {
+      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
+      const min = Math.min(...values), max = Math.max(...values)
+      if (max !== min) data = data.map(row => { if (typeof row[col] === 'number') row[col] = (row[col] - min) / (max - min); return row })
+    }
+  }
+  if (cleaningOptions.value.fillForward) { for (let i = 1; i < data.length; i++) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i - 1][k] }) }
+  if (cleaningOptions.value.fillBackward) { for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i + 1][k] }) }
+  cleanedData.value = data
+  cleaningStats.value = { totalRows: rawData.value.length, validRows: cleanedData.value.length, removedRows: rawData.value.length - cleanedData.value.length, fixedMissing: 0 }
+  debouncedSave()
+  forceUpdate.value++
 }
 
 // ========== CONTINUE AFTER CLEANING ==========
@@ -1255,32 +1307,77 @@ async function continueAfterCleaning() {
 async function calculateMetrics() {
   if (!cleanedData.value.length) return
 
-  try {
-    // Use backend API for calculations
-    const response = await fetch(`http://localhost:5000/api/calculate/${instrumentType.value}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        data: cleanedData.value,
-        country: effectiveCountry.value || 'USA',
-        currency: effectiveCurrency.value || 'USD',
-        maturity: effectiveMaturity.value || '1Y'
-      })
-    })
-    const result = await response.json()
-
-    if (!result.success) {
-      throw new Error(result.message || 'Failed to calculate metrics')
-    }
-
-    calculations.value = result.data || {}
-    await enrichCalculationsWithFred()
-    debouncedSave()
-    forceUpdate.value++
-  } catch (err) {
-    console.error('Calculation error:', err)
-    alert(`Failed to calculate metrics: ${err.message}`)
+  let uniqueInstrumentsCount = 0
+  if (instrumentType.value === 'money-market') {
+    const uniqueNames = new Set(cleanedData.value.map(row => row.Instrument).filter(v => v && v !== 'N/A'))
+    uniqueInstrumentsCount = uniqueNames.size
+  } else if (instrumentType.value === 'bonds') {
+    const uniqueNames = new Set(cleanedData.value.map(row => row.BondName).filter(v => v && v !== 'N/A'))
+    uniqueInstrumentsCount = uniqueNames.size
+  } else {
+    const uniqueNames = new Set(cleanedData.value.map(row => row.TBillName).filter(v => v && v !== 'N/A'))
+    uniqueInstrumentsCount = uniqueNames.size
   }
+  if (uniqueInstrumentsCount === 0) uniqueInstrumentsCount = cleanedData.value.length
+
+  if (instrumentType.value === 'money-market') {
+    const totalValue = cleanedData.value.reduce((s, r) => s + (parseFloat(r.Amount) || 0), 0)
+    const totalRate = cleanedData.value.reduce((s, r) => s + (parseFloat(r.Rate) || 0), 0)
+    const weightedSum = cleanedData.value.reduce((s, r) => s + ((parseFloat(r.Rate) || 0) * (parseFloat(r.Amount) || 0)), 0)
+    const avgRateVal = totalRate / cleanedData.value.length
+    calculations.value = {
+      totalValue, instrumentCount: uniqueInstrumentsCount,
+      avgRate: avgRateVal.toFixed(2),
+      weightedAvgRate: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
+      totalInterest: (totalValue * avgRateVal / 100).toFixed(2),
+      interestEarned: (totalValue * avgRateVal / 100 * 90 / 365).toFixed(2),
+      annualYield: ((Math.pow(1 + avgRateVal / 100, 365 / 90) - 1) * 100).toFixed(2),
+      effectiveAnnualRate: ((Math.pow(1 + avgRateVal / 100, 1) - 1) * 100).toFixed(2),
+      avgDaysToMaturity: 90,
+      totalPrincipal: totalValue
+    }
+  } else if (instrumentType.value === 'bonds') {
+    const totalValue = cleanedData.value.reduce((s, r) => s + (parseFloat(r.FaceValue) || 0), 0)
+    const totalRate = cleanedData.value.reduce((s, r) => s + (parseFloat(r.CouponRate) || 0), 0)
+    const weightedSum = cleanedData.value.reduce((s, r) => s + ((parseFloat(r.CouponRate) || 0) * (parseFloat(r.FaceValue) || 0)), 0)
+    const totalYield = cleanedData.value.reduce((s, r) => s + (parseFloat(r.Yield) || 0), 0)
+    const avgCoupon = totalRate / cleanedData.value.length
+    const avgYieldVal = totalYield / cleanedData.value.length
+    calculations.value = {
+      totalValue, instrumentCount: uniqueInstrumentsCount,
+      avgCouponRate: avgCoupon.toFixed(2),
+      weightedAvgCoupon: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
+      totalAnnualIncome: (totalValue * avgCoupon / 100).toFixed(2),
+      avgYTM: avgYieldVal.toFixed(2),
+      duration: (10 * 0.7).toFixed(2)
+    }
+  } else {
+    const totalValue = cleanedData.value.reduce((s, r) => s + (parseFloat(r.FaceValue) || 0), 0)
+    const totalRate = cleanedData.value.reduce((s, r) => s + (parseFloat(r.DiscountRate) || 0), 0)
+    const weightedSum = cleanedData.value.reduce((s, r) => s + ((parseFloat(r.DiscountRate) || 0) * (parseFloat(r.FaceValue) || 0)), 0)
+    const avgDiscount = totalRate / cleanedData.value.length
+    const discountAmount = totalValue * (avgDiscount / 100) * 91 / 360
+    const price = totalValue - discountAmount
+    calculations.value = {
+      totalValue, instrumentCount: uniqueInstrumentsCount,
+      avgDiscountRate: avgDiscount.toFixed(2),
+      weightedAvgDiscount: totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : 0,
+      totalDiscount: discountAmount.toFixed(2),
+      effectiveYield: ((Math.pow(1 + discountAmount / price, 365 / 91) - 1) * 100).toFixed(2),
+      bondEquivalentYield: ((discountAmount / price) * (365 / 91) * 100).toFixed(2),
+      discountYield: ((discountAmount / totalValue) * (360 / 91) * 100).toFixed(2),
+      moneyMarketYield: ((discountAmount / price) * (360 / 91) * 100).toFixed(2),
+      pricePer100: (100 * (1 - (avgDiscount / 100) * (91 / 360))).toFixed(2),
+      totalPurchasePrice: price.toFixed(2),
+      avgInvestment: (price / cleanedData.value.length).toFixed(2),
+      holdingPeriodYield: ((discountAmount / price) * 100).toFixed(2),
+      annualizedYield: ((discountAmount / price) * (365 / 91) * 100).toFixed(2),
+      avgDaysToMaturity: 91
+    }
+  }
+  await enrichCalculationsWithFred()
+  debouncedSave()
+  forceUpdate.value++
 }
 
 function continueToVisualizations() {
@@ -2343,7 +2440,7 @@ onMounted(async () => {
   }
   await checkAndReset()
   loadUploadHistory()
-  await loadSavedTemplates()
+  loadSavedTemplates()
   window.addEventListener('storage', () => checkAndReset())
   await loadFilterOptions()
   if (!effectiveMaturity.value) {
@@ -2419,63 +2516,116 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .mapping-row { display: flex; align-items: center; gap: 15px; }
 .required-label { width: 140px; font-weight: 600; color: #0B2044; }
 .mapping-select { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
-.mapping-hint { margin-top: 15px; padding: 10px; background: #f8f9ff; border-radius: 8px; display: flex; align-items: center; gap: 8px; color: #666; }
 
-/* ===== SAVED MAPPINGS STYLES ===== */
-.saved-mappings-section {
-  margin-top: 20px;
-  padding: 16px;
-  background: #f8f9ff;
-  border-radius: 8px;
-  border: 1px solid #e8ecf1;
-}
-.saved-mappings-title {
-  color: #0B2044;
-  font-size: 15px;
-  font-weight: 600;
-  margin: 0 0 12px 0;
-}
-.saved-mappings-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.saved-mappings-row .template-select,
-.saved-mappings-row .template-input {
-  padding: 6px 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 13px;
-  background: white;
-}
-.saved-mappings-row .template-select:focus,
-.saved-mappings-row .template-input:focus {
-  outline: none;
-  border-color: #0B2044;
-}
-.saved-mappings-row .btn-primary,
-.saved-mappings-row .btn-secondary {
-  padding: 6px 14px;
-  font-size: 12px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.saved-mappings-row .btn-primary {
+/* ===== SAVED MAPPINGS POPUP STYLES ===== */
+.saved-mappings-popup-title {
   background: #0B2044;
   color: white;
+  padding: 16px 24px;
 }
-.saved-mappings-row .btn-primary:hover {
+.saved-mappings-popup-title .btn-close-dialog {
+  background: transparent;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+}
+.saved-mappings-popup-title .btn-close-dialog:hover {
+  background: rgba(255,255,255,0.1);
+}
+.save-section {
+  margin-bottom: 20px;
+}
+.save-section h4 {
+  margin-bottom: 12px;
+  color: #0B2044;
+}
+.save-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.save-row .template-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.save-row .btn-primary {
+  background: #0B2044;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.save-row .btn-primary:hover {
   background: #1a3a6e;
 }
-.saved-mappings-row .btn-secondary {
+.save-row .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.saved-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border-top: 1px solid #e8ecf1;
+  padding-top: 12px;
+}
+.saved-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eee;
+}
+.saved-item:last-child {
+  border-bottom: none;
+}
+.template-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.template-name {
+  font-weight: 600;
+  color: #0B2044;
+}
+.template-timestamp {
+  font-size: 12px;
+  color: #999;
+}
+.template-actions {
+  display: flex;
+  gap: 8px;
+}
+.btn-secondary.small, .btn-danger.small {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+}
+.btn-secondary.small {
   background: #e0e0e0;
   color: #333;
 }
-.saved-mappings-row .btn-secondary:hover {
+.btn-secondary.small:hover {
   background: #c0c0c0;
+}
+.btn-danger.small {
+  background: #f44336;
+  color: white;
+}
+.btn-danger.small:hover {
+  background: #d32f2f;
+}
+.empty-saved {
+  text-align: center;
+  color: #999;
+  padding: 20px 0;
 }
 
 /* ===== REST OF ORIGINAL STYLES – UNCHANGED ===== */
