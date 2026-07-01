@@ -70,7 +70,9 @@
                     <v-icon small>mdi-file-excel-outline</v-icon>
                     <span>{{ item.name }}</span>
                     <small>{{ new Date(item.date).toLocaleString() }}</small>
-                    <button class="btn-delete-history" @click.stop="deleteHistoryItem(idx)">🗑️</button>
+                    <button class="btn-delete-history" @click.stop="deleteHistoryItem(idx)">
+                      <v-icon small color="error">mdi-delete</v-icon>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -143,7 +145,9 @@
                   <v-card-title class="saved-mappings-popup-title">
                     <v-icon left>mdi-content-save-outline</v-icon> Saved Mappings
                     <v-spacer></v-spacer>
-                    <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">✕</button>
+                    <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">
+                      <v-icon>mdi-close</v-icon>
+                    </button>
                   </v-card-title>
                   <v-card-text>
                     <div class="save-section">
@@ -415,10 +419,10 @@
                 </div>
                 <div class="comparison-item">
                   <span class="comparison-label">Benchmark Yield ({{ selectedMaturityOptionLabel }}):</span>
-                  <span class="comparison-value market">{{ getRateForMaturity(effectiveMaturity) }}%</span>
+                  <span class="comparison-value market">{{ benchmarkYield !== null ? benchmarkYield + '%' : '—' }}</span>
                 </div>
-                <div class="comparison-difference" :class="{ 'positive': (getRateForMaturity(effectiveMaturity) - portfolioAvgRate) > 0, 'negative': (getRateForMaturity(effectiveMaturity) - portfolioAvgRate) < 0 }">
-                  Difference: {{ (getRateForMaturity(effectiveMaturity) - portfolioAvgRate).toFixed(2) }}%
+                <div class="comparison-difference" :class="{ 'positive': benchmarkYield - portfolioAvgRate > 0, 'negative': benchmarkYield - portfolioAvgRate < 0 }">
+                  Difference: {{ benchmarkYield !== null ? (benchmarkYield - portfolioAvgRate).toFixed(2) : '—' }}%
                 </div>
               </div>
 
@@ -477,7 +481,7 @@
 
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('calculations')">Previous</button>
-                <button class="btn-primary" @click="switchTab('summary')">Continue</button>
+                <button class="btn-primary" @click="continueFromVisualizations">Continue</button>
                 <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
               </div>
             </v-card-text>
@@ -560,7 +564,7 @@
                     <button class="btn-secondary" @click="deselectAllInstruments">Deselect All</button>
                   </div>
                 </div>
-                <p class="report-hint">Click <strong>Preview Report</strong> to see the full professional report with cover, TOC, methodology, appendix, and live FRED charts. Downloads match the preview.</p>
+                <!-- report hint removed to reduce UI clutter -->
                 <div class="report-actions">
                   <button class="btn-preview" @click="previewReport">Preview Report</button>
                   <button class="btn-json" @click="downloadCombinedReport('json')">JSON</button>
@@ -569,7 +573,6 @@
                   <button class="btn-pdf" @click="downloadCombinedReport('pdf')">PDF</button>
                   <button class="btn-word" @click="downloadCombinedReport('word')">Word</button>
                   <button class="btn-excel" @click="downloadCombinedReport('excel')">Excel (XLSX)</button>
-                  <button class="btn-save" @click="saveToSession">Save to Session</button>
                 </div>
               </div>
               <div class="navigation-buttons">
@@ -588,7 +591,9 @@
         <v-card-title class="excel-dialog-title">
           {{ excelDialogTitle }} - Excel Viewer
           <v-spacer></v-spacer>
-          <button class="btn-close-dialog" @click="closeExcelDialog">✕</button>
+          <button class="btn-close-dialog" @click="closeExcelDialog">
+            <v-icon>mdi-close</v-icon>
+          </button>
         </v-card-title>
         <v-card-text class="excel-dialog-content pa-0">
           <ExcelViewer :data="excelData" :headers="excelColumns" @data-update="onExcelDataUpdate" />
@@ -599,7 +604,9 @@
     <!-- Formula Dialog -->
     <v-dialog v-model="formulaDialog" max-width="500px">
       <v-card>
-        <v-card-title class="formula-dialog-title">📐 Formula Used</v-card-title>
+        <v-card-title class="formula-dialog-title">
+          <v-icon>mdi-ruler</v-icon> Formula Used
+        </v-card-title>
         <v-card-text class="formula-text">{{ formulaText }}</v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
@@ -614,7 +621,9 @@
         <v-card-title class="excel-dialog-title">
           Report Preview
           <v-spacer></v-spacer>
-          <button class="btn-close-dialog" @click="reportPreviewDialog = false">✕</button>
+          <button class="btn-close-dialog" @click="reportPreviewDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </button>
         </v-card-title>
         <v-card-text class="report-preview-content" style="padding:0;">
           <iframe :srcdoc="reportPreviewHtml" frameborder="0" style="width:100%; height:80vh;"></iframe>
@@ -640,20 +649,24 @@ import sessionManager from '@/services/sessionManager.js'
 import { useFredMarket } from '@/composables/useFredMarket'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import { loadFredSeriesChart, loadFredSeriesForReport } from '@/utils/fredChartHelper'
-import { renderFredLineChart } from '@/utils/renderFredChart'
+import { markStepCompleted } from '@/utils/workflowProgress.js'
 import { buildWorkflowSnapshot, applyWorkflowToPage } from '@/utils/instrumentSession.js'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig.js'
 import { autoMatchColumns as matchColumns, applyMappingToRows, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping.js'
 import { parseExcel } from '@/utils/intelligentParser.js'
 import Chart from 'chart.js/auto'
-import logoUrl from '@/assets/DuraCapital logo.png'
 
-// ========== Router & Route ==========
+// ---------- CACHE ----------
+const yieldCurveCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const logoUrl = '/DuraCapital logo.png'
+const backgroundCoverUrl = '/reportbackground.png'
+
 const router = useRouter()
 const route = useRoute()
 const activeSession = ref(null)
 
-// ========== Instrument Info ==========
 const instrumentType = computed(() => route.params.type || route.path.split('/').pop())
 const instrumentName = computed(() => ({ 'money-market': 'Money Market', bonds: 'Bonds', tbills: 'T-Bills' }[instrumentType.value] || 'Instrument'))
 const instrumentDescription = computed(() => ({
@@ -667,26 +680,22 @@ const activeTab = computed({
   set: (val) => router.push({ query: { ...route.query, tab: val } })
 })
 
-// ========== Configuration ==========
 const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInstrumentConfig()
-
-// ========== FRED Market (for benchmark) ==========
-const { fredFilters, filterOptions, loadFilterOptions, seriesIdForMaturity, fetchBenchmark } = useFredMarket('1Y')
+const { fredFilters, filterOptions, loadFilterOptions, fetchBenchmark } = useFredMarket('1Y')
 const yieldCurveLoading = ref(false)
 const yieldCurveError = ref('')
-const selectedSeries = ref('')
 const yieldCurveChart = ref(null)
 const chartInstanceRef = { current: null }
 
-// ========== Yield Curve Data ==========
-const yieldCurveData = ref([]) // array of {maturity: number, rate: number}
+const yieldCurveData = ref([])
 const chartSeriesLabel = ref('')
 const currentMarketRate = ref(null)
 
-// ========== FRED Options ==========
 const selectedMaturityOption = ref(''), customMaturity = ref('')
 const selectedCountryOption = ref(''), customCountry = ref('')
 const selectedCurrencyOption = ref(''), customCurrency = ref('')
+
+const SUPPORTED_COUNTRIES = ['USA', 'GBR', 'EUR', 'JPN', 'CAN']
 
 const effectiveMaturity = computed(() => selectedMaturityOption.value === '__custom__' ? customMaturity.value : selectedMaturityOption.value)
 const effectiveCountry = computed(() => selectedCountryOption.value === '__custom__' ? customCountry.value : selectedCountryOption.value)
@@ -729,7 +738,6 @@ const maturityOptions = computed(() => {
   return baseOptions
 })
 
-// ========== Watches ==========
 watch([countryOptions, currencyOptions, maturityOptions], () => {
   if (!effectiveCountry.value && countryOptions.value.length) {
     const def = countryOptions.value[0].value
@@ -757,7 +765,6 @@ watch(() => instrumentType.value, () => {
   }
 }, { immediate: true })
 
-// ========== Steps ==========
 const steps = computed(() => {
   if (workflowSteps.value.length) {
     return workflowSteps.value.map(s => ({ tab: s.tab, name: s.name }))
@@ -772,19 +779,16 @@ const steps = computed(() => {
   ]
 })
 
+// ---------- COMPLETED STEPS TRACKING ----------
+const completedSteps = ref(new Set())
+
 function isStepComplete(tab) {
-  switch (tab) {
-    case 'upload': return rawData.value.length > 0
-    case 'cleaning': return cleanedData.value.length > 0
-    case 'calculations': return !!calculations.value.totalValue && calculations.value.totalValue > 0
-    case 'visualizations': return yieldCurveData.value.length > 0
-    case 'summary': return cleanedData.value.length > 0 && !!calculations.value.totalValue
-    case 'reports': return cleanedData.value.length > 0 && !!calculations.value.totalValue
-    default: return false
-  }
+  return completedSteps.value.has(tab)
 }
 
+// ---------- FARTHEST ALLOWED INDEX ----------
 const farthestAllowedIndex = computed(() => {
+  // Find the first incomplete step; allow clicking up to that index
   for (let i = 0; i < steps.value.length; i++) {
     if (!isStepComplete(steps.value[i].tab)) return i
   }
@@ -794,7 +798,6 @@ const farthestAllowedIndex = computed(() => {
 const currentStepIndex = computed(() => steps.value.findIndex(s => s.tab === activeTab.value))
 const totalSteps = computed(() => steps.value.length)
 
-// ========== Data refs ==========
 const uploadedFile = ref(null)
 const rawData = ref([])
 const cleanedData = ref([])
@@ -814,7 +817,6 @@ const sessionSavedAt = ref(null)
 const showPreview = ref(false)
 const forceUpdate = ref(0)
 
-// ---- Mapping Templates ----
 const savedTemplates = ref({})
 const selectedTemplate = ref('')
 const newTemplateName = ref('')
@@ -827,7 +829,6 @@ const cleaningOptions = ref({
   specificColumn: '', standardizeNumericRange: false, removeEmptyRows: false, fillForward: false, fillBackward: false
 })
 
-// ========== Upload History ==========
 const uploadHistory = ref([])
 function loadUploadHistory() {
   const key = `${instrumentType.value}_upload_history`
@@ -869,7 +870,6 @@ function deleteHistoryItem(idx) {
   saveUploadHistory()
 }
 
-// ========== Mapping Templates ==========
 function loadSavedTemplates() {
   const key = `${instrumentType.value}_mapping_templates`
   const saved = localStorage.getItem(key)
@@ -927,7 +927,6 @@ function deleteTemplateFromPopup(name) {
   }
 }
 
-// ========== Computed Helpers ==========
 const fileSize = computed(() => {
   if (!uploadedFile.value) return ''
   const bytes = uploadedFile.value.size
@@ -954,7 +953,6 @@ const uploadPreviewHeaders = computed(() => {
 const cleanPreviewHeaders = computed(() => Object.keys((cleanedData.value[0]) || {}))
 const portfolioAvgRate = computed(() => instrumentType.value === 'money-market' ? calculations.value.avgRate || 0 : instrumentType.value === 'bonds' ? calculations.value.avgCouponRate || 0 : calculations.value.avgDiscountRate || 0)
 
-// ========== Navigation ==========
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToPortfolioSummary() { saveSessionData(); router.push('/summary') }
 function goToCalculations() {
@@ -975,10 +973,27 @@ function goToVisualizations() {
     alert('Please clean your data first.')
   }
 }
-function goToReportTab() {
+async function goToReportTab() {
   saveSessionData()
   activeTab.value = 'reports'
   forceUpdate.value++
+  const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+  if (sid) {
+    await markStepCompleted(String(sid), 'summary')
+    completedSteps.value.add('summary')
+    saveSessionData()
+  }
+}
+
+async function finishAndDashboard() {
+  saveSessionData()
+  const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+  if (sid) {
+    await markStepCompleted(String(sid), 'reports')
+    completedSteps.value.add('reports')
+    saveSessionData()
+  }
+  router.push('/dashboard')
 }
 function switchTab(tab) {
   const idx = steps.value.findIndex(s => s.tab === tab)
@@ -991,7 +1006,6 @@ function switchTab(tab) {
   forceUpdate.value++
 }
 
-// ========== File Upload ==========
 const fileInput = ref(null)
 function handleFileUpload(e) { const file = e.target.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
 function handleDrop(e) { const file = e.dataTransfer.files[0]; if (file) { uploadedFile.value = file; readFileData(file) } }
@@ -1033,7 +1047,7 @@ async function readFileData(file) {
           return
         }
       } catch (err) {
-        console.warn('Intelligent parser failed, falling back to regular parser:', err)
+        console.warn('Intelligent parser failed, falling back to XLSX parser:', err)
       }
       const workbook = XLSX.read(buffer, { type: 'array', cellDates: false, cellNF: false, cellText: false, sheetRows: 5000, defval: "" })
       const sheetName = workbook.SheetNames[0]
@@ -1078,7 +1092,6 @@ function removeFile() {
   if (fileInput.value) fileInput.value.value = ''
 }
 
-// ========== Mapping ==========
 function applyCurrentMapping() {
   if (!originalRawData.value.length) return
   const hasAnyMapping = requiredColumns.value.some(col => columnMapping.value[col])
@@ -1126,12 +1139,18 @@ function applyColumnMappingAndClose() {
 async function continueAfterUpload() {
   if (!uploadedFile.value) { alert('Please upload a file first.'); return }
   if (!rawData.value.length) { alert('No data loaded. Please upload a valid file.'); return }
+  saveSessionData()
   activeTab.value = 'cleaning'
   debouncedSave()
   forceUpdate.value++
+  const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+  if (sid) {
+    await markStepCompleted(String(sid), 'upload')
+    completedSteps.value.add('upload')
+    saveSessionData()
+  }
 }
 
-// ========== Cleaning ==========
 function applyCleaning() {
   if (!rawData.value.length) return
   let data = JSON.parse(JSON.stringify(rawData.value))
@@ -1201,9 +1220,15 @@ async function continueAfterCleaning() {
   }
   goToCalculations()
   forceUpdate.value++
+  saveSessionData()
+  const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+  if (sid) {
+    await markStepCompleted(String(sid), 'cleaning')
+    completedSteps.value.add('cleaning')
+    saveSessionData()
+  }
 }
 
-// ========== Calculations ==========
 async function calculateMetrics() {
   if (!cleanedData.value.length) return
   let uniqueInstrumentsCount = 0
@@ -1278,28 +1303,30 @@ async function calculateMetrics() {
   debouncedSave()
   forceUpdate.value++
 }
-function continueToVisualizations() {
+async function continueToVisualizations() {
   if (!hasCleanedData.value) { alert('Please clean your data first.'); return }
   goToVisualizations()
   forceUpdate.value++
+  saveSessionData()
+  const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+  if (sid) {
+    await markStepCompleted(String(sid), 'calculations')
+    completedSteps.value.add('calculations')
+    saveSessionData()
+  }
 }
 
-// ========== Yield Curve ==========
-// Fallback mapping for common FRED series IDs
-const SERIES_MAP = {
-  '1M': 'DGS1MO',
-  '3M': 'DGS3MO',
-  '6M': 'DGS6MO',
-  '1Y': 'DGS1',
-  '2Y': 'DGS2',
-  '5Y': 'DGS5',
-  '10Y': 'DGS10',
-  '30Y': 'DGS30',
-  '4W': 'DGS4W',
-  '8W': 'DGS8W',
-  '13W': 'DGS3MO',
-  '26W': 'DGS6MO',
-  '52W': 'DGS1'
+async function continueFromVisualizations() {
+  if (!hasCleanedData.value) { alert('Please clean your data first.'); return }
+  saveSessionData()
+  activeTab.value = 'summary'
+  forceUpdate.value++
+  const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+  if (sid) {
+    await markStepCompleted(String(sid), 'visualizations')
+    completedSteps.value.add('visualizations')
+    saveSessionData()
+  }
 }
 
 function getMaturitiesForInstrument() {
@@ -1318,118 +1345,174 @@ function parseMaturityToYears(mat) {
 }
 
 function getRateForMaturity(mat) {
-  const point = yieldCurveData.value.find(d => d.maturityLabel === mat)
-  return point ? point.rate : null
+  if (!mat || !yieldCurveData.value.length) return null
+  const targetYears = parseMaturityToYears(mat)
+  let closest = null
+  let minDiff = Infinity
+  for (const point of yieldCurveData.value) {
+    const diff = Math.abs(point.maturity - targetYears)
+    if (diff < minDiff) {
+      minDiff = diff
+      closest = point
+    }
+  }
+  if (closest && minDiff < 0.5) {
+    return closest.rate
+  }
+  return null
 }
 
+const benchmarkYield = computed(() => {
+  if (!effectiveMaturity.value || !yieldCurveData.value.length) return null
+  return getRateForMaturity(effectiveMaturity.value)
+})
+
+// ---------- UPDATED fetchYieldCurve – with nextTick ----------
 async function fetchYieldCurve() {
-  yieldCurveLoading.value = true
-  yieldCurveError.value = ''
+  const country = effectiveCountry.value;
+  const maturity = effectiveMaturity.value;
+  const currency = effectiveCurrency.value || 'USD';
+
+  if (!country || !SUPPORTED_COUNTRIES.includes(country)) {
+    yieldCurveError.value = `Country "${country || 'none'}" is not supported. Please select one of: ${SUPPORTED_COUNTRIES.join(', ')}.`;
+    yieldCurveData.value = [];
+    return;
+  }
+  if (!maturity) {
+    yieldCurveError.value = 'Please select a maturity.';
+    return;
+  }
+
+  const cacheKey = `${instrumentType.value}_${country}_${currency}_${maturity}`;
+  const cached = yieldCurveCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    yieldCurveData.value = cached.data;
+    chartSeriesLabel.value = 'Yield Curve (cached)';
+    await nextTick();
+    await renderYieldCurveChart();
+    updateFredBenchmark();
+    debouncedSave();
+    forceUpdate.value++;
+    return;
+  }
+
+  yieldCurveLoading.value = true;
+  yieldCurveError.value = '';
+
   try {
-    const maturities = getMaturitiesForInstrument()
-    const cacheKey = `yieldcurve_${instrumentType.value}_${effectiveCountry.value}_${effectiveCurrency.value}`
-    const cached = localStorage.getItem(cacheKey)
-    if (cached) {
-      const parsed = JSON.parse(cached)
-      if (Date.now() - parsed.timestamp < 5 * 60 * 1000) {
-        yieldCurveData.value = parsed.data
-        chartSeriesLabel.value = parsed.seriesLabel || 'FRED'
-        yieldCurveLoading.value = false
-        await renderYieldCurveChart()
-        return
-      }
+    const payload = { instrument_type: instrumentType.value, country, currency, maturity };
+    const response = await api.visualizationAPI.getYieldCurve(payload);
+    
+    if (response.success && response.data && response.data.maturities && response.data.maturities.length) {
+      const data = response.data;
+      const points = data.maturities.map((m, idx) => ({
+        maturity: parseFloat(m),
+        maturityLabel: data.labels?.[idx] || `${m}Y`,
+        rate: data.rates[idx]
+      }));
+      yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() });
+      yieldCurveData.value = points;
+      chartSeriesLabel.value = 'Yield Curve';
+      await nextTick();
+      await renderYieldCurveChart();
+      updateFredBenchmark();
+      debouncedSave();
+      forceUpdate.value++;
+    } else {
+      yieldCurveError.value = response.error || 'No data returned from FRED for the selected parameters.';
+      yieldCurveData.value = [];
     }
-
-    const points = []
-    for (const mat of maturities) {
-      let seriesId = null
-      try {
-        seriesId = await seriesIdForMaturity(mat)
-      } catch { /* ignore */ }
-      if (!seriesId) {
-        seriesId = SERIES_MAP[mat] || null
-      }
-      if (!seriesId) {
-        console.warn(`No series ID for maturity ${mat}`)
-        continue
-      }
-
-      try {
-        const chartData = await loadFredSeriesChart(seriesId)
-        if (chartData && chartData.datasets && chartData.datasets.length) {
-          const dataset = chartData.datasets[0]
-          if (dataset.data && dataset.data.length) {
-            const lastPoint = dataset.data[dataset.data.length - 1]
-            if (lastPoint && lastPoint.y != null) {
-              points.push({
-                maturity: parseMaturityToYears(mat),
-                maturityLabel: mat,
-                rate: lastPoint.y
-              })
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to fetch series', seriesId, e)
-      }
-    }
-
-    if (points.length === 0) throw new Error('No data returned from FRED. Please check your internet connection and try again.')
-
-    points.sort((a,b) => a.maturity - b.maturity)
-    yieldCurveData.value = points
-    chartSeriesLabel.value = 'Yield Curve'
-
-    localStorage.setItem(cacheKey, JSON.stringify({
-      timestamp: Date.now(),
-      data: points,
-      seriesLabel: chartSeriesLabel.value
-    }))
-
-    await renderYieldCurveChart()
-    currentMarketRate.value = points[points.length-1]?.rate || null
-
-    const selectedMat = effectiveMaturity.value
-    const benchRate = getRateForMaturity(selectedMat)
-    if (benchRate != null) {
-      calculations.value.fred = {
-        benchmark_rate: benchRate,
-        series_label: selectedMat,
-        spread_vs_market: +(portfolioAvgRate.value - benchRate).toFixed(2),
-        country: effectiveCountry.value,
-        currency: effectiveCurrency.value,
-        maturity: selectedMat
-      }
-    }
-    debouncedSave()
-    forceUpdate.value++
   } catch (err) {
-    console.error(err)
-    yieldCurveError.value = err.message || 'Failed to load yield curve.'
+    console.error('Yield curve fetch error:', err);
+    yieldCurveError.value = err.message || 'Failed to load yield curve.';
+    yieldCurveData.value = [];
   } finally {
-    yieldCurveLoading.value = false
+    yieldCurveLoading.value = false;
   }
 }
 
+function updateFredBenchmark() {
+  const benchRate = getRateForMaturity(effectiveMaturity.value);
+  if (benchRate != null) {
+    calculations.value.fred = {
+      benchmark_rate: benchRate,
+      series_label: effectiveMaturity.value,
+      spread_vs_market: +(portfolioAvgRate.value - benchRate).toFixed(2),
+      country: effectiveCountry.value,
+      currency: effectiveCurrency.value,
+      maturity: effectiveMaturity.value
+    };
+  }
+}
+
+// ---------- RENDER CHART with resize fix ----------
 async function renderYieldCurveChart() {
-  if (!yieldCurveChart.value || !yieldCurveData.value.length) return
-  await nextTick()
-  if (chartInstanceRef.current) chartInstanceRef.current.destroy()
+  if (!yieldCurveChart.value || !yieldCurveData.value.length) return;
+  
+  const rect = yieldCurveChart.value.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) {
+    setTimeout(() => renderYieldCurveChart(), 200);
+    return;
+  }
+  
+  await nextTick();
+  if (chartInstanceRef.current) {
+    chartInstanceRef.current.destroy();
+    chartInstanceRef.current = null;
+  }
 
-  const ctx = yieldCurveChart.value.getContext('2d')
-  const labels = yieldCurveData.value.map(d => d.maturity.toFixed(1))
-  const data = yieldCurveData.value.map(d => d.rate)
+  const period = effectiveMaturity.value;
+  let multiplier = 1;
+  let totalUnits = 0;
+  let unitLabel = '';
 
-  const maxMat = Math.max(...yieldCurveData.value.map(d => d.maturity))
-  const step = Math.ceil(maxMat / 10) || 1
+  const match = period.match(/^(\d+)([YMW])$/);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    const unit = match[2];
+    if (unit === 'Y') {
+      multiplier = 1;
+      totalUnits = num;
+      unitLabel = 'Y';
+    } else if (unit === 'M') {
+      multiplier = 12;
+      totalUnits = num;
+      unitLabel = 'M';
+    } else if (unit === 'W') {
+      multiplier = 365 / 7;
+      totalUnits = num * 7;
+      unitLabel = 'D';
+    }
+  } else {
+    multiplier = 1;
+    const num = parseFloat(period) || 10;
+    totalUnits = num;
+    unitLabel = 'Y';
+  }
 
+  const maxMat = parseFloat(period) || 10;
+  const filtered = yieldCurveData.value.filter(d => d.maturity <= maxMat);
+  if (!filtered.length) {
+    yieldCurveError.value = 'No data available for the selected maturity.';
+    return;
+  }
+
+  const transformed = filtered.map(d => ({
+    x: d.maturity * multiplier,
+    y: d.rate
+  }));
+
+  const stepSize = 1;
+  const maxX = Math.max(totalUnits, Math.max(...transformed.map(p => p.x))) + 0.5;
+
+  const ctx = yieldCurveChart.value.getContext('2d');
+  
   chartInstanceRef.current = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: labels,
       datasets: [{
         label: 'Yield (%)',
-        data: data,
+        data: transformed,
         borderColor: '#0B2044',
         backgroundColor: 'rgba(11,32,68,0.1)',
         fill: true,
@@ -1451,10 +1534,20 @@ async function renderYieldCurveChart() {
       },
       scales: {
         x: {
-          title: { display: true, text: 'Maturity (years)' },
+          type: 'linear',
+          title: {
+            display: true,
+            text: unitLabel === 'Y' ? 'Years' : (unitLabel === 'M' ? 'Months' : 'Days')
+          },
+          min: 0,
+          max: maxX,
           ticks: {
-            stepSize: step > 0 ? step : 1,
-            max: maxMat + 0.5
+            stepSize: stepSize,
+            autoSkip: false,
+            callback: function(value) {
+              if (Number.isInteger(value)) return value.toString();
+              return null;
+            }
           }
         },
         y: {
@@ -1465,10 +1558,22 @@ async function renderYieldCurveChart() {
         }
       }
     }
-  })
+  });
+
+  setTimeout(() => {
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.resize();
+    }
+  }, 50);
 }
 
-// ========== FRED Filter Handlers ==========
+watch(yieldCurveData, async () => {
+  if (activeTab.value === 'visualizations' && yieldCurveData.value.length) {
+    await nextTick();
+    await renderYieldCurveChart();
+  }
+}, { deep: true });
+
 function onCountrySelectChange() {
   if (selectedCountryOption.value !== '__custom__') {
     fredFilters.value.country = selectedCountryOption.value
@@ -1515,29 +1620,47 @@ function onCustomMaturityChange() {
   }
 }
 
+let fredFilterTimeout = null;
 async function onFredFilterChange() {
-  if (activeTab.value === 'visualizations') await fetchYieldCurve()
-  if (Object.keys(calculations.value).length) enrichCalculationsWithFred()
-  debouncedSave()
+  if (fredFilterTimeout) clearTimeout(fredFilterTimeout);
+  fredFilterTimeout = setTimeout(async () => {
+    if (activeTab.value === 'visualizations') {
+      await fetchYieldCurve();
+    }
+    if (Object.keys(calculations.value).length) {
+      await enrichCalculationsWithFred();
+    }
+    debouncedSave();
+  }, 500);
 }
 
 function getCountryLabel(code) { const found = countryOptions.value.find(c => c.value === code); return found ? found.label : code }
 function getCurrencyLabel(code) { const found = currencyOptions.value.find(c => c.value === code); return found ? found.label : code }
 function defaultMaturityForInstrument() {
-  return instrumentType.value === 'bonds' ? '10Y' : instrumentType.value === 'money-market' ? '1Y' : instrumentType.value === 'tbills' ? '13W' : '3M'
+  const inst = instrumentType.value;
+  if (inst === 'bonds') return '10Y';
+  if (inst === 'money-market') return '1Y';
+  if (inst === 'tbills') return '13W';
+  return '3M';
 }
 
 async function enrichCalculationsWithFred() {
   try {
-    const bench = await fetchBenchmark(instrumentType.value)
+    const bench = await fetchBenchmark(instrumentType.value);
     if (bench?.benchmark_rate != null) {
-      const portfolio = parseFloat(portfolioAvgRate.value) || 0
-      calculations.value.fred = { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2) }
+      const portfolio = parseFloat(portfolioAvgRate.value) || 0;
+      calculations.value.fred = { 
+        ...bench, 
+        spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2) 
+      };
+    } else {
+      if (calculations.value.fred) delete calculations.value.fred;
     }
-  } catch (e) { console.error(e) }
+  } catch (e) {
+    console.error('FRED benchmark fetch error:', e);
+  }
 }
 
-// ========== Report Generation ==========
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
 function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
@@ -1613,7 +1736,6 @@ function buildMethodologySection(selectedInstrumentNames) {
 
 function captureChartImage() {
   return new Promise((resolve) => {
-    // First try to get the canvas from the ref
     const canvas = yieldCurveChart.value
     if (canvas && canvas.toDataURL) {
       try {
@@ -1622,7 +1744,6 @@ function captureChartImage() {
         return
       } catch (e) { console.warn('Canvas capture failed', e) }
     }
-    // Fallback: find canvas by class
     const canvasEl = document.querySelector('.chart-container--fred canvas')
     if (canvasEl && canvasEl.toDataURL) {
       try {
@@ -1631,11 +1752,11 @@ function captureChartImage() {
         return
       } catch (e) { console.warn('DOM canvas capture failed', e) }
     }
-    // If still no canvas, return empty
     resolve('')
   })
 }
 
+// ---------- UPDATED generateReportHtml ----------
 async function generateReportHtml() {
   await loadSavedData()
   const report = reportPreviewData.value
@@ -1644,14 +1765,10 @@ async function generateReportHtml() {
     return null
   }
 
-  // Capture chart image – now it will work
   let chartImageData = ''
   try {
     chartImageData = await captureChartImage()
-    console.log('Chart image captured, length:', chartImageData.length)
-  } catch (e) {
-    console.warn('Chart capture failed', e)
-  }
+  } catch (e) { console.warn('Chart capture failed', e) }
 
   const valuationDate = new Date().toISOString().split('T')[0]
   const reportDate = new Date().toLocaleString()
@@ -1702,6 +1819,8 @@ async function generateReportHtml() {
     </div>
   ` : '<p>Yield curve chart not available.</p>'
 
+  const watermarkLogo = `<img src="${logoUrl}" alt="logo" style="position:absolute; top:20px; right:30px; width:80px; opacity:0.15; pointer-events:none;" />`;
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -1709,46 +1828,83 @@ async function generateReportHtml() {
   <title>Valuation Assessment Report - ${report.session}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Arial', sans-serif; color: #333; background: white; line-height: 1.6; }
-    .page { page-break-after: always; padding: 60px 80px; min-height: 100vh; }
+    body { 
+      font-family: 'Arial', sans-serif; 
+      color: #000; 
+      background: white; 
+      line-height: 1.6; 
+      margin: 0;
+      padding: 0;
+    }
+    .page { 
+      page-break-after: always; 
+      padding: 30px 40px;  /* reduced padding for more content width */
+      min-height: 100vh; 
+      position: relative;
+      width: 210mm;
+      margin: 0 auto;
+      background: white;
+    }
     .page:last-child { page-break-after: auto; }
+
     .cover-page {
+      background-color: white;
+      background-image: url('${backgroundCoverUrl}');
+      background-size: 45%;  /* enlarged from 30% */
+      background-position: right center;
+      background-repeat: no-repeat;
+      color: black;
       display: flex;
       flex-direction: column;
       justify-content: center;
       align-items: center;
       text-align: center;
-      background: linear-gradient(135deg, #0B2044 0%, #1a3a6e 40%, #2a5a8e 100%);
-      color: white;
+      padding: 40px 50px;
       position: relative;
-      overflow: hidden;
-    }
-    .cover-page::before {
-      content: '';
-      position: absolute;
-      top: -50%;
-      left: -50%;
-      width: 200%;
-      height: 200%;
-      background: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.05) 0%, transparent 60%);
-      pointer-events: none;
+      min-height: 100vh;
+      width: 210mm;
+      margin: 0 auto;
     }
     .cover-content {
-      max-width: 800px;
+      max-width: 70%;
       position: relative;
-      z-index: 1;
-      background: rgba(11,32,68,0.4);
-      padding: 40px 60px;
-      border-radius: 20px;
-      backdrop-filter: blur(4px);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      z-index: 2;
+      color: black;
     }
-    .logo { margin-bottom: 30px; }
-    .logo img { max-width: 180px; height: auto; border-radius: 8px; background: white; padding: 8px; }
-    .cover-title { font-size: 48px; font-weight: 700; letter-spacing: 2px; margin-bottom: 20px; text-shadow: 0 2px 10px rgba(0,0,0,0.3); }
-    .cover-subtitle { font-size: 24px; font-weight: 300; opacity: 0.9; margin-bottom: 40px; }
-    .cover-meta { font-size: 14px; opacity: 0.85; line-height: 2; }
-    .cover-meta strong { opacity: 1; }
+    .cover-logo {
+      position: absolute;
+      top: 30px;
+      left: 40px;
+      z-index: 3;
+    }
+    .cover-logo img {
+      max-width: 160px;  /* slightly larger */
+      height: auto;
+      background: white;
+      padding: 4px;
+    }
+    .cover-session-name {
+      font-size: 44px;
+      font-weight: 300;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+      color: #000;
+    }
+    .cover-title {
+      font-size: 48px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      margin-bottom: 20px;
+      color: #000;
+    }
+    .cover-subtitle {
+      font-size: 28px;
+      font-weight: 300;
+      opacity: 0.85;
+      margin-bottom: 20px;
+      color: #000;
+    }
+
     .toc-page h1 { font-size: 28px; color: #0B2044; border-bottom: 3px solid #0B2044; padding-bottom: 15px; margin-bottom: 30px; }
     .toc-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px dotted #ddd; font-size: 16px; }
     .toc-item:hover { background: #f5f5f5; }
@@ -1772,41 +1928,50 @@ async function generateReportHtml() {
       font-size: 12px;
       color: #999;
       text-align: center;
-      line-height: 1.8;
     }
     .reference-list { list-style: none; padding: 0; }
     .reference-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
     .chart-container { margin: 20px 0; text-align: center; }
     .chart-container img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid #e0e0e0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
     .chart-caption { font-size: 12px; color: #666; margin-top: 5px; }
-    @media print {
-      .page { padding: 40px 60px; }
-      .cover-page { background: #0B2044 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-      .executive-summary { background: #f8f9ff !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    .watermark { position: absolute; top: 20px; right: 30px; opacity: 0.15; pointer-events: none; }
+    .watermark img { width: 80px; }
+
+    @page {
+      margin: 15mm 12mm;  /* adjusted margins for better A4 fit */
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 10pt;
+        color: #666;
+      }
     }
+    @media print {
+      .page { padding: 30px 40px; width: 210mm; }
+      .cover-page { padding: 40px 50px; width: 210mm; }
+      .executive-summary { background: #f8f9ff !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      .watermark { opacity: 0.15 !important; }
+    }
+    /* Ensure tables and images fit within page width */
+    table, img, .chart-container { max-width: 100%; }
   </style>
 </head>
 <body>
 
 <!-- COVER PAGE -->
 <div class="page cover-page">
+  <div class="cover-logo">
+    <img src="${logoUrl}" alt="Dura Capital Logo" />
+  </div>
   <div class="cover-content">
-    <div class="logo">
-      <img src="${logoUrl}" alt="Dura Capital Logo" />
-    </div>
+    <div class="cover-session-name">${report.session}</div>
     <h1 class="cover-title">Valuation Assessment Report</h1>
     <p class="cover-subtitle">${report.instruments.map(i => i.name).join(' & ')}</p>
-    <div class="cover-meta">
-      <p><strong>${report.session}</strong></p>
-      <p><strong>Valuation Date:</strong> ${valuationDate}</p>
-      <p><strong>Report Date:</strong> ${reportDate}</p>
-      <p><strong>Prepared by:</strong> Dura Capital (Private) Limited</p>
-    </div>
   </div>
 </div>
 
 <!-- TABLE OF CONTENTS -->
 <div class="page toc-page">
+  ${watermarkLogo}
   <h1>Table of Contents</h1>
   <div class="toc-item"><span>Introduction</span><span>1</span></div>
   <div class="toc-item"><span>Executive Summary</span><span>2</span></div>
@@ -1821,6 +1986,7 @@ async function generateReportHtml() {
 
 <!-- INTRODUCTION -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Introduction</h1>
   <p>Dura Capital (Private) Limited ("Dura Capital", "us", "we") was contracted to provide a fair valuation assessment report of the following fixed income instruments as at ${valuationDate}:</p>
   <ul style="margin: 20px 0 20px 30px;">
@@ -1840,6 +2006,7 @@ async function generateReportHtml() {
 
 <!-- EXECUTIVE SUMMARY -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Executive Summary</h1>
   <div class="executive-summary">
     <p><strong>Valuation Assessment Summary</strong></p>
@@ -1859,6 +2026,7 @@ async function generateReportHtml() {
 
 <!-- METHODOLOGY -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Methodology</h1>
   <p>The audit team provided us with data for ${report.instruments.map(i => i.name).join(', ')}. This section outlines the methodologies used to provide a fair value of the fixed income assets in terms of IFRS 13.</p>
   <br>
@@ -1870,6 +2038,7 @@ async function generateReportHtml() {
 
 <!-- MARKET INPUTS -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Market Inputs</h1>
   <p>Market data for Zimbabwe is not available and there have not been any Zimbabwe issued instruments trading on international markets. As such, we have used the OIS SOFR rates from Bloomberg as a risk-free yield curve and added a country risk premium sourced from country risk premiums published by Damodaran.</p>
   <br>
@@ -1886,6 +2055,7 @@ async function generateReportHtml() {
 
 <!-- RESULTS -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Results</h1>
   <p>Below is a summary of the key findings of the valuation for the selected instruments.</p>
   <br>
@@ -1921,6 +2091,7 @@ async function generateReportHtml() {
 
 <!-- YIELD CURVE -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Yield Curve</h1>
   <p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>
   ${chartHtml}
@@ -1928,6 +2099,7 @@ async function generateReportHtml() {
 
 <!-- CONCLUSION -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Conclusion</h1>
   <p>The valuation assessment conducted by Dura Capital provides a comprehensive fair value assessment of the ${report.instruments.map(i => i.name).join(', ')} instruments as at ${valuationDate}.</p>
   <br>
@@ -1946,6 +2118,7 @@ async function generateReportHtml() {
 
 <!-- APPENDIX -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Appendix: Detailed Instrument Data</h1>
   <p><strong>Valuation Date:</strong> ${valuationDate}</p>
   <p><strong>Total Instruments:</strong> ${allDataRows.length}</p>
@@ -1973,6 +2146,7 @@ async function generateReportHtml() {
 
 <!-- REFERENCE -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Reference</h1>
   <ul class="reference-list">
     <li>Bloomberg Financial Services – SOFR OIS Yield Curve as at ${valuationDate}</li>
@@ -1983,9 +2157,6 @@ async function generateReportHtml() {
   </ul>
   <br>
   <div class="footer">
-    <p><strong>Valuation Date:</strong> ${valuationDate}</p>
-    <p><strong>Report Date:</strong> ${reportDate}</p>
-    <p><strong>Prepared by:</strong> Dura Capital (Private) Limited</p>
     <p>© ${new Date().getFullYear()} Dura Capital (Private) Limited. All rights reserved.</p>
     <p>This report is confidential and prepared solely for the use of the client.</p>
   </div>
@@ -2112,7 +2283,6 @@ function downloadBlob(content, filename, mimeType) {
   URL.revokeObjectURL(url)
 }
 
-// ========== Excel Viewer Dialogs ==========
 const showExcelDialog = ref(false)
 const excelData = ref([])
 const excelColumns = ref([])
@@ -2127,7 +2297,6 @@ function togglePreview() {
   showPreview.value = !showPreview.value
 }
 
-// ========== Formula Popup ==========
 const formulaDialog = ref(false)
 const formulaText = ref('')
 function showFormula(metricKey) {
@@ -2160,7 +2329,6 @@ function showFormula(metricKey) {
   formulaDialog.value = true
 }
 
-// ========== Save to Session ==========
 function saveToSession() {
   saveSessionData()
   if (!activeSession.value) {
@@ -2188,7 +2356,6 @@ function saveToSession() {
   forceUpdate.value++
 }
 
-// ========== Session Persistence ==========
 function refreshPage() {
   rawData.value = []
   originalRawData.value = []
@@ -2211,7 +2378,7 @@ async function loadSavedData() {
   const datasetId = route.query.dataset_id
   if (datasetId) {
     try {
-      const res = await api.datasetAPI.load(datasetId)
+      const res = await api.datasetAPI.load(ddatasetId)
       if (res && res.success && res.data) {
         const last = res.data
         rawData.value = last.data || []
@@ -2249,6 +2416,10 @@ async function loadSavedData() {
       rawData, cleanedData, calculations, uploadedFile, cleaningStats,
       columnMapping, mappingApplied, originalRawData, originalFileColumns
     })
+    // Load completed steps from workflow
+    if (wf.completedSteps) {
+      completedSteps.value = new Set(wf.completedSteps)
+    }
     if (wf.sessionSavedAt) sessionSavedAt.value = wf.sessionSavedAt
     if (originalFileColumns.value.length) fileColumns.value = [...originalFileColumns.value]
     else if (originalRawData.value.length) fileColumns.value = Object.keys(originalRawData.value[0] || {})
@@ -2324,6 +2495,7 @@ async function loadSavedData() {
     const savedYieldCurve = localStorage.getItem(`${key}_yieldCurve`)
     const savedFredFilters = localStorage.getItem(`${key}_fredFilters`)
     const savedMapping = localStorage.getItem(`${key}_mapping`)
+    const savedCompleted = localStorage.getItem(`${key}_completed`)
     if (savedRaw) {
       rawData.value = JSON.parse(savedRaw)
       originalRawData.value = JSON.parse(JSON.stringify(rawData.value))
@@ -2346,6 +2518,9 @@ async function loadSavedData() {
       columnMapping.value = matchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
       applyCurrentMapping()
     }
+    if (savedCompleted) {
+      completedSteps.value = new Set(JSON.parse(savedCompleted))
+    }
     showPreview.value = false
     forceUpdate.value++
   }
@@ -2357,6 +2532,17 @@ async function loadSavedData() {
       removedRows: rawData.value.length - cleanedData.value.length,
       fixedMissing: 0
     }
+  }
+
+  if (!effectiveCountry.value && countryOptions.value.length) {
+    const def = countryOptions.value[0].value;
+    selectedCountryOption.value = def;
+    fredFilters.value.country = def;
+  }
+  if (!effectiveMaturity.value) {
+    const def = defaultMaturityForInstrument();
+    selectedMaturityOption.value = def;
+    fredFilters.value.maturity = def;
   }
   return loaded
 }
@@ -2394,7 +2580,8 @@ function saveSessionData() {
     yieldCurveData: yieldCurveData.value,
     fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
     sessionSavedAt: sessionSavedAt.value,
-    showPreview: showPreview.value
+    showPreview: showPreview.value,
+    completedSteps: Array.from(completedSteps.value)  // save completion status
   })
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, wf)
   sessionManager.updateSession(sid, { last_tab: activeTab.value })
@@ -2408,6 +2595,7 @@ function saveSessionData() {
   localStorage.setItem(`${key}_mapping`, JSON.stringify(columnMapping.value))
   localStorage.setItem(`${key}_fredFilters`, JSON.stringify({ country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value }))
   localStorage.setItem(`${key}_showPreview`, JSON.stringify(showPreview.value))
+  localStorage.setItem(`${key}_completed`, JSON.stringify(Array.from(completedSteps.value)))
   if (uploadedFile.value) localStorage.setItem(`${instrumentType.value}_uploaded_file_name`, uploadedFile.value.name)
 }
 
@@ -2441,7 +2629,6 @@ function updateSessionCompletion() {
   })
 }
 
-// ========== Data Update Handlers ==========
 function onRawExcelUpdate(data, sourceData) {
   if (sourceData?.length) originalRawData.value = sourceData
   rawData.value = data
@@ -2455,15 +2642,18 @@ function debouncedSave() { if (saveTimeout) clearTimeout(saveTimeout); saveTimeo
 
 watch([rawData, cleanedData], () => debouncedSave(), { deep: true })
 watch(cleanedData, async (newVal) => { if (newVal.length) await calculateMetrics() }, { deep: true })
-watch(yieldCurveData, async () => {
-  if (activeTab.value === 'visualizations' && yieldCurveChart.value && yieldCurveData.value.length) {
-    await nextTick()
-    await renderYieldCurveChart()
-  }
-}, { deep: true })
 watch(() => activeTab.value, async (newTab) => {
   if (newTab === 'visualizations' && hasCleanedData.value && !yieldCurveData.value.length && !yieldCurveLoading.value) {
-    await fetchYieldCurve()
+    if (!effectiveCountry.value) {
+      selectedCountryOption.value = 'USA';
+      fredFilters.value.country = 'USA';
+    }
+    if (!effectiveMaturity.value) {
+      const def = defaultMaturityForInstrument();
+      selectedMaturityOption.value = def;
+      fredFilters.value.maturity = def;
+    }
+    await fetchYieldCurve();
   }
 })
 
@@ -2471,37 +2661,48 @@ watch([rawData, cleanedData, calculations, yieldCurveData], () => {
   forceUpdate.value++
 }, { deep: true })
 
-// ========== Lifecycle ==========
 let lastInstrument = '', lastSessionId = ''
+
 async function checkAndReset() {
-  const currentSessionId = sessionManager.getActiveSessionId() || route.query.session || null
-  const currentInstrument = instrumentType.value
+  const currentSessionId = sessionManager.getActiveSessionId() || route.query.session || null;
+  const currentInstrument = instrumentType.value;
   if (currentInstrument !== lastInstrument || currentSessionId !== lastSessionId) {
-    lastInstrument = currentInstrument
-    lastSessionId = currentSessionId
+    lastInstrument = currentInstrument;
+    lastSessionId = currentSessionId;
     if (currentSessionId) {
-      const s = sessionManager.getSession(String(currentSessionId))
-      activeSession.value = s || null
+      const s = sessionManager.getSession(String(currentSessionId));
+      activeSession.value = s || null;
     } else {
-      activeSession.value = null
+      activeSession.value = null;
     }
-    const loaded = await loadSavedData()
+    const loaded = await loadSavedData();
     if (!loaded) {
-      refreshPage()
-      if (!route.query.tab) activeTab.value = 'upload'
+      refreshPage();
+      if (!route.query.tab) activeTab.value = 'upload';
     } else {
       if (!route.query.tab) {
-        const savedTab = sessionManager.getInstrumentWorkflow(activeSession.value?.id, instrumentType.value)?.last_tab
+        const savedTab = sessionManager.getInstrumentWorkflow(activeSession.value?.id, instrumentType.value)?.last_tab;
         if (savedTab && steps.value.some(s => s.tab === savedTab)) {
-          activeTab.value = savedTab
+          activeTab.value = savedTab;
         } else {
-          activeTab.value = 'upload'
+          activeTab.value = 'upload';
         }
       }
-      if (cleanedData.value.length) await calculateMetrics()
-      if (activeTab.value === 'visualizations' && !yieldCurveData.value.length) await fetchYieldCurve()
+      if (cleanedData.value.length) await calculateMetrics();
+      if (activeTab.value === 'visualizations' && !yieldCurveData.value.length) {
+        if (!effectiveCountry.value) {
+          selectedCountryOption.value = 'USA';
+          fredFilters.value.country = 'USA';
+        }
+        if (!effectiveMaturity.value) {
+          const def = defaultMaturityForInstrument();
+          selectedMaturityOption.value = def;
+          fredFilters.value.maturity = def;
+        }
+        await fetchYieldCurve();
+      }
     }
-    debouncedSave()
+    debouncedSave();
   }
 }
 
@@ -2540,7 +2741,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* ===== ALL ORIGINAL STYLES – UNCHANGED ===== */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
 .header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
@@ -2550,10 +2750,10 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .step-indicator { background: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; color: #0B2044; font-weight: 600; }
 
 .progress-bar-container { margin-bottom: 30px; padding: 0 10px; }
-.progress-steps { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.progress-step { flex: 1; text-align: center; cursor: pointer; }
+.progress-steps { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); position: relative; }
+.progress-step { flex: 1; text-align: center; cursor: pointer; position: relative; }
 .progress-step.disabled { cursor: not-allowed; opacity: 0.5; }
-.step-circle { width: 36px; height: 36px; background: #e0e0e0; color: #999; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; transition: all 0.3s; }
+.step-circle { width: 36px; height: 36px; background: #e0e0e0; color: #999; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; transition: all 0.3s; z-index: 2; position: relative; }
 .progress-step.active .step-circle { background: #0B2044; color: white; box-shadow: 0 0 0 4px rgba(11,32,68,0.2); }
 .progress-step.completed .step-circle { background: #4CAF50; color: white; }
 .step-label { font-size: 11px; color: #999; margin-top: 8px; }
@@ -2588,7 +2788,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .required-label { width: 140px; font-weight: 600; color: #0B2044; }
 .mapping-select { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
 
-/* ===== SAVED MAPPINGS POPUP STYLES ===== */
 .saved-mappings-popup-title {
   background: #0B2044;
   color: white;
@@ -2699,9 +2898,13 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   padding: 20px 0;
 }
 
-/* ===== FILTER DROPDOWN ARROWS & 3D STYLING ===== */
 .filter-group {
   position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 150px;
 }
 .filter-select {
   width: 100%;
@@ -2739,10 +2942,10 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 }
 .custom-maturity-input {
   margin-top: 8px;
+  width: 100%;
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
 
-/* ===== REST OF ORIGINAL STYLES – UNCHANGED ===== */
 .required-columns { margin: 20px 0; }
 .columns-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .column-badge { background: #e8ecf1; padding: 6px 12px; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
@@ -2821,7 +3024,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .chart-container--fred { position: relative; height: 400px; width: 100%; background: white; border-radius: 8px; padding: 10px; }
 .chart-container--fred canvas { width: 100% !important; height: 100% !important; }
 .filters-row { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap; }
-.filter-group { flex: 1; min-width: 150px; }
 .filter-group label { display: block; font-size: 12px; font-weight: 600; color: #0B2044; margin-bottom: 4px; }
 .refresh-btn { flex-shrink: 0; align-self: flex-end; }
 .report-hint { font-size: 14px; color: #555; margin-bottom: 16px; padding: 12px; background: #f0f4f8; border-radius: 8px; }
@@ -2845,13 +3047,11 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .formula-dialog-title { background: #0B2044; color: white; }
 .formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; }
 
-/* Resizable Excel columns and rows */
 .excel-edit-table th { resize: horizontal; overflow: auto; }
 .excel-edit-table td { resize: vertical; overflow: auto; }
 </style>
 
 <style>
-/* ===== GLOBAL OVERRIDES – UNCHANGED ===== */
 html, body, #app, .v-application, .v-application--wrap, .fixed-layout, .v-main, .v-content { max-width: 100vw !important; overflow-x: hidden !important; }
 .instrument-page { max-width: 100% !important; overflow-x: hidden !important; }
 .instrument-page .excel-table-wrapper, .instrument-page .excel-preview-section, .instrument-page .preview-section, .instrument-page .excel-scroll-wrapper, .instrument-page .excel-dialog-content { overflow-x: auto !important; max-width: 100% !important; }

@@ -59,6 +59,12 @@ export const sessionManager = {
     return this.getAllSessions().find(s => s.id === id) || null
   },
 
+  getActiveSession() {
+    const activeId = this.getActiveSessionId()
+    if (!activeId) return null
+    return this.getSession(activeId)
+  },
+
   /** Load full session from database into localStorage */
   async loadSessionFromDb(sessionId) {
     const res = await api.sessionsAPI.get(sessionId)

@@ -17,8 +17,9 @@
         </div>
       </div>
 
+      <!-- KPI Strip -->
       <div class="kpi-strip">
-        <div class="kpi-mini" v-for="k in quickKpis" :key="k.label">
+        <div class="kpi-mini" v-for="k in extendedKpis" :key="k.label">
           <v-icon size="20" :color="k.color">{{ k.icon }}</v-icon>
           <div>
             <span class="kpi-mini-val">{{ k.value }}</span>
@@ -27,12 +28,12 @@
         </div>
       </div>
 
+      <!-- Instrument breakdown -->
       <div class="section-header">
         <v-icon color="#0B2044" size="22">mdi-chart-areaspline</v-icon>
         <h2>Instrument breakdown</h2>
       </div>
 
-      <!-- Instrument cards -->
       <div class="summary-cards">
         <div class="summary-card" v-for="inst in instruments" :key="inst.id">
           <div class="card-top" :style="{ background: inst.gradient }">
@@ -64,7 +65,21 @@
         </div>
       </div>
 
-      <!-- Detailed sections – with "View as Excel" per instrument -->
+      <!-- Distribution bars -->
+      <div class="distribution-section">
+        <h3>Portfolio Allocation</h3>
+        <div class="distribution-bars">
+          <div v-for="inst in instruments" :key="inst.id" class="dist-bar-container">
+            <div class="dist-label">{{ inst.name }}</div>
+            <div class="dist-track">
+              <div class="dist-fill" :style="{ width: inst.percent + '%', background: inst.barColor }"></div>
+            </div>
+            <div class="dist-percent">{{ inst.percent }}%</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detailed sections -->
       <div v-for="inst in instrumentsWithDetails" :key="inst.id" class="detail-section">
         <div class="detail-header">
           <h3>{{ inst.name }} – Detailed Instruments ({{ inst.details.length }} rows)</h3>
@@ -76,7 +91,7 @@
         </div>
       </div>
 
-      <!-- Combined View & Export buttons -->
+      <!-- Export buttons -->
       <div class="export-all-section">
         <button class="btn-view-portfolio" @click="openCombinedModal">
           <v-icon>mdi-eye</v-icon> View Portfolio as Excel
@@ -92,13 +107,15 @@
       </div>
     </div>
 
-    <!-- Modal for per-instrument Excel view -->
+    <!-- Modals -->
     <v-dialog v-model="detailModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">
           Detailed view: {{ selectedInst?.name }}
           <v-spacer></v-spacer>
-          <button class="btn-close-dialog" @click="detailModalVisible = false">✕</button>
+          <button class="btn-close-dialog" @click="detailModalVisible = false">
+            <v-icon>mdi-close</v-icon>
+          </button>
         </v-card-title>
         <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
           <ExcelViewer :data="selectedInst?.details || []" :headers="selectedInst?.detailHeaders || []" />
@@ -106,23 +123,25 @@
       </v-card>
     </v-dialog>
 
-    <!-- Combined Portfolio Excel view -->
     <v-dialog v-model="combinedModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title">
           Portfolio – Combined Excel View
           <v-spacer></v-spacer>
-          <button class="btn-close-dialog" @click="combinedModalVisible = false">✕</button>
+          <button class="btn-close-dialog" @click="combinedModalVisible = false">
+            <v-icon>mdi-close</v-icon>
+          </button>
         </v-card-title>
         <v-card-text class="combined-excel-body">
-          <!-- Summary table -->
           <div class="combined-section">
             <h4 class="combined-section-title">Summary</h4>
             <table class="summary-table">
               <thead>
                 <tr>
                   <th>Instrument</th>
-                  <th>Total Value</th>
+                  <th>Face Value ($)</th>
+                  <th>Calculated Value ($)</th>
+                  <th>Difference ($)</th>
                   <th>Count</th>
                   <th>Avg Rate (%)</th>
                   <th>FRED Benchmark (%)</th>
@@ -132,7 +151,9 @@
               <tbody>
                 <tr v-for="inst in filteredInstruments" :key="inst.id">
                   <td><strong>{{ inst.name }}</strong></td>
+                  <td>${{ formatNumber(inst.faceValue || 0) }}</td>
                   <td>${{ formatNumber(inst.value) }}</td>
+                  <td>${{ formatNumber(inst.difference || 0) }}</td>
                   <td>{{ inst.count }}</td>
                   <td>{{ inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate : '—' }}</td>
                   <td>{{ inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench : '—' }}</td>
@@ -142,7 +163,6 @@
             </table>
           </div>
 
-          <!-- Detail sections per instrument -->
           <div v-for="inst in filteredDetails" :key="inst.id" class="combined-section">
             <h4 class="combined-section-title">
               {{ inst.name }} – Details ({{ inst.details.length }} rows)
@@ -157,7 +177,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- Export selection dialog -->
     <v-dialog v-model="showExportDialog" max-width="500px">
       <v-card>
         <v-card-title>Select instruments to export</v-card-title>
@@ -197,43 +216,37 @@ const combinedModalVisible = ref(false)
 const showExportDialog = ref(false)
 const selectedExportInstruments = ref({})
 
-// ===== FILTERED DATA FOR MODAL =====
+const totalFaceValue = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.faceValue || 0), 0))
+
+const extendedKpis = computed(() => [
+  { label: 'Total Face Value', value: '$' + formatNumber(totalFaceValue.value), icon: 'mdi-cash', color: '#0B2044' },
+  { label: 'Total Calculated', value: '$' + formatNumber(grandTotal.value), icon: 'mdi-calculator', color: '#1E88E5' },
+  { label: 'Difference', value: '$' + formatNumber(totalFaceValue.value - grandTotal.value), icon: 'mdi-arrow-right', color: '#FF9800' },
+  { label: 'Instrument Types', value: `${completedCount.value}/3`, icon: 'mdi-chart-pie', color: '#4CAF50' }
+])
+
 const filteredInstruments = computed(() => {
   return instruments.value.filter(inst => selectedExportInstruments.value[inst.id])
 })
-
 const filteredDetails = computed(() => {
   return instrumentsWithDetails.value.filter(inst => selectedExportInstruments.value[inst.id])
 })
-
 const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
 const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
 const completedCount = computed(() => instruments.value.filter(i => i.completed).length)
 
-const quickKpis = computed(() => [
-  { label: 'Asset classes', value: `${completedCount.value}/3`, icon: 'mdi-layers-triple', color: '#0B2044' },
-  { label: 'Session status', value: activeSession.value?.status === 'completed' ? 'Complete' : 'In progress', icon: 'mdi-folder-check', color: '#1E88E5' },
-  { label: 'Last updated', value: lastUpdatedLabel.value, icon: 'mdi-clock-outline', color: '#4CAF50' }
-])
-
-const lastUpdatedLabel = computed(() => {
-  try {
-    const wfs = activeSession.value?.instrumentWorkflow || {}
-    const dates = Object.values(wfs).map(w => w.saved_at).filter(Boolean)
-    if (!dates.length) return '—'
-    return new Date(Math.max(...dates.map(d => new Date(d).getTime()))).toLocaleDateString()
-  } catch (e) {
-    return '—'
-  }
-})
-
-function formatNumber(num) { return (num || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
+function formatNumber(num) {
+  return (num || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 function openInstrument(id) {
   if (!activeSession.value) { alert('Select a session on the Dashboard first'); router.push('/dashboard'); return }
   router.push({ path: `/instrument/${id}`, query: { session: activeSession.value.id } })
 }
-function goToDashboard() { router.push('/dashboard') }
+function goToDashboard() { 
+  try { if (activeSession.value) sessionManager.setActiveSession(activeSession.value) } catch(e) { console.warn(e) }
+  router.push('/dashboard') 
+}
 function goToReport() {
   if (!activeSession.value) { alert('No active session'); return }
   router.push({ path: '/instrument/money-market', query: { session: activeSession.value.id, tab: 'reports' } })
@@ -242,7 +255,6 @@ function openDetailModal(inst) {
   selectedInst.value = inst
   detailModalVisible.value = true
 }
-
 function openCombinedModal() {
   const hasSelection = Object.values(selectedExportInstruments.value).some(v => v === true)
   if (!hasSelection) {
@@ -263,17 +275,25 @@ async function loadSummary() {
       const all = sessionManager.getAllSessions()
       session = all[0] || null
     }
+    if (!session) {
+      const sid = sessionManager.getActiveSessionId()
+      if (sid) {
+        const loaded = await sessionManager.loadSessionFromDb(sid)
+        if (loaded) {
+          session = sessionManager.getSession(sid)
+        }
+      }
+    }
+    if (!session) {
+      const savedSessionRaw = localStorage.getItem('active_session')
+      if (savedSessionRaw) {
+        try {
+          session = JSON.parse(savedSessionRaw)
+        } catch(e) {}
+      }
+    }
   } catch(e) {
     console.warn('Error getting session:', e)
-  }
-  
-  if (!session) {
-    const savedSessionRaw = localStorage.getItem('active_session')
-    if (savedSessionRaw) {
-      try {
-        session = JSON.parse(savedSessionRaw)
-      } catch(e) {}
-    }
   }
   activeSession.value = session
 
@@ -286,9 +306,9 @@ async function loadSummary() {
 
   const sid = activeSession.value.id
   const templates = [
-    { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', rateLabel: 'Avg interest rate' },
-    { id: 'bonds', name: 'Bonds', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', rateLabel: 'Avg coupon' },
-    { id: 'tbills', name: 'T-Bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', rateLabel: 'Avg discount' }
+    { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', rateLabel: 'Avg interest rate', barColor: '#1E88E5' },
+    { id: 'bonds', name: 'Bonds', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', rateLabel: 'Avg coupon', barColor: '#4CAF50' },
+    { id: 'tbills', name: 'T-Bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', rateLabel: 'Avg discount', barColor: '#FF9800' }
   ]
 
   const detailsList = []
@@ -300,7 +320,11 @@ async function loadSummary() {
     
     let cleanedData = []
     let calculations = {}
-    if (!wf || !wf.calculations?.totalValue) {
+    if (wf && wf.calculations?.totalValue) {
+      cleanedData = wf.cleanedData || []
+      calculations = wf.calculations || {}
+    } 
+    if (!calculations.totalValue) {
       const cleanKey = `${template.id}_session_${sid}_clean`
       const calcKey = `${template.id}_session_${sid}_calc`
       const savedClean = localStorage.getItem(cleanKey)
@@ -311,9 +335,10 @@ async function loadSummary() {
       if (savedCalc) {
         try { calculations = JSON.parse(savedCalc) } catch(e) {}
       }
-    } else {
-      cleanedData = wf.cleanedData || []
-      calculations = wf.calculations || {}
+    }
+    if (!calculations.totalValue && activeSession.value.instrumentData?.[template.id]) {
+      const data = activeSession.value.instrumentData[template.id]
+      calculations = data
     }
     
     const completed = !!calculations.totalValue
@@ -323,8 +348,7 @@ async function loadSummary() {
       id: template.id,
       name: template.name,
       details: cleanedData,
-      detailHeaders: headers,
-      showDetails: false
+      detailHeaders: headers
     })
     let avgRate = null
     if (template.id === 'money-market') avgRate = calculations.avgRate
@@ -332,9 +356,21 @@ async function loadSummary() {
     else avgRate = calculations.avgDiscountRate
     if (avgRate === undefined) avgRate = null
     
+    let faceValue = 0
+    if (cleanedData && cleanedData.length) {
+      cleanedData.forEach(row => {
+        const fv = parseFloat(row.FaceValue || row.Amount || row.Principal || 0)
+        if (!isNaN(fv)) faceValue += fv
+      })
+    }
+    if (faceValue === 0 && value > 0) faceValue = value
+    const difference = faceValue - value
+
     return {
       ...template,
       value,
+      faceValue,
+      difference,
       count: calculations.instrumentCount || 0,
       avgRate,
       fredBench: calculations.fred?.benchmark_rate ?? null,
@@ -345,6 +381,12 @@ async function loadSummary() {
     }
   })
   instrumentsWithDetails.value = detailsList
+
+  const total = instruments.value.reduce((sum, inst) => sum + inst.value, 0)
+  instruments.value = instruments.value.map(inst => ({
+    ...inst,
+    percent: total > 0 ? ((inst.value / total) * 100).toFixed(1) : 0
+  }))
 
   const initSelections = {}
   instruments.value.forEach(inst => {
@@ -361,27 +403,21 @@ function exportToExcel() {
   const workbook = XLSX.utils.book_new()
   const valuationDate = new Date().toISOString().split('T')[0]
   
-  // ---- ENHANCED SUMMARY SHEET ----
   const summaryRows = toExport.map(inst => {
-    const calculatedValue = inst.value;
-    // For difference, we need to get the actual face value from details if possible
-    let totalFaceValue = calculatedValue;
+    const faceValue = inst.faceValue || 0
+    const calculatedValue = inst.value || 0
+    const diff = faceValue - calculatedValue
     let maturityDate = '—'
     const detailInst = instrumentsWithDetails.value.find(d => d.id === inst.id);
     if (detailInst && detailInst.details && detailInst.details.length) {
-      const faceSum = detailInst.details.reduce((s, row) => s + (parseFloat(row.FaceValue || row.Amount || row.Principal || 0)), 0);
-      if (faceSum > 0) totalFaceValue = faceSum;
-      
-      // Get maturity date from first row if available
       const firstRow = detailInst.details[0]
       if (firstRow) {
         maturityDate = firstRow.MaturityDate || firstRow.Maturity || firstRow['Maturity Date'] || '—'
       }
     }
-    const diff = totalFaceValue - calculatedValue;
     return {
       'Instrument Name': inst.name,
-      'Face Value': totalFaceValue,
+      'Face Value': faceValue,
       'Calculated Value': calculatedValue,
       'Difference': diff,
       'Yield (%)': inst.avgRate !== null ? inst.avgRate : '—',
@@ -390,7 +426,6 @@ function exportToExcel() {
     };
   });
 
-  // Add totals row
   const totals = {
     'Instrument Name': 'TOTAL',
     'Face Value': summaryRows.reduce((s, r) => s + r['Face Value'], 0),
@@ -404,10 +439,8 @@ function exportToExcel() {
   const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
 
-  // ---- DETAIL SHEETS WITH ENHANCED FIELDS ----
   for (const inst of instrumentsWithDetails.value) {
     if (selectedExportInstruments.value[inst.id] && inst.details && inst.details.length) {
-      // Enrich details with all required fields per instrument
       const enrichedDetails = inst.details.map(row => {
         const newRow = { ...row };
         const face = parseFloat(row.FaceValue || row.Amount || row.Principal || 0);
@@ -424,7 +457,6 @@ function exportToExcel() {
     }
   }
   
-  // ---- INSTRUMENT-SPECIFIC TOTALS SHEET ----
   const instrumentTotals = []
   toExport.forEach(inst => {
     const detailInst = instrumentsWithDetails.value.find(d => d.id === inst.id);
@@ -456,7 +488,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* ===== ALL ORIGINAL STYLES – UNCHANGED ===== */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
@@ -509,7 +540,6 @@ onMounted(() => {
 .export-instrument-select { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .export-checkbox { display: flex; align-items: center; gap: 10px; font-size: 16px; cursor: pointer; }
 .warning-badge { background: #ffebee; color: #c62828; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
-
 .combined-excel-body { padding: 16px 24px; max-height: calc(100vh - 140px); overflow-y: auto; background: #f9fafc; }
 .combined-section { background: white; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
 .combined-section-title { color: #0B2044; font-size: 16px; font-weight: 600; margin: 0 0 12px 0; display: flex; align-items: center; gap: 10px; }
@@ -520,4 +550,13 @@ onMounted(() => {
 .summary-table td { padding: 8px; border-bottom: 1px solid #eee; }
 .summary-table tr:hover { background: #f8f9ff; }
 .excel-wrapper { border: 1px solid #e8ecf1; border-radius: 8px; overflow: hidden; }
+
+.distribution-section { background: white; border-radius: 12px; padding: 20px; margin: 30px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+.distribution-section h3 { color: #0B2044; margin-bottom: 16px; }
+.distribution-bars { display: flex; flex-direction: column; gap: 12px; }
+.dist-bar-container { display: flex; align-items: center; gap: 12px; }
+.dist-label { width: 120px; font-weight: 600; color: #0B2044; }
+.dist-track { flex: 1; height: 20px; background: #e8ecf1; border-radius: 10px; overflow: hidden; }
+.dist-fill { height: 100%; border-radius: 10px; transition: width 0.5s ease; }
+.dist-percent { width: 50px; text-align: right; font-weight: 600; color: #0B2044; }
 </style>

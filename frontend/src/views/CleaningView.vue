@@ -174,6 +174,8 @@ import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
 import { dataAPI, datasetAPI } from '../services/api'
+import sessionManager from '@/services/sessionManager.js'
+import { markStepCompleted } from '@/utils/workflowProgress.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -347,10 +349,15 @@ async function completeProcess() {
 }
 
 // Go to calculations
-function goToCalculations() {
+async function goToCalculations() {
   if (!results.value) return alert('Please clean data first')
   const datasetId = route.query.dataset_id
   if (!datasetId) return alert('Cannot proceed without dataset reference')
+  try {
+    const session = sessionManager.getActiveSession()
+    const sid = session?.id || sessionManager.getActiveSessionId()
+    if (sid) await markStepCompleted(String(sid), 'cleaning')
+  } catch (e) { console.warn(e) }
   router.push({ name: 'calculations', query: { dataset_id: datasetId } })
 }
 

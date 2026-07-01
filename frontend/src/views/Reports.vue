@@ -86,10 +86,17 @@ import FixedLayout from '@/components/FixedLayout.vue'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import { datasetAPI, fredAPI } from '@/services/api'
 import sessionManager from '@/services/sessionManager.js'
+import { markStepCompleted } from '@/utils/workflowProgress.js'
+import * as XLSX from 'xlsx'
+
+// ----- Image paths -----
+const logoUrl = '/DuraCapital logo.png'
+const backgroundCoverUrl = '/reportbackground.png'
 
 const router = useRouter()
 const route = useRoute()
 
+// ----- State -----
 const selectedType = ref('current')
 const previewData = ref(null)
 const yieldCurveData = ref(null)
@@ -98,28 +105,10 @@ const dataset = ref(null)
 const showDatasetPreview = ref(false)
 const sessionName = ref('')
 
-function selectReportType(type) {
-  selectedType.value = type
-  generatePreview()
-}
-
-async function loadFredForReport() {
-  reportError.value = ''
-  try {
-    const res = await fredAPI.getYieldCurve('all')
-    if (res?.success && res.data?.datasets?.length) {
-      yieldCurveData.value = res.data
-    } else {
-      reportError.value = 'FRED yield data not available. Check backend .env FRED_API_KEY.'
-      yieldCurveData.value = null
-    }
-  } catch (e) {
-    reportError.value = e.message || 'Failed to load FRED data'
-    yieldCurveData.value = null
-  }
-}
-
-function buildFullReportHtml(data, instrument, session, date, valuationDate) {
+// ============================================================
+// FULL generateReportHtml – copied from MoneyMarket.vue
+// ============================================================
+function generateReportHtml(data, instrument, session, date, valuationDate) {
   const now = new Date().toLocaleString()
   const valDate = valuationDate || new Date().toISOString().split('T')[0]
   
@@ -151,6 +140,7 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
     assumptions = 'Standard market conventions applied.'
   }
 
+  // Build instrument rows for appendix
   let instrumentRows = ''
   data.forEach((item, idx) => {
     const name = item.Instrument || item.BondName || item.TBillName || `Instrument ${idx + 1}`
@@ -168,24 +158,96 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
     </tr>`
   })
 
-  return `
-<!DOCTYPE html>
+  // Watermark logo for pages after cover
+  const watermarkLogo = `<img src="${logoUrl}" alt="logo" style="position:absolute; top:20px; right:30px; width:80px; opacity:0.15; pointer-events:none;" />`;
+
+  // ----- NEW COVER DESIGN -----
+  const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <title>Valuation Assessment Report - ${session}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Arial', sans-serif; color: #333; background: white; line-height: 1.6; }
-    .page { page-break-after: always; padding: 60px 80px; min-height: 100vh; }
+    body { 
+      font-family: 'Arial', sans-serif; 
+      color: #000; 
+      background: white; 
+      line-height: 1.6; 
+      margin: 0;
+      padding: 0;
+    }
+    .page { 
+      page-break-after: always; 
+      padding: 40px 50px; 
+      min-height: 100vh; 
+      position: relative;
+      width: 210mm;
+      margin: 0 auto;
+      background: white;
+    }
     .page:last-child { page-break-after: auto; }
-    .cover-page { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; background: linear-gradient(135deg, #0B2044 0%, #1a3a6e 100%); color: white; }
-    .cover-content { max-width: 800px; }
-    .logo { max-width: 200px; margin-bottom: 40px; }
-    .cover-title { font-size: 48px; font-weight: 700; letter-spacing: 2px; margin-bottom: 20px; }
-    .cover-subtitle { font-size: 24px; font-weight: 300; opacity: 0.9; margin-bottom: 40px; }
-    .cover-meta { font-size: 14px; opacity: 0.8; line-height: 1.8; }
-    .cover-meta strong { opacity: 1; }
+
+    /* COVER PAGE – white background, image as watermark on right, text centered */
+    .cover-page {
+      background-color: white;
+      background-image: url('${backgroundCoverUrl}');
+      background-size: 30%;           /* smaller, like a watermark */
+      background-position: right center;
+      background-repeat: no-repeat;
+      color: black;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 40px 50px;
+      position: relative;
+      min-height: 100vh;
+      width: 210mm;
+      margin: 0 auto;
+    }
+    .cover-content {
+      max-width: 70%;
+      position: relative;
+      z-index: 2;
+      color: black;
+    }
+    .cover-logo {
+      position: absolute;
+      top: 30px;
+      left: 40px;
+      z-index: 3;
+    }
+    .cover-logo img {
+      max-width: 140px;
+      height: auto;
+      background: white;
+      padding: 4px;
+    }
+    .cover-session-name {
+      font-size: 44px;
+      font-weight: 300;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+      color: #000;
+    }
+    .cover-title {
+      font-size: 48px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      margin-bottom: 20px;
+      color: #000;
+    }
+    .cover-subtitle {
+      font-size: 28px;
+      font-weight: 300;
+      opacity: 0.85;
+      margin-bottom: 20px;
+      color: #000;
+    }
+
+    /* Rest of the pages – A4, black text */
     .toc-page h1 { font-size: 28px; color: #0B2044; border-bottom: 3px solid #0B2044; padding-bottom: 15px; margin-bottom: 30px; }
     .toc-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px dotted #ddd; font-size: 16px; }
     .toc-item:hover { background: #f5f5f5; }
@@ -202,41 +264,53 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
     .appendix-table { font-size: 12px; }
     .appendix-table th { background: #1a3a6e; }
     .appendix-table td { padding: 6px 8px; }
-    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999; text-align: center; }
+    .footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #ddd;
+      font-size: 12px;
+      color: #999;
+      text-align: center;
+    }
     .reference-list { list-style: none; padding: 0; }
     .reference-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
+    .watermark { position: absolute; top: 20px; right: 30px; opacity: 0.15; pointer-events: none; }
+    .watermark img { width: 80px; }
+
+    /* Page numbers */
+    @page {
+      margin: 20mm 15mm;
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 10pt;
+        color: #666;
+      }
+    }
     @media print {
-      .page { padding: 40px 60px; }
-      .cover-page { background: #0B2044 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      .page { padding: 40px 50px; width: 210mm; }
+      .cover-page { padding: 40px 50px; width: 210mm; }
       .executive-summary { background: #f8f9ff !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      .watermark { opacity: 0.15 !important; }
     }
   </style>
 </head>
 <body>
 
-<!-- COVER PAGE -->
+<!-- COVER PAGE (no watermark) -->
 <div class="page cover-page">
+  <div class="cover-logo">
+    <img src="${logoUrl}" alt="Dura Capital Logo" />
+  </div>
   <div class="cover-content">
-    <div class="logo">
-      <svg width="180" height="60" viewBox="0 0 180 60" fill="none">
-        <rect x="0" y="0" width="180" height="60" rx="8" fill="white" opacity="0.95"/>
-        <text x="20" y="38" font-family="Arial" font-weight="700" font-size="24" fill="#0B2044">DuraCapital</text>
-        <text x="120" y="38" font-family="Arial" font-weight="300" font-size="12" fill="#666">Valuation</text>
-      </svg>
-    </div>
+    <div class="cover-session-name">${session}</div>
     <h1 class="cover-title">Valuation Assessment Report</h1>
     <p class="cover-subtitle">${instrument.charAt(0).toUpperCase() + instrument.slice(1)}</p>
-    <div class="cover-meta">
-      <p><strong>Prepared for:</strong> ${session}</p>
-      <p><strong>Valuation Date:</strong> ${valDate}</p>
-      <p><strong>Report Date:</strong> ${date}</p>
-      <p><strong>Prepared by:</strong> Dura Capital (Private) Limited</p>
-    </div>
   </div>
 </div>
 
 <!-- TABLE OF CONTENTS -->
 <div class="page toc-page">
+  ${watermarkLogo}
   <h1>Table of Contents</h1>
   <div class="toc-item"><span>Introduction</span><span>1</span></div>
   <div class="toc-item"><span>Executive Summary</span><span>2</span></div>
@@ -250,6 +324,7 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
 
 <!-- INTRODUCTION -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Introduction</h1>
   <p>Dura Capital (Private) Limited ("Dura Capital", "us", "we") was contracted to provide a fair valuation assessment report of the following ${instrument} instruments as at ${valDate}:</p>
   <ul style="margin: 20px 0 20px 30px;">
@@ -271,6 +346,7 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
 
 <!-- EXECUTIVE SUMMARY -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Executive Summary</h1>
   <div class="executive-summary">
     <p><strong>Valuation Assessment Summary</strong></p>
@@ -291,8 +367,9 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
 
 <!-- METHODOLOGY -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Methodology</h1>
-  <p>The Axcentium Audit team provided us with ${instrument} data. This section outlines the methodologies used to provide a fair value of the fixed income assets in terms of IFRS 13.</p>
+  <p>The audit team provided us with ${instrument} data. This section outlines the methodologies used to provide a fair value of the fixed income assets in terms of IFRS 13.</p>
   <br>
   <div class="methodology-box">
     <h3>Valuation Approach</h3>
@@ -309,6 +386,7 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
 
 <!-- MARKET INPUTS -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Market Inputs</h1>
   <p>Market data for Zimbabwe is not available and there have not been any Zimbabwe issued instruments trading on international markets. As such, we have used the OIS SOFR rates from Bloomberg as a risk-free yield curve and added a country risk premium sourced from country risk premiums published by Damodaran.</p>
   <br>
@@ -328,6 +406,7 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
 
 <!-- RESULTS -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Results</h1>
   <p>Below is a summary of the key findings of the valuation for ${instrument} instruments.</p>
   <br>
@@ -351,6 +430,7 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
 
 <!-- CONCLUSION -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Conclusion</h1>
   <p>The valuation assessment conducted by Dura Capital provides a comprehensive fair value assessment of the ${instrument} instruments as at ${valDate}.</p>
   <br>
@@ -369,6 +449,7 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
 
 <!-- APPENDIX -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Appendix: Detailed Instrument Data</h1>
   <p><strong>Valuation Date:</strong> ${valDate}</p>
   <p><strong>Total Instruments:</strong> ${data.length}</p>
@@ -393,6 +474,7 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
 
 <!-- REFERENCE -->
 <div class="page">
+  ${watermarkLogo}
   <h1 class="section-title">Reference</h1>
   <ul class="reference-list">
     <li>Bloomberg Financial Services – SOFR OIS Yield Curve as at ${valDate}</li>
@@ -410,6 +492,33 @@ function buildFullReportHtml(data, instrument, session, date, valuationDate) {
 
 </body>
 </html>`
+
+  return html
+}
+
+// ============================================================
+// Component logic
+// ============================================================
+
+function selectReportType(type) {
+  selectedType.value = type
+  generatePreview()
+}
+
+async function loadFredForReport() {
+  reportError.value = ''
+  try {
+    const res = await fredAPI.getYieldCurve('all')
+    if (res?.success && res.data?.datasets?.length) {
+      yieldCurveData.value = res.data
+    } else {
+      reportError.value = 'FRED yield data not available. Check backend .env FRED_API_KEY.'
+      yieldCurveData.value = null
+    }
+  } catch (e) {
+    reportError.value = e.message || 'Failed to load FRED data'
+    yieldCurveData.value = null
+  }
 }
 
 async function generatePreview() {
@@ -439,7 +548,6 @@ async function generatePreview() {
   sessionName.value = session.name || 'Current Session'
   const instrument = route.query.instrument || 'money-market'
 
-  // Get data for the instrument
   let data = []
   const wf = sessionManager.getInstrumentWorkflow(session.id, instrument)
   if (wf && wf.cleanedData && wf.cleanedData.length) {
@@ -500,7 +608,6 @@ function downloadFullReport() {
   const date = data.date || new Date().toLocaleString()
   const valuationDate = data.valuationDate || new Date().toISOString().split('T')[0]
 
-  // Get full dataset
   let fullData = []
   if (selectedType.value === 'session' && data.instruments) {
     for (const [inst, rows] of Object.entries(data.instruments)) {
@@ -509,7 +616,6 @@ function downloadFullReport() {
       }
     }
   } else {
-    // Try to get data from session
     const sessionId = route.query.session
     if (sessionId) {
       const wf = sessionManager.getInstrumentWorkflow(sessionId, instrument)
@@ -530,7 +636,7 @@ function downloadFullReport() {
     return
   }
 
-  const html = buildFullReportHtml(fullData, instrument, session, date, valuationDate)
+  const html = generateReportHtml(fullData, instrument, session, date, valuationDate)
   const blob = new Blob([html], { type: 'text/html' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -621,7 +727,8 @@ async function markDone() {
       completed: true,
       timestamp: new Date().toISOString()
     }
-    sessionManager.updateSession(session.id, { instrumentData: session.instrumentData })
+    await sessionManager.updateSession(session.id, { instrumentData: session.instrumentData })
+    try { if (session && session.id) await markStepCompleted(String(session.id), 'reports') } catch (e) { console.error(e) }
     alert(`Marked ${instrument} as done in session.`)
     router.push('/dashboard')
   } catch (err) {
@@ -644,7 +751,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* same as original – keep your styles */
 .reports-page { padding: 30px; max-width: 1200px; margin: 0 auto; }
 .page-header { margin-bottom: 30px; }
 .back-btn { background: transparent; border: none; color: #0B2044; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 8px; margin-bottom: 20px; }

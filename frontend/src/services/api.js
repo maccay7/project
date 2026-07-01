@@ -83,7 +83,8 @@ export const dataAPI = {
   },
   clean: (data, options) => callAPI('/api/clean', 'POST', { data, options }),
   calculate: (data, type, params, datasetId = null) => callAPI('/api/calculate', 'POST', { data, instrument_type: type, params, dataset_id: datasetId }),
-  deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { upload_id: id })
+  deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { upload_id: id }),
+  parseExcel: (formData) => callAPI('/api/data/parse-excel', 'POST', formData, true)
 }
 
 export const datasetAPI = {
@@ -133,6 +134,15 @@ export const sessionsAPI = {
   delete: (session_id) => callAPI('/api/sessions/delete', 'POST', { session_id })
 }
 
+// ========== NEW: Visualization API ==========
+export const visualizationAPI = {
+  // Get yield curve data (aggregated) – this is the one we use now
+  getYieldCurve: (payload) => callAPI('/api/visualization/yield-curve', 'POST', payload),
+  getChartData: (data, instrumentType) => 
+    callAPI('/api/visualization/chart-data', 'POST', { data, instrument_type: instrumentType }),
+  clearCache: () => callAPI('/api/visualization/cache/clear', 'DELETE')
+}
+
 export default {
   authAPI,
   dashboardAPI,
@@ -143,5 +153,6 @@ export default {
   datasetAPI,
   fredAPI,
   instrumentConfigAPI,
-  sessionsAPI
+  sessionsAPI,
+  visualizationAPI  
 }

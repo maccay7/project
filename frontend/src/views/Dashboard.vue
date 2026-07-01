@@ -20,7 +20,7 @@
       <div class="recent-sessions-card">
         <v-card class="session-card">
           <v-card-title class="card-title">
-            <div class="title-left"><v-icon>mdi-history</v-icon> Recent Sessions</div>
+            <div class="title-left"><v-icon>mdi-clock-time-eight-outline</v-icon> Recent Sessions</div>
             <div class="title-right"><span class="session-count">{{ filteredSessions.length }} Total</span></div>
           </v-card-title>
           <v-card-text class="card-text-flex">
@@ -38,7 +38,7 @@
                 </div>
                 <div v-for="session in filteredSessions" :key="session.id" class="session-row-item" :class="{ 'active-session-row': activeSession && activeSession.id === session.id }">
                   <div class="session-row-icon" :style="{ background: '#0B2044' }" @click="loadExistingSession(session.id)">
-                    <v-icon size="14" color="white">mdi-folder</v-icon>
+                    <v-icon size="14" color="white">mdi-folder-text-outline</v-icon>
                   </div>
                   <div class="session-row-info" @click="loadExistingSession(session.id)">
                     <div class="session-row-name">{{ session.name }}</div>
@@ -61,7 +61,7 @@
 
       <div class="create-session-card">
         <v-card class="session-card">
-          <v-card-title class="card-title"><v-icon>mdi-folder-plus</v-icon> Create New Session</v-card-title>
+          <v-card-title class="card-title"><v-icon>mdi-folder-plus-outline</v-icon> Create New Session</v-card-title>
           <v-card-text class="create-session-content">
             <div class="create-session-input">
               <input v-model="newSessionName" placeholder="Enter session name" class="session-input" @keyup.enter="createNewSession"/>
@@ -86,12 +86,10 @@
                   <span>Created: {{ formatDate(activeSession.date) }}</span>
                   <span>Instruments: {{ activeSession.instrumentCount || 0 }}/3</span>
                 </div>
-                <button class="btn-save-session" @click="saveToSession">
-                  <v-icon size="14">mdi-content-save</v-icon> Save to Session
-                </button>
+                <!-- Save to Session button removed -->
               </div>
               <div v-else class="no-session-warning">
-                <v-icon color="warning" size="16">mdi-alert</v-icon>
+                <v-icon color="warning" size="16">mdi-alert-circle-outline</v-icon>
                 <span>No active session selected</span>
               </div>
             </div>
@@ -531,24 +529,6 @@ const deleteSession = (sessionId) => {
   }
 }
 
-// Explicit Save to Session - creates version record
-const saveToSession = () => {
-  if (!activeSession.value) return
-  
-  // Dispatch event with explicitSave flag
-  window.dispatchEvent(new CustomEvent('session-updated', {
-    detail: {
-      sessionId: activeSession.value.id,
-      explicitSave: true,
-      changeType: 'Saved',
-      shortDescription: 'Saved to session',
-      instrument: detectInstrument(activeSession.value.id) || 'Session'
-    }
-  }))
-  
-  alert('Session saved successfully!')
-}
-
 // ***** FIXED NAVIGATION *****
 const goToInstrument = (instrumentId) => {
   if (!activeSession.value) {
@@ -731,8 +711,6 @@ onBeforeUnmount(() => {
 .session-status-badge.in-progress { background: #FFF3E0; color: #FF9800; }
 .session-status-badge.completed { background: #E8F5E9; color: #4CAF50; }
 .session-details { display: flex; gap: 10px; font-size: 9px; color: #555; }
-.btn-save-session { margin-top: 8px; width: 100%; padding: 8px 12px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; transition: all 0.2s; }
-.btn-save-session:hover { background: #45a049; transform: translateY(-1px); }
 .no-session-warning { padding: 10px 10px; background: #FFF3E0; border-radius: 8px; display: flex; align-items: center; gap: 6px; color: #E65100; font-size: 10px; margin-bottom: 12px; }
 .flex-spacer { flex: 1; min-height: 10px; }
 .session-stats-summary { background: #f8f9ff; margin: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(11, 32, 68, 0.08); }

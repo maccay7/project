@@ -136,6 +136,8 @@ import ExcelViewer from '../components/ExcelViewer.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { datasetAPI } from '../services/api'
+import sessionManager from '@/services/sessionManager.js'
+import { markStepCompleted } from '@/utils/workflowProgress.js'
 import * as XLSX from 'xlsx'
 
 const router = useRouter()
@@ -355,14 +357,16 @@ function goToClean() {
   // If not saved yet, ask to save
   if (!selectedDatasetId.value) {
     const name = uploadedFile.value?.name?.replace(/\.[^/.]+$/, '') || `Dataset-${Date.now()}`
-    saveDataset(name).then(saved => {
+    saveDataset(name).then(async saved => {
       if (saved) {
+        try { const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId(); if (sid) await markStepCompleted(String(sid), 'upload') } catch (e) { console.warn(e) }
         router.push({ name: 'cleaning', query: { dataset_id: selectedDatasetId.value } })
       } else {
         alert('Unable to save dataset before cleaning')
       }
     })
   } else {
+    try { const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId(); if (sid) await markStepCompleted(String(sid), 'upload') } catch (e) { console.warn(e) }
     router.push({ name: 'cleaning', query: { dataset_id: selectedDatasetId.value } })
   }
 }

@@ -87,6 +87,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { dataAPI } from '../services/api'
 import api from '../services/api'
 import sessionManager from '@/services/sessionManager.js'
+import { markStepCompleted } from '@/utils/workflowProgress.js'
 import * as XLSX from 'xlsx'
 import Chart from 'chart.js/auto'
 
@@ -123,7 +124,11 @@ function nextStep() {
   const steps = ['upload', 'clean', 'calculate', 'visualize', 'reports']
   const idx = steps.indexOf(currentStep.value)
   if (idx < steps.length - 1) {
-    currentStep.value = steps[idx + 1]
+    const prev = currentStep.value
+    const next = steps[idx + 1]
+    // mark the previous step as completed (persisted)
+    try { markStepCompleted(sessionId, prev) } catch (e) { console.error(e) }
+    currentStep.value = next
     router.replace({ query: { ...route.query, step: currentStep.value } })
   }
 }
@@ -191,13 +196,11 @@ async function drawYieldCurve() {
       options: { responsive: true, maintainAspectRatio: false }
     })
   } catch (err) {
-    console.error('Failed to load yield curve from backend, using sample data', err)
-    const ctx = yieldCanvas.value.getContext('2d')
-    yieldChart = new Chart(ctx, {
-      type: 'line',
-      data: { labels: ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'], datasets: [{ label: 'Yield Curve', data: [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1], borderColor: '#0B2A44', fill: true }] },
-      options: { responsive: true, maintainAspectRatio: false }
-    })
+    console.error('Failed to load yield curve from backend', err)
+    if (yieldChart) {
+      yieldChart.destroy()
+      yieldChart = null
+    }
   }
 }
 watch(currentStep, (step) => { if (step === 'visualize') setTimeout(drawYieldCurve, 100) })

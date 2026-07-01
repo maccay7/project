@@ -662,12 +662,13 @@ export default {
 <style scoped>
 /* same as before – unchanged */
 .excel-viewer {
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  border: 1px solid #d6dee9;
+  border-radius: 14px;
   overflow: hidden;
-  background: white;
+  background: #f7fafc;
   font-size: 13px;
   max-width: 100%;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.6);
 }
 .formula-bar {
   display: flex;
@@ -763,17 +764,19 @@ export default {
 }
 .excel-edit-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
 }
 .excel-edit-table th,
 .excel-edit-table td {
-  border: 1px solid #e0e0e0;
+  border: 1px solid #cbd6e2;
   box-sizing: border-box;
+  background: #fff;
 }
 .excel-edit-table th {
-  background: #f5f5f5;
-  font-weight: 600;
+  background: #eef4fb;
+  font-weight: 700;
   color: #0B2044;
   user-select: none;
   position: sticky;

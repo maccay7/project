@@ -4,10 +4,20 @@
 
 const WORKFLOW_PROGRESS_KEY = 'dura_workflow_progress'
 
+import sessionManager from '@/services/sessionManager.js'
+
 // Get persisted workflow progress for a session
 function getWorkflowProgress(sessionId) {
   if (!sessionId) return {}
   try {
+    // Prefer server-backed session data when available
+    try {
+      const s = sessionManager.getSession(sessionId)
+      if (s && s.workflow_progress) return s.workflow_progress
+    } catch (e) {
+      // ignore and fallback to localStorage
+    }
+
     const stored = localStorage.getItem(WORKFLOW_PROGRESS_KEY)
     const all = stored ? JSON.parse(stored) : {}
     return all[sessionId] || {}
@@ -20,10 +30,21 @@ function getWorkflowProgress(sessionId) {
 function saveWorkflowProgress(sessionId, progress) {
   if (!sessionId) return
   try {
+    // Persist locally for quick reads
     const stored = localStorage.getItem(WORKFLOW_PROGRESS_KEY)
     const all = stored ? JSON.parse(stored) : {}
     all[sessionId] = progress
     localStorage.setItem(WORKFLOW_PROGRESS_KEY, JSON.stringify(all))
+
+    // Also persist to backend via sessionManager (will call API)
+    try {
+      const s = sessionManager.getSession(sessionId) || {}
+      const serverProgress = s.workflow_progress || {}
+      const merged = { ...serverProgress, ...progress }
+      sessionManager.updateSession(sessionId, { workflow_progress: merged })
+    } catch (e) {
+      // ignore backend failures — local copy remains
+    }
   } catch (e) {
     console.error('Failed to save workflow progress:', e)
   }
@@ -37,6 +58,12 @@ function clearWorkflowProgress(sessionId) {
     const all = stored ? JSON.parse(stored) : {}
     delete all[sessionId]
     localStorage.setItem(WORKFLOW_PROGRESS_KEY, JSON.stringify(all))
+
+    try {
+      sessionManager.updateSession(sessionId, { workflow_progress: {} })
+    } catch (e) {
+      // ignore
+    }
   } catch (e) {
     console.error('Failed to clear workflow progress:', e)
   }

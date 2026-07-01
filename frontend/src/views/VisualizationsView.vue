@@ -133,7 +133,7 @@
       <!-- No Data Message -->
       <v-card v-if="!hasData" class="stats-card">
         <v-card-text class="text-center pa-8">
-          <v-icon size="64" color="#999">mdi-chart-line-off</v-icon>
+          <v-icon size="64" color="#999">mdi-chart-box-outline</v-icon>
           <h3 class="mt-4">No Data Loaded</h3>
           <p>Click "Load Data" to load calculation results</p>
           <v-btn color="#0B2A44" @click="loadData">Load Data</v-btn>
@@ -149,6 +149,8 @@ import { ref, nextTick, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import api from '@/services/api.js'
+import sessionManager from '@/services/sessionManager.js'
+import { markStepCompleted } from '@/utils/workflowProgress.js'
 import { useFredMarket } from '@/composables/useFredMarket'
 import { Chart, registerables } from 'chart.js'
 
@@ -183,10 +185,10 @@ const lastYieldCurveRequest = ref({})
 
 // KPI Stats
 const kpiStats = ref([
-  { title: 'Records', value: 0, icon: 'mdi-database', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
-  { title: 'Instrument Type', value: 'N/A', icon: 'mdi-chart-bubble', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
-  { title: 'Average Yield', value: '0%', icon: 'mdi-trending-up', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
-  { title: 'Data Source', value: 'FRED API', icon: 'mdi-api', color: 'rgba(255,193,7,0.1)', iconColor: '#FFC107' }
+  { title: 'Records', value: 0, icon: 'mdi-table-large', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
+  { title: 'Instrument Type', value: 'N/A', icon: 'mdi-shape-outline', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
+  { title: 'Average Yield', value: '0%', icon: 'mdi-percent-outline', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
+  { title: 'Data Source', value: 'FRED API', icon: 'mdi-web', color: 'rgba(255,193,7,0.1)', iconColor: '#FFC107' }
 ])
 
 // Load data from the latest calculation for the selected dataset
@@ -247,8 +249,7 @@ function chartDatasets(payload) {
   if (payload.datasets && payload.datasets.length) {
     return payload.datasets.map(d => ({
       label: d.label,
-      data: d.data,
-      maturities: d.maturities || payload.labels,
+      data: d.data.map((val, idx) => ({ x: d.maturities?.[idx] || idx, y: val })),
       borderColor: d.borderColor || '#0B2044',
       backgroundColor: 'rgba(11, 42, 68, 0.08)',
       borderWidth: 2,
@@ -256,9 +257,11 @@ function chartDatasets(payload) {
       tension: 0.35
     }))
   }
+  // Fallback: assume payload.labels are maturity strings and payload.current are rates
+  const maturities = (payload.labels || []).map(l => parseFloat(l.replace(/[^0-9.]/g, '')) || 0)
   return [{
     label: 'Yield Curve',
-    data: payload.current || [],
+    data: (payload.current || []).map((val, idx) => ({ x: maturities[idx] || idx, y: val })),
     borderColor: '#0B2044',
     backgroundColor: 'rgba(11, 42, 68, 0.1)',
     borderWidth: 2,
@@ -270,13 +273,9 @@ function chartDatasets(payload) {
 async function loadYieldCurve() {
   yieldError.value = ''
   try {
-    // Create cache key based on request parameters
     const cacheKey = `${selectedInstrument.value}_${fredFilters.value.country}_${fredFilters.value.currency}`
-    
-    // Check cache first
     if (yieldCurveCache.value.has(cacheKey)) {
       const cached = yieldCurveCache.value.get(cacheKey)
-      // Use cached data if less than 5 minutes old
       if (Date.now() - cached.timestamp < 300000) {
         yieldData.value = cached.data
         await nextTick()
@@ -284,22 +283,19 @@ async function loadYieldCurve() {
         return
       }
     }
-    
-    // Prevent duplicate requests
     const requestKey = `${cacheKey}_${Date.now()}`
     if (lastYieldCurveRequest.value[cacheKey] && Date.now() - lastYieldCurveRequest.value[cacheKey] < 1000) {
-      return // Debounce: don't request if already requested within last second
+      return
     }
     lastYieldCurveRequest.value[cacheKey] = Date.now()
-    
+
     const res = await api.fredAPI.getYieldCurve(
       selectedInstrument.value,
       fredFilters.value.country,
       fredFilters.value.currency
     )
-    if (res?.success && res.data?.labels?.length) {
+    if (res?.success && res.data?.maturities?.length) {
       yieldData.value = res.data
-      // Cache the result
       yieldCurveCache.value.set(cacheKey, {
         data: res.data,
         timestamp: Date.now()
@@ -320,15 +316,25 @@ function renderYieldChart() {
   if (!yieldCanvas.value || !yieldData.value) return
   if (yieldChart) yieldChart.destroy()
   const ctx = yieldCanvas.value.getContext('2d')
-  
-  // Generate dynamic X-axis based on maximum maturity
-  const labels = yieldData.value.labels || []
-  const maxMaturity = extractMaxMaturity(labels)
-  const dynamicLabels = generateDynamicXAxis(maxMaturity)
-  
+
+  const maturities = yieldData.value.maturities || []
+  const maxMaturity = maturities.length ? Math.max(...maturities) : 10
+  const selectedMaturity = parseFloat(fredFilters.value.maturity) || maxMaturity
+  const effectiveMax = Math.min(maxMaturity, selectedMaturity)
+
+  const xLabels = []
+  for (let i = 0; i <= effectiveMax; i++) {
+    xLabels.push(i)
+  }
+
+  const datasets = chartDatasets(yieldData.value).map(ds => ({
+    ...ds,
+    data: ds.data.filter(pt => pt.x <= effectiveMax)
+  }))
+
   yieldChart = new Chart(ctx, {
     type: 'line',
-    data: { labels: dynamicLabels, datasets: chartDatasets(yieldData.value) },
+    data: { datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -337,19 +343,22 @@ function renderYieldChart() {
         tooltip: {
           callbacks: {
             label: (ctx) => {
-              const m = ctx.dataset.maturities?.[ctx.dataIndex] || ctx.label
-              return `${m}: ${ctx.raw}%`
+              const pt = ctx.raw
+              return `${pt.x.toFixed(0)}Y: ${pt.y.toFixed(2)}%`
             }
           }
         }
       },
       scales: {
         y: { title: { display: true, text: 'Yield (%)' } },
-        x: { 
+        x: {
+          type: 'linear',
           title: { display: true, text: 'Maturity (Years)' },
+          min: 0,
+          max: effectiveMax,
           ticks: {
-            autoSkip: true,
-            maxTicksLimit: 12
+            callback: (val) => Number.isInteger(val) ? val : '',
+            stepSize: 1
           }
         }
       }
@@ -357,50 +366,22 @@ function renderYieldChart() {
   })
 }
 
-// Extract maximum maturity from labels (e.g., "30Y" -> 30, "5Y" -> 5)
-function extractMaxMaturity(labels) {
-  let maxYears = 30 // Default to 30 years
-  labels.forEach(label => {
-    const match = label.match(/(\d+)(Y|M)/i)
-    if (match) {
-      const value = parseInt(match[1])
-      const unit = match[2].toUpperCase()
-      if (unit === 'Y') {
-        maxYears = Math.max(maxYears, value)
-      } else if (unit === 'M') {
-        maxYears = Math.max(maxYears, Math.ceil(value / 12))
-      }
-    }
-  })
-  return maxYears
-}
-
-// Generate dynamic X-axis labels based on maximum maturity
-function generateDynamicXAxis(maxYears) {
-  const labels = []
-  if (maxYears <= 5) {
-    for (let i = 1; i <= maxYears; i++) labels.push(`${i}Y`)
-  } else if (maxYears <= 10) {
-    for (let i = 1; i <= maxYears; i++) labels.push(`${i}Y`)
-  } else if (maxYears <= 20) {
-    for (let i = 1; i <= maxYears; i += 2) labels.push(`${i}Y`)
-  } else {
-    for (let i = 1; i <= maxYears; i += 5) labels.push(`${i}Y`)
-  }
-  return labels
-}
-
 async function loadComparisonChart() {
   try {
     const res = await api.fredAPI.getYieldCurve('all', fredFilters.value.country, fredFilters.value.currency)
-    if (!res?.success || !res.data?.datasets?.length) return
+    if (!res?.success || !res.data?.maturities?.length) return
     await nextTick()
     if (compareChart) compareChart.destroy()
     const ctx = compareCanvas.value?.getContext('2d')
     if (!ctx) return
+    
+    const maturities = res.data.maturities || []
+    const maxMaturity = maturities.length ? Math.max(...maturities) : 10
+    const effectiveMax = maxMaturity
+
     compareChart = new Chart(ctx, {
       type: 'line',
-      data: { labels: res.data.labels, datasets: chartDatasets(res.data) },
+      data: { datasets: chartDatasets(res.data) },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -409,15 +390,24 @@ async function loadComparisonChart() {
           tooltip: {
             callbacks: {
               label: (ctx) => {
-                const m = ctx.dataset.maturities?.[ctx.dataIndex] || ''
-                return `${ctx.dataset.label} ${m}: ${ctx.raw}%`
+                const pt = ctx.raw
+                return `${ctx.dataset.label} ${pt.x.toFixed(0)}Y: ${pt.y.toFixed(2)}%`
               }
             }
           }
         },
         scales: {
           y: { title: { display: true, text: 'Yield (%)' } },
-          x: { title: { display: true, text: 'Tenor rank (hover for maturity)' } }
+          x: {
+            type: 'linear',
+            title: { display: true, text: 'Maturity (Years)' },
+            min: 0,
+            max: effectiveMax,
+            ticks: {
+              callback: (val) => Number.isInteger(val) ? val : '',
+              stepSize: 1
+            }
+          }
         }
       }
     })
@@ -427,12 +417,17 @@ async function loadComparisonChart() {
 }
 
 // Navigate to reports
-function goToReports() {
+async function goToReports() {
   const datasetId = route.query.dataset_id
   if (!datasetId) {
     alert('Dataset reference missing. Please run calculations first.')
     return
   }
+  try {
+    const session = sessionManager.getActiveSession()
+    const sid = session?.id || sessionManager.getActiveSessionId()
+    if (sid) await markStepCompleted(String(sid), 'visualizations')
+  } catch (e) { console.warn(e) }
   router.push({ name: 'reports', query: { dataset_id: datasetId } })
 }
 

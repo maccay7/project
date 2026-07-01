@@ -173,6 +173,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import sessionManager from '@/services/sessionManager.js'
+import { markStepCompleted } from '@/utils/workflowProgress.js'
 import FixedLayout from '../components/FixedLayout.vue'
 import { dataAPI, datasetAPI, calculationsAPI } from '../services/api'
 
@@ -345,12 +347,17 @@ function clearAll() {
 }
 
 // Navigate to visualizations
-function goToVisuals() {
+async function goToVisuals() {
   const datasetId = route.query.dataset_id
   if (!datasetId) {
     alert('Dataset reference missing. Please load a dataset first.')
     return
   }
+  try {
+    const session = sessionManager.getActiveSession()
+    const sid = session?.id || sessionManager.getActiveSessionId()
+    if (sid) await markStepCompleted(String(sid), 'calculations')
+  } catch (e) { console.warn(e) }
   router.push({ name: 'visualizations', query: { dataset_id: datasetId } })
 }
 

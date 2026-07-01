@@ -113,6 +113,7 @@ import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
 import * as XLSX from 'xlsx'
 import sessionManager from '@/services/sessionManager.js'
+import { markStepCompleted } from '@/utils/workflowProgress.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -726,8 +727,12 @@ async function generateExcel() {
 }
 
 // Reset all
-function finishAndReset() {
+async function finishAndReset() {
   if (confirm('Complete & Reset?')) {
+    try {
+      const sid = route.query.session || null
+      if (sid) await markStepCompleted(String(sid), 'reports')
+    } catch (e) { console.warn(e) }
     calcData.value = []
     instrumentType.value = ''
     sections.value.forEach(s => s.selected = true)

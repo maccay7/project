@@ -4,8 +4,8 @@
       <!-- Logo Section -->
       <div class="logo-section">
         <img 
-          src="/DataStudio-logo.jpeg" 
-          alt="DataStudio Logo" 
+          src="/DuraCapital logo.png" 
+          alt="Dura Capital Logo" 
           class="login-logo"
           @error="e => e.target.style.display = 'none'"
         />
@@ -163,7 +163,7 @@ const goToRegister = () => {
 /* ===== ORIGINAL STYLES – UNCHANGED ===== */
 .login-container {
   min-height: 100vh;
-  background: url('https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1600&h=900&fit=crop') center/cover no-repeat;
+  background: url('/login1.jpg') center/cover no-repeat;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -178,20 +178,21 @@ const goToRegister = () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(2px);
+  background: rgba(5, 17, 34, 0.35);
+  backdrop-filter: blur(8px);
 }
 
 .login-form {
-  background: #ffffff;
-  border-radius: 20px;
-  padding: 25px 30px;
+  background: rgba(255,255,255,0.14);
+  border-radius: 24px;
+  padding: 28px 30px;
   width: 100%;
-  max-width: 360px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  max-width: 400px;
+  box-shadow: 0 24px 65px rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(22px) saturate(160%);
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .logo-section {
@@ -200,11 +201,16 @@ const goToRegister = () => {
 }
 
 .login-logo {
-  width: 200px;
-  height: 60px;
+  width: 160px;
+  height: auto;
   object-fit: contain;
   display: block;
-  margin: 0 auto;
+  margin: 0 auto 18px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 10px;
+  border-radius: 18px;
+  mix-blend-mode: normal;
+  filter: drop-shadow(0 20px 40px rgba(0,0,0,0.25));
 }
 
 .form-group {
@@ -227,12 +233,18 @@ const goToRegister = () => {
 .form-input {
   width: 100%;
   padding: 11px 11px 11px 36px;
-  border: 1.5px solid #e0e0e0;
-  border-radius: 10px;
+  border: 1.5px solid rgba(255,255,255,0.34);
+  border-radius: 14px;
   font-size: 14px;
-  background: white;
+  background: rgba(255,255,255,0.86);
   transition: all 0.3s ease;
   outline: none;
+}
+
+.form-input:focus {
+  border-color: rgba(74, 144, 226, 0.85);
+  background: rgba(255,255,255,0.96);
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.12);
 }
 
 .form-input:focus {
@@ -327,18 +339,19 @@ const goToRegister = () => {
 
 .login-button {
   width: 100%;
-  padding: 11px;
-  background: linear-gradient(135deg, #4a90e2, #357abd);
+  padding: 12px;
+  background: linear-gradient(135deg, #3b7fd1, #1f497f);
   color: white;
   border: none;
-  border-radius: 10px;
+  border-radius: 14px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.3s ease;
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-bottom: 14px;
+  box-shadow: 0 10px 24px rgba(15, 60, 110, 0.2);
 }
 
 .login-button:hover:not(:disabled) {
@@ -388,15 +401,15 @@ const goToRegister = () => {
   top: 24px;
   right: 24px;
   z-index: 9999;
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 12px 20px;
+  background: rgba(255,255,255,0.95);
+  border-radius: 10px;
+  padding: 10px 16px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  color: #333;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-  border: 1px solid #e8f5e9;
+  gap: 10px;
+  color: #222;
+  box-shadow: 0 8px 32px rgba(6,24,64,0.25);
+  border: 1px solid rgba(255,255,255,0.06);
   animation: slideIn 0.4s ease;
 }
 
