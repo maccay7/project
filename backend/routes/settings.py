@@ -10,6 +10,7 @@ from utils.db import get_db
 
 
 def create_settings_table():
+    """Create the user_settings table if it doesn't exist."""
     conn = get_db()
     if not conn:
         return False
@@ -37,6 +38,7 @@ def create_settings_table():
 
 
 def get_setting(user_id, setting_key):
+    """Get a user setting."""
     conn = get_db()
     if not conn:
         return None
@@ -61,6 +63,7 @@ def get_setting(user_id, setting_key):
 
 
 def save_setting(user_id, setting_key, setting_value, setting_type='preference'):
+    """Save a user setting."""
     conn = get_db()
     if not conn:
         return False
@@ -86,6 +89,7 @@ def save_setting(user_id, setting_key, setting_value, setting_type='preference')
 
 
 def get_all_settings(user_id):
+    """Get all settings for a user."""
     conn = get_db()
     if not conn:
         return {}
@@ -111,201 +115,28 @@ def get_all_settings(user_id):
 
 
 def settings_routes(app):
+    """Register all settings routes."""
+    
+    # Create table on module load
     create_settings_table()
     
     @app.route('/api/user/profile', methods=['GET', 'OPTIONS'])
     def profile():
         if request.method == 'OPTIONS':
             return '', 200
-        token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        user_id = 1
-        if token:
-            conn = get_db()
-            if conn:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT user_id FROM sessions WHERE token = %s', (token,))
-                    session = cursor.fetchone()
-                    if session:
-                        user_id = session['user_id']
-                    cursor.close()
-                    conn.close()
-                except:
-                    pass
-        return jsonify({'success': True, 'data': get_user_profile(user_id)})
-
-    @app.route('/api/user/profile', methods=['PUT', 'OPTIONS'])
-    def update_profile():
-        if request.method == 'OPTIONS':
-            return '', 200
-        data = request.get_json()
-        token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        user_id = 1
-        if token:
-            conn = get_db()
-            if conn:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT user_id FROM sessions WHERE token = %s', (token,))
-                    session = cursor.fetchone()
-                    if session:
-                        user_id = session['user_id']
-                    cursor.close()
-                    conn.close()
-                except:
-                    pass
-        
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'Database error'}), 500
-        try:
-            cursor = conn.cursor()
-            if data.get('name'):
-                name_parts = data['name'].split(' ', 1)
-                cursor.execute('UPDATE users SET first_name = %s, last_name = %s WHERE id = %s',
-                             (name_parts[0], name_parts[1] if len(name_parts) > 1 else '', user_id))
-            if data.get('phone'):
-                cursor.execute('UPDATE users SET phone = %s WHERE id = %s', (data['phone'], user_id))
-            conn.commit()
-            cursor.close()
-            conn.close()
-            return jsonify({'success': True, 'data': get_user_profile(user_id)})
-        except Exception as e:
-            print(f"Error updating profile: {e}")
-            conn.close()
-            return jsonify({'success': False, 'message': 'Failed to update profile'}), 500
+        return jsonify({'success': True, 'data': get_user_profile()})
 
     @app.route('/api/user/preferences', methods=['GET', 'OPTIONS'])
     def preferences():
         if request.method == 'OPTIONS':
             return '', 200
-        token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        user_id = 1
-        if token:
-            conn = get_db()
-            if conn:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT user_id FROM sessions WHERE token = %s', (token,))
-                    session = cursor.fetchone()
-                    if session:
-                        user_id = session['user_id']
-                    cursor.close()
-                    conn.close()
-                except:
-                    pass
-        return jsonify({'success': True, 'data': get_user_preferences(user_id)})
-
-    @app.route('/api/user/preferences', methods=['PUT', 'OPTIONS'])
-    def update_preferences():
-        if request.method == 'OPTIONS':
-            return '', 200
-        data = request.get_json()
-        token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        user_id = 1
-        if token:
-            conn = get_db()
-            if conn:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT user_id FROM sessions WHERE token = %s', (token,))
-                    session = cursor.fetchone()
-                    if session:
-                        user_id = session['user_id']
-                    cursor.close()
-                    conn.close()
-                except:
-                    pass
-        
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'Database error'}), 500
-        try:
-            cursor = conn.cursor()
-            if data.get('language'):
-                cursor.execute('UPDATE user_preferences SET language = %s WHERE user_id = %s', (data['language'], user_id))
-            if data.get('timezone'):
-                cursor.execute('UPDATE user_preferences SET timezone = %s WHERE user_id = %s', (data['timezone'], user_id))
-            if data.get('dateFormat'):
-                cursor.execute('UPDATE user_preferences SET date_format = %s WHERE user_id = %s', (data['dateFormat'], user_id))
-            if data.get('currency'):
-                cursor.execute('UPDATE user_preferences SET currency = %s WHERE user_id = %s', (data['currency'], user_id))
-            conn.commit()
-            cursor.close()
-            conn.close()
-            return jsonify({'success': True, 'data': get_user_preferences(user_id)})
-        except Exception as e:
-            print(f"Error updating preferences: {e}")
-            conn.close()
-            return jsonify({'success': False, 'message': 'Failed to update preferences'}), 500
+        return jsonify({'success': True, 'data': get_user_preferences()})
 
     @app.route('/api/user/notifications/settings', methods=['GET', 'OPTIONS'])
     def notifications_settings():
         if request.method == 'OPTIONS':
             return '', 200
-        token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        user_id = 1
-        if token:
-            conn = get_db()
-            if conn:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT user_id FROM sessions WHERE token = %s', (token,))
-                    session = cursor.fetchone()
-                    if session:
-                        user_id = session['user_id']
-                    cursor.close()
-                    conn.close()
-                except:
-                    pass
-        return jsonify({'success': True, 'data': get_notification_settings(user_id)})
-
-    @app.route('/api/user/notifications/settings', methods=['PUT', 'OPTIONS'])
-    def update_notification_settings():
-        if request.method == 'OPTIONS':
-            return '', 200
-        data = request.get_json()
-        token = request.headers.get('Authorization', '').replace('Bearer ', '')
-        user_id = 1
-        if token:
-            conn = get_db()
-            if conn:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT user_id FROM sessions WHERE token = %s', (token,))
-                    session = cursor.fetchone()
-                    if session:
-                        user_id = session['user_id']
-                    cursor.close()
-                    conn.close()
-                except:
-                    pass
-        
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'Database error'}), 500
-        try:
-            cursor = conn.cursor()
-            if data.get('emailNotifications') is not None:
-                cursor.execute('UPDATE user_preferences SET email_notifications = %s WHERE user_id = %s',
-                             (data['emailNotifications'], user_id))
-            if data.get('pushNotifications') is not None:
-                cursor.execute('UPDATE user_preferences SET push_notifications = %s WHERE user_id = %s',
-                             (data['pushNotifications'], user_id))
-            if data.get('weeklyReports') is not None:
-                cursor.execute('UPDATE user_preferences SET weekly_reports = %s WHERE user_id = %s',
-                             (data['weeklyReports'], user_id))
-            if data.get('systemAlerts') is not None:
-                cursor.execute('UPDATE user_preferences SET system_alerts = %s WHERE user_id = %s',
-                             (data['systemAlerts'], user_id))
-            conn.commit()
-            cursor.close()
-            conn.close()
-            return jsonify({'success': True, 'data': get_notification_settings(user_id)})
-        except Exception as e:
-            print(f"Error updating notification settings: {e}")
-            conn.close()
-            return jsonify({'success': False, 'message': 'Failed to update notification settings'}), 500
+        return jsonify({'success': True, 'data': get_notification_settings()})
 
     @app.route('/api/system/info', methods=['GET', 'OPTIONS'])
     def system_info():
@@ -317,14 +148,18 @@ def settings_routes(app):
     def get_user_settings(user_id):
         if request.method == 'OPTIONS':
             return '', 200
+        
         settings = get_all_settings(user_id)
+        
         return jsonify({'success': True, 'data': settings})
     
     @app.route('/api/settings/<int:user_id>/<setting_key>', methods=['GET', 'OPTIONS'])
     def get_user_setting(user_id, setting_key):
         if request.method == 'OPTIONS':
             return '', 200
+        
         value = get_setting(user_id, setting_key)
+        
         if value is not None:
             return jsonify({'success': True, 'data': {setting_key: value}})
         else:
@@ -334,12 +169,16 @@ def settings_routes(app):
     def update_user_setting(user_id, setting_key):
         if request.method == 'OPTIONS':
             return '', 200
+        
         payload = request.get_json() or {}
         setting_value = payload.get('value')
         setting_type = payload.get('type', 'preference')
+        
         if setting_value is None:
             return jsonify({'success': False, 'message': 'Setting value is required'}), 400
+        
         success = save_setting(user_id, setting_key, setting_value, setting_type)
+        
         if success:
             return jsonify({'success': True, 'data': {setting_key: setting_value}})
         else:
@@ -349,10 +188,13 @@ def settings_routes(app):
     def save_user_settings(user_id):
         if request.method == 'OPTIONS':
             return '', 200
+        
         payload = request.get_json() or {}
         settings = payload.get('settings', {})
+        
         if not settings:
             return jsonify({'success': False, 'message': 'Settings data is required'}), 400
+        
         saved_settings = {}
         for key, value in settings.items():
             setting_type = value.get('type', 'preference') if isinstance(value, dict) else 'preference'
@@ -360,5 +202,6 @@ def settings_routes(app):
             success = save_setting(user_id, key, actual_value, setting_type)
             if success:
                 saved_settings[key] = actual_value
+        
         return jsonify({'success': True, 'data': saved_settings})
 

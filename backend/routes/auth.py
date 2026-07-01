@@ -45,8 +45,24 @@ def auth_routes(app):
             
             token = str(uuid.uuid4())
             expires_at = datetime.now() + timedelta(days=7)
+            # ensure auth_sessions exists
+            try:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS auth_sessions (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        user_id INT NOT NULL,
+                        token VARCHAR(255) UNIQUE NOT NULL,
+                        expires_at TIMESTAMP NOT NULL,
+                        ip_address VARCHAR(45),
+                        user_agent TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                ''')
+            except Exception:
+                pass
             cursor.execute(
-                'INSERT INTO sessions (user_id, token, expires_at) VALUES (%s, %s, %s)',
+                'INSERT INTO auth_sessions (user_id, token, expires_at) VALUES (%s, %s, %s)',
                 (user_id, token, expires_at)
             )
             conn.commit()
@@ -91,7 +107,7 @@ def auth_routes(app):
             token = str(uuid.uuid4())
             expires_at = datetime.now() + timedelta(days=7)
             cursor.execute(
-                'INSERT INTO sessions (user_id, token, expires_at) VALUES (%s, %s, %s)',
+                'INSERT INTO auth_sessions (user_id, token, expires_at) VALUES (%s, %s, %s)',
                 (user['id'], token, expires_at)
             )
             conn.commit()
@@ -109,8 +125,9 @@ def auth_routes(app):
                 }
             })
         except Exception as e:
-            print(f"Login error: {e}")
-            return jsonify({'success': False, 'message': 'Login failed'}), 500
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/logout', methods=['POST', 'OPTIONS'])
     def logout():
@@ -123,7 +140,7 @@ def auth_routes(app):
         if conn:
             try:
                 cursor = conn.cursor()
-                cursor.execute('DELETE FROM sessions WHERE token = %s', (token,))
+                cursor.execute('DELETE FROM auth_sessions WHERE token = %s', (token,))
                 conn.commit()
                 cursor.close()
                 conn.close()
@@ -144,7 +161,7 @@ def auth_routes(app):
         try:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT s.user_id, u.email, u.first_name, u.last_name FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = %s AND s.expires_at > NOW()',
+                'SELECT s.user_id, u.email, u.first_name, u.last_name FROM auth_sessions s JOIN users u ON s.user_id = u.id WHERE s.token = %s AND s.expires_at > NOW()',
                 (token,)
             )
             session = cursor.fetchone()

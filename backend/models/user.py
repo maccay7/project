@@ -3,6 +3,38 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 import uuid
 
+
+# Ensure auth_sessions table exists (separate from UI sessions)
+def _ensure_auth_sessions_table():
+    conn = get_db()
+    if not conn:
+        return
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                token VARCHAR(255) UNIQUE NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                ip_address VARCHAR(45),
+                user_agent TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ''')
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception:
+        try:
+            conn.close()
+        except:
+            pass
+
+
+_ensure_auth_sessions_table()
+
 class User:
     
     @staticmethod
@@ -53,7 +85,7 @@ class User:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id FROM sessions WHERE token = %s AND expires_at > NOW()",
+                "SELECT id FROM auth_sessions WHERE token = %s AND expires_at > NOW()",
                 (token,)
             )
             session = cursor.fetchone()
@@ -83,7 +115,7 @@ class User:
             
             cursor = conn.cursor()
             cursor.execute(
-                """INSERT INTO sessions (user_id, token, expires_at, ip_address, user_agent) 
+                """INSERT INTO auth_sessions (user_id, token, expires_at, ip_address, user_agent) 
                    VALUES (%s, %s, %s, %s, %s)""",
                 (user_id, token, expires_at, ip_address, user_agent)
             )

@@ -14,17 +14,15 @@ FRED_API_KEY = os.environ.get('FRED_API_KEY')
 FRED_BASE_URL = 'https://api.stlouisfed.org/fred'
 
 def fred_routes(app):
+
     @app.route('/api/fred/series/<series_id>', methods=['GET', 'OPTIONS'])
     def get_fred_series(series_id):
         if request.method == 'OPTIONS':
             return '', 200
-        
         if not FRED_API_KEY:
             return jsonify({'success': False, 'error': 'FRED API key not configured'}), 500
-        
         limit = request.args.get('limit', 200)
         sort_order = request.args.get('sort_order', 'desc')
-        
         params = {
             'series_id': series_id,
             'api_key': FRED_API_KEY,
@@ -32,15 +30,12 @@ def fred_routes(app):
             'sort_order': sort_order,
             'limit': limit
         }
-        
         try:
-            response = requests.get(f'{FRED_BASE_URL}/series/observations', params=params)
+            response = requests.get(f'{FRED_BASE_URL}/series/observations', params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-            
             if 'error_code' in data:
                 return jsonify({'success': False, 'error': data.get('error_message', 'FRED API error')}), 400
-            
             observations = data.get('observations', [])
             result = []
             for obs in observations:
@@ -49,9 +44,9 @@ def fred_routes(app):
                         'date': obs['date'],
                         'value': float(obs['value'])
                     })
-            
             return jsonify({'success': True, 'series_id': series_id, 'data': result})
         except Exception as e:
+            print(f"FRED series error: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/fred/categories', methods=['GET', 'OPTIONS'])
@@ -85,16 +80,18 @@ def fred_routes(app):
             return '', 200
         if not FRED_API_KEY:
             return jsonify({'success': False, 'error': 'FRED API key not configured'}), 500
-        inst = request.args.get('instrument_type', 'money_market')
-        maturity = request.args.get('maturity', '1Y')
-        country = request.args.get('country', 'US')
-        currency = request.args.get('currency', 'USD')
-        data = get_market_benchmark(inst, maturity, country, currency)
-        if data.get('error'):
-            return jsonify({'success': False, 'error': data['error'], 'data': data}), 400
-        if data.get('benchmark_rate') is None:
-            return jsonify({'success': False, 'error': 'No FRED data for this series', 'data': data}), 404
-        return jsonify({'success': True, 'data': data})
+        try:
+            inst = request.args.get('instrument_type', 'money_market')
+            maturity = request.args.get('maturity', '1Y')
+            country = request.args.get('country', 'US')
+            currency = request.args.get('currency', 'USD')
+            data = get_market_benchmark(inst, maturity, country, currency)
+            if data.get('error'):
+                return jsonify({'success': False, 'error': data['error'], 'data': None}), 400
+            return jsonify({'success': True, 'data': data})
+        except Exception as e:
+            print(f"Benchmark error: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/fred/series-by-maturity', methods=['GET', 'OPTIONS'])
     def fred_series_by_maturity():
@@ -102,7 +99,11 @@ def fred_routes(app):
             return '', 200
         maturity = request.args.get('maturity', '1Y')
         country = request.args.get('country', 'US')
+        if not FRED_API_KEY:
+            return jsonify({'success': False, 'error': 'FRED API key not configured'}), 500
         series_id, label, used_mat, _, _, note = series_for_country(country, maturity)
+        if not series_id:
+            return jsonify({'success': False, 'error': f'No series found for {country} {maturity}'}), 404
         return jsonify({
             'success': True,
             'series_id': series_id,

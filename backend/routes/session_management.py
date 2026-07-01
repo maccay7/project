@@ -12,7 +12,7 @@ def create_session_table():
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
+            CREATE TABLE IF NOT EXISTS ui_sessions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 user_id INT,
@@ -41,7 +41,7 @@ def create_session(name, user_id, instrument_type, workflow_data):
     try:
         cursor = conn.cursor()
         cursor.execute(
-            """INSERT INTO sessions (name, user_id, instrument_type, workflow_data) 
+            """INSERT INTO ui_sessions (name, user_id, instrument_type, workflow_data) 
                VALUES (%s, %s, %s, %s)""",
             (name, user_id, instrument_type, json.dumps(workflow_data))
         )
@@ -64,7 +64,7 @@ def update_session(session_id, workflow_data):
     try:
         cursor = conn.cursor()
         cursor.execute(
-            """UPDATE sessions SET workflow_data = %s, updated_at = CURRENT_TIMESTAMP 
+            """UPDATE ui_sessions SET workflow_data = %s, updated_at = CURRENT_TIMESTAMP 
                WHERE id = %s""",
             (json.dumps(workflow_data), session_id)
         )
@@ -85,7 +85,7 @@ def get_session(session_id):
         return None
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM sessions WHERE id = %s", (session_id,))
+        cursor.execute("SELECT * FROM ui_sessions WHERE id = %s", (session_id,))
         row = cursor.fetchone()
         cursor.close()
         conn.close()
@@ -117,9 +117,9 @@ def get_all_sessions(user_id=None):
     try:
         cursor = conn.cursor()
         if user_id:
-            cursor.execute("SELECT * FROM sessions WHERE user_id = %s ORDER BY updated_at DESC", (user_id,))
+            cursor.execute("SELECT * FROM ui_sessions WHERE user_id = %s ORDER BY updated_at DESC", (user_id,))
         else:
-            cursor.execute("SELECT * FROM sessions ORDER BY updated_at DESC")
+            cursor.execute("SELECT * FROM ui_sessions ORDER BY updated_at DESC")
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -150,7 +150,7 @@ def delete_session(session_id):
         return False
     try:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM sessions WHERE id = %s", (session_id,))
+        cursor.execute("DELETE FROM ui_sessions WHERE id = %s", (session_id,))
         conn.commit()
         cursor.close()
         conn.close()
@@ -168,8 +168,8 @@ def set_active_session(session_id):
         return False
     try:
         cursor = conn.cursor()
-        cursor.execute("UPDATE sessions SET is_active = FALSE")
-        cursor.execute("UPDATE sessions SET is_active = TRUE WHERE id = %s", (session_id,))
+        cursor.execute("UPDATE ui_sessions SET is_active = FALSE")
+        cursor.execute("UPDATE ui_sessions SET is_active = TRUE WHERE id = %s", (session_id,))
         conn.commit()
         cursor.close()
         conn.close()

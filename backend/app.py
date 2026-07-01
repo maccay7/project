@@ -39,11 +39,12 @@ allowed_origins = [
 ]
 
 CORS(app,
-    origins=allowed_origins,
-    supports_credentials=True,
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+     origins=allowed_origins,
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
+# Register routes
 auth_routes(app)
 dashboard_routes(app)
 calculations_routes(app)
@@ -61,6 +62,15 @@ session_management_routes(app)
 version_history_routes(app)
 reports_routes(app)
 visualization_routes(app)
+
+# Global OPTIONS handler
+@app.route('/api/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    response = jsonify({})
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
+    return response
 
 @app.route('/')
 def home():

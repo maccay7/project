@@ -190,3 +190,35 @@ CREATE TABLE IF NOT EXISTS datasets (
     INDEX (done),
     INDEX (created_at)
 );
+
+DROP TABLE IF EXISTS ui_sessions;
+
+CREATE TABLE ui_sessions (
+    session_id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'in-progress',
+    instrument_count INT DEFAULT 0,
+    total_value DECIMAL(20,2) DEFAULT 0,
+    instrument_data JSON,
+    versions JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+DESCRIBE ui_sessions;
+
+DROP TABLE IF EXISTS ui_sessions;
+
+CREATE TABLE ui_sessions (
+    session_id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'in-progress',
+    instrument_count INT DEFAULT 0,
+    total_value DECIMAL(20,2) DEFAULT 0,
+    instrument_data JSON,
+    versions JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
