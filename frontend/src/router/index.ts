@@ -20,6 +20,13 @@ const router = createRouter({
       component: () => import('@/views/SignupView.vue'),
       meta: { requiresAuth: false }
     },
+    // ✅ NEW: Forgot Password route
+    {
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('@/views/resetpassword.vue'), // adjust path if needed
+      meta: { requiresAuth: false }
+    },
     {
       path: '/dashboard',
       name: 'dashboard',
