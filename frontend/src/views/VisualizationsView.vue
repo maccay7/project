@@ -100,7 +100,43 @@
             <p class="fred-note mb-2">
               Market data from FRED — {{ fredFilters.country }} ({{ fredFilters.currency }}). Non-US countries use government bond yields available on FRED.
             </p>
-            <v-alert v-if="yieldError" type="warning" density="compact" class="mb-3">{{ yieldError }}</v-alert>
+            <v-alert v-if="yieldLoading" type="info" density="compact" class="mb-3">Loading Yield Curve...</v-alert>
+            <v-alert v-if="yieldError" type="error" density="compact" class="mb-3">{{ yieldError }}</v-alert>
+            <!-- Analytics Display -->
+            <v-row v-if="yieldAnalytics && !yieldLoading" class="mb-3">
+              <v-col cols="12" sm="6" md="3">
+                <v-card class="analytics-card">
+                  <v-card-text class="text-center">
+                    <div class="analytics-label">Latest Yield</div>
+                    <div class="analytics-value">{{ yieldAnalytics.latest_yield }}%</div>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+              <v-col cols="12" sm="6" md="3">
+                <v-card class="analytics-card">
+                  <v-card-text class="text-center">
+                    <div class="analytics-label">Highest Yield</div>
+                    <div class="analytics-value">{{ yieldAnalytics.highest_yield }}%</div>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+              <v-col cols="12" sm="6" md="3">
+                <v-card class="analytics-card">
+                  <v-card-text class="text-center">
+                    <div class="analytics-label">Lowest Yield</div>
+                    <div class="analytics-value">{{ yieldAnalytics.lowest_yield }}%</div>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+              <v-col cols="12" sm="6" md="3">
+                <v-card class="analytics-card">
+                  <v-card-text class="text-center">
+                    <div class="analytics-label">Average Yield</div>
+                    <div class="analytics-value">{{ yieldAnalytics.average_yield }}%</div>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
             <div class="chart-container">
               <canvas ref="yieldCanvas"></canvas>
             </div>
@@ -164,6 +200,7 @@ const hasData = ref(false)
 const calcData = ref(null)
 const yieldData = ref(null)
 const yieldError = ref('')
+const yieldLoading = ref(false)
 const selectedInstrument = ref('all')
 const instrumentOptions = [
   { title: 'All Instruments', value: 'all' },
@@ -171,6 +208,9 @@ const instrumentOptions = [
   { title: 'Bonds', value: 'bonds' },
   { title: 'Money Market', value: 'money_market' }
 ]
+
+// Analytics state
+const yieldAnalytics = ref(null)
 
 const { fredFilters, countryItems, currencyItems, maturityItems, loadFilterOptions, onCountryChange } = useFredMarket('1Y')
 
@@ -247,15 +287,31 @@ function clearData() {
 
 function chartDatasets(payload) {
   if (payload.datasets && payload.datasets.length) {
-    return payload.datasets.map(d => ({
-      label: d.label,
-      data: d.data.map((val, idx) => ({ x: d.maturities?.[idx] || idx, y: val })),
-      borderColor: d.borderColor || '#0B2044',
-      backgroundColor: 'rgba(11, 42, 68, 0.08)',
-      borderWidth: 2,
-      fill: false,
-      tension: 0.35
-    }))
+    return payload.datasets.map(d => {
+      // Handle both data formats: array of objects with x/y or array of values
+      let chartData
+      if (d.data && d.data.length > 0 && typeof d.data[0] === 'object' && 'x' in d.data[0]) {
+        // Data is already in {x, y} format
+        chartData = d.data
+      } else {
+        // Convert array of values to {x, y} format using maturities
+        const maturities = d.maturities || payload.labels || []
+        chartData = d.data.map((val, idx) => ({ 
+          x: maturities[idx] || idx, 
+          y: val 
+        }))
+      }
+      
+      return {
+        label: d.label,
+        data: chartData,
+        borderColor: d.borderColor || '#0B2044',
+        backgroundColor: 'rgba(11, 42, 68, 0.08)',
+        borderWidth: 2,
+        fill: false,
+        tension: 0.35
+      }
+    })
   }
   // Fallback: assume payload.labels are maturity strings and payload.current are rates
   const maturities = (payload.labels || []).map(l => parseFloat(l.replace(/[^0-9.]/g, '')) || 0)
@@ -272,12 +328,14 @@ function chartDatasets(payload) {
 
 async function loadYieldCurve() {
   yieldError.value = ''
+  yieldLoading.value = true
   try {
     const cacheKey = `${selectedInstrument.value}_${fredFilters.value.country}_${fredFilters.value.currency}`
     if (yieldCurveCache.value.has(cacheKey)) {
       const cached = yieldCurveCache.value.get(cacheKey)
       if (Date.now() - cached.timestamp < 300000) {
         yieldData.value = cached.data
+        yieldAnalytics.value = cached.analytics
         await nextTick()
         renderYieldChart()
         return
@@ -294,21 +352,29 @@ async function loadYieldCurve() {
       fredFilters.value.country,
       fredFilters.value.currency
     )
-    if (res?.success && res.data?.maturities?.length) {
+    if (res?.success && res.data?.datasets?.length) {
       yieldData.value = res.data
+      yieldAnalytics.value = res.data.analytics || null
       yieldCurveCache.value.set(cacheKey, {
         data: res.data,
+        analytics: res.data.analytics || null,
         timestamp: Date.now()
       })
+      await saveFredSettings()
     } else {
-      yieldError.value = res?.data?.error || 'No FRED data. Check API key in backend .env'
+      yieldError.value = res?.data?.error || 'Unable to load Yield Curve. Please try again.'
       yieldData.value = null
+      yieldAnalytics.value = null
     }
     await nextTick()
     renderYieldChart()
   } catch (err) {
-    yieldError.value = err.message || 'Failed to load FRED data'
+    yieldError.value = 'Unable to load Yield Curve. Please try again.'
+    yieldData.value = null
+    yieldAnalytics.value = null
     console.error(err)
+  } finally {
+    yieldLoading.value = false
   }
 }
 
@@ -319,18 +385,59 @@ function renderYieldChart() {
 
   const maturities = yieldData.value.maturities || []
   const maxMaturity = maturities.length ? Math.max(...maturities) : 10
-  const selectedMaturity = parseFloat(fredFilters.value.maturity) || maxMaturity
-  const effectiveMax = Math.min(maxMaturity, selectedMaturity)
-
-  const xLabels = []
-  for (let i = 0; i <= effectiveMax; i++) {
-    xLabels.push(i)
+  const selectedMaturityStr = fredFilters.value.maturity || '1Y'
+  
+  // Parse maturity to determine label format
+  let effectiveMax = maxMaturity
+  let isYearBased = true
+  let isMonthBased = false
+  let isWeekBased = false
+  
+  if (selectedMaturityStr.includes('Y')) {
+    effectiveMax = Math.min(maxMaturity, parseFloat(selectedMaturityStr))
+    isYearBased = true
+  } else if (selectedMaturityStr.includes('M')) {
+    effectiveMax = Math.min(maxMaturity, parseFloat(selectedMaturityStr))
+    isMonthBased = true
+    isYearBased = false
+  } else if (selectedMaturityStr.includes('W')) {
+    effectiveMax = Math.min(maxMaturity, parseFloat(selectedMaturityStr) * 7)
+    isWeekBased = true
+    isYearBased = false
   }
 
   const datasets = chartDatasets(yieldData.value).map(ds => ({
     ...ds,
     data: ds.data.filter(pt => pt.x <= effectiveMax)
   }))
+
+  // If no data points after filtering, show error
+  if (datasets.every(ds => ds.data.length === 0)) {
+    yieldError.value = 'No yield curve data available for selected maturity'
+    return
+  }
+
+  // Generate appropriate tick labels based on maturity type
+  let tickCallback
+  let xAxisTitle
+  let stepSize
+  
+  if (isMonthBased) {
+    // Show months (0, 1, 2, 3, ..., 12)
+    tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= 12 ? `${val}M` : ''
+    xAxisTitle = 'Maturity (Months)'
+    stepSize = 1
+  } else if (isWeekBased) {
+    // Show days (1, 2, 3, ..., 14 for 2 weeks)
+    tickCallback = (val) => Number.isInteger(val) && val >= 1 && val <= 14 ? val : ''
+    xAxisTitle = 'Maturity (Days)'
+    stepSize = 1
+  } else {
+    // Show years (0, 1, 2, 3, ...)
+    tickCallback = (val) => Number.isInteger(val) ? val : ''
+    xAxisTitle = 'Maturity (Years)'
+    stepSize = 1
+  }
 
   yieldChart = new Chart(ctx, {
     type: 'line',
@@ -344,6 +451,11 @@ function renderYieldChart() {
           callbacks: {
             label: (ctx) => {
               const pt = ctx.raw
+              if (isMonthBased) {
+                return `${pt.x.toFixed(0)}M: ${pt.y.toFixed(2)}%`
+              } else if (isWeekBased) {
+                return `Day ${pt.x.toFixed(0)}: ${pt.y.toFixed(2)}%`
+              }
               return `${pt.x.toFixed(0)}Y: ${pt.y.toFixed(2)}%`
             }
           }
@@ -353,12 +465,12 @@ function renderYieldChart() {
         y: { title: { display: true, text: 'Yield (%)' } },
         x: {
           type: 'linear',
-          title: { display: true, text: 'Maturity (Years)' },
-          min: 0,
+          title: { display: true, text: xAxisTitle },
+          min: isWeekBased ? 1 : 0,
           max: effectiveMax,
           ticks: {
-            callback: (val) => Number.isInteger(val) ? val : '',
-            stepSize: 1
+            callback: tickCallback,
+            stepSize: stepSize
           }
         }
       }
@@ -433,6 +545,7 @@ async function goToReports() {
 
 onMounted(async () => {
   await loadFilterOptions()
+  await loadFredSettings()
   if (route.query.dataset_id) loadData()
 })
 </script>
@@ -466,6 +579,51 @@ onMounted(async () => {
 .kpi-title { font-size: 12px; color: #666; }
 
 .action-card { border-radius: 12px; background: white; border: 1px solid rgba(11,42,68,0.08); text-align: center; padding: 16px; }
+
+.analytics-card { border-radius: 8px; background: #f8f9ff; border: 1px solid #e0e0e0; }
+.analytics-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+.analytics-value { font-size: 18px; font-weight: 700; color: #0B2044; }
+
+@media (max-width: 600px) {
+  .visualizations-view { padding: 0 16px; }
+  .action-buttons { flex-direction: column; }
+  .chart-container { height: 300px; }
+}
+</style>>
+
+<style scoped>
+.visualizations-view { max-width: 1400px; margin: 0 auto; padding: 20px; }
+.page-header { margin-bottom: 30px; }
+.page-header h1 { color: #0B2A44; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+.page-header p { color: #666; font-size: 16px; }
+
+.action-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 30px; }
+
+.stats-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
+.stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); border-radius: 12px 12px 0 0; }
+
+.chart-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
+.chart-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); }
+
+.card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
+.title-icon { margin-right: 8px; }
+
+.fred-note { font-size: 13px; color: #666; }
+.chart-container { height: 400px; position: relative; padding: 16px; }
+
+.kpi-card { height: 120px; border-radius: 12px; transition: 0.2s; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
+.kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50); }
+.kpi-card:hover { transform: translateY(-2px); }
+.kpi-content { display: flex; align-items: center; height: 100%; padding: 8px; }
+.kpi-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; flex-shrink: 0; }
+.kpi-value { font-size: 24px; font-weight: 700; color: #0B2A44; }
+.kpi-title { font-size: 12px; color: #666; }
+
+.action-card { border-radius: 12px; background: white; border: 1px solid rgba(11,42,68,0.08); text-align: center; padding: 16px; }
+
+.analytics-card { border-radius: 8px; background: #f8f9ff; border: 1px solid #e0e0e0; }
+.analytics-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+.analytics-value { font-size: 18px; font-weight: 700; color: #0B2044; }
 
 @media (max-width: 600px) {
   .visualizations-view { padding: 0 16px; }

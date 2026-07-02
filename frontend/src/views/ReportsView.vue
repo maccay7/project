@@ -84,10 +84,42 @@
 
       <!-- Generate Button -->
       <v-card class="stats-card" v-if="hasData">
-        <v-card-text class="text-center">
-          <v-btn color="#0B2A44" size="large" @click="generateExcel" :loading="generating">
-            <v-icon left>mdi-file-excel</v-icon> Generate Excel Report
-          </v-btn>
+        <v-card-title class="card-title">
+          <v-icon class="title-icon">mdi-download</v-icon> Download Report
+        </v-card-title>
+        <v-card-text>
+          <v-row>
+            <v-col cols="12" sm="6" md="4">
+              <v-btn color="#0B2A44" size="large" @click="downloadJSON" :loading="generating" block>
+                <v-icon left>mdi-code-json</v-icon> JSON
+              </v-btn>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <v-btn color="#0B2A44" size="large" @click="downloadCSV" :loading="generating" block>
+                <v-icon left>mdi-file-delimited</v-icon> CSV
+              </v-btn>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <v-btn color="#0B2A44" size="large" @click="downloadHTML" :loading="generating" block>
+                <v-icon left>mdi-language-html5</v-icon> HTML
+              </v-btn>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <v-btn color="#0B2A44" size="large" @click="downloadPDF" :loading="generating" block>
+                <v-icon left>mdi-file-pdf</v-icon> PDF
+              </v-btn>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <v-btn color="#0B2A44" size="large" @click="downloadWord" :loading="generating" block>
+                <v-icon left>mdi-file-word</v-icon> Word
+              </v-btn>
+            </v-col>
+            <v-col cols="12" sm="6" md="4">
+              <v-btn color="#0B2A44" size="large" @click="downloadExcel" :loading="generating" block>
+                <v-icon left>mdi-file-excel</v-icon> Excel
+              </v-btn>
+            </v-col>
+          </v-row>
           <v-alert v-if="reportReady" type="success" class="mt-3">Report downloaded!</v-alert>
         </v-card-text>
       </v-card>
@@ -333,15 +365,16 @@ function buildFullReport(data, instrument, session, date, valuationDate) {
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Arial', sans-serif; color: #333; background: white; line-height: 1.6; }
-    .page { page-break-after: always; padding: 60px 80px; min-height: 100vh; }
+    .page { page-break-after: always; padding: 60px 80px; min-height: 297mm; width: 210mm; margin: 0 auto; }
     .page:last-child { page-break-after: auto; }
     .cover-page { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; background: linear-gradient(135deg, #0B2044 0%, #1a3a6e 100%); color: white; }
-    .cover-content { max-width: 800px; }
-    .logo { max-width: 200px; margin-bottom: 40px; }
-    .cover-title { font-size: 48px; font-weight: 700; letter-spacing: 2px; margin-bottom: 20px; }
-    .cover-subtitle { font-size: 24px; font-weight: 300; opacity: 0.9; margin-bottom: 40px; }
-    .cover-meta { font-size: 14px; opacity: 0.8; line-height: 1.8; }
-    .cover-meta strong { opacity: 1; }
+    .cover-content { max-width: 800px; padding: 40px; }
+    .logo { max-width: 250px; margin: 0 auto 50px auto; }
+    .cover-title { font-size: 42px; font-weight: 800; letter-spacing: 3px; margin-bottom: 30px; text-transform: uppercase; }
+    .cover-subtitle { font-size: 28px; font-weight: 600; opacity: 0.95; margin-bottom: 50px; }
+    .cover-meta { font-size: 16px; opacity: 0.9; line-height: 2.2; }
+    .cover-meta p { margin: 8px 0; }
+    .cover-meta strong { font-weight: 700; opacity: 1; font-size: 18px; }
     .toc-page h1 { font-size: 28px; color: #0B2044; border-bottom: 3px solid #0B2044; padding-bottom: 15px; margin-bottom: 30px; }
     .toc-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px dotted #ddd; font-size: 16px; }
     .toc-item:hover { background: #f5f5f5; }
@@ -362,8 +395,10 @@ function buildFullReport(data, instrument, session, date, valuationDate) {
     .reference-list { list-style: none; padding: 0; }
     .reference-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
     @media print {
-      .page { padding: 40px 60px; }
-      .cover-page { background: #0B2044 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      @page { size: A4; margin: 0; }
+      body { margin: 0; }
+      .page { padding: 60px 80px; width: 210mm; min-height: 297mm; margin: 0 auto; box-sizing: border-box; }
+      .cover-page { background: #0B2044 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; min-height: 297mm; }
       .executive-summary { background: #f8f9ff !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     }
   </style>
@@ -374,16 +409,16 @@ function buildFullReport(data, instrument, session, date, valuationDate) {
 <div class="page cover-page">
   <div class="cover-content">
     <div class="logo">
-      <svg width="180" height="60" viewBox="0 0 180 60" fill="none">
-        <rect x="0" y="0" width="180" height="60" rx="8" fill="white" opacity="0.95"/>
-        <text x="20" y="38" font-family="Arial" font-weight="700" font-size="24" fill="#0B2044">DuraCapital</text>
-        <text x="120" y="38" font-family="Arial" font-weight="300" font-size="12" fill="#666">Valuation</text>
+      <svg width="200" height="70" viewBox="0 0 200 70" fill="none">
+        <rect x="0" y="0" width="200" height="70" rx="10" fill="white" opacity="0.95"/>
+        <text x="25" y="45" font-family="Arial" font-weight="700" font-size="28" fill="#0B2044">DuraCapital</text>
+        <text x="130" y="45" font-family="Arial" font-weight="300" font-size="14" fill="#666">Valuation</text>
       </svg>
     </div>
-    <h1 class="cover-title">Valuation Assessment Report</h1>
+    <h1 class="cover-title">VALUATION ASSESSMENT REPORT</h1>
     <p class="cover-subtitle">${instrument.charAt(0).toUpperCase() + instrument.slice(1)}</p>
     <div class="cover-meta">
-      <p><strong>Prepared for:</strong> ${session}</p>
+      <p><strong>SESSION:</strong> ${session}</p>
       <p><strong>Valuation Date:</strong> ${valDate}</p>
       <p><strong>Report Date:</strong> ${date}</p>
       <p><strong>Prepared by:</strong> Dura Capital (Private) Limited</p>
@@ -575,6 +610,144 @@ function buildFullReport(data, instrument, session, date, valuationDate) {
 
 </body>
 </html>`
+}
+
+// Download functions for all formats - all use the same HTML template as preview
+function downloadJSON() {
+  generating.value = true
+  setTimeout(() => {
+    const data = calcData.value
+    const instrument = instrumentType.value
+    const session = sessionName.value || 'Current Session'
+    const date = new Date().toLocaleString()
+    const valuationDate = new Date().toISOString().split('T')[0]
+    
+    const reportData = {
+      metadata: {
+        title: 'Valuation Assessment Report',
+        session: session,
+        instrument: instrument,
+        valuationDate: valuationDate,
+        reportDate: date,
+        preparedBy: 'Dura Capital (Private) Limited'
+      },
+      summary: {
+        totalValue: data.reduce((s, r) => s + (parseFloat(r.FaceValue || r.Amount || r.Principal || 0)), 0),
+        recordCount: data.length,
+        averageRate: data.map(r => parseFloat(r.Rate || r.InterestRate || r.CouponRate || r.DiscountRate || 0)).filter(r => !isNaN(r) && r > 0).reduce((a, b) => a + b, 0) / data.length || 0
+      },
+      data: data
+    }
+    
+    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Report_${session}_${instrument}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    
+    reportReady.value = true
+    generating.value = false
+    setTimeout(() => { reportReady.value = false }, 3000)
+  }, 500)
+}
+
+function downloadCSV() {
+  generating.value = true
+  setTimeout(() => {
+    const data = calcData.value
+    const headers = Object.keys(data[0] || {})
+    const csvContent = [
+      headers.join(','),
+      ...data.map(row => headers.map(h => `"${row[h] || ''}"`).join(','))
+    ].join('\n')
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Report_${sessionName.value}_${instrumentType.value}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    
+    reportReady.value = true
+    generating.value = false
+    setTimeout(() => { reportReady.value = false }, 3000)
+  }, 500)
+}
+
+function downloadHTML() {
+  generating.value = true
+  setTimeout(() => {
+    const htmlContent = buildFullReport()
+    const blob = new Blob([htmlContent], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Report_${sessionName.value}_${instrumentType.value}.html`
+    a.click()
+    URL.revokeObjectURL(url)
+    
+    reportReady.value = true
+    generating.value = false
+    setTimeout(() => { reportReady.value = false }, 3000)
+  }, 500)
+}
+
+function downloadPDF() {
+  generating.value = true
+  setTimeout(() => {
+    // Use browser's print to PDF - opens print dialog
+    const htmlContent = buildFullReport()
+    const printWindow = window.open('', '_blank')
+    printWindow.document.write(htmlContent)
+    printWindow.document.close()
+    printWindow.focus()
+    setTimeout(() => {
+      printWindow.print()
+    }, 500)
+    
+    reportReady.value = true
+    generating.value = false
+    setTimeout(() => { reportReady.value = false }, 3000)
+  }, 500)
+}
+
+function downloadWord() {
+  generating.value = true
+  setTimeout(() => {
+    const htmlContent = buildFullReport()
+    // Add Word-specific XML header
+    const wordContent = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' 
+            xmlns:w='urn:schemas-microsoft-com:office:word'
+            xmlns='http://www.w3.org/TR/REC-html40'>
+      <head>
+        <meta charset="utf-8">
+        <title>Valuation Assessment Report</title>
+      </head>
+      <body>
+        ${htmlContent.replace('<!DOCTYPE html><html><head>', '').replace('</body></html>', '')}
+      </body>
+      </html>
+    `
+    const blob = new Blob([wordContent], { type: 'application/msword' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Report_${sessionName.value}_${instrumentType.value}.doc`
+    a.click()
+    URL.revokeObjectURL(url)
+    
+    reportReady.value = true
+    generating.value = false
+    setTimeout(() => { reportReady.value = false }, 3000)
+  }, 500)
+}
+
+function downloadExcel() {
+  generateExcel()
 }
 
 // Generate Excel report with professional structure

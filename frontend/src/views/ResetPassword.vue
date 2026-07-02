@@ -75,7 +75,8 @@ const resetPassword = async () => {
   
   loading.value = true
   try {
-    const response = await fetch('http://localhost:5000/api/reset-password', {
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
+    const response = await fetch(`${apiUrl}/api/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, new_password: newPassword.value })

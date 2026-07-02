@@ -10,18 +10,37 @@ FRED_URL = 'https://api.stlouisfed.org/fred/series/observations'
 def get_kpi():
     conn = get_db()
     if not conn:
-        return {'total_users': 0, 'active_users': 0, 'datasets_processed': 0}
+        return {'total_users': 0, 'active_users': 0, 'datasets_processed': 0, 'total_instruments': 0, 'total_versions': 0}
 
     try:
         cursor = conn.cursor()
+        
+        # Total users
         cursor.execute('SELECT COUNT(*) AS total_users FROM users')
         total_users = cursor.fetchone().get('total_users', 0)
 
-        cursor.execute("SELECT COUNT(*) AS active_users FROM sessions WHERE expires_at > NOW()")
+        # Active users (sessions that haven't expired)
+        cursor.execute("SELECT COUNT(*) AS active_users FROM auth_sessions WHERE expires_at > NOW()")
         active_users = cursor.fetchone().get('active_users', 0)
 
+        # Datasets processed
         cursor.execute("SELECT COUNT(*) AS datasets_processed FROM calculations WHERE calculation_status = 'completed'")
         datasets_processed = cursor.fetchone().get('datasets_processed', 0)
+        
+        # Total instruments (max 3 - money_market, bonds, treasury_bills)
+        # Count unique instrument types in ui_sessions
+        cursor.execute("""
+            SELECT COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(instrument_workflows, '$.*')))
+            FROM ui_sessions
+            WHERE instrument_workflows IS NOT NULL
+            AND instrument_workflows != 'null'
+        """)
+        instrument_count_result = cursor.fetchone()
+        total_instruments = min(instrument_count_result.get('COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(instrument_workflows, \'$.*\')))', 0) if instrument_count_result else 0, 3)
+        
+        # Total versions across all sessions
+        cursor.execute("SELECT COUNT(*) AS total_versions FROM version_history")
+        total_versions = cursor.fetchone().get('total_versions', 0)
 
         cursor.close()
         conn.close()
@@ -29,10 +48,13 @@ def get_kpi():
         return {
             'total_users': total_users,
             'active_users': active_users,
-            'datasets_processed': datasets_processed
+            'datasets_processed': datasets_processed,
+            'total_instruments': total_instruments,
+            'total_versions': total_versions
         }
-    except Exception:
-        return {'total_users': 0, 'active_users': 0, 'datasets_processed': 0}
+    except Exception as e:
+        print(f"Error getting KPI: {e}")
+        return {'total_users': 0, 'active_users': 0, 'datasets_processed': 0, 'total_instruments': 0, 'total_versions': 0}
 
 
 def get_recent_activity():

@@ -20,7 +20,7 @@ def create_mapping_table():
                 required_columns JSON,
                 mapping_type VARCHAR(50) DEFAULT 'manual',
                 applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
+                INDEX idx_dataset_id (dataset_id)
             )
         """)
         conn.commit()

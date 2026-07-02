@@ -133,7 +133,8 @@ const forgotPassword = async () => {
   if (!userEmail) return
   
   try {
-    const response = await fetch('http://localhost:5000/api/forgot-password', {
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
+    const response = await fetch(`${apiUrl}/api/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: userEmail })
@@ -142,7 +143,8 @@ const forgotPassword = async () => {
     
     if (data.success) {
       if (data.reset_token) {
-        alert(`Reset token (development only): ${data.reset_token}\n\nUse this link to reset your password:\nhttp://localhost:3000/reset-password?token=${data.reset_token}`)
+        const frontendUrl = window.location.origin
+        alert(`Reset token (development only): ${data.reset_token}\n\nUse this link to reset your password:\n${frontendUrl}/reset-password?token=${data.reset_token}`)
       } else {
         alert(data.message || 'If the email exists, a reset link has been sent.')
       }

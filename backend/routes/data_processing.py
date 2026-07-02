@@ -24,7 +24,7 @@ def create_processed_data_table():
                 cleaning_options JSON,
                 processing_stats JSON,
                 processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE
+                INDEX idx_dataset_id (dataset_id)
             )
         """)
         conn.commit()

@@ -204,4 +204,53 @@ def settings_routes(app):
                 saved_settings[key] = actual_value
         
         return jsonify({'success': True, 'data': saved_settings})
+    
+    # FRED-specific settings endpoints
+    @app.route('/api/settings/fred', methods=['POST', 'OPTIONS'])
+    def save_fred_settings():
+        """Save FRED filter preferences (country, currency, maturity)."""
+        if request.method == 'OPTIONS':
+            return '', 200
+        try:
+            data = request.get_json()
+            user_id = data.get('user_id')
+            country = data.get('country', 'US')
+            currency = data.get('currency', 'USD')
+            maturity = data.get('maturity', '1Y')
+            
+            if not user_id:
+                return jsonify({'success': False, 'error': 'user_id is required'}), 400
+            
+            settings_value = {'country': country, 'currency': currency, 'maturity': maturity}
+            success = save_setting(user_id, 'fred_preferences', settings_value, 'preference')
+            
+            if success:
+                return jsonify({'success': True, 'data': settings_value})
+            else:
+                return jsonify({'success': False, 'error': 'Failed to save FRED settings'}), 500
+        except Exception as e:
+            print(f"Error saving FRED settings: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+    
+    @app.route('/api/settings/fred', methods=['GET', 'OPTIONS'])
+    def load_fred_settings():
+        """Load FRED filter preferences."""
+        if request.method == 'OPTIONS':
+            return '', 200
+        try:
+            user_id = request.args.get('user_id')
+            
+            if not user_id:
+                return jsonify({'success': False, 'error': 'user_id is required'}), 400
+            
+            settings = get_setting(user_id, 'fred_preferences')
+            
+            if settings:
+                return jsonify({'success': True, 'data': settings})
+            else:
+                # Return default settings
+                return jsonify({'success': True, 'data': {'country': 'US', 'currency': 'USD', 'maturity': '1Y'}})
+        except Exception as e:
+            print(f"Error loading FRED settings: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
 

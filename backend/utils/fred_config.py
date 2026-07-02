@@ -2,15 +2,26 @@
 import os
 import time
 import requests
+from dotenv import load_dotenv
+from datetime import datetime
 
+# Load environment variables securely
+load_dotenv()
+
+# Secure API key loading with validation
 FRED_KEY = os.getenv('FRED_API_KEY', '')
+if not FRED_KEY:
+    print("❌ ERROR: FRED_API_KEY is not set in environment variables!")
+    print("Please add FRED_API_KEY to your .env file.")
+else:
+    print(f"✅ FRED_API_KEY loaded successfully")
+
 FRED_URL = 'https://api.stlouisfed.org/fred/series/observations'
+FRED_TIMEOUT = 10  # seconds
 
-# Diagnostic print to check if the API key is loaded
-print(f"🔑 FRED_API_KEY: {FRED_KEY[:8]}..." if FRED_KEY else "❌ FRED_API_KEY is NOT set in environment!")
-
+# Backend cache with 5-minute duration
 _cache = {}
-CACHE_SEC = 300
+CACHE_SEC = 300  # 5 minutes
 
 # ─── Country Data (US has full maturity coverage) ──────────────────────────
 
@@ -20,10 +31,9 @@ COUNTRY_DATA = {
         'currency': 'USD',
         'series': {
             '4W': ('DTB4WK', '4-Week Treasury Bill'),
-            '8W': ('DTB8WK', '8-Week Treasury Bill'),
-            '13W': ('TB3MS', '3-Month Treasury Bill'),
-            '26W': ('TB6MS', '6-Month Treasury Bill'),
-            '52W': ('TB1YR', '1-Year Treasury Bill'),
+            '13W': ('DTB3', '3-Month Treasury Bill'),
+            '26W': ('DTB6', '6-Month Treasury Bill'),
+            '52W': ('DTB1YR', '1-Year Treasury Bill'),
             '1M': ('DGS1MO', '1-Month Treasury Rate'),
             '3M': ('DGS3MO', '3-Month Treasury Rate'),
             '6M': ('DGS6MO', '6-Month Treasury Rate'),
@@ -169,12 +179,18 @@ def series_for_country(country, maturity):
     return sid, label, used, c['name'], c['currency'], note
 
 def latest_value(series_id):
+    """Fetch latest value from FRED API with comprehensive error handling and caching."""
     if not FRED_KEY:
+        print("❌ FRED API key not configured")
         return None
+    
     cache_key = f'latest_{series_id}'
     now = time.time()
+    
+    # Check cache first
     if cache_key in _cache and now - _cache[cache_key][0] < CACHE_SEC:
         return _cache[cache_key][1]
+    
     params = {
         'series_id': series_id,
         'api_key': FRED_KEY,
@@ -182,23 +198,57 @@ def latest_value(series_id):
         'sort_order': 'desc',
         'limit': 12,
     }
+    
     try:
-        resp = requests.get(FRED_URL, params=params, timeout=10)
+        resp = requests.get(FRED_URL, params=params, timeout=FRED_TIMEOUT)
+        
+        # Handle HTTP errors
+        if resp.status_code == 429:
+            print(f"❌ FRED rate limit exceeded for {series_id}")
+            return None
+        elif resp.status_code == 404:
+            print(f"❌ FRED series not found: {series_id}")
+            return None
+        elif resp.status_code == 403:
+            print(f"❌ FRED authentication failed for {series_id}")
+            return None
+        
         resp.raise_for_status()
         data = resp.json()
+        
+        # Handle FRED API errors
         if 'error_code' in data:
-            print(f"❌ FRED error for {series_id}: {data.get('error_message', 'unknown')}")
+            error_msg = data.get('error_message', 'unknown error')
+            print(f"❌ FRED API error for {series_id}: {error_msg}")
             return None
+        
+        # Extract latest valid value
         for row in data.get('observations', []):
             val = row.get('value')
             if val and val != '.':
                 rate = float(val)
+                # Cache the result
                 _cache[cache_key] = (now, rate)
                 return rate
-    except Exception as e:
+        
+        print(f"⚠️ No valid data found for {series_id}")
+        return None
+        
+    except requests.exceptions.Timeout:
+        print(f"⚠️ FRED request timeout for {series_id}")
+        return None
+    except requests.exceptions.ConnectionError:
+        print(f"⚠️ FRED connection error for {series_id}")
+        return None
+    except requests.exceptions.RequestException as e:
         print(f"⚠️ FRED request failed for {series_id}: {e}")
         return None
-    return None
+    except ValueError as e:
+        print(f"⚠️ FRED JSON decode error for {series_id}: {e}")
+        return None
+    except Exception as e:
+        print(f"⚠️ Unexpected error for {series_id}: {e}")
+        return None
 
 def get_market_benchmark(instrument_type, maturity=None, country='US', currency='USD'):
     key = normalize_type(instrument_type)
@@ -273,29 +323,40 @@ def curve_for_type(instrument_type, country='US'):
     return labels, values
 
 def build_yield_curve_response(instrument_type='all', country='US', currency='USD'):
+    """Build yield curve response with analytics and comprehensive error handling."""
     country_code = resolve_country_input(country)
     c = get_country(country_code)
+    
+    # Validate currency match
     if currency and currency.upper() != c['currency'] and currency.upper() not in ('ANY', 'ALL'):
         return {
             'labels': [],
             'current': [],
             'datasets': [],
             'error': f'Currency mismatch. {c["name"]} uses {c["currency"]}. Please select {c["currency"]}.',
+            'analytics': None,
         }
+    
     key = normalize_type(instrument_type)
+    
+    # Build datasets based on instrument type
     if key == 'all' and country_code == 'US':
         types = [('treasury_bills', 'Treasury Bills'), ('bonds', 'Bonds'), ('money_market', 'Money Market')]
         datasets = []
+        all_values = []
+        
         for tkey, name in types:
             labels, values = curve_for_type(tkey, country_code)
             if not labels:
                 continue
+            all_values.extend(values)
             datasets.append({
                 'label': name,
                 'data': values,
                 'maturities': labels,
                 'borderColor': COLORS.get(tkey, '#0B2044'),
             })
+        
         if not datasets:
             return {
                 'labels': [],
@@ -305,9 +366,15 @@ def build_yield_curve_response(instrument_type='all', country='US', currency='US
                 'source': 'FRED API',
                 'country': country_code,
                 'currency': c['currency'],
+                'analytics': None,
             }
+        
+        # Calculate analytics
+        analytics = calculate_analytics(all_values) if all_values else None
+        
         max_len = max((len(d['data']) for d in datasets), default=0)
         shared_labels = [f'Point {i+1}' for i in range(max_len)]
+        
         return {
             'labels': shared_labels,
             'current': datasets[0]['data'] if datasets else [],
@@ -315,7 +382,11 @@ def build_yield_curve_response(instrument_type='all', country='US', currency='US
             'source': 'FRED API',
             'country': country_code,
             'currency': c['currency'],
+            'analytics': analytics,
+            'last_updated': datetime.now().isoformat(),
         }
+    
+    # Single instrument type
     labels, values = curve_for_type(key, country_code)
     if not labels:
         return {
@@ -326,7 +397,12 @@ def build_yield_curve_response(instrument_type='all', country='US', currency='US
             'source': 'FRED API',
             'country': country_code,
             'currency': c['currency'],
+            'analytics': None,
         }
+    
+    # Calculate analytics
+    analytics = calculate_analytics(values) if values else None
+    
     return {
         'labels': labels,
         'current': values,
@@ -339,7 +415,30 @@ def build_yield_curve_response(instrument_type='all', country='US', currency='US
         'source': 'FRED API',
         'country': country_code,
         'currency': c['currency'],
+        'analytics': analytics,
+        'last_updated': datetime.now().isoformat(),
     }
+
+def calculate_analytics(values):
+    """Calculate yield curve analytics (latest, highest, lowest, average)."""
+    if not values:
+        return None
+    
+    try:
+        numeric_values = [float(v) for v in values if v is not None]
+        if not numeric_values:
+            return None
+        
+        return {
+            'latest_yield': round(numeric_values[-1], 2) if numeric_values else None,
+            'highest_yield': round(max(numeric_values), 2),
+            'lowest_yield': round(min(numeric_values), 2),
+            'average_yield': round(sum(numeric_values) / len(numeric_values), 2),
+            'data_points': len(numeric_values),
+        }
+    except (ValueError, TypeError) as e:
+        print(f"⚠️ Error calculating analytics: {e}")
+        return None
 
 def attach_fred_to_calculation(result, instrument_type, maturity=None, country='US', currency='USD'):
     if not result:

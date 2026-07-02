@@ -3,6 +3,7 @@ import uuid
 import pymysql.cursors
 from flask import request, jsonify
 from utils.db import get_db
+from datetime import datetime
 
 def create_sessions_table():
     """Create ui_sessions table if it doesn't exist."""
@@ -66,6 +67,16 @@ def sessions_routes(app):
         versions = payload.get('versions', [])
         instrument_workflows = payload.get('instrument_workflows', {})
         legacy_payload = payload.get('payload')
+        
+        # Version control data
+        create_version = payload.get('create_version', False)
+        instrument_type = payload.get('instrument_type')
+        change_summary = payload.get('change_summary')
+        dataset_snapshot = payload.get('dataset_snapshot')
+        mapping_snapshot = payload.get('mapping_snapshot')
+        calculation_snapshot = payload.get('calculation_snapshot')
+        portfolio_snapshot = payload.get('portfolio_snapshot')
+        report_snapshot = payload.get('report_snapshot')
 
         conn = get_db()
         if not conn:
@@ -104,6 +115,19 @@ def sessions_routes(app):
             conn.commit()
             cursor.close()
             conn.close()
+            
+            # Create version entry if requested (only on Save to Session click)
+            if create_version and instrument_type:
+                from routes.version_history import create_version, get_next_version_number
+                next_version = get_next_version_number(session_id)
+                version_id = create_version(
+                    session_id, next_version, instrument_type, change_summary,
+                    dataset_snapshot, mapping_snapshot, calculation_snapshot,
+                    portfolio_snapshot, report_snapshot, user_id
+                )
+                if version_id:
+                    print(f"✅ Created version {next_version} for session {session_id}")
+            
             return jsonify({'success': True, 'session_id': session_id})
         except Exception as e:
             print(f"❌ Save session error: {e}")
@@ -175,10 +199,10 @@ def sessions_routes(app):
         if not conn:
             return jsonify({'success': False, 'message': 'DB error'}), 500
         try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)  # <-- FIXED
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute('''
                 SELECT session_id, name, status, versions, instrument_workflows, created_at, updated_at
-                FROM ui_sessions ORDER BY updated_at DESC LIMIT 200
+                FROM ui_sessions LIMIT 200
             ''')
             rows = cursor.fetchall()
             cursor.close()
@@ -208,6 +232,8 @@ def sessions_routes(app):
             return jsonify({'success': True, 'data': sessions_list})
         except Exception as e:
             print(f"❌ List sessions error: {e}")
+            import traceback
+            traceback.print_exc()
             # Return empty list with 200 to avoid breaking the frontend
             return jsonify({'success': False, 'message': 'Query failed', 'data': []}), 200
 

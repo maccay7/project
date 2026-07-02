@@ -976,13 +976,17 @@ function goToVisualizations() {
 async function goToReportTab() {
   saveSessionData()
   activeTab.value = 'reports'
-  forceUpdate.value++
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
     await markStepCompleted(String(sid), 'summary')
     completedSteps.value.add('summary')
+    completedSteps.value.add('visualizations')
+    completedSteps.value.add('calculations')
+    completedSteps.value.add('cleaning')
+    completedSteps.value.add('upload')
     saveSessionData()
   }
+  forceUpdate.value++
 }
 
 async function finishAndDashboard() {
@@ -1545,6 +1549,16 @@ async function renderYieldCurveChart() {
             stepSize: stepSize,
             autoSkip: false,
             callback: function(value) {
+              if (unitLabel === 'M') {
+                // Show months (0, 1, 2, ..., 12)
+                if (Number.isInteger(value) && value >= 0 && value <= 12) return value.toString();
+                return null;
+              } else if (unitLabel === 'D') {
+                // Show days (1, 2, 3, ..., 14 for 2 weeks)
+                if (Number.isInteger(value) && value >= 1 && value <= 14) return value.toString();
+                return null;
+              }
+              // Show years
               if (Number.isInteger(value)) return value.toString();
               return null;
             }
