@@ -83,7 +83,7 @@ def save_dataset_metadata(file_name, original_name, file_path, file_size, instru
 
 def parse_excel_file(file_path, instrument_type):
     """
-    Parse Excel file and extract structured data.
+    Parse Excel file and extract structured data with intelligent detection.
     Returns: { sheets: [], metadata: {}, warnings: [] }
     """
     result = {
@@ -93,7 +93,98 @@ def parse_excel_file(file_path, instrument_type):
     }
     
     try:
-        # Use pandas for robust Excel parsing
+        # Use openpyxl for better structure detection
+        import openpyxl
+        workbook = openpyxl.load_workbook(file_path, data_only=False, read_only=False)
+        
+        result['metadata']['sheet_names'] = workbook.sheetnames
+        result['metadata']['sheet_count'] = len(workbook.sheetnames)
+        
+        # Detect named ranges
+        named_ranges = []
+        for name in workbook.defined_names:
+            named_ranges.append({
+                'name': name.name,
+                'value': str(name.attr_text) if hasattr(name, 'attr_text') else str(name.value)
+            })
+        result['metadata']['named_ranges'] = named_ranges
+        
+        total_rows = 0
+        total_columns = 0
+        
+        for sheet_name in workbook.sheetnames:
+            try:
+                sheet = workbook[sheet_name]
+                
+                # Detect tables in the sheet
+                tables = []
+                for table in sheet.tables:
+                    tables.append({
+                        'name': table.name,
+                        'ref': table.ref,
+                        'display_name': table.displayName
+                    })
+                
+                # Detect data ranges (contiguous data blocks)
+                data_ranges = []
+                if sheet.dimensions:
+                    data_ranges.append(sheet.dimensions)
+                
+                # Read all data
+                headers = []
+                data = []
+                
+                for row_idx, row in enumerate(sheet.iter_rows(values_only=False)):
+                    row_data = []
+                    for cell in row:
+                        # Store both value and formula
+                        cell_info = {
+                            'value': cell.value if cell.value is not None else '',
+                            'formula': None,
+                            'data_type': cell.data_type
+                        }
+                        if cell.data_type == 'f':
+                            cell_info['formula'] = cell.value
+                        row_data.append(cell_info)
+                    
+                    if row_idx == 0:
+                        headers = row_data
+                    else:
+                        row_dict = {}
+                        for idx, (header, value) in enumerate(zip(headers, row_data)):
+                            row_dict[str(header)] = value
+                        data.append(row_dict)
+                
+                # Get merged cell ranges
+                merged_ranges = []
+                for merge_range in sheet.merged_cells.ranges:
+                    merged_ranges.append(str(merge_range))
+                
+                sheet_info = {
+                    'name': sheet_name,
+                    'headers': headers,
+                    'data': data,
+                    'row_count': len(data),
+                    'column_count': len(headers),
+                    'total_rows': sheet.max_row,
+                    'tables': tables,
+                    'data_ranges': data_ranges,
+                    'merged_ranges': merged_ranges
+                }
+                
+                result['sheets'].append(sheet_info)
+                total_rows += len(data)
+                total_columns = max(total_columns, len(headers))
+                
+            except Exception as e:
+                result['warnings'].append(f"Error parsing sheet '{sheet_name}': {str(e)}")
+        
+        workbook.close()
+        result['metadata']['total_rows'] = total_rows
+        result['metadata']['total_columns'] = total_columns
+        
+    except ImportError:
+        # Fallback to pandas if openpyxl not available
         excel_file = pd.ExcelFile(file_path)
         
         result['metadata']['sheet_names'] = excel_file.sheet_names
@@ -106,7 +197,7 @@ def parse_excel_file(file_path, instrument_type):
             try:
                 df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
                 
-                # Detect header row (row with most non-null values)
+                # Detect header row
                 header_row_idx = 0
                 max_non_null = 0
                 for idx, row in df.iterrows():
@@ -115,7 +206,6 @@ def parse_excel_file(file_path, instrument_type):
                         max_non_null = non_null_count
                         header_row_idx = idx
                 
-                # Extract headers and data
                 if header_row_idx < len(df):
                     headers = df.iloc[header_row_idx].fillna('').astype(str).tolist()
                     data_df = df.iloc[header_row_idx + 1:].reset_index(drop=True)
@@ -123,7 +213,6 @@ def parse_excel_file(file_path, instrument_type):
                     headers = [f'Column {i}' for i in range(len(df.columns))]
                     data_df = df
                 
-                # Convert data to list of dicts
                 data = []
                 for _, row in data_df.iterrows():
                     row_dict = {}
@@ -137,7 +226,7 @@ def parse_excel_file(file_path, instrument_type):
                     'data': data,
                     'row_count': len(data),
                     'column_count': len(headers),
-                    'header_row': header_row_idx
+                    'total_rows': len(df)
                 }
                 
                 result['sheets'].append(sheet_info)
@@ -152,6 +241,113 @@ def parse_excel_file(file_path, instrument_type):
         
     except Exception as e:
         result['warnings'].append(f"Error parsing Excel file: {str(e)}")
+    
+    return result
+
+
+def parse_full_workbook(file_path, instrument_type):
+    """
+    Parse full workbook structure for Excel viewer.
+    Returns: { sheets: [], metadata: {}, warnings: [] }
+    """
+    print(f"=== parse_full_workbook called ===")
+    print(f"File path: {file_path}")
+    print(f"Instrument type: {instrument_type}")
+    
+    result = {
+        'sheets': [],
+        'metadata': {},
+        'warnings': []
+    }
+    
+    try:
+        import openpyxl
+        print("openpyxl imported successfully")
+        
+        # Load workbook without data_only to preserve formulas
+        workbook = openpyxl.load_workbook(file_path, data_only=False, read_only=False)
+        print(f"Workbook loaded. Sheets: {workbook.sheetnames}")
+        
+        result['metadata']['sheet_names'] = workbook.sheetnames
+        result['metadata']['sheet_count'] = len(workbook.sheetnames)
+        
+        for sheet_name in workbook.sheetnames:
+            try:
+                print(f"Parsing sheet: {sheet_name}")
+                sheet = workbook[sheet_name]
+                headers = []
+                data = []
+                
+                # Read all rows without limit for complete workbook display
+                for row_idx, row in enumerate(sheet.iter_rows(values_only=False)):
+                    row_data = []
+                    for cell in row:
+                        # Store both value and formula if present
+                        cell_info = {
+                            'value': cell.value if cell.value is not None else '',
+                            'formula': None
+                        }
+                        if cell.data_type == 'f':  # Formula cell
+                            cell_info['formula'] = cell.value
+                            # Also get the calculated value
+                            try:
+                                cell_info['value'] = openpyxl.load_workbook(file_path, data_only=True, read_only=True)[sheet_name].cell(row=cell.row, column=cell.column).value
+                            except:
+                                pass
+                        row_data.append(cell_info)
+                    
+                    if row_idx == 0:
+                        headers = row_data
+                    else:
+                        row_dict = {}
+                        for idx, (header, value) in enumerate(zip(headers, row_data)):
+                            row_dict[str(header)] = value
+                        data.append(row_dict)
+                
+                # Get merged cell ranges
+                merged_ranges = []
+                for merge_range in sheet.merged_cells.ranges:
+                    merged_ranges.append(str(merge_range))
+                
+                sheet_info = {
+                    'name': sheet_name,
+                    'headers': headers,
+                    'data': data,
+                    'row_count': len(data),
+                    'column_count': len(headers),
+                    'total_rows': sheet.max_row,
+                    'merged_ranges': merged_ranges
+                }
+                
+                result['sheets'].append(sheet_info)
+                print(f"Sheet {sheet_name} parsed: {len(data)} rows, {len(headers)} columns")
+                
+            except Exception as e:
+                print(f"Error parsing sheet '{sheet_name}': {str(e)}")
+                result['warnings'].append(f"Error parsing sheet '{sheet_name}': {str(e)}")
+                # Continue with other sheets even if one fails
+        
+        workbook.close()
+        
+        result['metadata']['total_rows'] = sum(s['row_count'] for s in result['sheets'])
+        result['metadata']['total_columns'] = max((s['column_count'] for s in result['sheets']), default=0)
+        
+        print(f"=== parse_full_workbook complete: {len(result['sheets'])} sheets ===")
+        
+    except ImportError as e:
+        print(f"ImportError: {e}")
+        # Fallback to pandas if openpyxl not available
+        result = parse_excel_file(file_path, instrument_type)
+    except Exception as e:
+        print(f"Exception in parse_full_workbook: {e}")
+        import traceback
+        traceback.print_exc()
+        result['warnings'].append(f"Error parsing workbook: {str(e)}")
+        # Try pandas fallback
+        try:
+            result = parse_excel_file(file_path, instrument_type)
+        except:
+            pass
     
     return result
 

@@ -124,25 +124,111 @@ def settings_routes(app):
     def profile():
         if request.method == 'OPTIONS':
             return '', 200
-        return jsonify({'success': True, 'data': get_user_profile()})
+        user_id = request.args.get('user_id', 1)
+        return jsonify({'success': True, 'data': get_user_profile(user_id)})
 
     @app.route('/api/user/preferences', methods=['GET', 'OPTIONS'])
     def preferences():
         if request.method == 'OPTIONS':
             return '', 200
-        return jsonify({'success': True, 'data': get_user_preferences()})
+        user_id = request.args.get('user_id', 1)
+        return jsonify({'success': True, 'data': get_user_preferences(user_id)})
 
     @app.route('/api/user/notifications/settings', methods=['GET', 'OPTIONS'])
     def notifications_settings():
         if request.method == 'OPTIONS':
             return '', 200
-        return jsonify({'success': True, 'data': get_notification_settings()})
+        user_id = request.args.get('user_id', 1)
+        return jsonify({'success': True, 'data': get_notification_settings(user_id)})
 
     @app.route('/api/system/info', methods=['GET', 'OPTIONS'])
     def system_info():
         if request.method == 'OPTIONS':
             return '', 200
         return jsonify({'success': True, 'data': get_system_info()})
+
+    @app.route('/api/user/profile', methods=['PUT', 'OPTIONS'])
+    def update_profile():
+        if request.method == 'OPTIONS':
+            return '', 200
+        data = request.get_json()
+        user_id = data.get('user_id', 1)
+        first_name = data.get('first_name')
+        last_name = data.get('last_name')
+        email = data.get('email')
+        
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'DB error'}), 500
+        try:
+            cursor = conn.cursor()
+            if first_name or last_name or email:
+                update_fields = []
+                params = []
+                if first_name:
+                    update_fields.append('first_name = %s')
+                    params.append(first_name)
+                if last_name:
+                    update_fields.append('last_name = %s')
+                    params.append(last_name)
+                if email:
+                    update_fields.append('email = %s')
+                    params.append(email)
+                params.append(user_id)
+                
+                cursor.execute(f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s", params)
+                conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'data': get_user_profile(user_id)})
+        except Exception as e:
+            print(f"Error updating profile: {e}")
+            conn.close()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+    @app.route('/api/user/preferences', methods=['PUT', 'OPTIONS'])
+    def update_preferences():
+        if request.method == 'OPTIONS':
+            return '', 200
+        data = request.get_json()
+        user_id = data.get('user_id', 1)
+        
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'DB error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO user_preferences (user_id, language, timezone, date_format, currency, email_notifications, push_notifications, weekly_reports, system_alerts)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    language = VALUES(language),
+                    timezone = VALUES(timezone),
+                    date_format = VALUES(date_format),
+                    currency = VALUES(currency),
+                    email_notifications = VALUES(email_notifications),
+                    push_notifications = VALUES(push_notifications),
+                    weekly_reports = VALUES(weekly_reports),
+                    system_alerts = VALUES(system_alerts)
+            """, (
+                user_id,
+                data.get('language', 'English'),
+                data.get('timezone', 'GMT+2'),
+                data.get('dateFormat', 'DD/MM/YYYY'),
+                data.get('currency', 'USD'),
+                data.get('emailNotifications', True),
+                data.get('pushNotifications', False),
+                data.get('weeklyReports', True),
+                data.get('systemAlerts', True)
+            ))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'data': get_user_preferences(user_id)})
+        except Exception as e:
+            print(f"Error updating preferences: {e}")
+            conn.close()
+            return jsonify({'success': False, 'message': str(e)}), 500
     
     @app.route('/api/settings/<int:user_id>', methods=['GET', 'OPTIONS'])
     def get_user_settings(user_id):

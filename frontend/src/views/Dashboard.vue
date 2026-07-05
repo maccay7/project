@@ -44,7 +44,7 @@
                     <div class="session-row-name">{{ session.name }}</div>
                     <div class="session-row-meta">{{ formatDate(session.date) }}</div>
                   </div>
-                  <div class="session-row-stats"><span>{{ session.instrumentCount || 0 }} instruments</span></div>
+                  <div class="session-row-stats"><span>{{ getInstrumentCount(session) }}/3 instruments</span></div>
                   <div class="session-row-status" :class="session.status">{{ session.status === 'completed' ? '✓' : '⟳' }}</div>
                   <button class="version-btn" @click.stop="openVersionModal(session.id)">
                     <v-icon size="12">mdi-history</v-icon>
@@ -84,7 +84,8 @@
                 </div>
                 <div class="session-details">
                   <span>Created: {{ formatDate(activeSession.date) }}</span>
-                  <span>Instruments: {{ activeSession.instrumentCount || 0 }}/3</span>
+                  <span>Instruments: {{ activeInstrumentCount }}/3</span>
+                  <span>Versions: {{ activeSession.versions?.length || 0 }}</span>
                 </div>
                 <!-- Save to Session button removed -->
               </div>
@@ -257,9 +258,19 @@ const inProgressSessions = computed(() => validSessions.value.filter(s => s.stat
 
 const kpiStats = computed(() => [
   { title: 'Active Session', value: activeSession.value?.name || 'No Session', icon: 'mdi-folder', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
-  { title: 'Instruments Used', value: activeSession.value?.instrumentCount || '0', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
-  { title: 'Completion', value: `${Math.round((activeSession.value?.instrumentCount || 0) / 3 * 100)}%`, icon: 'mdi-database', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }
+  { title: 'Instruments Used', value: activeSession.value ? `${activeInstrumentCount.value}/3` : '0/3', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
+  { title: 'Completion', value: `${Math.round((activeInstrumentCount.value / 3) * 100)}%`, icon: 'mdi-database', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }
 ])
+
+const activeInstrumentCount = computed(() => {
+  if (!activeSession.value?.id) return 0
+  return sessionManager.countSessionInstruments(activeSession.value.id)
+})
+
+function getInstrumentCount(session) {
+  if (!session?.id) return 0
+  return sessionManager.countSessionInstruments(session.id)
+}
 
 // Helpers
 const formatDate = d => d ? new Date(d).toLocaleString() : ''
@@ -381,12 +392,7 @@ const restoreVersion = (sessionId, index) => {
   for (const [inst, wf] of Object.entries(version.workflows)) {
     sessionManager.saveInstrumentWorkflow(sessionId, inst, wf)
   }
-  const restoredInstrument = detectInstrument(sessionId) || version.instrument || 'Session'
-  captureVersion(sessionId, {
-    changeType: 'Restored',
-    shortDescription: `Restored version from ${formatVersionTime(version.timestamp)}`,
-    instrument: restoredInstrument
-  })
+  sessionManager.updateSession(sessionId, { instrumentCount: sessionManager.countSessionInstruments(sessionId) })
   alert(`Restored version from ${formatVersionTime(version.timestamp)}`)
   if (activeSession.value?.id === sessionId) loadExistingSession(sessionId)
   versionDialogVisible.value = false
@@ -401,11 +407,16 @@ const onSessionUpdated = (event) => {
     const updated = sessionManager.getSession(sessionId)
     if (updated) {
       const idx = sessions.value.findIndex(s => s.id === sessionId)
-      if (idx !== -1) {
-        sessions.value[idx] = { ...sessions.value[idx], ...updated, versions: updated.versions || sessions.value[idx].versions }
-      } else {
-        sessions.value.unshift(updated)
+      const instrumentCount = sessionManager.countSessionInstruments(sessionId)
+      const merged = {
+        ...(idx !== -1 ? sessions.value[idx] : updated),
+        ...updated,
+        instrumentCount,
+        versions: updated.versions || (idx !== -1 ? sessions.value[idx].versions : [])
       }
+      if (idx !== -1) sessions.value[idx] = merged
+      else sessions.value.unshift(merged)
+      if (activeSession.value?.id === sessionId) activeSession.value = { ...activeSession.value, ...merged }
       saveSessions()
     }
     return
@@ -413,18 +424,23 @@ const onSessionUpdated = (event) => {
   // Only capture version if explicitly saving to session
   if (explicitSave) {
     captureVersion(sessionId, options)
-  } else {
-    // Just update session data without creating a version
-    const updated = sessionManager.getSession(sessionId)
-    if (updated) {
-      const idx = sessions.value.findIndex(s => s.id === sessionId)
-      if (idx !== -1) {
-        sessions.value[idx] = { ...sessions.value[idx], ...updated, versions: updated.versions || sessions.value[idx].versions }
-      } else {
-        sessions.value.unshift(updated)
-      }
-      saveSessions()
+  }
+  const updated = sessionManager.getSession(sessionId)
+  if (updated) {
+    const idx = sessions.value.findIndex(s => s.id === sessionId)
+    const instrumentCount = sessionManager.countSessionInstruments(sessionId)
+    const merged = {
+      ...(idx !== -1 ? sessions.value[idx] : updated),
+      ...updated,
+      instrumentCount,
+      versions: updated.versions || (idx !== -1 ? sessions.value[idx].versions : [])
     }
+    if (idx !== -1) sessions.value[idx] = merged
+    else sessions.value.unshift(merged)
+    if (activeSession.value?.id === sessionId) {
+      activeSession.value = { ...activeSession.value, ...merged }
+    }
+    saveSessions()
   }
 }
 
@@ -491,7 +507,6 @@ const openRename = (session) => {
     if (idx !== -1) {
       sessions.value[idx].name = name.trim()
       saveSessions()
-      captureVersion(session.id, { changeType: 'Renamed', shortDescription: `Renamed to "${name.trim()}"` })
     }
     if (activeSession.value?.id === session.id) activeSession.value = sessions.value[idx]
   }
@@ -511,7 +526,6 @@ const saveRename = () => {
   if (idx !== -1) {
     sessions.value[idx].name = renameInput.value.trim()
     saveSessions()
-    captureVersion(activeSession.value.id, { changeType: 'Renamed', shortDescription: `Renamed to "${renameInput.value.trim()}"` })
     activeSession.value = sessions.value[idx]
   }
   renamingActive.value = false

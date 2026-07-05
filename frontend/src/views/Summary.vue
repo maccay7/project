@@ -134,6 +134,17 @@
         </v-card-title>
         <v-card-text class="combined-excel-body">
           <div class="combined-section">
+            <div class="excel-header">
+              <div class="excel-logo-area">
+                <img src="/DuraCapital logo.png" alt="DuraCapital" class="excel-logo" />
+              </div>
+              <div class="excel-title-area">
+                <h3 class="excel-company">DuraCapital</h3>
+                <h4 class="excel-report-title">Portfolio Summary</h4>
+                <p class="excel-session">Session: {{ activeSession?.name || 'N/A' }}</p>
+                <p class="excel-date">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</p>
+              </div>
+            </div>
             <h4 class="combined-section-title">Summary</h4>
             <table class="summary-table">
               <thead>
@@ -285,11 +296,12 @@ async function loadSummary() {
       }
     }
     if (!session) {
-      const savedSessionRaw = localStorage.getItem('active_session')
-      if (savedSessionRaw) {
-        try {
-          session = JSON.parse(savedSessionRaw)
-        } catch(e) {}
+      const sid = sessionManager.getActiveSessionId()
+      if (sid) {
+        const loaded = await sessionManager.loadSessionFromDb(sid)
+        if (loaded) {
+          session = sessionManager.getSession(sid)
+        }
       }
     }
   } catch(e) {
@@ -320,7 +332,7 @@ async function loadSummary() {
     
     let cleanedData = []
     let calculations = {}
-    if (wf && wf.calculations?.totalValue) {
+    if (wf && (wf.calculations?.totalValue || wf.cleanedData?.length)) {
       cleanedData = wf.cleanedData || []
       calculations = wf.calculations || {}
     } 
@@ -338,7 +350,7 @@ async function loadSummary() {
     }
     if (!calculations.totalValue && activeSession.value.instrumentData?.[template.id]) {
       const data = activeSession.value.instrumentData[template.id]
-      calculations = data
+      calculations = { ...data, ...calculations }
     }
     
     const completed = !!calculations.totalValue
@@ -403,7 +415,31 @@ function exportToExcel() {
   const workbook = XLSX.utils.book_new()
   const valuationDate = new Date().toISOString().split('T')[0]
   
-  const summaryRows = toExport.map(inst => {
+  // Create summary sheet with logo and professional formatting
+  const summaryRows = []
+  
+  // Add header rows with logo placeholder and company info
+  summaryRows.push({ '': '', '': '', '': '' }) // Empty row for spacing
+  summaryRows.push({ '': 'DuraCapital', '': '', '': '' }) // Company name
+  summaryRows.push({ '': 'Portfolio Summary', '': '', '': '' }) // Report title
+  summaryRows.push({ '': `Session: ${activeSession.value.name}`, '': '', '': '' }) // Session name
+  summaryRows.push({ '': `Valuation Date: ${valuationDate}`, '': '', '': '' }) // Valuation date
+  summaryRows.push({ '': '', '': '', '': '' }) // Empty row for spacing
+  
+  // Add column headers
+  summaryRows.push({
+    'Instrument Name': 'Instrument Name',
+    'Face Value': 'Face Value',
+    'Calculated Value': 'Calculated Value',
+    'Difference': 'Difference',
+    'Yield (%)': 'Yield (%)',
+    'Valuation Date': 'Valuation Date',
+    'Maturity Date': 'Maturity Date'
+  })
+  
+  // Add data rows
+  const dataRows = []
+  toExport.forEach(inst => {
     const faceValue = inst.faceValue || 0
     const calculatedValue = inst.value || 0
     const diff = faceValue - calculatedValue
@@ -415,7 +451,7 @@ function exportToExcel() {
         maturityDate = firstRow.MaturityDate || firstRow.Maturity || firstRow['Maturity Date'] || '—'
       }
     }
-    return {
+    dataRows.push({
       'Instrument Name': inst.name,
       'Face Value': faceValue,
       'Calculated Value': calculatedValue,
@@ -423,19 +459,22 @@ function exportToExcel() {
       'Yield (%)': inst.avgRate !== null ? inst.avgRate : '—',
       'Valuation Date': valuationDate,
       'Maturity Date': maturityDate
-    };
+    });
   });
+  summaryRows.push(...dataRows);
 
+  // Add totals row
   const totals = {
     'Instrument Name': 'TOTAL',
-    'Face Value': summaryRows.reduce((s, r) => s + r['Face Value'], 0),
-    'Calculated Value': summaryRows.reduce((s, r) => s + r['Calculated Value'], 0),
-    'Difference': summaryRows.reduce((s, r) => s + r['Difference'], 0),
+    'Face Value': dataRows.reduce((s, r) => s + r['Face Value'], 0),
+    'Calculated Value': dataRows.reduce((s, r) => s + r['Calculated Value'], 0),
+    'Difference': dataRows.reduce((s, r) => s + r['Difference'], 0),
     'Yield (%)': '—',
     'Valuation Date': '',
     'Maturity Date': ''
   };
   summaryRows.push(totals);
+  
   const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
 
@@ -550,6 +589,13 @@ onMounted(() => {
 .summary-table td { padding: 8px; border-bottom: 1px solid #eee; }
 .summary-table tr:hover { background: #f8f9ff; }
 .excel-wrapper { border: 1px solid #e8ecf1; border-radius: 8px; overflow: hidden; }
+.excel-header { display: flex; align-items: center; gap: 20px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #0B2044; }
+.excel-logo-area { flex-shrink: 0; }
+.excel-logo { max-height: 60px; max-width: 200px; object-fit: contain; }
+.excel-title-area { flex: 1; }
+.excel-company { color: #0B2044; font-size: 24px; font-weight: 700; margin: 0 0 4px 0; }
+.excel-report-title { color: #1E88E5; font-size: 18px; font-weight: 600; margin: 0 0 8px 0; }
+.excel-session, .excel-date { color: #666; font-size: 14px; margin: 2px 0; }
 
 .distribution-section { background: white; border-radius: 12px; padding: 20px; margin: 30px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 .distribution-section h3 { color: #0B2044; margin-bottom: 16px; }

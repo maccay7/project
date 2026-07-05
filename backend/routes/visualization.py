@@ -162,11 +162,11 @@ def prepare_yield_curve_data(instrument_type, country, currency, maturity):
             if result[0] is not None:
                 points.append({'maturity': result[0], 'rate': result[1], 'code': result[2]})
 
-    # If no points and country is not USA, fallback to USA
-    if not points and country.upper() != 'USA':
-        print(f"⚠️ No data for {country}, falling back to USA for {instrument_type} {maturity}")
+    # If no points and country is not US, fallback to US
+    if not points and country.upper() not in ('US', 'USA'):
+        print(f"⚠️ No data for {country}, falling back to US for {instrument_type} {maturity}")
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(fetch_one, m, 'USA') for m in maturities]
+            futures = [executor.submit(fetch_one, m, 'US') for m in maturities]
             for future in as_completed(futures):
                 result = future.result()
                 if result[0] is not None:

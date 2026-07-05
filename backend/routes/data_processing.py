@@ -7,6 +7,9 @@ from datetime import datetime
 import openpyxl
 import tempfile
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from routes.dataset import parse_full_workbook
 
 def create_processed_data_table():
     conn = get_db()
@@ -139,7 +142,26 @@ def parse_intelligent_excel(file_path, instrument_type):
                             break
             new_row[req_col] = found if found is not None else ''
         mapped_rows.append(new_row)
-    return mapped_rows
+    
+    workbook.close()
+    
+    # Return in the same format as parse_full_workbook
+    return {
+        'sheets': [{
+            'name': workbook.sheetnames[0] if workbook.sheetnames else 'Sheet1',
+            'headers': list(mapping.keys()) if mapping else [],
+            'data': mapped_rows,
+            'row_count': len(mapped_rows),
+            'column_count': len(mapping.keys()) if mapping else 0
+        }],
+        'metadata': {
+            'sheet_names': workbook.sheetnames,
+            'sheet_count': len(workbook.sheetnames),
+            'total_rows': len(mapped_rows),
+            'total_columns': len(mapping.keys()) if mapping else 0
+        },
+        'warnings': []
+    }
 
 def clean_data(data, cleaning_options):
     if not data or not isinstance(data, list):
@@ -227,8 +249,58 @@ def auto_match_columns(file_columns, required_columns):
                 break
     return mapping
 
+# Cache for parsed workbook data
+_workbook_cache = {}
+
 def data_processing_routes(app):
     create_processed_data_table()
+
+    @app.route('/api/data/workbook/<file_id>', methods=['GET'])
+    def get_workbook_by_id(file_id):
+        """Load workbook by file ID without re-uploading."""
+        print(f"=== Get Workbook by ID: {file_id} ===")
+        
+        # Check cache first
+        if file_id in _workbook_cache:
+            print(f"✅ Returning cached workbook data for {file_id}")
+            return jsonify({'success': True, 'data': _workbook_cache[file_id]})
+        
+        # Find file in uploads folder
+        upload_folder = 'uploads'
+        if not os.path.exists(upload_folder):
+            return jsonify({'success': False, 'error': 'Uploads folder not found'}), 404
+        
+        # Search for file with this ID
+        matching_files = []
+        for filename in os.listdir(upload_folder):
+            if filename.startswith(file_id):
+                file_path = os.path.join(upload_folder, filename)
+                matching_files.append(file_path)
+        
+        if not matching_files:
+            print(f"ERROR: No file found with ID {file_id}")
+            return jsonify({'success': False, 'error': 'File not found'}), 404
+        
+        file_path = matching_files[0]
+        print(f"Found file: {file_path}")
+        
+        # Get instrument type from query params
+        instrument_type = request.args.get('instrument_type', 'money-market')
+        
+        try:
+            result = parse_full_workbook(file_path, instrument_type)
+            print(f"Workbook parsed: {len(result.get('sheets', []))} sheets")
+            
+            # Cache the result
+            _workbook_cache[file_id] = result
+            print(f"✅ Cached workbook data for {file_id}")
+            
+            return jsonify({'success': True, 'data': result})
+        except Exception as e:
+            print(f"ERROR parsing workbook: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/data/parse-excel', methods=['POST', 'OPTIONS'])
     def parse_excel_endpoint():
@@ -238,20 +310,98 @@ def data_processing_routes(app):
             response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
             response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
             return response, 200
+        
+        print("=== Parse Excel Request ===")
+        print(f"Request method: {request.method}")
+        print(f"Request files keys: {list(request.files.keys())}")
+        print(f"Request form keys: {list(request.form.keys())}")
+        
         file = request.files.get('file')
         instrument_type = request.form.get('instrument_type', 'money-market')
+        return_full_workbook = request.form.get('return_full_workbook', 'false').lower() == 'true'
+        
+        print(f"File received: {file.filename if file else 'None'}")
+        print(f"File content type: {file.content_type if file else 'None'}")
+        print(f"File size: {len(file.read()) if file else 0} bytes")
+        if file:
+            file.seek(0)  # Reset file pointer after reading
+        print(f"Instrument type: {instrument_type}")
+        print(f"Return full workbook: {return_full_workbook}")
+        
         if not file:
+            print("ERROR: No file uploaded")
             return jsonify({'success': False, 'error': 'No file uploaded'}), 400
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-            file.save(tmp.name)
-            try:
-                result = parse_intelligent_excel(tmp.name, instrument_type)
-            except Exception as e:
-                os.unlink(tmp.name)
-                return jsonify({'success': False, 'error': str(e)}), 500
-            os.unlink(tmp.name)
+        
+        # Generate unique file ID
+        import uuid
+        file_id = str(uuid.uuid4())
+        upload_timestamp = datetime.now().isoformat()
+        
+        # Save file permanently with file ID
+        upload_folder = 'uploads'
+        os.makedirs(upload_folder, exist_ok=True)
+        file_path = os.path.join(upload_folder, f"{file_id}_{file.filename}")
+        file.save(file_path)
+        print(f"File saved to: {file_path} with ID: {file_id}")
+        
+        try:
+            # Use full workbook parsing when viewer is opened, otherwise use fast parsing
+            if return_full_workbook:
+                print("Calling parse_full_workbook (for viewer)...")
+                result = parse_full_workbook(file_path, instrument_type)
+                print(f"Parse result type: {type(result)}")
+                print(f"Parse result sheets: {len(result.get('sheets', []))}")
+                # Cache the parsed workbook
+                _workbook_cache[file_id] = result
+                print(f"✅ Cached workbook data for {file_id}")
+            else:
+                print("Calling parse_intelligent_excel (fast)...")
+                result = parse_intelligent_excel(file_path, instrument_type)
+                print(f"Parse result type: {type(result)}")
+                print(f"Parse result sheets: {len(result.get('sheets', []))}")
+                # Also cache the fast result for potential use
+                _workbook_cache[file_id] = result
+                print(f"✅ Cached workbook data for {file_id}")
+            
+            # Add file metadata to result
+            if result and isinstance(result, dict):
+                result['metadata'] = result.get('metadata', {})
+                result['metadata']['file_id'] = file_id
+                result['metadata']['original_filename'] = file.filename
+                result['metadata']['upload_timestamp'] = upload_timestamp
+                result['metadata']['file_path'] = file_path
+            else:
+                print(f"ERROR: parsing returned invalid type: {type(result)}")
+                result = {'sheets': [], 'metadata': {'file_id': file_id, 'original_filename': file.filename, 'upload_timestamp': upload_timestamp}, 'warnings': ['Parsing failed']}
+            
+            # Check if result has valid data
+            if not result or not isinstance(result, dict):
+                print("ERROR: Invalid parsing result")
+                result = {'sheets': [], 'metadata': {'file_id': file_id, 'original_filename': file.filename, 'upload_timestamp': upload_timestamp}, 'warnings': ['Invalid parsing result']}
+            
+            # Ensure sheets array exists
+            if 'sheets' not in result:
+                result['sheets'] = []
+            
+            # Ensure metadata exists
+            if 'metadata' not in result:
+                result['metadata'] = {}
+            
+            # Ensure warnings exists
+            if 'warnings' not in result:
+                result['warnings'] = []
+            
+            print(f"Final result: {len(result.get('sheets', []))} sheets, {len(result.get('warnings', []))} warnings")
+                
+        except Exception as e:
+            print(f"ERROR during parsing: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': f'Parsing error: {str(e)}'}), 500
+        
         response = jsonify({'success': True, 'data': result})
         response.headers.add('Access-Control-Allow-Origin', '*')
+        print("=== Parse Excel Complete ===")
         return response
 
     @app.route('/api/data/clean', methods=['POST', 'OPTIONS'])

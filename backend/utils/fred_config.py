@@ -100,14 +100,27 @@ COLORS = {
 def build_filter_options():
     countries = []
     for code, info in COUNTRY_DATA.items():
+        maturities = []
+        for m in info['series']:
+            # Convert maturity codes to full labels
+            if m.endswith('W'):
+                label = f'{m} Weeks'
+            elif m.endswith('M'):
+                label = f'{m} Months'
+            elif m.endswith('Y'):
+                label = f'{m} Years'
+            else:
+                label = m
+            maturities.append({
+                'code': m,
+                'name': f'{label} – {info["series"][m][1]}',
+                'label': label
+            })
         countries.append({
             'code': code,
             'name': info['name'],
             'currency': info['currency'],
-            'maturities': [
-                {'code': m, 'name': f'{m} – {info["series"][m][1]}'}
-                for m in info['series']
-            ],
+            'maturities': maturities,
         })
     currencies = []
     seen = set()
@@ -189,6 +202,7 @@ def latest_value(series_id):
     
     # Check cache first
     if cache_key in _cache and now - _cache[cache_key][0] < CACHE_SEC:
+        print(f"✅ Using cached value for {series_id}: {_cache[cache_key][1]}")
         return _cache[cache_key][1]
     
     params = {
@@ -200,6 +214,7 @@ def latest_value(series_id):
     }
     
     try:
+        print(f"🔍 Fetching FRED data for series: {series_id}")
         resp = requests.get(FRED_URL, params=params, timeout=FRED_TIMEOUT)
         
         # Handle HTTP errors
@@ -223,15 +238,19 @@ def latest_value(series_id):
             return None
         
         # Extract latest valid value
-        for row in data.get('observations', []):
+        observations = data.get('observations', [])
+        print(f"📊 FRED returned {len(observations)} observations for {series_id}")
+        
+        for row in observations:
             val = row.get('value')
             if val and val != '.':
                 rate = float(val)
+                print(f"✅ Found valid value for {series_id}: {rate}")
                 # Cache the result
                 _cache[cache_key] = (now, rate)
                 return rate
         
-        print(f"⚠️ No valid data found for {series_id}")
+        print(f"⚠️ No valid data found for {series_id} (all values are '.' or missing)")
         return None
         
     except requests.exceptions.Timeout:
@@ -292,10 +311,12 @@ def curve_points_for_country(country):
 
 def curve_for_type(instrument_type, country='US'):
     country_code = resolve_country_input(country)
+    print(f"🔍 Building yield curve for {instrument_type} in {country_code}")
+    
     if country_code == 'US':
         key = normalize_type(instrument_type)
         if key in ('treasury_bills', 'tbills'):
-            desired = ['4W', '8W', '13W', '26W', '52W']
+            desired = ['4W', '13W', '26W', '52W']
         elif key in ('money_market', 'money-market'):
             desired = ['1M', '3M', '6M', '1Y']
         elif key == 'bonds':
@@ -307,19 +328,34 @@ def curve_for_type(instrument_type, country='US'):
         for m in desired:
             if m in c['series']:
                 sid, label = c['series'][m]
-                points.append((m, sid))
+                # Convert maturity code to full label
+                if m.endswith('W'):
+                    full_label = f'{m} Weeks'
+                elif m.endswith('M'):
+                    full_label = f'{m} Months'
+                elif m.endswith('Y'):
+                    full_label = f'{m} Years'
+                else:
+                    full_label = m
+                points.append((full_label, sid))
         if not points:
             points = [(m, c['series'][m][0]) for m in c['series']]
     else:
         points = curve_points_for_country(country_code)
+    
+    print(f"📊 Yield curve points: {points}")
+    
     labels, values = [], []
     for label, series_id in points:
         rate = latest_value(series_id)
         if rate is not None:
             labels.append(label)
             values.append(round(rate, 2))
+            print(f"✅ {label} ({series_id}): {rate}%")
         else:
             print(f"⚠️ FRED unavailable for {label} ({series_id}); skipping this maturity.")
+    
+    print(f"📈 Final yield curve: {len(labels)} points - {labels}: {values}")
     return labels, values
 
 def build_yield_curve_response(instrument_type='all', country='US', currency='USD'):

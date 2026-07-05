@@ -1,7 +1,7 @@
 <template>
   <div class="login-container">
     <div class="login-form">
-      <!-- Logo – no pill, just the image -->
+      <!-- Logo – no pill -->
       <div class="logo-section">
         <img 
           src="/Untitled - July 02, 2026 at 13.19.30.png" 
@@ -114,7 +114,6 @@
 </template>
 
 <script setup lang="ts">
-// (Your existing script – unchanged)
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -206,7 +205,7 @@ const goToRegister = () => {
 </script>
 
 <style scoped>
-/* ===== NO PILL, BRIGHTENED GLASS ===== */
+/* ===== BRIGHTENED GLASS – no pill ===== */
 .login-container {
   min-height: 100vh;
   background: url('/login1.jpg') center/cover no-repeat;
@@ -216,7 +215,7 @@ const goToRegister = () => {
   position: relative;
 }
 .login-form {
-  background: rgba(18, 22, 30, 0.15); /* much lighter – logo becomes clear */
+  background: rgba(18, 22, 30, 0.15);
   border-radius: 28px;
   padding: 4px 34px 20px 34px;
   width: 100%;
@@ -233,7 +232,6 @@ const goToRegister = () => {
   margin-bottom: 4px;
   padding: 0;
 }
-
 .login-logo {
   width: 200px;
   height: auto;
@@ -246,13 +244,9 @@ const goToRegister = () => {
           drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
 }
 
-/* ---- Even spacing between form groups ---- */
-.form-group {
-  margin-bottom: 12px;
-}
-.form-group:last-of-type {
-  margin-bottom: 12px;
-}
+/* ---- Even spacing ---- */
+.form-group { margin-bottom: 12px; }
+.form-group:last-of-type { margin-bottom: 12px; }
 .input-wrapper {
   position: relative;
   display: flex;

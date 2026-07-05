@@ -1,139 +1,176 @@
 <template>
   <div class="excel-viewer" :class="{ 'has-mapping': showMappingControls }">
-    <!-- Formula Bar -->
-    <div class="formula-bar" v-if="displayData.length">
-      <div class="formula-cell-ref">{{ selectedCellRef }}</div>
-      <div class="formula-input-wrapper">
-        <span class="formula-prefix">fx</span>
-        <input
-          ref="formulaInput"
-          type="text"
-          :value="formulaBarValue"
-          @input="updateFormulaBarValue($event.target.value)"
-          @blur="applyFormulaBarEdit"
-          @keydown.enter.prevent="applyFormulaBarEdit"
-          class="formula-input"
-          :placeholder="selectedCell ? 'Enter value or formula' : ''"
-          style="color: #000000 !important; background: #ffffff !important;"
-        />
+    <!-- Sheet Tabs -->
+    <div class="sheet-tabs" v-if="workbookSheets.length > 1">
+      <div
+        v-for="sheet in workbookSheets"
+        :key="sheet.name"
+        class="sheet-tab"
+        :class="{ active: currentSheetName === sheet.name }"
+        @click="selectSheet(sheet.name)"
+      >
+        {{ sheet.name }}
       </div>
     </div>
 
-    <!-- Toolbar -->
-    <div class="excel-toolbar">
-      <span>{{ displayData.length }} rows × {{ displayHeaders.length }} columns</span>
-      <div class="toolbar-right">
-        <div class="pagination-controls">
-          <button class="page-btn" @click="prevPage" :disabled="currentPage === 1">←</button>
-          <span class="page-info">Page {{ currentPage }} of {{ totalPages }}</span>
-          <button class="page-btn" @click="nextPage" :disabled="currentPage === totalPages">→</button>
+    <!-- Multi-Instrument Detection Banner -->
+    <div class="instrument-detection-banner" v-if="detectedInstruments.length > 0">
+      <span class="detection-info">🔍 Detected {{ detectedInstruments.length }} instrument(s) in this sheet:</span>
+      <div class="instrument-tags">
+        <span v-for="(inst, idx) in detectedInstruments" :key="idx" class="instrument-tag">
+          {{ inst.name }} ({{ inst.rowCount }} rows)
+        </span>
+      </div>
+      <button class="process-all-btn" @click="processAllInstruments">Process All Instruments</button>
+    </div>
+
+    <!-- Luckysheet Container -->
+    <div v-if="useLuckysheet" ref="luckysheetContainer" class="luckysheet-container"></div>
+
+    <!-- Traditional Excel Table (fallback) -->
+    <div v-else>
+      <!-- Formula Bar -->
+      <div class="formula-bar" v-if="displayData.length">
+        <div class="formula-cell-ref">{{ selectedCellRef }}</div>
+        <div class="formula-input-wrapper">
+          <span class="formula-prefix">fx</span>
+          <input
+            ref="formulaInput"
+            type="text"
+            :value="formulaBarValue"
+            @input="updateFormulaBarValue($event.target.value)"
+            @blur="applyFormulaBarEdit"
+            @keydown.enter.prevent="applyFormulaBarEdit"
+            class="formula-input"
+            :placeholder="selectedCell ? 'Enter value or formula' : ''"
+            style="color: #000000 !important; background: #ffffff !important;"
+          />
         </div>
       </div>
-    </div>
 
-    <!-- Excel table -->
-    <div class="excel-table-wrapper" @scroll="handleScroll">
-      <table class="excel-edit-table" :style="tableStyle" style="color: #000000 !important; background: #ffffff !important;">
-        <thead>
-          <tr>
-            <th class="row-number-col" style="width:50px; min-width:50px; max-width:50px; color: #000000 !important; background: #f5f5f5 !important;">#</th>
-            <th
-              v-for="(header, colIndex) in displayHeaders"
-              :key="header"
-              :style="headerStyle(header, colIndex)"
-              class="header-cell"
-              :class="{ 'resizing': resizingColumn === header }"
-            >
-              <!-- Header dropdown: show for required columns only -->
-              <div v-if="showMappingControls && isRequiredColumn(header)" class="header-dropdown">
-                <select
-                  :value="getMappingForHeader(header)"
-                  @change="onMappingChange(header, $event.target.value)"
-                  class="mapping-dropdown"
-                  @click.stop
-                  style="color: #000000 !important; background: #ffffff !important;"
-                >
-                  <option value="__na__">— Select source —</option>
-                  <option v-for="fileCol in availableFileColumns" :key="fileCol" :value="fileCol">
-                    {{ fileCol }}
-                  </option>
-                </select>
-                <span class="header-label" style="color: #000000 !important;">{{ header }}</span>
-              </div>
-              <span v-else class="header-text" style="color: #000000 !important;">{{ header }}</span>
+      <!-- Toolbar -->
+      <div class="excel-toolbar">
+        <span>{{ displayData.length }} rows × {{ displayHeaders.length }} columns</span>
+        <div class="toolbar-right">
+          <button v-if="!showMappingControls" @click="processSheet" class="process-btn">
+            Process this Instrument
+          </button>
+          <div class="pagination-controls">
+            <button class="page-btn" @click="prevPage" :disabled="currentPage === 1">←</button>
+            <span class="page-info">Page {{ currentPage }} of {{ totalPages }}</span>
+            <button class="page-btn" @click="nextPage" :disabled="currentPage === totalPages">→</button>
+          </div>
+        </div>
+      </div>
 
-              <!-- Column resizer -->
-              <div
-                class="column-resizer"
-                @mousedown.stop="startColumnResize($event, header, colIndex)"
-              ></div>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <template v-for="(row, rowIndex) in paginatedData" :key="rowIndex">
-            <tr
-              :style="rowStyle(rowIndex)"
-              :class="{ 'selected-row': isRowSelected(rowIndex) }"
-              @mousedown="handleRowMouseDown($event, rowIndex)"
-            >
-              <td class="row-number" style="color: #000000 !important; background: #f8f9ff !important;">
-                {{ (currentPage - 1) * pageSize + rowIndex + 1 }}
-              </td>
-              <td
+      <!-- Excel table -->
+      <div class="excel-table-wrapper" @scroll="handleScroll">
+        <table class="excel-edit-table" :style="tableStyle" style="color: #000000 !important; background: #ffffff !important;">
+          <thead>
+            <tr>
+              <th class="row-number-col" style="width:50px; min-width:50px; max-width:50px; color: #000000 !important; background: #f5f5f5 !important;">#</th>
+              <th
                 v-for="(header, colIndex) in displayHeaders"
                 :key="header"
-                :class="{
-                  'selected-cell': isCellSelected(rowIndex, colIndex),
-                  'editing-cell': isEditingCell(rowIndex, colIndex),
-                }"
-                :style="cellStyle(rowIndex, colIndex)"
-                @click="handleCellClick($event, rowIndex, colIndex)"
-                @dblclick="handleCellDblClick($event, rowIndex, colIndex)"
-                @mousedown="handleCellMouseDown($event, rowIndex, colIndex)"
-                style="color: #000000 !important; background: #ffffff !important;"
+                :style="headerStyle(header, colIndex)"
+                class="header-cell"
+                :class="{ 'resizing': resizingColumn === header }"
               >
-                <!-- Directly display the value from the row using the header key -->
-                <div v-if="!isEditingCell(rowIndex, colIndex)" class="cell-content" style="color: #000000 !important; background: #ffffff !important;">
-                  {{ row[header] !== undefined ? row[header] : '' }}
+                <!-- Header dropdown: show for required columns only -->
+                <div v-if="showMappingControls && isRequiredColumn(header)" class="header-dropdown">
+                  <select
+                    :value="getMappingForHeader(header)"
+                    @change="onMappingChange(header, $event.target.value)"
+                    class="mapping-dropdown"
+                    @click.stop
+                    style="color: #000000 !important; background: #ffffff !important;"
+                  >
+                    <option value="__na__">— Select source —</option>
+                    <option v-for="fileCol in availableFileColumns" :key="fileCol" :value="fileCol">
+                      {{ fileCol }}
+                    </option>
+                  </select>
+                  <span class="header-label" style="color: #000000 !important;">{{ header }}</span>
                 </div>
-                <input
-                  v-else
-                  ref="editInput"
-                  :value="editValue"
-                  @input="editValue = $event.target.value"
-                  @blur="finishEditing(true)"
-                  @keydown="handleEditKeydown($event)"
-                  class="cell-input"
-                  type="text"
-                  autofocus
-                  style="color: #000000 !important; background: #ffffff !important;"
-                />
-              </td>
-            </tr>
-            <!-- Row resizer handle -->
-            <tr
-              v-if="rowIndex < paginatedData.length - 1"
-              class="row-resizer-row"
-              @mousedown.stop="startRowResize($event, rowIndex)"
-            >
-              <td colspan="100" class="row-resizer-cell"></td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-    </div>
+                <span v-else class="header-text" style="color: #000000 !important;">{{ header }}</span>
 
-    <!-- Footer -->
-    <div class="excel-footer" v-if="displayData.length">
-      <span style="color: #000000 !important;">{{ displayData.length }} rows · {{ displayHeaders.length }} columns</span>
-      <span v-if="selectedCell" style="color: #000000 !important;">Cell: {{ selectedCellRef }}</span>
+                <!-- Column resizer -->
+                <div
+                  class="column-resizer"
+                  @mousedown.stop="startColumnResize($event, header, colIndex)"
+                ></div>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="(row, rowIndex) in paginatedData" :key="rowIndex">
+              <tr
+                :style="rowStyle(rowIndex)"
+                :class="{ 'selected-row': isRowSelected(rowIndex) }"
+                @mousedown="handleRowMouseDown($event, rowIndex)"
+              >
+                <td class="row-number" style="color: #000000 !important; background: #f8f9ff !important;">
+                  {{ (currentPage - 1) * pageSize + rowIndex + 1 }}
+                </td>
+                <td
+                  v-for="(header, colIndex) in displayHeaders"
+                  :key="header"
+                  :class="{
+                    'selected-cell': isCellSelected(rowIndex, colIndex),
+                    'editing-cell': isEditingCell(rowIndex, colIndex),
+                  }"
+                  :style="cellStyle(rowIndex, colIndex)"
+                  @click="handleCellClick($event, rowIndex, colIndex)"
+                  @dblclick="handleCellDblClick($event, rowIndex, colIndex)"
+                  @mousedown="handleCellMouseDown($event, rowIndex, colIndex)"
+                  style="color: #000000 !important; background: #ffffff !important;"
+                >
+                  <!-- Directly display the value from the row using the header key -->
+                  <div v-if="!isEditingCell(rowIndex, colIndex)" class="cell-content" style="color: #000000 !important; background: #ffffff !important;">
+                    {{ row[header] !== undefined ? row[header] : '' }}
+                  </div>
+                  <input
+                    v-else
+                    ref="editInput"
+                    :value="editValue"
+                    @input="editValue = $event.target.value"
+                    @blur="finishEditing(true)"
+                    @keydown="handleEditKeydown($event)"
+                    class="cell-input"
+                    type="text"
+                    autofocus
+                    style="color: #000000 !important; background: #ffffff !important;"
+                  />
+                </td>
+              </tr>
+              <!-- Row resizer handle -->
+              <tr
+                v-if="rowIndex < paginatedData.length - 1"
+                class="row-resizer-row"
+                @mousedown.stop="startRowResize($event, rowIndex)"
+              >
+                <td colspan="100" class="row-resizer-cell"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer -->
+      <div class="excel-footer" v-if="displayData.length">
+        <span style="color: #000000 !important;">{{ displayData.length }} rows · {{ displayHeaders.length }} columns</span>
+        <span v-if="selectedCell" style="color: #000000 !important;">Cell: {{ selectedCellRef }}</span>
+      </div>
     </div>
   </div>
 </template>
 
 <script>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import luckysheet from 'luckysheet'
+import 'luckysheet/dist/plugins/css/pluginsCss.css'
+import 'luckysheet/dist/plugins/plugins.css'
+import 'luckysheet/dist/css/luckysheet.css'
 
 export default {
   name: 'ExcelViewer',
@@ -146,8 +183,10 @@ export default {
     columnMapping: { type: Object, default: () => ({}) },
     availableFileColumns: { type: Array, default: () => [] },
     requiredColumns: { type: Array, default: () => [] },
+    workbookSheets: { type: Array, default: () => [] }, // Array of {name, data, headers}
+    useLuckysheet: { type: Boolean, default: false },
   },
-  emits: ['data-update', 'mapping-update'],
+  emits: ['data-update', 'mapping-update', 'sheet-selected', 'process-sheet', 'process-all-instruments'],
   setup(props, { emit }) {
     // ─── Internal state ──────────────────────────────────
     const internalData = ref([])
@@ -156,6 +195,13 @@ export default {
     const editingCell = ref(null)
     const editValue = ref('')
     const editInput = ref(null)
+
+    // Luckysheet
+    const luckysheetContainer = ref(null)
+    const luckysheetInitialized = ref(false)
+
+    // Multi-instrument detection
+    const detectedInstruments = ref([])
 
     // Formula bar
     const formulaInput = ref(null)
@@ -175,8 +221,12 @@ export default {
     const scrollLeft = ref(0)
 
     // Pagination
-    const pageSize = 20
+    const pageSize = ref(100)
     const currentPage = ref(1)
+    const loadAllMode = ref(false)
+
+    // Sheet name for multi-sheet workbooks
+    const currentSheetName = ref('')
 
     // ─── Computed ─────────────────────────────────────────
     const displayData = computed(() => internalData.value)
@@ -194,10 +244,11 @@ export default {
       return []
     })
 
-    const totalPages = computed(() => Math.max(1, Math.ceil(displayData.value.length / pageSize)))
+    const totalPages = computed(() => Math.max(1, Math.ceil(displayData.value.length / pageSize.value)))
     const paginatedData = computed(() => {
-      const start = (currentPage.value - 1) * pageSize
-      return displayData.value.slice(start, start + pageSize)
+      if (loadAllMode.value) return displayData.value
+      const start = (currentPage.value - 1) * pageSize.value
+      return displayData.value.slice(start, start + pageSize.value)
     })
 
     const defaultColumnWidth = 120
@@ -206,7 +257,7 @@ export default {
     const selectedCellRef = computed(() => {
       if (!selectedCell.value) return ''
       const colLetter = String.fromCharCode(65 + selectedCell.value.col)
-      const rowNum = (currentPage.value - 1) * pageSize + selectedCell.value.row + 1
+      const rowNum = (currentPage.value - 1) * pageSize.value + selectedCell.value.row + 1
       return colLetter + rowNum
     })
 
@@ -559,6 +610,142 @@ export default {
     // ─── Pagination ──────────────────────────────────────
     function prevPage() { if (currentPage.value > 1) currentPage.value-- }
     function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
+    function loadAllRows() {
+      loadAllMode.value = true
+      currentPage.value = 1
+    }
+
+    // ─── Sheet Selection ──────────────────────────────────
+    function selectSheet(sheetName) {
+      currentSheetName.value = sheetName
+      const sheet = props.workbookSheets.find(s => s.name === sheetName)
+      if (sheet) {
+        internalData.value = sheet.data || []
+        currentPage.value = 1
+        selectedCell.value = null
+        selectedRange.value = null
+        editingCell.value = null
+        emit('sheet-selected', sheetName, sheet.data, sheet.headers)
+      }
+    }
+
+    function processSheet() {
+      emit('process-sheet', currentSheetName.value, internalData.value, displayHeaders.value)
+    }
+
+    // ─── Multi-Instrument Detection ───────────────────────
+    function detectMultiInstruments(data) {
+      if (!data || data.length === 0) return []
+      
+      const instruments = []
+      let currentInstrument = null
+      let startRow = 0
+      
+      // Look for instrument markers (rows with specific patterns)
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i]
+        const keys = Object.keys(row)
+        
+        // Check if this row looks like an instrument header
+        const isInstrumentHeader = keys.some(key => {
+          const value = String(row[key] || '').toLowerCase()
+          return value.includes('instrument') || value.includes('security') || value.includes('bond') || value.includes('bill')
+        })
+        
+        if (isInstrumentHeader) {
+          // Save previous instrument if exists
+          if (currentInstrument) {
+            currentInstrument.rowCount = i - startRow
+            instruments.push(currentInstrument)
+          }
+          
+          // Start new instrument
+          const instrumentName = keys.find(key => {
+            const value = String(row[key] || '')
+            return value.length > 0 && value !== 'Instrument'
+          }) || `Instrument ${instruments.length + 1}`
+          
+          currentInstrument = {
+            name: row[instrumentName] || `Instrument ${instruments.length + 1}`,
+            startRow: i,
+            rowCount: 0
+          }
+          startRow = i
+        }
+      }
+      
+      // Add last instrument
+      if (currentInstrument) {
+        currentInstrument.rowCount = data.length - startRow
+        instruments.push(currentInstrument)
+      }
+      
+      // If no instruments detected, treat entire sheet as one instrument
+      if (instruments.length === 0 && data.length > 0) {
+        instruments.push({
+          name: 'Single Instrument',
+          startRow: 0,
+          rowCount: data.length
+        })
+      }
+      
+      return instruments
+    }
+
+    function processAllInstruments() {
+      emit('process-all-instruments', detectedInstruments.value, internalData.value)
+    }
+
+    // ─── Luckysheet Initialization ─────────────────────────
+    function initializeLuckysheet() {
+      if (!props.useLuckysheet || !luckysheetContainer.value || luckysheetInitialized.value) return
+      
+      const sheetData = internalData.value.map(row => Object.values(row))
+      const headers = displayHeaders.value
+      
+      // Add headers as first row
+      sheetData.unshift(headers)
+      
+      const options = {
+        container: luckysheetContainer.value,
+        data: [sheetData],
+        title: currentSheetName.value || 'Sheet 1',
+        showinfobar: false,
+        showsheetbar: false,
+        showstatisticBar: false,
+        enableAddRow: false,
+        enableAddBackTop: false,
+        userInfo: false,
+        showConfigWindowResize: true,
+        forceCalculation: false,
+        rowHeaderWidth: 46,
+        columnHeaderHeight: 25,
+        defaultColWidth: 120,
+        defaultRowHeight: 30,
+        lang: 'en',
+        showGrid: true,
+        showToolbar: true,
+        showFormulaBar: true,
+      }
+      
+      try {
+        luckysheet.create(options)
+        luckysheetInitialized.value = true
+      } catch (error) {
+        console.error('Luckysheet initialization error:', error)
+      }
+    }
+
+    function destroyLuckysheet() {
+      if (luckysheetInitialized.value) {
+        try {
+          luckysheet.destroy()
+          luckysheetInitialized.value = false
+        } catch (error) {
+          console.error('Luckysheet destroy error:', error)
+        }
+      }
+    }
 
     // ─── Mapping change from header dropdown ──────────────
     function onMappingChange(header, newSrcCol) {
@@ -572,6 +759,17 @@ export default {
       () => props.data,
       (newData) => {
         internalData.value = newData.map(row => ({ ...row }))
+        
+        // Detect multi-instruments
+        detectedInstruments.value = detectMultiInstruments(internalData.value)
+        
+        // Initialize Luckysheet if enabled
+        if (props.useLuckysheet) {
+          nextTick(() => {
+            initializeLuckysheet()
+          })
+        }
+        
         // Reset selection and editing
         selectedCell.value = null
         selectedRange.value = null
@@ -581,6 +779,14 @@ export default {
       { immediate: true, deep: true }
     )
 
+    watch(() => props.useLuckysheet, (newValue) => {
+      if (newValue) {
+        nextTick(() => initializeLuckysheet())
+      } else {
+        destroyLuckysheet()
+      }
+    })
+
     watch(selectedCell, () => {
       updateFormulaBarFromSelection()
     })
@@ -588,6 +794,13 @@ export default {
     // ─── Lifecycle ─────────────────────────────────────────
     onMounted(() => {
       document.addEventListener('keydown', handleKeyDown)
+      
+      // Initialize Luckysheet if enabled
+      if (props.useLuckysheet) {
+        nextTick(() => {
+          initializeLuckysheet()
+        })
+      }
     })
 
     onBeforeUnmount(() => {
@@ -596,6 +809,9 @@ export default {
       document.removeEventListener('mouseup', stopColumnResize)
       document.removeEventListener('mousemove', onRowResize)
       document.removeEventListener('mouseup', stopRowResize)
+      
+      // Destroy Luckysheet
+      destroyLuckysheet()
     })
 
     // ─── Expose ────────────────────────────────────────────
@@ -654,13 +870,19 @@ export default {
       updateFormulaBarFromSelection,
       updateFormulaBarValue,
       applyFormulaBarEdit,
+      currentSheetName,
+      workbookSheets: computed(() => props.workbookSheets),
+      selectSheet,
+      processSheet,
+      luckysheetContainer,
+      detectedInstruments,
+      processAllInstruments,
     }
   },
 }
 </script>
 
 <style scoped>
-/* same as before – unchanged */
 .excel-viewer {
   border: 1px solid #d6dee9;
   border-radius: 14px;
@@ -669,6 +891,99 @@ export default {
   font-size: 13px;
   max-width: 100%;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.6);
+}
+
+.instrument-detection-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #e3f2fd;
+  border-bottom: 1px solid #bbdefb;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.detection-info {
+  font-weight: 600;
+  color: #0B2044;
+}
+
+.instrument-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.instrument-tag {
+  background: #fff;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  color: #0B2044;
+  border: 1px solid #0B2044;
+}
+
+.process-all-btn {
+  background: #0B2044;
+  color: white;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.process-all-btn:hover {
+  background: #1a3a6e;
+}
+
+.luckysheet-container {
+  width: 100%;
+  height: 500px;
+  background: #fff;
+}
+
+.sheet-tabs {
+  display: flex;
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+  overflow-x: auto;
+}
+.sheet-tab {
+  padding: 8px 16px;
+  cursor: pointer;
+  border-right: 1px solid #ddd;
+  background: #f5f5f5;
+  white-space: nowrap;
+  font-size: 13px;
+  color: #555;
+  transition: background 0.2s;
+}
+.sheet-tab:hover {
+  background: #e8e8e8;
+}
+.sheet-tab.active {
+  background: white;
+  color: #0B2044;
+  font-weight: 600;
+  border-bottom: 2px solid #0B2044;
+}
+.process-btn {
+  background: #0B2044;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+.process-btn:hover {
+  background: #1a3a6e;
 }
 .formula-bar {
   display: flex;

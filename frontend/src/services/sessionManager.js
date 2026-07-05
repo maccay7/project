@@ -158,6 +158,22 @@ export const sessionManager = {
     return s?.instrumentWorkflow?.[instrumentKey] || null
   },
 
+  /** Count distinct instrument types with saved data (max 3). */
+  countSessionInstruments(sessionId) {
+    const keys = ['money-market', 'bonds', 'tbills']
+    let count = 0
+    for (const key of keys) {
+      const wf = this.getInstrumentWorkflow(sessionId, key)
+      const hasData = wf && (
+        (wf.cleanedData?.length > 0) ||
+        (wf.data?.length > 0) ||
+        (wf.calculations && parseFloat(wf.calculations.totalValue) > 0)
+      )
+      if (hasData) count++
+    }
+    return Math.min(count, 3)
+  },
+
   /** Append a version record and persist to DB */
   addVersion(sessionId, version) {
     const s = this.getSession(sessionId)

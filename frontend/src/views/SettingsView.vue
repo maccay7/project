@@ -358,6 +358,7 @@ import { ref, onMounted, reactive } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { userAPI, systemAPI } from '../services/api'
 import FixedLayout from '../components/FixedLayout.vue'
+import { API_BASE_URL } from '../config.js'
 
 const authStore = useAuthStore()
 
@@ -413,19 +414,18 @@ const activeSessions = ref<any[]>([])
 // ========== LOAD DATA FROM BACKEND ==========
 const loadSettingsData = async () => {
   try {
+    const userId = authStore.user?.id || 1
+    
     // 1. Profile
-    const profileRes = await userAPI.getProfile()
+    const profileRes = await userAPI.getProfile(userId)
     if (profileRes?.success) {
       const data = profileRes.data
       user.value.name = data.name || ''
       user.value.fullName = data.name || ''
       user.value.email = data.email || ''
-      // Role: you can set from backend if available, otherwise fallback
       user.value.role = data.role || 'Administrator'
-      // Avatar: try from localStorage or backend
       const savedAvatar = localStorage.getItem('user-avatar')
       if (savedAvatar) user.value.avatar = savedAvatar
-      // Phone: backend doesn't provide phone yet, we'll keep fallback
       user.value.phone = data.phone || ''
       profileData.value = {
         fullName: user.value.fullName,
@@ -436,7 +436,7 @@ const loadSettingsData = async () => {
     }
 
     // 2. Notification settings
-    const notifRes = await userAPI.getNotificationSettings()
+    const notifRes = await userAPI.getNotificationSettings(userId)
     if (notifRes?.success) {
       const n = notifRes.data
       notifications.value.enabled = n.emailNotifications ?? true
@@ -452,7 +452,6 @@ const loadSettingsData = async () => {
     }
   } catch (error) {
     console.error('Error loading settings:', error)
-    // Fallback: load avatar from localStorage
     const avatar = localStorage.getItem('user-avatar')
     if (avatar) {
       user.value.avatar = avatar
@@ -465,9 +464,21 @@ const loadSettingsData = async () => {
 const saveNotifications = async () => {
   saving.value.notifications = true
   try {
-    const payload = { enabled: notifications.value.enabled }
-    const response = await userAPI.updateNotificationSettings(payload)
-    if (!response?.success) {
+    const userId = authStore.user?.id || 1
+    const payload = {
+      user_id: userId,
+      emailNotifications: notifications.value.enabled,
+      pushNotifications: false,
+      weeklyReports: true,
+      systemAlerts: true
+    }
+    const response = await fetch(`${API_BASE_URL}/api/user/preferences?user_id=${userId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    const result = await response.json()
+    if (!result?.success) {
       notifications.value.enabled = !notifications.value.enabled
       alert('Failed to save notification settings.')
     }
@@ -482,18 +493,25 @@ const saveNotifications = async () => {
 const saveProfile = async () => {
   saving.value.profile = true
   try {
-    const payload: any = {
-      name: profileData.value.fullName,
-      phone: profileData.value.phone
+    const userId = authStore.user?.id || 1
+    const nameParts = profileData.value.fullName.split(' ', 2)
+    const payload = {
+      user_id: userId,
+      first_name: nameParts[0] || '',
+      last_name: nameParts[1] || '',
+      email: profileData.value.email
     }
-    if (profileData.value.avatarPreview && profileData.value.avatarPreview !== user.value.avatar) {
-      payload.avatar = profileData.value.avatarPreview
-    }
-    const response = await userAPI.updateProfile(payload)
-    if (response?.success) {
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/user/profile?user_id=${userId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    const result = await response.json()
+    if (result?.success) {
       user.value.fullName = profileData.value.fullName
       user.value.name = profileData.value.fullName
-      if (payload.avatar) {
+      user.value.email = profileData.value.email
+      if (profileData.value.avatarPreview && profileData.value.avatarPreview !== user.value.avatar) {
         user.value.avatar = profileData.value.avatarPreview
         localStorage.setItem('user-avatar', profileData.value.avatarPreview)
       }

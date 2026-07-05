@@ -1,5 +1,4 @@
-/** Column mapping helpers shared across instrument pages */
-
+// utils/instrumentMapping.js
 export function autoMatchColumns(fileColumns, requiredColumns, columnVariations) {
   const newMapping = {}
   requiredColumns.forEach(reqCol => {
@@ -35,44 +34,4 @@ export function isColumnMapped(col, { mappingApplied, columnMapping, rawData }) 
 
 export function getMissingColumns(requiredColumns, ctx) {
   return requiredColumns.filter(col => !isColumnMapped(col, ctx))
-}
-
-const NUMERIC_COLUMNS = new Set([
-  'Rate', 'Amount', 'Principal', 'InterestRate', 'DiscountRate', 'Price', 'FaceValue',
-  'CouponRate', 'Yield', 'AccruedInterest', 'DaysToMaturity', 'RedemptionValue'
-])
-const DATE_COLUMNS = new Set(['Date', 'MaturityDate', 'IssueDate'])
-
-export function validateCellValue(columnName, value) {
-  const trimmed = String(value ?? '').trim()
-  if (trimmed === '') return { valid: true, value: trimmed }
-
-  if (NUMERIC_COLUMNS.has(columnName)) {
-    const num = Number(trimmed.replace(/,/g, ''))
-    if (Number.isNaN(num)) {
-      return { valid: false, value: trimmed, error: `"${columnName}" must be a number` }
-    }
-    return { valid: true, value: num }
-  }
-
-  if (DATE_COLUMNS.has(columnName)) {
-    const parsed = Date.parse(trimmed)
-    if (Number.isNaN(parsed)) {
-      return { valid: false, value: trimmed, error: `"${columnName}" must be a valid date` }
-    }
-    return { valid: true, value: trimmed }
-  }
-
-  return { valid: true, value: trimmed }
-}
-
-export function validateRowEdits(row, columns) {
-  const errors = []
-  const validated = { ...row }
-  for (const col of columns) {
-    const result = validateCellValue(col, row[col])
-    if (!result.valid) errors.push(result.error)
-    else validated[col] = result.value
-  }
-  return { valid: errors.length === 0, errors, row: validated }
 }

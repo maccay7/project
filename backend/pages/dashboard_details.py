@@ -28,15 +28,24 @@ def get_kpi():
         datasets_processed = cursor.fetchone().get('datasets_processed', 0)
         
         # Total instruments (max 3 - money_market, bonds, treasury_bills)
-        # Count unique instrument types in ui_sessions
+        # Count unique instrument types in ui_sessions that have data
         cursor.execute("""
-            SELECT COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(instrument_workflows, '$.*')))
+            SELECT COUNT(DISTINCT 
+                CASE 
+                    WHEN JSON_EXTRACT(instrument_workflows, '$.money-market.data') IS NOT NULL 
+                         OR JSON_EXTRACT(instrument_workflows, '$.money-market.cleanedData') IS NOT NULL THEN 'money-market'
+                    WHEN JSON_EXTRACT(instrument_workflows, '$.bonds.data') IS NOT NULL 
+                         OR JSON_EXTRACT(instrument_workflows, '$.bonds.cleanedData') IS NOT NULL THEN 'bonds'
+                    WHEN JSON_EXTRACT(instrument_workflows, '$.tbills.data') IS NOT NULL 
+                         OR JSON_EXTRACT(instrument_workflows, '$.tbills.cleanedData') IS NOT NULL THEN 'tbills'
+                END
+            ) as instrument_count
             FROM ui_sessions
             WHERE instrument_workflows IS NOT NULL
             AND instrument_workflows != 'null'
         """)
         instrument_count_result = cursor.fetchone()
-        total_instruments = min(instrument_count_result.get('COUNT(DISTINCT JSON_UNQUOTE(JSON_EXTRACT(instrument_workflows, \'$.*\')))', 0) if instrument_count_result else 0, 3)
+        total_instruments = min(instrument_count_result.get('instrument_count', 0) if instrument_count_result else 0, 3)
         
         # Total versions across all sessions
         cursor.execute("SELECT COUNT(*) AS total_versions FROM version_history")

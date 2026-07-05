@@ -1,3 +1,4 @@
+// composables/useFredMarket.js
 import { ref, computed } from 'vue'
 import { fredAPI } from '@/services/api'
 
@@ -18,12 +19,22 @@ export function useFredMarket(defaultMaturity = '1Y') {
     const c = filterOptions.value.countries?.find(
       x => x.code === fredFilters.value.country
     )
-    return c?.maturities || []
+    const maturities = c?.maturities || []
+    // Add custom option at the bottom
+    return [...maturities, { code: 'custom', name: 'Custom' }]
   })
 
-  const currencyItems = computed(() => filterOptions.value.currencies || [])
+  const currencyItems = computed(() => {
+    const currencies = filterOptions.value.currencies || []
+    // Add custom option at the bottom
+    return [...currencies, { code: 'custom', name: 'Custom' }]
+  })
 
-  const countryItems = computed(() => filterOptions.value.countries || [])
+  const countryItems = computed(() => {
+    const countries = filterOptions.value.countries || []
+    // Add custom option at the bottom
+    return [...countries, { code: 'custom', name: 'Custom' }]
+  })
 
   async function loadFilterOptions() {
     try {
@@ -41,7 +52,14 @@ export function useFredMarket(defaultMaturity = '1Y') {
     const c = filterOptions.value.countries?.find(
       x => x.code === fredFilters.value.country
     )
-    if (!c) return
+    if (!c) {
+      const first = filterOptions.value.countries?.[0]
+      if (first) {
+        fredFilters.value.country = first.code
+        fredFilters.value.currency = first.currency
+      }
+      return
+    }
     fredFilters.value.currency = c.currency
     const mats = c.maturities || []
     if (mats.length && !mats.some(m => m.code === fredFilters.value.maturity)) {
@@ -55,9 +73,9 @@ export function useFredMarket(defaultMaturity = '1Y') {
         fredFilters.value.maturity,
         fredFilters.value.country
       )
-      return res?.series_id || 'DGS1'
+      return res?.series_id || null
     } catch {
-      return 'DGS1'
+      return null
     }
   }
 
@@ -68,7 +86,7 @@ export function useFredMarket(defaultMaturity = '1Y') {
       fredFilters.value.country,
       fredFilters.value.currency
     )
-    if (res?.success) return res.data
+    if (res?.success && res.data) return res.data
     if (res?.data) return res.data
     return null
   }

@@ -1,5 +1,4 @@
-/** Helpers to save/load instrument page state in session */
-
+// utils/instrumentSession.js
 export function buildWorkflowSnapshot({
   rawData,
   cleanedData,
@@ -12,8 +11,11 @@ export function buildWorkflowSnapshot({
   originalRawData,
   originalFileColumns,
   chartData,
+  yieldCurveData,
   fredFilters,
-  sessionSavedAt
+  sessionSavedAt,
+  showPreview,
+  completedSteps
 }) {
   return {
     data: rawData || [],
@@ -27,8 +29,11 @@ export function buildWorkflowSnapshot({
     originalRawData: originalRawData || [],
     originalFileColumns: originalFileColumns || [],
     chartData: chartData || null,
+    yieldCurveData: yieldCurveData || [],
     fredFilters: fredFilters || null,
     sessionSavedAt: sessionSavedAt || null,
+    showPreview: !!showPreview,
+    completedSteps: completedSteps || [],
     saved_at: new Date().toISOString()
   }
 }
@@ -72,5 +77,17 @@ export function applyWorkflowToPage(wf, refs) {
     ok = true
   }
   if (wf.cleaningStats) refs.cleaningStats.value = wf.cleaningStats
+  if (wf.yieldCurveData?.length && refs.yieldCurveData) {
+    refs.yieldCurveData.value = wf.yieldCurveData
+  }
+  if (wf.fredFilters && refs.fredFilters) {
+    refs.fredFilters.value = { ...refs.fredFilters.value, ...wf.fredFilters }
+  }
+  if (wf.completedSteps?.length && refs.completedSteps) {
+    refs.completedSteps.value = new Set(wf.completedSteps)
+  }
+  if (wf.showPreview !== undefined && refs.showPreview) {
+    refs.showPreview.value = !!wf.showPreview
+  }
   return ok
 }

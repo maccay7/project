@@ -25,21 +25,9 @@ from routes.visualization import visualization_routes
 
 app = Flask(__name__)
 
-allowed_origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-    "http://localhost:3002",
-    "http://127.0.0.1:3002",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://192.168.0.125:3000",
-    "http://192.168.100.4:3001"
-]
-
-CORS(app,
-     origins=allowed_origins,
+# Configure CORS to allow requests from localhost:3000
+CORS(app, 
+     resources={r"/api/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173", "*"]}},
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])

@@ -1,20 +1,21 @@
+// services/api.js
 import { API_BASE_URL, RATE_LIMIT_MESSAGE } from '../config.js'
 
-async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = false) {
+async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = false, fetchOptions = {}) {
   const url = API_BASE_URL + endpoint
   console.log('Calling:', url, method)
   
-  const options = { method }
+  const options = { method, ...fetchOptions }
   const token = localStorage.getItem('auth_token')
   
   if (token) {
-    options.headers = { 'Authorization': `Bearer ${token}` }
+    options.headers = { ...(options.headers || {}), 'Authorization': `Bearer ${token}` }
   }
   
   if (isFileUpload) {
     options.body = body
   } else if (body) {
-    options.headers = { ...options.headers, 'Content-Type': 'application/json' }
+    options.headers = { ...(options.headers || {}), 'Content-Type': 'application/json' }
     options.body = JSON.stringify(body)
   }
   
@@ -60,11 +61,11 @@ export const calculationsAPI = {
 }
 
 export const userAPI = {
-  getProfile: () => callAPI('/api/user/profile'),
+  getProfile: (userId = 1) => callAPI(`/api/user/profile?user_id=${userId}`),
   updateProfile: (profile) => callAPI('/api/user/profile', 'PUT', profile),
-  getPreferences: () => callAPI('/api/user/preferences'),
+  getPreferences: (userId = 1) => callAPI(`/api/user/preferences?user_id=${userId}`),
   updatePreferences: (prefs) => callAPI('/api/user/preferences', 'PUT', prefs),
-  getNotificationSettings: () => callAPI('/api/user/notifications/settings'),
+  getNotificationSettings: (userId = 1) => callAPI(`/api/user/notifications/settings?user_id=${userId}`),
   updateNotificationSettings: (settings) => callAPI('/api/user/notifications/settings', 'PUT', settings)
 }
 
@@ -134,10 +135,8 @@ export const sessionsAPI = {
   delete: (session_id) => callAPI('/api/sessions/delete', 'POST', { session_id })
 }
 
-// ========== NEW: Visualization API ==========
 export const visualizationAPI = {
-  // Get yield curve data (aggregated) – this is the one we use now
-  getYieldCurve: (payload) => callAPI('/api/visualization/yield-curve', 'POST', payload),
+  getYieldCurve: (payload, fetchOptions = {}) => callAPI('/api/visualization/yield-curve', 'POST', payload, false, fetchOptions),
   getChartData: (data, instrumentType) => 
     callAPI('/api/visualization/chart-data', 'POST', { data, instrument_type: instrumentType }),
   clearCache: () => callAPI('/api/visualization/cache/clear', 'DELETE')

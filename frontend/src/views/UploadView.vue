@@ -349,7 +349,7 @@ function handleDrop(e) {
   if (files.length) uploadFile(files[0])
 }
 
-function goToClean() {
+async function goToClean() {
   if (!dataset.value.length) {
     alert('Load data first')
     return

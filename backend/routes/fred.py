@@ -30,13 +30,17 @@ def fred_routes(app):
             'sort_order': sort_order,
             'limit': limit
         }
+        print(f"🔍 FRED API request: series={series_id}, limit={limit}, sort_order={sort_order}")
         try:
             response = requests.get(f'{FRED_BASE_URL}/series/observations', params=params, timeout=10)
+            print(f"📊 FRED response status: {response.status_code}")
             response.raise_for_status()
             data = response.json()
             if 'error_code' in data:
+                print(f"❌ FRED API error: {data.get('error_message')}")
                 return jsonify({'success': False, 'error': data.get('error_message', 'FRED API error')}), 400
             observations = data.get('observations', [])
+            print(f"📈 FRED returned {len(observations)} observations")
             result = []
             for obs in observations:
                 if obs['value'] != '.':
@@ -44,9 +48,10 @@ def fred_routes(app):
                         'date': obs['date'],
                         'value': float(obs['value'])
                     })
+            print(f"✅ Filtered to {len(result)} valid observations")
             return jsonify({'success': True, 'series_id': series_id, 'data': result})
         except Exception as e:
-            print(f"FRED series error: {e}")
+            print(f"❌ FRED series error: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/fred/categories', methods=['GET', 'OPTIONS'])

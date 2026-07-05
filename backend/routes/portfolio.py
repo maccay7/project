@@ -196,3 +196,32 @@ def portfolio_routes(app):
             })
         else:
             return jsonify({'success': False, 'message': 'Failed to save portfolio'}), 500
+    
+    @app.route('/api/portfolio/export', methods=['POST', 'OPTIONS'])
+    def export_summary():
+        """
+        Receives the Portfolio Summary data from frontend
+        and saves it as an Excel file.
+        """
+        if request.method == 'OPTIONS':
+            return '', 200
+        
+        import pandas as pd
+        
+        data = request.get_json()
+        
+        if not data or 'summary' not in data:
+            return jsonify({'error': 'No summary data provided'}), 400
+        
+        # Convert the summary list to a pandas DataFrame
+        df = pd.DataFrame(data['summary'])
+        
+        # Save to Excel in the backend folder
+        file_path = 'portfolio_summary.xlsx'
+        df.to_excel(file_path, index=False)
+        
+        return jsonify({
+            'message': 'Export successful',
+            'file': file_path,
+            'rows': len(df)
+        })
