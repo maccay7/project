@@ -135,6 +135,25 @@ export const sessionsAPI = {
   delete: (session_id) => callAPI('/api/sessions/delete', 'POST', { session_id })
 }
 
+export const versionAPI = {
+  create: (session_id, instrument_type, change_summary, dataset_snapshot = null, mapping_snapshot = null, calculation_snapshot = null, portfolio_snapshot = null, report_snapshot = null, user_id = null) =>
+    callAPI('/api/version', 'POST', {
+      session_id,
+      instrument_type,
+      change_summary,
+      dataset_snapshot,
+      mapping_snapshot,
+      calculation_snapshot,
+      portfolio_snapshot,
+      report_snapshot,
+      user_id
+    }),
+  getVersions: (session_id) => callAPI(`/api/version/session/${session_id}`, 'GET'),
+  getLatest: (session_id) => callAPI(`/api/version/session/${session_id}/latest`, 'GET'),
+  restore: (version_id) => callAPI(`/api/version/${version_id}/restore`, 'POST'),
+  getTotalCount: () => callAPI('/api/version/count', 'GET')
+}
+
 export const visualizationAPI = {
   getYieldCurve: (payload, fetchOptions = {}) => callAPI('/api/visualization/yield-curve', 'POST', payload, false, fetchOptions),
   getChartData: (data, instrumentType) => 
@@ -153,5 +172,6 @@ export default {
   fredAPI,
   instrumentConfigAPI,
   sessionsAPI,
+  versionAPI,
   visualizationAPI  
 }

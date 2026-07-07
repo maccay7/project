@@ -15,7 +15,11 @@ export function buildWorkflowSnapshot({
   fredFilters,
   sessionSavedAt,
   showPreview,
-  completedSteps
+  completedSteps,
+  workbookSheets,
+  worksheetStatus,
+  instrumentSummary,
+  portfolioSummary
 }) {
   return {
     data: rawData || [],
@@ -34,6 +38,10 @@ export function buildWorkflowSnapshot({
     sessionSavedAt: sessionSavedAt || null,
     showPreview: !!showPreview,
     completedSteps: completedSteps || [],
+    workbookSheets: workbookSheets || [],
+    worksheetStatus: worksheetStatus || {},
+    instrumentSummary: instrumentSummary || { columns: [], rows: [] },
+    portfolioSummary: portfolioSummary || { columns: [], rows: [] },
     saved_at: new Date().toISOString()
   }
 }
@@ -88,6 +96,19 @@ export function applyWorkflowToPage(wf, refs) {
   }
   if (wf.showPreview !== undefined && refs.showPreview) {
     refs.showPreview.value = !!wf.showPreview
+  }
+  if (wf.workbookSheets?.length && refs.workbookSheets) {
+    refs.workbookSheets.value = wf.workbookSheets
+    ok = true
+  }
+  if (wf.worksheetStatus && refs.worksheetStatus) {
+    refs.worksheetStatus.value = { ...wf.worksheetStatus }
+  }
+  if (wf.instrumentSummary && refs.instrumentSummary) {
+    refs.instrumentSummary.value = { ...wf.instrumentSummary }
+  }
+  if (wf.portfolioSummary && refs.portfolioSummary) {
+    refs.portfolioSummary.value = { ...wf.portfolioSummary }
   }
   return ok
 }

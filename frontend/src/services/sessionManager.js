@@ -1,169 +1,277 @@
-// Session manager: localStorage + MySQL via /api/sessions/*
+// src/services/sessionManager.js
+// Full integration with MySQL via sessionsAPI and versionAPI
+
 import api from './api.js'
 
 const STORAGE_KEY = 'dura_sessions'
 const ACTIVE_KEY = 'dura_active_session_id'
 
-function parsePayload(p) {
-  if (!p) return null
-  if (typeof p === 'string') {
-    try { return JSON.parse(p) } catch { return null }
+class SessionManager {
+  constructor() {
+    this.sessions = []
+    this.activeSessionId = null
+    this.loadCache()
   }
-  return p
-}
 
-function buildInstrumentWorkflows(session) {
-  return session?.instrumentWorkflow || session?.instrument_workflows || {}
-}
-
-export const sessionManager = {
-  getAllSessions() {
+  // ---- Local cache ----
+  loadCache() {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
-      const local = stored ? JSON.parse(stored) : []
-      api.sessionsAPI.list().then(res => {
-        if (res?.success && Array.isArray(res.data)) {
-          const mapped = res.data.map(r => ({
-            id: r.id || r.session_id,
-            name: r.name,
-            instrument: r.instrument,
-            status: r.status,
-            date: r.created_at || r.date,
-            created_at: r.created_at || r.date,
-            versions: r.versions || [],
-            instrumentCount: r.instrumentCount || 0
-          }))
-          const merged = [...local]
-          for (const ms of mapped) {
-            const idx = merged.findIndex(s => s.id === ms.id)
-            if (idx !== -1) {
-              merged[idx] = {
-                ...merged[idx],
-                ...ms,
-                versions: ms.versions?.length ? ms.versions : (merged[idx].versions || [])
-              }
-            } else {
-              merged.push(ms)
-            }
-          }
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
-        }
-      }).catch(() => {})
-      return local
+      this.sessions = stored ? JSON.parse(stored) : []
     } catch {
-      return []
+      this.sessions = []
     }
-  },
+    const active = localStorage.getItem(ACTIVE_KEY)
+    this.activeSessionId = active || null
+  }
 
-  getSession(id) {
-    return this.getAllSessions().find(s => s.id === id) || null
-  },
-
-  getActiveSession() {
-    const activeId = this.getActiveSessionId()
-    if (!activeId) return null
-    return this.getSession(activeId)
-  },
-
-  /** Load full session from database into localStorage */
-  async loadSessionFromDb(sessionId) {
-    const res = await api.sessionsAPI.get(sessionId)
-    if (!res?.success) return null
-    const body = res.data
-    if (!body) return this.getSession(sessionId)
-
-    let full = parsePayload(body.payload) || {}
-    full.id = body.session_id || sessionId
-    full.name = body.name || full.name
-    full.status = body.status || full.status
-    full.created_at = body.created_at
-    if (body.versions?.length) full.versions = body.versions
-    if (body.instrument_workflows && Object.keys(body.instrument_workflows).length) {
-      full.instrumentWorkflow = body.instrument_workflows
+  saveCache() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.sessions))
+    if (this.activeSessionId) {
+      localStorage.setItem(ACTIVE_KEY, this.activeSessionId)
+    } else {
+      localStorage.removeItem(ACTIVE_KEY)
     }
+  }
 
-    const list = this.getAllSessions().filter(s => s.id !== full.id)
-    list.unshift(full)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
-    return full
-  },
+  // ---- API calls ----
 
+  // Fetch all sessions from backend, merge with cache
+  async getAllSessions() {
+    try {
+      const data = await api.sessionsAPI.list()
+      // data is the array of sessions from backend
+      const backendSessions = Array.isArray(data) ? data : []
+      // Merge: override local with backend data (preserve any extra fields)
+      const merged = [...this.sessions]
+      for (const bs of backendSessions) {
+        const idx = merged.findIndex(s => s.id === bs.id || s.session_id === bs.id)
+        if (idx !== -1) {
+          merged[idx] = { ...merged[idx], ...bs }
+        } else {
+          merged.push(bs)
+        }
+      }
+      this.sessions = merged
+      this.saveCache()
+      return this.sessions
+    } catch (err) {
+      console.error('Failed to fetch sessions from backend:', err)
+      return this.sessions
+    }
+  }
+
+  // Get a single session – from cache or fetch from backend
+  async getSession(id) {
+    // Check cache first
+    let session = this.sessions.find(s => s.id === id)
+    if (session) return session
+
+    // Fetch from backend
+    try {
+      const data = await api.sessionsAPI.get(id)
+      if (data) {
+        const mapped = {
+          id: data.id || data.session_id,
+          name: data.name,
+          status: data.status || 'in-progress',
+          date: data.created_at || data.date,
+          created_at: data.created_at || data.date,
+          instrument_count: data.instrument_count || 0,
+          version_count: data.version_count || 0,
+          total_value: data.total_value || 0,
+          instrumentWorkflow: data.instrument_workflows || {},
+          versions: data.versions || [],
+        }
+        const idx = this.sessions.findIndex(s => s.id === mapped.id)
+        if (idx !== -1) {
+          this.sessions[idx] = { ...this.sessions[idx], ...mapped }
+        } else {
+          this.sessions.push(mapped)
+        }
+        this.saveCache()
+        return mapped
+      }
+    } catch (err) {
+      console.error('Failed to fetch session from backend:', err)
+    }
+    return null
+  }
+
+  // ---- Active session ----
   setActiveSession(session) {
     if (!session) {
+      this.activeSessionId = null
       localStorage.removeItem(ACTIVE_KEY)
       return
     }
+    this.activeSessionId = session.id
     localStorage.setItem(ACTIVE_KEY, session.id)
-  },
+  }
+
+  getActiveSession() {
+    if (!this.activeSessionId) return null
+    return this.sessions.find(s => s.id === this.activeSessionId) || null
+  }
 
   getActiveSessionId() {
-    try {
-      const a = localStorage.getItem(ACTIVE_KEY)
-      if (!a) return null
-      if (a.startsWith('{')) return JSON.parse(a).id
-      return a
-    } catch {
-      return null
-    }
-  },
+    return this.activeSessionId
+  }
 
-  createSession(nameOverride = '') {
-    const sessions = this.getAllSessions()
+  // ---- CRUD operations ----
+
+  // Create a new session – persists to backend immediately
+  async createSession(nameOverride = '') {
     const newSession = {
       id: Date.now().toString(),
-      instrument: '',
       name: nameOverride || `Session ${new Date().toLocaleDateString()}`,
       date: new Date().toISOString(),
-      instrumentWorkflow: {},
       status: 'in-progress',
-      instrumentCount: 0,
-      totalValue: 0,
-      versions: []
+      instrument_count: 0,
+      version_count: 0,
+      total_value: 0,
+      instrumentWorkflow: {},
+      versions: [],
     }
-    sessions.unshift(newSession)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
-    this.persistToDb(newSession)
+    // Add to cache
+    this.sessions.unshift(newSession)
+    this.saveCache()
     this.setActiveSession(newSession)
-    return newSession
-  },
 
-  renameSession(id, newName) {
-    return this.updateSession(id, { name: newName.trim() })
-  },
-
-  updateSession(id, updates) {
-    const sessions = this.getAllSessions()
-    const index = sessions.findIndex(s => s.id === id)
-    if (index === -1) return null
-    sessions[index] = { ...sessions[index], ...updates, timestamp: Date.now() }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
-    this.persistToDb(sessions[index])
-    const active = this.getActiveSessionId()
-    if (active === id && updates.name) {
-      this.setActiveSession(sessions[index])
+    // Persist to backend
+    try {
+      await api.sessionsAPI.save({
+        id: newSession.id,
+        session_id: newSession.id,
+        name: newSession.name,
+        status: newSession.status,
+        payload: newSession,
+        instrument_workflows: {},
+        versions: [],
+      })
+    } catch (err) {
+      console.error('Failed to create session on backend:', err)
     }
-    return sessions[index]
-  },
+    return newSession
+  }
 
-  /** Save workflow for one instrument inside the session */
-  saveInstrumentWorkflow(sessionId, instrumentKey, workflow) {
-    const s = this.getSession(sessionId)
-    if (!s) return
-    const iw = { ...(s.instrumentWorkflow || {}), [instrumentKey]: workflow }
-    this.updateSession(sessionId, { instrumentWorkflow: iw })
-  },
+  // Update session – persist to backend
+  async updateSession(id, updates) {
+    const idx = this.sessions.findIndex(s => s.id === id)
+    if (idx === -1) return null
 
-  getInstrumentWorkflow(sessionId, instrumentKey) {
-    const s = this.getSession(sessionId)
-    return s?.instrumentWorkflow?.[instrumentKey] || null
-  },
+    // Preserve versions if not overwritten
+    const existingVersions = this.sessions[idx].versions || []
+    this.sessions[idx] = { ...this.sessions[idx], ...updates, timestamp: Date.now() }
+    if (!updates.versions) {
+      this.sessions[idx].versions = existingVersions
+    }
+    this.saveCache()
 
-  /** Count distinct instrument types with saved data (max 3). */
+    // Persist to backend
+    try {
+      await api.sessionsAPI.save({
+        id: this.sessions[idx].id,
+        session_id: this.sessions[idx].id,
+        name: this.sessions[idx].name,
+        status: this.sessions[idx].status,
+        payload: this.sessions[idx],
+        instrument_workflows: this.sessions[idx].instrumentWorkflow || {},
+        versions: this.sessions[idx].versions || [],
+      })
+    } catch (err) {
+      console.error('Failed to update session on backend:', err)
+    }
+    return this.sessions[idx]
+  }
+
+  // Rename session
+  async renameSession(id, newName) {
+    return this.updateSession(id, { name: newName.trim() })
+  }
+
+  // Delete session – from cache and backend
+  async deleteSession(id) {
+    this.sessions = this.sessions.filter(s => s.id !== id)
+    this.saveCache()
+    if (this.activeSessionId === id) {
+      this.activeSessionId = null
+      localStorage.removeItem(ACTIVE_KEY)
+    }
+    try {
+      await api.sessionsAPI.delete(id)
+    } catch (err) {
+      console.error('Failed to delete session from backend:', err)
+    }
+  }
+
+  // ---- Workflow management (stored inside session payload) ----
+
+  // Save instrument workflow – updates session and persists
+  async saveInstrumentWorkflow(sessionId, instrumentKey, workflow) {
+    const session = await this.getSession(sessionId)
+    if (!session) return
+    const iw = { ...(session.instrumentWorkflow || {}), [instrumentKey]: workflow }
+    await this.updateSession(sessionId, { instrumentWorkflow: iw })
+  }
+
+  // Get instrument workflow – from session cache
+  async getInstrumentWorkflow(sessionId, instrumentKey) {
+    const session = await this.getSession(sessionId)
+    return session?.instrumentWorkflow?.[instrumentKey] || null
+  }
+
+  // ---- Version management ----
+
+  // Add a version record – calls versionAPI.create and refreshes session
+  async addVersion(sessionId, version) {
+    const session = await this.getSession(sessionId)
+    if (!session) return null
+
+    // Local update
+    const versions = session.versions || []
+    const versionNumber = versions.length + 1
+    const record = {
+      versionNumber,
+      timestamp: Date.now(),
+      ...version,
+    }
+    versions.unshift(record)
+    await this.updateSession(sessionId, { versions })
+
+    // Call backend version API to create a dedicated version record
+    try {
+      await api.versionAPI.create(
+        sessionId,
+        version.instrument || 'General',
+        version.shortDescription || version.changeType || 'Saved',
+        version.datasetSnapshot || null,
+        version.mappingSnapshot || null,
+        version.calculationSnapshot || null,
+        version.portfolioSnapshot || null,
+        version.reportSnapshot || null,
+        null // userId
+      )
+      // Refresh the session to get updated version_count from backend
+      await this.getSession(sessionId)
+    } catch (err) {
+      console.error('Failed to save version to backend:', err)
+    }
+    return record
+  }
+
+  // ---- Helpers ----
+
+  // Count distinct instruments (max 3) – uses instrument_count from backend if available
   countSessionInstruments(sessionId) {
+    const session = this.sessions.find(s => s.id === sessionId)
+    if (!session) return 0
+    if (session.instrument_count !== undefined) return session.instrument_count
+    // Fallback: count from instrumentWorkflow
     const keys = ['money-market', 'bonds', 'tbills']
     let count = 0
     for (const key of keys) {
-      const wf = this.getInstrumentWorkflow(sessionId, key)
+      const wf = session.instrumentWorkflow?.[key]
       const hasData = wf && (
         (wf.cleanedData?.length > 0) ||
         (wf.data?.length > 0) ||
@@ -172,56 +280,17 @@ export const sessionManager = {
       if (hasData) count++
     }
     return Math.min(count, 3)
-  },
+  }
 
-  /** Append a version record and persist to DB */
-  addVersion(sessionId, version) {
-    const s = this.getSession(sessionId)
-    if (!s) return null
-    const versions = s.versions || []
-    const versionNumber = versions.length + 1
-    const record = {
-      versionNumber,
-      timestamp: Date.now(),
-      ...version
-    }
-    versions.unshift(record)
-    if (versions.length > 50) versions.pop()
-    return this.updateSession(sessionId, { versions })
-  },
-
-  updateSessionData(id, dataType, data, rows = 0) {
-    const updates = { [dataType]: data, rows }
-    if (dataType === 'data') updates.status = 'in-progress'
-    return this.updateSession(id, updates)
-  },
-
-  persistToDb(session) {
-    if (!session?.id) return
-    api.sessionsAPI.save({
-      id: session.id,
-      session_id: session.id,
-      name: session.name,
-      instrument: session.instrument || '',
-      payload: session,
-      status: session.status || 'in-progress',
-      versions: session.versions || [],
-      instrument_workflows: buildInstrumentWorkflows(session)
-    }).catch(() => {})
-  },
-
-  deleteSession(id) {
-    const sessions = this.getAllSessions().filter(s => s.id !== id)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
-    if (this.getActiveSessionId() === id) localStorage.removeItem(ACTIVE_KEY)
-    api.sessionsAPI.delete(id).catch(() => {})
-  },
-
+  // Clear all sessions (local only)
   clearAllSessions() {
+    this.sessions = []
     localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
     localStorage.removeItem(ACTIVE_KEY)
-  },
+    this.activeSessionId = null
+  }
 
+  // Get instrument name from key
   getInstrumentName(type) {
     const names = {
       treasury_bills: 'Treasury Bills',
@@ -234,4 +303,5 @@ export const sessionManager = {
   }
 }
 
-export default sessionManager
+// Export a singleton instance
+export default new SessionManager()

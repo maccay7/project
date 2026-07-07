@@ -1,25 +1,25 @@
 <template>
   <div class="excel-workbook-viewer">
-    <div class="excel-toolbar">
-      <div class="excel-toolbar-left">
-        <span class="excel-filename">{{ fileName || 'Workbook' }}</span>
+    <!-- Header with Logo -->
+    <div class="viewer-header">
+      <div class="header-left">
+        <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+        <span class="excel-filename">{{ fileName || 'Excel Workbook' }}</span>
       </div>
-      <div class="excel-toolbar-right">
-        <button class="excel-toolbar-btn select-sheet-btn" @click="selectCurrentSheet" title="Select This Worksheet">
-          <v-icon>mdi-check</v-icon>
-          Select This Worksheet
-        </button>
-        <button class="excel-toolbar-btn" @click="closeViewer" title="Close">
+      <div class="header-right">
+        <button class="excel-toolbar-btn close-btn" @click="closeViewer" title="Close">
           <v-icon>mdi-close</v-icon>
         </button>
       </div>
     </div>
 
+    <!-- Formula Bar -->
     <div class="excel-formula-bar">
       <div class="formula-bar-label">fx</div>
       <div class="formula-bar-input">{{ selectedCellFormula || selectedCellValue }}</div>
     </div>
 
+    <!-- Grid Container -->
     <div class="excel-grid-container">
       <div class="excel-column-headers">
         <div class="excel-header-cell excel-corner-cell"></div>
@@ -72,6 +72,7 @@
       </div>
     </div>
 
+    <!-- Sheet Tabs -->
     <div class="excel-sheet-tabs">
       <div 
         v-for="(sheet, index) in sheets" 
@@ -86,6 +87,7 @@
       </div>
     </div>
 
+    <!-- Scrollbars -->
     <div class="excel-scrollbar-horizontal" ref="horizontalScrollbar">
       <div class="excel-scrollbar-thumb" :style="{ width: horizontalScrollPercent + '%' }"></div>
     </div>
@@ -97,7 +99,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 
 const props = defineProps({
   workbookData: {
@@ -110,8 +112,9 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'selectSheet'])
+const emit = defineEmits(['close'])
 
+// ===== STATE =====
 const sheets = ref([])
 const activeSheetIndex = ref(0)
 const visibleRows = ref([])
@@ -125,8 +128,10 @@ const verticalScrollbar = ref(null)
 const horizontalScrollPercent = ref(0)
 const verticalScrollPercent = ref(0)
 
+// ===== COMPUTED =====
 const activeSheet = computed(() => sheets.value[activeSheetIndex.value] || null)
 
+// ===== METHODS =====
 function getColumnHeaders(count) {
   const headers = []
   for (let i = 0; i < count; i++) {
@@ -193,17 +198,6 @@ function switchSheet(index) {
   loadSheetData()
 }
 
-function selectCurrentSheet() {
-  if (activeSheet.value) {
-    emit('selectSheet', {
-      sheetIndex: activeSheetIndex.value,
-      sheetName: activeSheet.value.name,
-      data: activeSheet.value.data,
-      headers: activeSheet.value.headers
-    })
-  }
-}
-
 function loadSheetData() {
   if (!activeSheet.value) return
   
@@ -219,6 +213,15 @@ function closeViewer() {
   emit('close')
 }
 
+// ===== WATCHERS =====
+watch(() => props.workbookData, (newData) => {
+  if (newData && newData.sheets) {
+    sheets.value = newData.sheets
+    loadSheetData()
+  }
+}, { immediate: true, deep: true })
+
+// ===== LIFECYCLE =====
 onMounted(() => {
   if (props.workbookData && props.workbookData.sheets) {
     sheets.value = props.workbookData.sheets
@@ -238,29 +241,37 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.excel-toolbar {
+.viewer-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  padding: 12px 20px;
   background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
   border-bottom: 1px solid #d0d0d0;
 }
 
-.excel-toolbar-left {
+.header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+}
+
+.logo {
+  height: 36px;
+  width: auto;
+  object-fit: contain;
 }
 
 .excel-filename {
   font-weight: 600;
-  color: #333;
+  color: #0B2044;
+  font-size: 15px;
 }
 
-.excel-toolbar-right {
+.header-right {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
 }
 
 .excel-toolbar-btn {
@@ -273,35 +284,38 @@ onMounted(() => {
   align-items: center;
   gap: 4px;
   color: #333;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .excel-toolbar-btn:hover {
   background: linear-gradient(180deg, #f0f0f0 0%, #e0e0e0 100%);
 }
 
-.select-sheet-btn {
-  background: #0B2044;
-  color: white;
-  border-color: #0B2044;
+.close-btn {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  color: #666;
+  padding: 4px 8px;
 }
 
-.select-sheet-btn:hover {
-  background: #1a3a6e;
+.close-btn:hover {
+  color: #dc3545;
+  background: rgba(220, 53, 69, 0.1);
 }
 
 .excel-formula-bar {
   display: flex;
   align-items: center;
-  padding: 4px 8px;
+  padding: 4px 12px;
   background: #fff;
   border-bottom: 1px solid #d0d0d0;
   gap: 8px;
 }
 
 .formula-bar-label {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 26px;
   background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
   border: 1px solid #c0c0c0;
   border-radius: 3px;
@@ -316,13 +330,14 @@ onMounted(() => {
 
 .formula-bar-input {
   flex: 1;
-  padding: 4px 8px;
+  padding: 4px 10px;
   border: 1px solid #c0c0c0;
   border-radius: 2px;
   background: #fff;
   color: #333;
   font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 12px;
+  font-size: 13px;
+  min-height: 28px;
 }
 
 .excel-grid-container {
@@ -332,6 +347,7 @@ onMounted(() => {
   grid-template-rows: 25px 1fr;
   overflow: hidden;
   position: relative;
+  background: #fff;
 }
 
 .excel-column-headers {
@@ -394,12 +410,12 @@ onMounted(() => {
 .excel-cell {
   flex-shrink: 0;
   border-right: 1px solid #e0e0e0;
-  padding: 2px 4px;
+  padding: 2px 6px;
   cursor: cell;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .excel-cell-selected {
@@ -410,18 +426,19 @@ onMounted(() => {
 
 .excel-sheet-tabs {
   display: flex;
-  padding: 4px 8px;
+  padding: 4px 12px;
   background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
   border-top: 1px solid #d0d0d0;
   gap: 2px;
   overflow-x: auto;
+  flex-shrink: 0;
 }
 
 .excel-sheet-tab {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 12px;
+  padding: 4px 14px;
   background: #e0e0e0;
   border: 1px solid #c0c0c0;
   border-radius: 3px 3px 0 0;

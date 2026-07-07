@@ -48,7 +48,7 @@
                   <div class="session-row-status" :class="session.status">{{ session.status === 'completed' ? '✓' : '⟳' }}</div>
                   <button class="version-btn" @click.stop="openVersionModal(session.id)">
                     <v-icon size="12">mdi-history</v-icon>
-                    <span class="version-count">History ({{ session.versions?.length || 0 }})</span>
+                    <span class="version-count">{{ session.version_count || 0 }}</span>
                   </button>
                   <button class="row-rename-btn" @click.stop="openRename(session)" title="Rename"><v-icon size="12">mdi-pencil</v-icon></button>
                   <button class="row-delete-btn" @click.stop="deleteSession(session.id)"><v-icon size="12">mdi-close</v-icon></button>
@@ -85,9 +85,8 @@
                 <div class="session-details">
                   <span>Created: {{ formatDate(activeSession.date) }}</span>
                   <span>Instruments: {{ activeInstrumentCount }}/3</span>
-                  <span>Versions: {{ activeSession.versions?.length || 0 }}</span>
+                  <span>Versions: {{ activeSession.version_count || 0 }}</span>
                 </div>
-                <!-- Save to Session button removed -->
               </div>
               <div v-else class="no-session-warning">
                 <v-icon color="warning" size="16">mdi-alert-circle-outline</v-icon>
@@ -195,14 +194,14 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import sessionManager from '@/services/sessionManager.js'
 import { useRouter } from 'vue-router'
+import api from '@/services/api.js'
 
 const router = useRouter()
 
-// Constants & Storage Keys
 const STORAGE_KEY = 'dura_sessions'
 const ACTIVE_KEY = 'dura_active_session_id'
 
-// Reactive State
+// ---- Reactive state ----
 const sessions = ref([])
 const searchQuery = ref('')
 const newSessionName = ref('')
@@ -214,450 +213,276 @@ const selectedSessionForVersions = ref(null)
 const versionSearchQuery = ref('')
 const currentUserFullName = ref('')
 
-// Instruments Data
+// ---- Instruments data ----
 const instruments = [
   { id: 'money-market', name: 'Money Market', description: 'Short-term debt instruments', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
   { id: 'bonds', name: 'Bonds', description: 'Fixed income securities', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
   { id: 'tbills', name: 'T-Bills', description: 'Treasury bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
 ]
 
-// Computed
-const validSessions = computed(() => {
-  const valid = sessions.value.filter(s => s.name?.trim())
-  valid.forEach(s => {
-    if (s.versions) {
-      s.versions.forEach(v => {
-        if (v.name?.includes('Auto-save')) {
-          v.name = v.name.replace(/Auto-save\s*/g, '').trim()
-        }
-        if (!v.displayName) v.displayName = v.name
-      })
-    }
-  })
-  return valid
-})
-
+// ---- Computed ----
 const filteredSessions = computed(() => {
   const q = searchQuery.value.toLowerCase()
-  return q ? validSessions.value.filter(s => s.name.toLowerCase().includes(q)) : validSessions.value
+  return q ? sessions.value.filter(s => s.name.toLowerCase().includes(q)) : sessions.value
 })
 
+const totalSessions = computed(() => sessions.value.length)
+const completedSessions = computed(() => sessions.value.filter(s => s.status === 'completed').length)
+const inProgressSessions = computed(() => sessions.value.filter(s => s.status === 'in-progress').length)
+
+// KPI stats – directly from session objects (backend)
+const kpiStats = computed(() => {
+  const totalInstruments = sessions.value.reduce((sum, s) => sum + (s.instrument_count || 0), 0)
+  const portfolioTotal = sessions.value.reduce((sum, s) => sum + (s.total_value || 0), 0)
+  return [
+    { title: 'Active Sessions', value: totalSessions.value, icon: 'mdi-folder-multiple', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
+    { title: 'Worked Instruments', value: totalInstruments, icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
+    { title: 'Portfolio Total', value: formatCurrency(portfolioTotal), icon: 'mdi-cash', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
+  ]
+})
+
+const activeInstrumentCount = computed(() => {
+  if (!activeSession.value) return 0
+  return activeSession.value.instrument_count || 0
+})
+
+// Filtered versions for the modal
 const filteredVersions = computed(() => {
   const versions = selectedSessionForVersions.value?.versions || []
   const q = versionSearchQuery.value.toLowerCase()
   if (!q) return versions
   return versions.filter(v =>
-    [v.instrument, v.changeType, v.shortDescription, v.description, v.name, ...(v.fieldsChanged || [])]
-      .some(f => f?.toLowerCase().includes(q))
+    (v.instrument || '').toLowerCase().includes(q) ||
+    (v.changeType || '').toLowerCase().includes(q) ||
+    (v.shortDescription || '').toLowerCase().includes(q)
   )
 })
 
-const totalSessions = computed(() => validSessions.value.length)
-const completedSessions = computed(() => validSessions.value.filter(s => s.status === 'completed').length)
-const inProgressSessions = computed(() => validSessions.value.filter(s => s.status === 'in-progress').length)
-
-const kpiStats = computed(() => [
-  { title: 'Active Session', value: activeSession.value?.name || 'No Session', icon: 'mdi-folder', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
-  { title: 'Instruments Used', value: activeSession.value ? `${activeInstrumentCount.value}/3` : '0/3', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
-  { title: 'Completion', value: `${Math.round((activeInstrumentCount.value / 3) * 100)}%`, icon: 'mdi-database', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }
-])
-
-const activeInstrumentCount = computed(() => {
-  if (!activeSession.value?.id) return 0
-  return sessionManager.countSessionInstruments(activeSession.value.id)
-})
-
-function getInstrumentCount(session) {
-  if (!session?.id) return 0
-  return sessionManager.countSessionInstruments(session.id)
-}
-
-// Helpers
+// ---- Helper functions ----
 const formatDate = d => d ? new Date(d).toLocaleString() : ''
 const formatVersionTime = t => new Date(t).toLocaleString()
-
-const stripEmojis = (text) => {
-  if (!text) return text
-  return text.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]|[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{1FB00}-\u{1FBFF}]|[\u{1FC00}-\u{1FCFF}]|[\u{1FD00}-\u{1FDFF}]|[\u{1FE00}-\u{1FEFF}]|[\u{1FF00}-\u{1FFFF}]/gu, '').trim()
+const formatCurrency = (val) => {
+  if (!val) return '$0'
+  return '$' + Number(val).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 
-// Local storage helpers
-const saveSessions = () => localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.value))
-const loadSessions = () => {
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored) {
-    try {
-      sessions.value = JSON.parse(stored)
-      sessions.value.forEach(s => { if (!s.versions) s.versions = [] })
-    } catch (e) {}
-  }
-}
-const saveActiveId = id => id ? localStorage.setItem(ACTIVE_KEY, id) : localStorage.removeItem(ACTIVE_KEY)
-const loadActiveId = () => localStorage.getItem(ACTIVE_KEY)
-
-// Detect instrument with data
-const detectInstrument = (sessionId) => {
-  const map = { 'money-market': 'Money Market', 'bonds': 'Bonds', 'tbills': 'T-Bills' }
-  const found = []
-  for (const [key, name] of Object.entries(map)) {
-    const wf = sessionManager.getInstrumentWorkflow(sessionId, key)
-    if (wf && ((wf.data?.length) || (wf.cleanedData?.length) || (wf.calculations && Object.keys(wf.calculations).length))) {
-      found.push(name)
-    }
-  }
-  const session = sessions.value.find(s => s.id === sessionId)
-  if (session?.instrumentData) {
-    for (const [key, name] of Object.entries(map)) {
-      if (session.instrumentData[key]?.completed && !found.includes(name)) found.push(name)
-    }
-  }
-  return found.length === 1 ? found[0] : found.length > 1 ? found.join(', ') : null
+function getInstrumentCount(session) {
+  return session?.instrument_count || 0
 }
 
-// Capture version
-const captureVersion = (sessionId, options = {}) => {
-  const session = sessions.value.find(s => s.id === sessionId)
-  if (!session) return
-
-  let { instrument, changeType = 'Updated', fieldsChanged = [], description, shortDescription, modifiedInstruments = [] } = options
-
-  instrument = instrument || detectInstrument(sessionId) || (session.versions?.length ? session.versions[0].instrument : null) || 'Session'
-
-  const shortDesc = shortDescription || description || changeType
-  const defaultDescriptions = {
-    'Uploaded': 'Uploaded data',
-    'Cleaned': 'Cleaned data',
-    'Calculated': 'Updated calculations',
-    'Renamed': 'Renamed session',
-    'Restored': 'Restored previous version',
-    'Saved': 'Saved to session'
-  }
-  let finalShort = shortDesc === changeType ? (defaultDescriptions[changeType] || changeType) : shortDesc
-  finalShort = stripEmojis(finalShort)
-  if (description) description = stripEmojis(description)
-
-  const workflows = {}
-  for (const inst of ['money-market', 'bonds', 'tbills']) {
-    const wf = sessionManager.getInstrumentWorkflow(sessionId, inst)
-    if (wf) workflows[inst] = wf
-  }
-
-  const badgeMap = {
-    'Uploaded': 'badge-uploaded', 'Cleaned': 'badge-cleaned',
-    'Calculated': 'badge-calculated', 'Renamed': 'badge-renamed',
-    'Updated': 'badge-updated', 'Restored': 'badge-restored',
-    'Saved': 'badge-saved'
-  }
-
-  const version = {
-    versionNumber: (session.versions?.length || 0) + 1,
-    timestamp: Date.now(),
-    instrument,
-    changeType,
-    changeTypeClass: badgeMap[changeType] || 'badge-updated',
-    fieldsChanged: fieldsChanged || [],
-    description: description || finalShort,
-    shortDescription: finalShort,
-    modifiedInstruments: modifiedInstruments.length ? modifiedInstruments : [instrument],
-    workflows,
-    name: finalShort
-  }
-
-  if (!session.versions) session.versions = []
-  session.versions.unshift(version)
-  if (session.versions.length > 50) session.versions.pop()
-
-  saveSessions()
-  sessionManager.updateSession(sessionId, { versions: session.versions })
-}
-
-// Version Modal
-const openVersionModal = (sessionId) => {
-  const session = sessions.value.find(s => s.id === sessionId)
-  if (session) {
-    selectedSessionForVersions.value = session
-    versionSearchQuery.value = ''
-    versionDialogVisible.value = true
-  }
-}
-
-const restoreVersion = (sessionId, index) => {
-  const session = sessions.value.find(s => s.id === sessionId)
-  if (!session?.versions?.[index]) return
-  const version = session.versions[index]
-  if (!version.workflows) {
-    alert('This version does not contain workflow data to restore.')
-    return
-  }
-  for (const [inst, wf] of Object.entries(version.workflows)) {
-    sessionManager.saveInstrumentWorkflow(sessionId, inst, wf)
-  }
-  sessionManager.updateSession(sessionId, { instrumentCount: sessionManager.countSessionInstruments(sessionId) })
-  alert(`Restored version from ${formatVersionTime(version.timestamp)}`)
-  if (activeSession.value?.id === sessionId) loadExistingSession(sessionId)
-  versionDialogVisible.value = false
-}
-
-// Event listener for external updates
-const onSessionUpdated = (event) => {
-  const detail = event.detail || {}
-  const { sessionId, skipCapture, explicitSave, ...options } = detail
-  if (!sessionId) return
-  if (skipCapture) {
-    const updated = sessionManager.getSession(sessionId)
-    if (updated) {
-      const idx = sessions.value.findIndex(s => s.id === sessionId)
-      const instrumentCount = sessionManager.countSessionInstruments(sessionId)
-      const merged = {
-        ...(idx !== -1 ? sessions.value[idx] : updated),
-        ...updated,
-        instrumentCount,
-        versions: updated.versions || (idx !== -1 ? sessions.value[idx].versions : [])
+// ---- Refresh Dashboard from backend ----
+async function refreshDashboard() {
+  try {
+    // Fetch fresh sessions from MySQL via sessionManager
+    const backendSessions = await sessionManager.getAllSessions()
+    sessions.value = backendSessions.map(s => ({
+      ...s,
+      version_count: s.version_count || 0,
+      instrument_count: Math.min(s.instrument_count || 0, 3)
+    }))
+    // Update active session if present
+    if (activeSession.value) {
+      const updated = sessions.value.find(s => s.id === activeSession.value.id)
+      if (updated) {
+        activeSession.value = updated
+      } else {
+        // Active session was deleted
+        activeSession.value = null
+        localStorage.removeItem(ACTIVE_KEY)
       }
-      if (idx !== -1) sessions.value[idx] = merged
-      else sessions.value.unshift(merged)
-      if (activeSession.value?.id === sessionId) activeSession.value = { ...activeSession.value, ...merged }
-      saveSessions()
     }
-    return
-  }
-  // Only capture version if explicitly saving to session
-  if (explicitSave) {
-    captureVersion(sessionId, options)
-  }
-  const updated = sessionManager.getSession(sessionId)
-  if (updated) {
-    const idx = sessions.value.findIndex(s => s.id === sessionId)
-    const instrumentCount = sessionManager.countSessionInstruments(sessionId)
-    const merged = {
-      ...(idx !== -1 ? sessions.value[idx] : updated),
-      ...updated,
-      instrumentCount,
-      versions: updated.versions || (idx !== -1 ? sessions.value[idx].versions : [])
-    }
-    if (idx !== -1) sessions.value[idx] = merged
-    else sessions.value.unshift(merged)
-    if (activeSession.value?.id === sessionId) {
-      activeSession.value = { ...activeSession.value, ...merged }
-    }
-    saveSessions()
+    // Save to local cache (optional, sessionManager does it)
+  } catch (error) {
+    console.error('Failed to refresh dashboard:', error)
   }
 }
 
-// Session Actions
-const createNewSession = () => {
+// ---- Session CRUD (using sessionManager) ----
+async function createNewSession() {
   if (!newSessionName.value.trim()) return
-  const created = sessionManager.createSession(newSessionName.value.trim())
-  const newSession = {
-    id: created.id,
-    name: created.name,
-    date: created.date || new Date().toISOString(),
-    status: created.status || 'in-progress',
-    instrumentCount: 0,
-    totalValue: 0,
-    versions: []
+  try {
+    const created = await sessionManager.createSession(newSessionName.value.trim())
+    await refreshDashboard()
+    // Set active session to the newly created one
+    const fresh = sessions.value.find(s => s.id === created.id)
+    if (fresh) {
+      activeSession.value = fresh
+      sessionManager.setActiveSession(fresh)
+      localStorage.setItem(ACTIVE_KEY, fresh.id)
+    }
+    newSessionName.value = ''
+  } catch (err) {
+    alert('Failed to create session: ' + err.message)
   }
-  sessions.value.unshift(newSession)
-  saveSessions()
-  activeSession.value = newSession
-  sessionManager.setActiveSession(activeSession.value)
-  saveActiveId(activeSession.value.id)
-  newSessionName.value = ''
 }
 
-const loadExistingSession = (sessionId) => {
-  let session = sessions.value.find(s => s.id === sessionId)
-  if (!session) {
-    const full = sessionManager.getSession(sessionId)
-    if (full) session = full
+async function loadExistingSession(sessionId) {
+  try {
+    // Ensure the session is loaded (sessionManager.getSession will fetch if needed)
+    const session = await sessionManager.getSession(sessionId)
+    if (session) {
+      activeSession.value = session
+      sessionManager.setActiveSession(session)
+      localStorage.setItem(ACTIVE_KEY, session.id)
+      await refreshDashboard() // Update counts from backend
+    }
+  } catch (err) {
+    alert('Error loading session: ' + err.message)
   }
-  if (!session) return
-
-  sessionManager.loadSessionFromDb(sessionId)
-    .then(() => {
-      const refreshed = sessionManager.getSession(sessionId)
-      if (refreshed) {
-        const idx = sessions.value.findIndex(s => s.id === sessionId)
-        if (idx !== -1) {
-          sessions.value[idx] = {
-            ...sessions.value[idx],
-            ...refreshed,
-            versions: refreshed.versions?.length ? refreshed.versions : (sessions.value[idx]?.versions || [])
-          }
-          saveSessions()
-          session = sessions.value[idx]
-        }
-      }
-      activeSession.value = session
-      sessionManager.setActiveSession(activeSession.value)
-      saveActiveId(activeSession.value.id)
-    })
-    .catch(() => {
-      activeSession.value = session
-      sessionManager.setActiveSession(activeSession.value)
-      saveActiveId(activeSession.value.id)
-    })
 }
 
-const openRename = (session) => {
+async function openRename(session) {
   const name = prompt('Rename session:', session.name)
   if (name?.trim()) {
-    sessionManager.renameSession(session.id, name.trim())
-    const idx = sessions.value.findIndex(s => s.id === session.id)
-    if (idx !== -1) {
-      sessions.value[idx].name = name.trim()
-      saveSessions()
+    try {
+      await sessionManager.renameSession(session.id, name.trim())
+      await refreshDashboard()
+      if (activeSession.value?.id === session.id) {
+        const updated = sessions.value.find(s => s.id === session.id)
+        if (updated) activeSession.value = updated
+      }
+    } catch (err) {
+      alert('Rename failed: ' + err.message)
     }
-    if (activeSession.value?.id === session.id) activeSession.value = sessions.value[idx]
   }
 }
 
-const startRenameActive = () => {
+async function deleteSession(sessionId) {
+  if (!confirm('Delete this session permanently?')) return
+  try {
+    await sessionManager.deleteSession(sessionId)
+    await refreshDashboard()
+    if (activeSession.value?.id === sessionId) {
+      activeSession.value = null
+      localStorage.removeItem(ACTIVE_KEY)
+    }
+  } catch (err) {
+    alert('Delete failed: ' + err.message)
+  }
+}
+
+// ---- Version history modal ----
+async function openVersionModal(sessionId) {
+  try {
+    // Fetch the session with versions from backend
+    const session = await sessionManager.getSession(sessionId)
+    if (session) {
+      // If versions are not loaded, fetch them via versionAPI
+      if (!session.versions || session.versions.length === 0) {
+        const res = await api.versionAPI.getVersions(sessionId)
+        session.versions = res || []
+      }
+      selectedSessionForVersions.value = session
+      versionSearchQuery.value = ''
+      versionDialogVisible.value = true
+    }
+  } catch (err) {
+    alert('Error loading versions: ' + err.message)
+  }
+}
+
+async function restoreVersion(sessionId, index) {
+  // Placeholder – implement restore logic if needed
+  alert('Restore functionality not implemented yet.')
+  versionDialogVisible.value = false
+  await refreshDashboard()
+}
+
+// ---- Active session rename ----
+function startRenameActive() {
   if (activeSession.value) {
     renameInput.value = activeSession.value.name
     renamingActive.value = true
   }
 }
 
-const saveRename = () => {
+async function saveRename() {
   if (!activeSession.value || !renameInput.value.trim()) return
-  sessionManager.renameSession(activeSession.value.id, renameInput.value.trim())
-  const idx = sessions.value.findIndex(s => s.id === activeSession.value.id)
-  if (idx !== -1) {
-    sessions.value[idx].name = renameInput.value.trim()
-    saveSessions()
-    activeSession.value = sessions.value[idx]
-  }
-  renamingActive.value = false
-}
-
-const deleteSession = (sessionId) => {
-  if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
-    sessionManager.deleteSession(sessionId)
-    sessions.value = sessions.value.filter(s => s.id !== sessionId)
-    saveSessions()
-    if (activeSession.value?.id === sessionId) {
-      activeSession.value = null
-      saveActiveId(null)
-    }
+  try {
+    await sessionManager.renameSession(activeSession.value.id, renameInput.value.trim())
+    await refreshDashboard()
+    const updated = sessions.value.find(s => s.id === activeSession.value.id)
+    if (updated) activeSession.value = updated
+    renamingActive.value = false
+  } catch (err) {
+    alert('Rename failed: ' + err.message)
   }
 }
 
-// ***** FIXED NAVIGATION *****
-const goToInstrument = (instrumentId) => {
+// ---- Navigation ----
+function goToInstrument(instrumentId) {
   if (!activeSession.value) {
-    alert('Please create or select a session first')
+    alert('Please select a session first')
     return
   }
   sessionManager.setActiveSession(activeSession.value)
   router.push({ path: `/instrument/${instrumentId}`, query: { session: activeSession.value.id } })
 }
 
-const goToSettings = () => router.push('/settings')
+function goToSettings() { router.push('/settings') }
 
-const handleLogout = () => {
+function handleLogout() {
   localStorage.removeItem('auth_token')
   localStorage.removeItem('user')
   sessionStorage.clear()
   window.location.href = '/login'
 }
 
-// Cleanup sessions
-const cleanupSessions = () => {
-  let changed = false
-  sessions.value = sessions.value.filter(s => {
-    if (!s.name?.trim()) {
-      changed = true
-      return false
-    }
-    return true
-  })
-  sessions.value.forEach(s => {
-    if (s.versions) {
-      s.versions.forEach(v => {
-        if (v.name?.includes('Auto-save')) {
-          v.name = v.name.replace(/Auto-save\s*/g, '').trim()
-          v.displayName = v.name
-          changed = true
-        }
-        if (!v.displayName) v.displayName = v.name
-      })
-    }
-  })
-  if (changed) saveSessions()
-}
-
-// Lifecycle
+// ---- Lifecycle ----
 onMounted(async () => {
-  // Get logged-in user's full name from localStorage
+  // Get user name
   try {
     const user = JSON.parse(localStorage.getItem('user'))
     if (user) {
-      const firstName = user.firstName || ''
-      const lastName = user.lastName || ''
-      currentUserFullName.value = (firstName + ' ' + lastName).trim()
+      currentUserFullName.value = (user.firstName || '' + ' ' + user.lastName || '').trim()
     }
-  } catch (e) {}
+  } catch {}
 
-  loadSessions()
-  cleanupSessions()
+  // Load sessions from backend
+  await refreshDashboard()
 
-  // Merge sessions from sessionManager
-  const managerSessions = sessionManager.getAllSessions()
-  if (managerSessions.length) {
-    const merged = [...sessions.value]
-    for (const ms of managerSessions) {
-      const idx = merged.findIndex(s => s.id === ms.id)
-      if (idx !== -1) merged[idx] = { ...merged[idx], ...ms }
-      else merged.push(ms)
-    }
-    sessions.value = merged
-    cleanupSessions()
-    saveSessions()
-  }
-
-  // Restore active session – ensure it is set
-  let activeId = loadActiveId()
+  // Restore active session
+  let activeId = localStorage.getItem(ACTIVE_KEY)
   if (activeId) {
     const session = sessions.value.find(s => s.id === activeId)
     if (session) {
       activeSession.value = session
-      sessionManager.setActiveSession(activeSession.value)
+      sessionManager.setActiveSession(session)
     } else {
-      const managerSession = sessionManager.getSession(activeId)
-      if (managerSession) {
-        activeSession.value = managerSession
-        sessionManager.setActiveSession(activeSession.value)
-        sessions.value.unshift(managerSession)
-        cleanupSessions()
-        saveSessions()
-      } else {
-        // If active ID is invalid, clear it and fallback to first session
-        saveActiveId(null)
-        activeId = null
-      }
+      // Invalid active – clear it
+      localStorage.removeItem(ACTIVE_KEY)
+      activeId = null
     }
   }
 
-  // If still no active session, pick the first available session or null
-  if (!activeSession.value && sessions.value.length > 0) {
+  // If still no active, pick first
+  if (!activeSession.value && sessions.value.length) {
     activeSession.value = sessions.value[0]
     sessionManager.setActiveSession(activeSession.value)
-    saveActiveId(activeSession.value.id)
-  } else if (!activeSession.value && sessions.value.length === 0) {
-    // No sessions at all – keep null
+    localStorage.setItem(ACTIVE_KEY, activeSession.value.id)
   }
 
-  window.addEventListener('session-updated', onSessionUpdated)
+  // Listen for external updates (from instrument pages)
+  window.addEventListener('session-updated', async (event) => {
+    const { sessionId } = event.detail || {}
+    if (sessionId) {
+      await refreshDashboard()
+      // If active session was updated, refresh it
+      if (activeSession.value?.id === sessionId) {
+        const updated = sessions.value.find(s => s.id === sessionId)
+        if (updated) activeSession.value = updated
+      }
+    }
+  })
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('session-updated', onSessionUpdated)
+  window.removeEventListener('session-updated', refreshDashboard)
 })
 </script>
 
 <style scoped>
-/* (All styles unchanged – keep your existing dashboard styles) */
+/* All styles unchanged – keep your existing dashboard styles */
 .dashboard { min-height: 100vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px 40px; }
 .top-navbar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: white; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); z-index: 1000; }
 .logo-placeholder { display: flex; align-items: center; }

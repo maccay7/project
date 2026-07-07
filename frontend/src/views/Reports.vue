@@ -64,7 +64,6 @@
         <h3>Report Preview</h3>
         <v-alert v-if="reportError" type="warning" density="compact" class="mb-3">{{ reportError }}</v-alert>
         
-        <!-- Dynamic Visualizations -->
         <div class="visualizations-section" v-if="previewData.allWorkedData">
           <h4>📊 Data Visualizations</h4>
           <div class="viz-grid">
@@ -77,7 +76,7 @@
                 </div>
                 <div class="stat" v-if="Array.isArray(data) && data.length">
                   <span class="stat-label">Total Value:</span>
-                  <span class="stat-value">{{ formatCurrency(data.reduce((s, r) => s + (parseFloat(r.FaceValue || r.Amount || r.Principal || 0)), 0)) }}</span>
+                  <span class="stat-value">{{ formatCurrency(data.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['Calculated Value'] || 0)), 0)) }}</span>
                 </div>
               </div>
             </div>
@@ -117,31 +116,99 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import ExcelViewer from '@/components/ExcelViewer.vue'
-import { datasetAPI, fredAPI } from '@/services/api'
 import sessionManager from '@/services/sessionManager.js'
 import { markStepCompleted } from '@/utils/workflowProgress.js'
-import { generateReportHtml, resolveActiveSession, loadInstrumentData } from '@/utils/generateReportHtml.js'
+import { generateReportHtml } from '@/utils/generateReportHtml.js'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
-import pdfMake from 'pdfmake'
 import { Document, Packer, Paragraph, TextRun } from 'docx'
 import { saveAs } from 'file-saver'
-
-const logoUrl = '/DuraCapital logo.png'
-const backgroundCoverUrl = '/reportbackground.png'
 
 const router = useRouter()
 const route = useRoute()
 
 const selectedType = ref('current')
 const previewData = ref(null)
-const yieldCurveData = ref(null)
 const reportError = ref('')
 const dataset = ref(null)
 const showDatasetPreview = ref(false)
 const sessionName = ref('')
 
-// ---- REPORT GENERATION (shared with ReportsView) ----
+// Helper: resolve active session
+async function resolveSession() {
+  let session = sessionManager.getActiveSession()
+  if (!session) {
+    const sid = sessionManager.getActiveSessionId()
+    if (sid) {
+      await sessionManager.getSession(sid)
+      session = sessionManager.getActiveSession()
+    }
+  }
+  if (!session) {
+    const all = await sessionManager.getAllSessions()
+    if (all.length) session = all[0]
+  }
+  return session
+}
+
+// Load data from instrument summary (calculated results)
+async function loadSummaryData(sessionId, instrumentType) {
+  const summaryKey = `${instrumentType}_session_${sessionId}_summary`
+  const saved = localStorage.getItem(summaryKey)
+  if (saved) {
+    try {
+      const summary = JSON.parse(saved)
+      if (summary.rows && summary.rows.length) {
+        return summary
+      }
+    } catch(e) {}
+  }
+  // Fallback: try to get from workflow
+  const wf = await sessionManager.getInstrumentWorkflow(sessionId, instrumentType)
+  if (wf && wf.cleanedData && wf.cleanedData.length) {
+    return { rows: wf.cleanedData, columns: Object.keys(wf.cleanedData[0] || {}) }
+  }
+  if (wf && wf.data && wf.data.length) {
+    return { rows: wf.data, columns: Object.keys(wf.data[0] || {}) }
+  }
+  return null
+}
+
+async function loadDatasetPreview() {
+  showDatasetPreview.value = true
+  try {
+    const session = await resolveSession()
+    if (!session) {
+      alert('No active session found.')
+      return
+    }
+    const instrument = route.query.instrument || 'money-market'
+    const summary = await loadSummaryData(session.id, instrument)
+    let data = []
+    if (summary && summary.rows && summary.rows.length) {
+      data = summary.rows
+    }
+    if (data.length) {
+      dataset.value = {
+        name: `${instrument} dataset (summary)`,
+        instrument_type: instrument,
+        data: data
+      }
+      generatePreview()
+    } else {
+      alert('No data found for this instrument in the session.')
+    }
+  } catch (err) {
+    console.error('Load dataset preview error', err)
+    alert('Error loading dataset: ' + err.message)
+  }
+}
+
+function handleDatasetUpdate(updatedData) {
+  if (dataset.value) {
+    dataset.value.data = updatedData
+  }
+}
 
 function selectReportType(type) {
   selectedType.value = type
@@ -149,15 +216,7 @@ function selectReportType(type) {
 }
 
 async function generatePreview() {
-  let session = resolveActiveSession(sessionManager)
-  if (!session) {
-    const sid = sessionManager.getActiveSessionId()
-    if (sid) {
-      await sessionManager.loadSessionFromDb(sid)
-      session = sessionManager.getSession(sid)
-    }
-  }
-
+  const session = await resolveSession()
   if (!session) {
     reportError.value = 'No active session found.'
     previewData.value = null
@@ -167,55 +226,34 @@ async function generatePreview() {
   sessionName.value = session.name || 'Current Session'
   const instrument = route.query.instrument || 'money-market'
 
-  // Load all worked data from all instruments
+  // Load all summary data from all instruments
   const allWorkedData = {}
   const instruments = ['money-market', 'bonds', 'tbills']
   
   for (const inst of instruments) {
-    let data = []
-    const wf = sessionManager.getInstrumentWorkflow(session.id, inst)
-    
-    // Try to get cleaned data first
-    if (wf && wf.cleanedData && wf.cleanedData.length) {
-      data = wf.cleanedData
-    } else {
-      // Fall back to raw data
-      const rawKey = `${inst}_session_${session.id}_raw`
-      const savedRaw = localStorage.getItem(rawKey)
-      if (savedRaw) {
-        try { data = JSON.parse(savedRaw) } catch(e) {}
-      }
-    }
-    
-    // Also try to get portfolio summary data
-    const summaryKey = `${inst}_session_${session.id}_summary`
-    const savedSummary = localStorage.getItem(summaryKey)
-    if (savedSummary) {
-      try {
-        const summary = JSON.parse(savedSummary)
-        if (summary.rows && summary.rows.length) {
-          allWorkedData[`${inst}_summary`] = summary
-        }
-      } catch(e) {}
-    }
-    
-    if (data.length) {
-      allWorkedData[inst] = data
+    const summary = await loadSummaryData(session.id, inst)
+    if (summary && summary.rows && summary.rows.length) {
+      allWorkedData[inst] = summary.rows
     }
   }
 
-  let data = loadInstrumentData(sessionManager, session.id, instrument)
+  // Get data for current instrument
+  let currentData = []
+  const currentSummary = await loadSummaryData(session.id, instrument)
+  if (currentSummary && currentSummary.rows && currentSummary.rows.length) {
+    currentData = currentSummary.rows
+  }
 
   const preview = {
     type: selectedType.value === 'current' ? 'Current Instrument Report' : 'Full Session Report',
     date: new Date().toLocaleString(),
     session: session.name || 'Current Session',
     instrument: instrument,
-    rows: data.length,
-    columns: data.length ? Object.keys(data[0]).length : 0,
-    sample: data.slice(0, 3),
+    rows: currentData.length,
+    columns: currentData.length ? Object.keys(currentData[0]).length : 0,
+    sample: currentData.slice(0, 3),
     valuationDate: new Date().toISOString().split('T')[0],
-    totalValue: data.reduce((s, r) => s + (parseFloat(r.FaceValue || r.Amount || r.Principal || 0)), 0),
+    totalValue: currentData.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['Calculated Value'] || 0)), 0),
     allWorkedData: allWorkedData
   }
 
@@ -227,7 +265,7 @@ async function generatePreview() {
     }
     preview.instruments = allData
     preview.totalRows = Object.values(allData).reduce((sum, arr) => sum + arr.length, 0)
-    preview.totalValue = Object.values(allData).reduce((sum, arr) => sum + arr.reduce((s, r) => s + (parseFloat(r.FaceValue || r.Amount || r.Principal || 0)), 0), 0)
+    preview.totalValue = Object.values(allData).reduce((sum, arr) => arr.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['Calculated Value'] || 0)), 0), 0)
   }
 
   previewData.value = preview
@@ -254,18 +292,10 @@ function downloadFullReport() {
       }
     }
   } else {
-    const sessionId = route.query.session
-    if (sessionId) {
-      const wf = sessionManager.getInstrumentWorkflow(sessionId, instrument)
-      if (wf && wf.cleanedData && wf.cleanedData.length) {
-        fullData = wf.cleanedData
-      } else {
-        const rawKey = `${instrument}_session_${sessionId}_raw`
-        const savedRaw = localStorage.getItem(rawKey)
-        if (savedRaw) {
-          try { fullData = JSON.parse(savedRaw) } catch(e) {}
-        }
-      }
+    if (data.allWorkedData && data.allWorkedData[instrument]) {
+      fullData = data.allWorkedData[instrument]
+    } else if (data.sample) {
+      fullData = data.sample
     }
   }
 
@@ -294,7 +324,7 @@ function downloadReport(format = 'json') {
   const filename = `report_${Date.now()}`
 
   if (format === 'json') {
-    const blob = new Blob([JSON.stringify({ ...data, yieldCurve: yieldCurveData.value }, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -306,22 +336,44 @@ function downloadReport(format = 'json') {
 
   if (format === 'excel') {
     const workbook = XLSX.utils.book_new()
-    const worksheet = XLSX.utils.json_to_sheet(data.allWorkedData || {})
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report')
+    const allData = data.allWorkedData || {}
+    for (const [key, rows] of Object.entries(allData)) {
+      if (rows.length) {
+        const sheet = XLSX.utils.json_to_sheet(rows)
+        XLSX.utils.book_append_sheet(workbook, sheet, key.substring(0, 31))
+      }
+    }
+    const summary = [
+      ['Report', data.type],
+      ['Session', data.session],
+      ['Date', data.date],
+      ['Valuation Date', data.valuationDate],
+      ['Total Value', data.totalValue],
+      ['Instruments', data.instrument],
+      ['Rows', data.rows]
+    ]
+    const summarySheet = XLSX.utils.aoa_to_sheet(summary)
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
     XLSX.writeFile(workbook, `${filename}.xlsx`)
     return
   }
 
   if (format === 'csv') {
-    const worksheet = XLSX.utils.json_to_sheet(data.allWorkedData || {})
-    const csv = XLSX.utils.sheet_to_csv(worksheet)
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${filename}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    const allData = data.allWorkedData || {}
+    const firstKey = Object.keys(allData)[0]
+    if (firstKey && allData[firstKey].length) {
+      const worksheet = XLSX.utils.json_to_sheet(allData[firstKey])
+      const csv = XLSX.utils.sheet_to_csv(worksheet)
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${filename}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } else {
+      alert('No data to export as CSV.')
+    }
     return
   }
 
@@ -366,10 +418,7 @@ function formatInstrumentName(key) {
   const names = {
     'money-market': 'Money Market',
     'bonds': 'Bonds',
-    'tbills': 'Treasury Bills',
-    'money-market_summary': 'Money Market Summary',
-    'bonds_summary': 'Bonds Summary',
-    'tbills_summary': 'Treasury Bills Summary'
+    'tbills': 'Treasury Bills'
   }
   return names[key] || key
 }
@@ -379,76 +428,15 @@ function formatCurrency(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
 }
 
-function handleDatasetUpdate(updatedData) {
-  if (!dataset.value) return
-  dataset.value.data = updatedData
-}
-
-async function loadDatasetPreview() {
-  showDatasetPreview.value = true
-  try {
-    let session = null
-    try {
-      const saved = localStorage.getItem('active_session')
-      if (saved) {
-        const sid = JSON.parse(saved).id
-        session = sessionManager.getSession(sid) || JSON.parse(saved)
-      } else {
-        const all = sessionManager.getAllSessions() || []
-        session = all.length ? all[0] : null
-      }
-    } catch (e) { session = null }
-
-    if (!session) {
-      alert('No active session found.')
-      return
-    }
-
-    const instrument = route.query.instrument || 'money-market'
-    let data = []
-    const wf = sessionManager.getInstrumentWorkflow(session.id, instrument)
-    if (wf && wf.cleanedData && wf.cleanedData.length) {
-      data = wf.cleanedData
-    } else {
-      const rawKey = `${instrument}_session_${session.id}_raw`
-      const savedRaw = localStorage.getItem(rawKey)
-      if (savedRaw) {
-        try { data = JSON.parse(savedRaw) } catch(e) {}
-      }
-    }
-
-    if (data.length) {
-      dataset.value = {
-        name: `${instrument} dataset`,
-        instrument_type: instrument,
-        data: data
-      }
-      generatePreview()
-    } else {
-      alert('No data found for this instrument in the session.')
-    }
-  } catch (err) {
-    console.error('Load dataset preview error', err)
-    alert('Error loading dataset: ' + err.message)
-  }
-}
-
 async function markDone() {
   try {
-    const session = sessionManager.getActiveSession()
+    const session = await resolveSession()
     if (!session) {
       alert('No active session.')
       return
     }
     const instrument = route.query.instrument || 'money-market'
-    if (!session.instrumentData) session.instrumentData = {}
-    session.instrumentData[instrument] = {
-      ...session.instrumentData[instrument],
-      completed: true,
-      timestamp: new Date().toISOString()
-    }
-    await sessionManager.updateSession(session.id, { instrumentData: session.instrumentData })
-    try { if (session && session.id) await markStepCompleted(String(session.id), 'reports') } catch (e) { console.error(e) }
+    await markStepCompleted(session.id, 'reports')
     alert(`Marked ${instrument} as done in session.`)
     router.push('/dashboard')
   } catch (err) {
@@ -461,11 +449,11 @@ function goBack() {
   router.back()
 }
 
-onMounted(() => {
+onMounted(async () => {
   if (route.query.session && route.query.instrument) {
-    loadDatasetPreview()
+    await loadDatasetPreview()
   } else {
-    generatePreview()
+    await generatePreview()
   }
 })
 </script>
@@ -494,4 +482,8 @@ onMounted(() => {
 .dataset-preview { background: white; border-radius: 16px; padding: 24px; margin-bottom: 24px; }
 .dataset-info-row { display: flex; gap: 24px; margin-bottom: 16px; }
 .preview-empty { padding: 40px; text-align: center; color: #999; }
+.viz-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+.viz-card { background: #f8f9ff; border-radius: 8px; padding: 16px; border: 1px solid #e8ecf1; }
+.viz-card h5 { margin: 0 0 8px 0; color: #0B2044; }
+.viz-stats .stat { display: flex; justify-content: space-between; font-size: 13px; }
 </style>

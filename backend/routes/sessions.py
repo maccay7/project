@@ -201,20 +201,16 @@ def sessions_routes(app):
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute('''
-                SELECT session_id, name, status, versions, instrument_workflows, created_at, updated_at
-                FROM ui_sessions LIMIT 200
+                SELECT s.session_id, s.name, s.status, s.instrument_workflows, s.created_at, s.updated_at,
+                       (SELECT COUNT(*) FROM version_history v WHERE v.session_id = s.session_id) as version_count
+                FROM ui_sessions s
+                LIMIT 200
             ''')
             rows = cursor.fetchall()
             cursor.close()
             conn.close()
             sessions_list = []
             for row in rows:
-                versions = []
-                if row.get('versions'):
-                    try:
-                        versions = json.loads(row['versions']) if isinstance(row['versions'], str) else row['versions']
-                    except:
-                        versions = []
                 instrument_workflows = {}
                 if row.get('instrument_workflows'):
                     try:
@@ -225,7 +221,8 @@ def sessions_routes(app):
                     'id': row['session_id'],
                     'name': row['name'],
                     'status': row['status'],
-                    'versions': versions,
+                    'versions': [],  # Empty array, count comes from version_count field
+                    'version_count': row.get('version_count', 0),
                     'instrumentCount': len(instrument_workflows) if instrument_workflows else 0,
                     'date': row['created_at'].isoformat() if row['created_at'] else None
                 })
@@ -250,11 +247,15 @@ def sessions_routes(app):
             return jsonify({'success': False, 'message': 'DB error'}), 500
         try:
             cursor = conn.cursor()
+            # Cascade delete: delete all related records first
+            cursor.execute('DELETE FROM version_history WHERE session_id = %s', (session_id,))
             cursor.execute('DELETE FROM ui_sessions WHERE session_id = %s', (session_id,))
             conn.commit()
             cursor.close()
             conn.close()
+            print(f'✅ Session {session_id} and all related records deleted')
             return jsonify({'success': True})
         except Exception as e:
             print(f"❌ Delete session error: {e}")
+            conn.close()
             return jsonify({'success': False, 'message': 'Delete failed'}), 500

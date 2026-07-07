@@ -1,9 +1,12 @@
 <template>
   <div class="excel-viewer-overlay" v-if="visible">
     <div class="excel-viewer-modal">
-      <!-- Header -->
+      <!-- Header with Logo -->
       <div class="viewer-header">
-        <h3>📊 {{ fileName || 'Excel Viewer' }}</h3>
+        <div class="header-left">
+          <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+          <h3>{{ fileName || 'Excel Viewer' }}</h3>
+        </div>
         <button class="close-btn" @click="closeViewer">✕</button>
       </div>
 
@@ -18,14 +21,6 @@
         >
           {{ sheet }}
         </div>
-      </div>
-
-      <!-- Row Counter -->
-      <div class="row-counter" v-if="displayedData.length > 0">
-        Showing {{ displayedData.length }} of {{ fullData.length }} rows
-        <span v-if="fullData.length > pageSize">
-          ({{ Math.ceil(fullData.length / pageSize) }} pages total)
-        </span>
       </div>
 
       <!-- Data Grid -->
@@ -54,13 +49,6 @@
         <span class="page-info">Page {{ currentPage + 1 }} of {{ totalPages }}</span>
         <button class="page-btn" :disabled="currentPage >= totalPages - 1" @click="nextPage">Next ▶</button>
         <button class="load-all-btn" @click="loadAllRows">Load All ({{ fullData.length }} rows)</button>
-      </div>
-
-      <!-- Process Button -->
-      <div class="action-section" v-if="fullData.length > 0">
-        <button class="process-btn" @click="processInstrument">
-          🚀 Process This Instrument ({{ activeSheet }})
-        </button>
       </div>
 
       <div v-else class="empty-state">
@@ -119,13 +107,17 @@ export default {
       try {
         console.log('📂 Loading file data into viewer...');
         
-        // Handle different input formats
         if (fileData.name) {
           this.fileName = fileData.name;
         }
 
-        // If we have base64 data (from FileReader)
-        if (fileData.base64) {
+        // 1) If we have an arrayBuffer (original file buffer)
+        if (fileData.arrayBuffer) {
+          console.log('📄 Parsing original file arrayBuffer...');
+          this.workbook = XLSX.read(fileData.arrayBuffer, { type: 'array' });
+        }
+        // 2) If we have base64 data
+        else if (fileData.base64) {
           console.log('📄 Parsing base64 data...');
           const binary = atob(fileData.base64.split(',')[1]);
           const arrayBuffer = new ArrayBuffer(binary.length);
@@ -135,7 +127,7 @@ export default {
           }
           this.workbook = XLSX.read(arrayBuffer, { type: 'array' });
         }
-        // If we have a File object
+        // 3) If we have a File object
         else if (fileData instanceof File) {
           console.log('📄 Processing File object...');
           const reader = new FileReader();
@@ -147,12 +139,16 @@ export default {
           reader.readAsArrayBuffer(fileData);
           return;
         }
-        // If we already have parsed workbook data (sheets array)
+        // 4) If we already have parsed workbook data (sheets array)
         else if (fileData.sheets && Array.isArray(fileData.sheets)) {
           console.log('📄 Using pre-parsed workbook sheets...');
-          this.workbook = fileData;
+          // Convert to a structure that afterLoad understands
+          this.workbook = {
+            sheets: fileData.sheets,
+            SheetNames: fileData.sheets.map(s => s.name)
+          };
         }
-        // If we have a URL or file path
+        // 5) If we have a data URL
         else if (typeof fileData === 'string' && fileData.startsWith('data:')) {
           console.log('📄 Parsing data URL...');
           const binary = atob(fileData.split(',')[1]);
@@ -201,12 +197,11 @@ export default {
     },
 
     loadSheetData(sheetName) {
-      let worksheet;
       let data = [];
       
       // Handle XLSX workbook format
       if (this.workbook.Sheets && this.workbook.Sheets[sheetName]) {
-        worksheet = this.workbook.Sheets[sheetName];
+        const worksheet = this.workbook.Sheets[sheetName];
         // Use sheet_to_json with raw: false to preserve formatting
         data = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
       }
@@ -269,26 +264,7 @@ export default {
 
     formatCell(value) {
       if (value === null || value === undefined || value === '') return '';
-      // Return as-is to preserve Excel formatting
       return value;
-    },
-
-    processInstrument() {
-      if (this.fullData.length === 0) {
-        alert('No data to process. Please load a sheet first.');
-        return;
-      }
-
-      console.log(`✅ Processing instrument: ${this.activeSheet}`);
-      console.log(`📈 Sending ${this.fullData.length} rows to existing engine.`);
-
-      this.$emit('process-sheet', {
-        sheetName: this.activeSheet,
-        data: this.fullData,
-        headers: this.columns
-      });
-
-      this.closeViewer();
     },
 
     closeViewer() {
@@ -338,6 +314,18 @@ export default {
   background: #f8f9fa;
   border-bottom: 2px solid #e9ecef;
   flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  height: 40px;
+  width: auto;
+  object-fit: contain;
 }
 
 .viewer-header h3 {
@@ -393,15 +381,6 @@ export default {
 .sheet-tab.active {
   background: #007bff;
   color: white;
-}
-
-.row-counter {
-  padding: 8px 20px;
-  background: white;
-  font-size: 14px;
-  color: #495057;
-  border-bottom: 1px solid #e9ecef;
-  flex-shrink: 0;
 }
 
 .table-wrapper {
@@ -496,31 +475,6 @@ export default {
 
 .load-all-btn:hover {
   background: #1e7e34;
-}
-
-.action-section {
-  padding: 16px 20px;
-  background: #f8f9fa;
-  border-top: 1px solid #e9ecef;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.process-btn {
-  padding: 12px 40px;
-  background: #28a745;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 16px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: 0.2s;
-}
-
-.process-btn:hover {
-  background: #218838;
-  transform: scale(1.02);
 }
 
 .empty-state {

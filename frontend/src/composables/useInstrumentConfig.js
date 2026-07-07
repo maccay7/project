@@ -6,7 +6,7 @@ import api from '@/services/api.js'
 const STATIC_CONFIGS = {
   'money-market': {
     required_columns: [
-      'Instrument', 'Amount', 'Rate', 'Principal', 'DaysToMaturity',
+      'Instrument', 'Amount', 'Rate', 'Principal',
       'Trade Date', 'Maturity Date'
     ],
     column_variations: {
@@ -52,7 +52,7 @@ const STATIC_CONFIGS = {
   },
   tbills: {
     required_columns: [
-      'TBillName', 'FaceValue', 'DiscountRate', 'DaysToMaturity',
+      'TBillName', 'FaceValue', 'DiscountRate',
       'Auction Date', 'Maturity Date'
     ],
     column_variations: {

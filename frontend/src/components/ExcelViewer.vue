@@ -1,6 +1,6 @@
 <template>
   <div class="excel-viewer" :class="{ 'has-mapping': showMappingControls }">
-    <!-- Sheet Tabs -->
+    <!-- Sheet Tabs (only if multiple sheets) -->
     <div class="sheet-tabs" v-if="workbookSheets.length > 1">
       <div
         v-for="sheet in workbookSheets"
@@ -13,18 +13,7 @@
       </div>
     </div>
 
-    <!-- Multi-Instrument Detection Banner -->
-    <div class="instrument-detection-banner" v-if="detectedInstruments.length > 0">
-      <span class="detection-info">🔍 Detected {{ detectedInstruments.length }} instrument(s) in this sheet:</span>
-      <div class="instrument-tags">
-        <span v-for="(inst, idx) in detectedInstruments" :key="idx" class="instrument-tag">
-          {{ inst.name }} ({{ inst.rowCount }} rows)
-        </span>
-      </div>
-      <button class="process-all-btn" @click="processAllInstruments">Process All Instruments</button>
-    </div>
-
-    <!-- Luckysheet Container -->
+    <!-- Luckysheet Container (if enabled) -->
     <div v-if="useLuckysheet" ref="luckysheetContainer" class="luckysheet-container"></div>
 
     <!-- Traditional Excel Table (fallback) -->
@@ -52,9 +41,6 @@
       <div class="excel-toolbar">
         <span>{{ displayData.length }} rows × {{ displayHeaders.length }} columns</span>
         <div class="toolbar-right">
-          <button v-if="!showMappingControls" @click="processSheet" class="process-btn">
-            Process this Instrument
-          </button>
           <div class="pagination-controls">
             <button class="page-btn" @click="prevPage" :disabled="currentPage === 1">←</button>
             <span class="page-info">Page {{ currentPage }} of {{ totalPages }}</span>
@@ -125,7 +111,6 @@
                   @mousedown="handleCellMouseDown($event, rowIndex, colIndex)"
                   style="color: #000000 !important; background: #ffffff !important;"
                 >
-                  <!-- Directly display the value from the row using the header key -->
                   <div v-if="!isEditingCell(rowIndex, colIndex)" class="cell-content" style="color: #000000 !important; background: #ffffff !important;">
                     {{ row[header] !== undefined ? row[header] : '' }}
                   </div>
@@ -186,7 +171,7 @@ export default {
     workbookSheets: { type: Array, default: () => [] }, // Array of {name, data, headers}
     useLuckysheet: { type: Boolean, default: false },
   },
-  emits: ['data-update', 'mapping-update', 'sheet-selected', 'process-sheet', 'process-all-instruments'],
+  emits: ['data-update', 'mapping-update', 'sheet-selected'],
   setup(props, { emit }) {
     // ─── Internal state ──────────────────────────────────
     const internalData = ref([])
@@ -199,9 +184,6 @@ export default {
     // Luckysheet
     const luckysheetContainer = ref(null)
     const luckysheetInitialized = ref(false)
-
-    // Multi-instrument detection
-    const detectedInstruments = ref([])
 
     // Formula bar
     const formulaInput = ref(null)
@@ -231,13 +213,11 @@ export default {
     // ─── Computed ─────────────────────────────────────────
     const displayData = computed(() => internalData.value)
 
-    // ***** FIX: Always use data keys for display headers *****
     const displayHeaders = computed(() => {
       if (displayData.value.length) {
         const keys = Object.keys(displayData.value[0])
         if (keys.length) return keys
       }
-      // Fallback to props (for empty data)
       if (props.headers && props.headers.length) return props.headers
       if (props.originalHeaders && props.originalHeaders.length) return props.originalHeaders
       if (props.availableFileColumns && props.availableFileColumns.length) return props.availableFileColumns
@@ -629,71 +609,11 @@ export default {
       }
     }
 
-    function processSheet() {
-      emit('process-sheet', currentSheetName.value, internalData.value, displayHeaders.value)
-    }
-
-    // ─── Multi-Instrument Detection ───────────────────────
-    function detectMultiInstruments(data) {
-      if (!data || data.length === 0) return []
-      
-      const instruments = []
-      let currentInstrument = null
-      let startRow = 0
-      
-      // Look for instrument markers (rows with specific patterns)
-      for (let i = 0; i < data.length; i++) {
-        const row = data[i]
-        const keys = Object.keys(row)
-        
-        // Check if this row looks like an instrument header
-        const isInstrumentHeader = keys.some(key => {
-          const value = String(row[key] || '').toLowerCase()
-          return value.includes('instrument') || value.includes('security') || value.includes('bond') || value.includes('bill')
-        })
-        
-        if (isInstrumentHeader) {
-          // Save previous instrument if exists
-          if (currentInstrument) {
-            currentInstrument.rowCount = i - startRow
-            instruments.push(currentInstrument)
-          }
-          
-          // Start new instrument
-          const instrumentName = keys.find(key => {
-            const value = String(row[key] || '')
-            return value.length > 0 && value !== 'Instrument'
-          }) || `Instrument ${instruments.length + 1}`
-          
-          currentInstrument = {
-            name: row[instrumentName] || `Instrument ${instruments.length + 1}`,
-            startRow: i,
-            rowCount: 0
-          }
-          startRow = i
-        }
-      }
-      
-      // Add last instrument
-      if (currentInstrument) {
-        currentInstrument.rowCount = data.length - startRow
-        instruments.push(currentInstrument)
-      }
-      
-      // If no instruments detected, treat entire sheet as one instrument
-      if (instruments.length === 0 && data.length > 0) {
-        instruments.push({
-          name: 'Single Instrument',
-          startRow: 0,
-          rowCount: data.length
-        })
-      }
-      
-      return instruments
-    }
-
-    function processAllInstruments() {
-      emit('process-all-instruments', detectedInstruments.value, internalData.value)
+    // ─── Mapping change from header dropdown ──────────────
+    function onMappingChange(header, newSrcCol) {
+      const newMapping = { ...props.columnMapping }
+      newMapping[header] = newSrcCol === '__na__' ? null : newSrcCol
+      emit('mapping-update', newMapping)
     }
 
     // ─── Luckysheet Initialization ─────────────────────────
@@ -747,21 +667,11 @@ export default {
       }
     }
 
-    // ─── Mapping change from header dropdown ──────────────
-    function onMappingChange(header, newSrcCol) {
-      const newMapping = { ...props.columnMapping }
-      newMapping[header] = newSrcCol === '__na__' ? null : newSrcCol
-      emit('mapping-update', newMapping)
-    }
-
     // ─── Watchers ──────────────────────────────────────────
     watch(
       () => props.data,
       (newData) => {
         internalData.value = newData.map(row => ({ ...row }))
-        
-        // Detect multi-instruments
-        detectedInstruments.value = detectMultiInstruments(internalData.value)
         
         // Initialize Luckysheet if enabled
         if (props.useLuckysheet) {
@@ -873,10 +783,7 @@ export default {
       currentSheetName,
       workbookSheets: computed(() => props.workbookSheets),
       selectSheet,
-      processSheet,
       luckysheetContainer,
-      detectedInstruments,
-      processAllInstruments,
     }
   },
 }
@@ -891,53 +798,6 @@ export default {
   font-size: 13px;
   max-width: 100%;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.6);
-}
-
-.instrument-detection-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  background: #e3f2fd;
-  border-bottom: 1px solid #bbdefb;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.detection-info {
-  font-weight: 600;
-  color: #0B2044;
-}
-
-.instrument-tags {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.instrument-tag {
-  background: #fff;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 12px;
-  color: #0B2044;
-  border: 1px solid #0B2044;
-}
-
-.process-all-btn {
-  background: #0B2044;
-  color: white;
-  border: none;
-  padding: 6px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  transition: background 0.2s;
-}
-
-.process-all-btn:hover {
-  background: #1a3a6e;
 }
 
 .luckysheet-container {
@@ -971,20 +831,7 @@ export default {
   font-weight: 600;
   border-bottom: 2px solid #0B2044;
 }
-.process-btn {
-  background: #0B2044;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-  transition: background 0.2s;
-}
-.process-btn:hover {
-  background: #1a3a6e;
-}
+
 .formula-bar {
   display: flex;
   align-items: center;
@@ -1034,6 +881,7 @@ export default {
 .formula-input:focus {
   background: #fff;
 }
+
 .excel-toolbar {
   display: flex;
   justify-content: space-between;
@@ -1071,6 +919,7 @@ export default {
   font-size: 13px;
   color: #555;
 }
+
 .excel-table-wrapper {
   overflow: auto;
   max-height: 500px;
@@ -1155,12 +1004,6 @@ export default {
   padding: 0 !important;
   border: none !important;
   height: 6px;
-}
-.row-resizer-handle {
-  width: 100%;
-  height: 100%;
-  background: transparent;
-  cursor: row-resize;
 }
 .row-number-col {
   background: #f8f9ff;

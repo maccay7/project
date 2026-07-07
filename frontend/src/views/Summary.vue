@@ -107,87 +107,152 @@
       </div>
     </div>
 
-    <!-- Modals -->
+    <!-- ===== MODALS ===== -->
+
+    <!-- Detail Modal (View as Excel) – White Header with Logo -->
     <v-dialog v-model="detailModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
-        <v-card-title class="excel-dialog-title">
-          Detailed view: {{ selectedInst?.name }}
+        <v-card-title class="excel-dialog-title-white">
+          <div class="header-left">
+            <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+            <div class="header-title">
+              <h4>{{ selectedInst?.name || 'Instrument' }} – Detailed View</h4>
+              <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+            </div>
+          </div>
           <v-spacer></v-spacer>
           <button class="btn-close-dialog" @click="detailModalVisible = false">
             <v-icon>mdi-close</v-icon>
           </button>
         </v-card-title>
         <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
-          <ExcelViewer :data="selectedInst?.details || []" :headers="selectedInst?.detailHeaders || []" />
+          <div class="excel-table-wrapper">
+            <table class="excel-table">
+              <thead>
+                <tr>
+                  <th v-for="header in selectedInst?.detailHeaders || []" :key="header">{{ header }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, idx) in selectedInst?.details || []" :key="idx">
+                  <td v-for="header in selectedInst?.detailHeaders || []" :key="header">{{ row[header] }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </v-card-text>
+        <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
+          <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="detailModalVisible = false">Close</button>
+        </div>
       </v-card>
     </v-dialog>
 
+    <!-- Combined Modal (View Portfolio as Excel) – White Header with Logo, NO duplicate header inside -->
     <v-dialog v-model="combinedModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
-        <v-card-title class="excel-dialog-title">
-          Portfolio – Combined Excel View
+        <v-card-title class="excel-dialog-title-white">
+          <div class="header-left">
+            <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+            <div class="header-title">
+              <h4>Portfolio – Combined Excel View</h4>
+              <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+            </div>
+          </div>
           <v-spacer></v-spacer>
           <button class="btn-close-dialog" @click="combinedModalVisible = false">
             <v-icon>mdi-close</v-icon>
           </button>
         </v-card-title>
         <v-card-text class="combined-excel-body">
+          <!-- Summary Section (no duplicate header) -->
           <div class="combined-section">
-            <div class="excel-header">
-              <div class="excel-logo-area">
-                <img src="/DuraCapital logo.png" alt="DuraCapital" class="excel-logo" />
-              </div>
-              <div class="excel-title-area">
-                <h3 class="excel-company">DuraCapital</h3>
-                <h4 class="excel-report-title">Portfolio Summary</h4>
-                <p class="excel-session">Session: {{ activeSession?.name || 'N/A' }}</p>
-                <p class="excel-date">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</p>
-              </div>
-            </div>
             <h4 class="combined-section-title">Summary</h4>
-            <table class="summary-table">
-              <thead>
-                <tr>
-                  <th>Instrument</th>
-                  <th>Face Value ($)</th>
-                  <th>Calculated Value ($)</th>
-                  <th>Difference ($)</th>
-                  <th>Count</th>
-                  <th>Avg Rate (%)</th>
-                  <th>FRED Benchmark (%)</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="inst in filteredInstruments" :key="inst.id">
-                  <td><strong>{{ inst.name }}</strong></td>
-                  <td>${{ formatNumber(inst.faceValue || 0) }}</td>
-                  <td>${{ formatNumber(inst.value) }}</td>
-                  <td>${{ formatNumber(inst.difference || 0) }}</td>
-                  <td>{{ inst.count }}</td>
-                  <td>{{ inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate : '—' }}</td>
-                  <td>{{ inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench : '—' }}</td>
-                  <td><span class="status-badge small" :class="inst.statusClass">{{ inst.statusText }}</span></td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="excel-table-wrapper">
+              <table class="excel-table">
+                <thead>
+                  <tr>
+                    <th @click="sortByColumn('name')" class="sortable-header">
+                      <span>Instrument</span>
+                      <span class="sort-indicator" v-if="sortColumn === 'name'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                    </th>
+                    <th @click="sortByColumn('faceValue')" class="sortable-header">
+                      <span>Face Value ($)</span>
+                      <span class="sort-indicator" v-if="sortColumn === 'faceValue'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                    </th>
+                    <th @click="sortByColumn('value')" class="sortable-header">
+                      <span>Calculated Value ($)</span>
+                      <span class="sort-indicator" v-if="sortColumn === 'value'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                    </th>
+                    <th @click="sortByColumn('difference')" class="sortable-header">
+                      <span>Difference ($)</span>
+                      <span class="sort-indicator" v-if="sortColumn === 'difference'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                    </th>
+                    <th @click="sortByColumn('count')" class="sortable-header">
+                      <span>Count</span>
+                      <span class="sort-indicator" v-if="sortColumn === 'count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                    </th>
+                    <th @click="sortByColumn('avgRate')" class="sortable-header">
+                      <span>Avg Rate (%)</span>
+                      <span class="sort-indicator" v-if="sortColumn === 'avgRate'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                    </th>
+                    <th @click="sortByColumn('fredBench')" class="sortable-header">
+                      <span>FRED Benchmark (%)</span>
+                      <span class="sort-indicator" v-if="sortColumn === 'fredBench'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                    </th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="inst in sortedInstruments" :key="inst.id">
+                    <td><strong>{{ inst.name }}</strong></td>
+                    <td>${{ formatNumber(inst.faceValue || 0) }}</td>
+                    <td>${{ formatNumber(inst.value) }}</td>
+                    <td>${{ formatNumber(inst.difference || 0) }}</td>
+                    <td>{{ inst.count }}</td>
+                    <td>{{ inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate : '—' }}</td>
+                    <td>{{ inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench : '—' }}</td>
+                    <td><span class="status-badge small" :class="inst.statusClass">{{ inst.statusText }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
+          <!-- Detailed sections for each instrument -->
           <div v-for="inst in filteredDetails" :key="inst.id" class="combined-section">
             <h4 class="combined-section-title">
               {{ inst.name }} – Details ({{ inst.details.length }} rows)
               <span v-if="!inst.details.length" class="empty-note">(no data)</span>
             </h4>
-            <div v-if="inst.details.length" class="excel-wrapper">
-              <ExcelViewer :data="inst.details" :headers="inst.detailHeaders" />
+            <div v-if="inst.details.length" class="excel-table-wrapper">
+              <table class="excel-table">
+                <thead>
+                  <tr>
+                    <th v-for="header in inst.detailHeaders" :key="header">{{ header }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, idx) in inst.details" :key="idx">
+                    <td v-for="header in inst.detailHeaders" :key="header">{{ row[header] }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
             <div v-else class="empty-placeholder">No data available for this instrument.</div>
           </div>
         </v-card-text>
+        <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
+          <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="combinedModalVisible = false">Close</button>
+          <button class="btn-primary" @click="exportCombinedExcel">📥 Download Excel</button>
+        </div>
       </v-card>
     </v-dialog>
 
+    <!-- Export Dialog -->
     <v-dialog v-model="showExportDialog" max-width="500px">
       <v-card>
         <v-card-title>Select instruments to export</v-card-title>
@@ -214,7 +279,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import sessionManager from '@/services/sessionManager.js'
-import ExcelViewer from '@/components/ExcelViewer.vue'
 import * as XLSX from 'xlsx'
 
 const router = useRouter()
@@ -226,8 +290,13 @@ const selectedInst = ref(null)
 const combinedModalVisible = ref(false)
 const showExportDialog = ref(false)
 const selectedExportInstruments = ref({})
+const sortColumn = ref('')
+const sortOrder = ref('asc')
 
 const totalFaceValue = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.faceValue || 0), 0))
+const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
+const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
+const completedCount = computed(() => instruments.value.filter(i => i.completed).length)
 
 const extendedKpis = computed(() => [
   { label: 'Total Face Value', value: '$' + formatNumber(totalFaceValue.value), icon: 'mdi-cash', color: '#0B2044' },
@@ -242,30 +311,50 @@ const filteredInstruments = computed(() => {
 const filteredDetails = computed(() => {
   return instrumentsWithDetails.value.filter(inst => selectedExportInstruments.value[inst.id])
 })
-const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
-const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
-const completedCount = computed(() => instruments.value.filter(i => i.completed).length)
+
+const sortedInstruments = computed(() => {
+  if (!sortColumn.value) return filteredInstruments.value
+  return [...filteredInstruments.value].sort((a, b) => {
+    let valA = a[sortColumn.value]
+    let valB = b[sortColumn.value]
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      return sortOrder.value === 'asc' ? valA - valB : valB - valA
+    }
+    valA = String(valA || '')
+    valB = String(valB || '')
+    return sortOrder.value === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
+  })
+})
 
 function formatNumber(num) {
   return (num || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function sortByColumn(col) {
+  if (sortColumn.value === col) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortColumn.value = col
+    sortOrder.value = 'asc'
+  }
 }
 
 function openInstrument(id) {
   if (!activeSession.value) { alert('Select a session on the Dashboard first'); router.push('/dashboard'); return }
   router.push({ path: `/instrument/${id}`, query: { session: activeSession.value.id } })
 }
-function goToDashboard() { 
-  try { if (activeSession.value) sessionManager.setActiveSession(activeSession.value) } catch(e) { console.warn(e) }
-  router.push('/dashboard') 
-}
+
+function goToDashboard() { router.push('/dashboard') }
 function goToReport() {
   if (!activeSession.value) { alert('No active session'); return }
   router.push({ path: '/instrument/money-market', query: { session: activeSession.value.id, tab: 'reports' } })
 }
+
 function openDetailModal(inst) {
   selectedInst.value = inst
   detailModalVisible.value = true
 }
+
 function openCombinedModal() {
   const hasSelection = Object.values(selectedExportInstruments.value).some(v => v === true)
   if (!hasSelection) {
@@ -278,34 +367,87 @@ function openCombinedModal() {
   combinedModalVisible.value = true
 }
 
+function exportCombinedExcel() {
+  // Export the combined modal view as Excel
+  const workbook = XLSX.utils.book_new()
+  const valuationDate = new Date().toISOString().split('T')[0]
+  const sessionName = activeSession.value?.name || 'N/A'
+
+  // Summary sheet
+  const summaryRows = []
+  summaryRows.push(['', '', '', ''])
+  summaryRows.push(['DuraCapital', '', '', ''])
+  summaryRows.push(['Portfolio Summary', '', '', ''])
+  summaryRows.push(['', '', '', ''])
+  summaryRows.push([
+    'Instrument Name',
+    'Face Value ($)',
+    'Calculated Value ($)',
+    'Difference ($)',
+    'Count',
+    'Avg Rate (%)',
+    'FRED Benchmark (%)',
+    'Status'
+  ])
+  filteredInstruments.value.forEach(inst => {
+    summaryRows.push([
+      inst.name,
+      inst.faceValue || 0,
+      inst.value,
+      (inst.faceValue || 0) - inst.value,
+      inst.count,
+      inst.avgRate !== null ? inst.avgRate : '—',
+      inst.fredBench !== null ? inst.fredBench : '—',
+      inst.statusText
+    ])
+  })
+  summaryRows.push([
+    'TOTAL',
+    totalFaceValue.value,
+    grandTotal.value,
+    totalFaceValue.value - grandTotal.value,
+    totalInstruments.value,
+    '',
+    '',
+    ''
+  ])
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows)
+  summarySheet['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 18 }, { wch: 14 }]
+  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
+
+  // Detail sheets
+  for (const inst of filteredDetails.value) {
+    if (inst.details && inst.details.length) {
+      const detailData = [
+        [`${inst.name} – Detailed Instruments`],
+        [`Session: ${sessionName}`],
+        [`Valuation Date: ${valuationDate}`],
+        [],
+        inst.detailHeaders,
+        ...inst.details.map(row => inst.detailHeaders.map(h => row[h] !== undefined ? row[h] : ''))
+      ]
+      const sheet = XLSX.utils.aoa_to_sheet(detailData)
+      sheet['!cols'] = inst.detailHeaders.map(() => ({ wch: 16 }))
+      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
+    }
+  }
+
+  XLSX.writeFile(workbook, `Portfolio_Summary_${sessionName}_${valuationDate}.xlsx`)
+  combinedModalVisible.value = false
+}
+
 async function loadSummary() {
-  let session = null
-  try {
-    session = sessionManager.getActiveSession()
-    if (!session) {
-      const all = sessionManager.getAllSessions()
-      session = all[0] || null
+  let session = sessionManager.getActiveSession()
+  if (!session) {
+    const sid = sessionManager.getActiveSessionId()
+    if (sid) {
+      await sessionManager.getSession(sid)
+      session = sessionManager.getActiveSession()
     }
-    if (!session) {
-      const sid = sessionManager.getActiveSessionId()
-      if (sid) {
-        const loaded = await sessionManager.loadSessionFromDb(sid)
-        if (loaded) {
-          session = sessionManager.getSession(sid)
-        }
-      }
-    }
-    if (!session) {
-      const sid = sessionManager.getActiveSessionId()
-      if (sid) {
-        const loaded = await sessionManager.loadSessionFromDb(sid)
-        if (loaded) {
-          session = sessionManager.getSession(sid)
-        }
-      }
-    }
-  } catch(e) {
-    console.warn('Error getting session:', e)
+  }
+  if (!session) {
+    const all = await sessionManager.getAllSessions()
+    if (all.length) session = all[0]
   }
   activeSession.value = session
 
@@ -324,74 +466,94 @@ async function loadSummary() {
   ]
 
   const detailsList = []
-  instruments.value = templates.map(template => {
-    let wf = null
-    try {
-      wf = sessionManager.getInstrumentWorkflow(sid, template.id)
-    } catch(e) { console.warn(e) }
-    
-    let cleanedData = []
-    let calculations = {}
-    if (wf && (wf.calculations?.totalValue || wf.cleanedData?.length)) {
-      cleanedData = wf.cleanedData || []
-      calculations = wf.calculations || {}
-    } 
-    if (!calculations.totalValue) {
-      const cleanKey = `${template.id}_session_${sid}_clean`
-      const calcKey = `${template.id}_session_${sid}_calc`
-      const savedClean = localStorage.getItem(cleanKey)
-      const savedCalc = localStorage.getItem(calcKey)
-      if (savedClean) {
-        try { cleanedData = JSON.parse(savedClean) } catch(e) {}
-      }
-      if (savedCalc) {
-        try { calculations = JSON.parse(savedCalc) } catch(e) {}
+  instruments.value = await Promise.all(templates.map(async (template) => {
+    const wf = await sessionManager.getInstrumentWorkflow(sid, template.id)
+    let details = []
+    let totalValue = 0
+    let totalFaceValue = 0
+    let totalAvgRate = 0
+    let instrumentCount = 0
+
+    // Try to get instrument summary first (this contains calculated rows from each sheet)
+    const summaryKey = `${template.id}_session_${sid}_summary`
+    const savedSummary = localStorage.getItem(summaryKey)
+    if (savedSummary) {
+      try {
+        const summaryData = JSON.parse(savedSummary)
+        if (summaryData.rows && summaryData.rows.length) {
+          details = summaryData.rows
+          instrumentCount = details.length
+          details.forEach(row => {
+            const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
+            const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
+            const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
+            if (!isNaN(value)) totalValue += value
+            if (!isNaN(faceValue)) totalFaceValue += faceValue
+            if (!isNaN(rate)) totalAvgRate += rate
+          })
+        }
+      } catch(e) {}
+    }
+
+    // Fallback to workflow data
+    if (!details.length && wf && wf.cleanedData && wf.cleanedData.length) {
+      details = wf.cleanedData
+      instrumentCount = details.length
+      details.forEach(row => {
+        const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
+        const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
+        const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
+        if (!isNaN(value)) totalValue += value
+        if (!isNaN(faceValue)) totalFaceValue += faceValue
+        if (!isNaN(rate)) totalAvgRate += rate
+      })
+    } else if (!details.length && wf && wf.data && wf.data.length) {
+      details = wf.data
+      instrumentCount = details.length
+    }
+
+    const avgRate = instrumentCount > 0 && totalAvgRate > 0 ? totalAvgRate / instrumentCount : null
+    const completed = instrumentCount > 0
+    const value = totalValue
+    const faceValue = totalFaceValue
+    const difference = faceValue - value
+
+    // Try to get FRED benchmark from stored calculations
+    let fredBench = null
+    if (wf && wf.calculations && wf.calculations.fred) {
+      fredBench = wf.calculations.fred.benchmark_rate
+    } else {
+      // Try to get from localStorage
+      const calcKey = `${template.id}_fred_benchmark`
+      const savedFred = localStorage.getItem(calcKey)
+      if (savedFred) {
+        try { fredBench = parseFloat(savedFred) } catch(e) {}
       }
     }
-    if (!calculations.totalValue && activeSession.value.instrumentData?.[template.id]) {
-      const data = activeSession.value.instrumentData[template.id]
-      calculations = { ...data, ...calculations }
-    }
-    
-    const completed = !!calculations.totalValue
-    const value = parseFloat(calculations.totalValue) || 0
-    const headers = cleanedData.length ? Object.keys(cleanedData[0]) : []
+
+    const headers = details.length ? Object.keys(details[0]) : []
     detailsList.push({
       id: template.id,
       name: template.name,
-      details: cleanedData,
+      details: details,
       detailHeaders: headers
     })
-    let avgRate = null
-    if (template.id === 'money-market') avgRate = calculations.avgRate
-    else if (template.id === 'bonds') avgRate = calculations.avgCouponRate
-    else avgRate = calculations.avgDiscountRate
-    if (avgRate === undefined) avgRate = null
-    
-    let faceValue = 0
-    if (cleanedData && cleanedData.length) {
-      cleanedData.forEach(row => {
-        const fv = parseFloat(row.FaceValue || row.Amount || row.Principal || 0)
-        if (!isNaN(fv)) faceValue += fv
-      })
-    }
-    if (faceValue === 0 && value > 0) faceValue = value
-    const difference = faceValue - value
 
     return {
       ...template,
       value,
       faceValue,
       difference,
-      count: calculations.instrumentCount || 0,
+      count: instrumentCount,
       avgRate,
-      fredBench: calculations.fred?.benchmark_rate ?? null,
+      fredBench,
       completed,
-      statusClass: completed ? 'completed' : value > 0 ? 'in-progress' : 'pending',
-      statusText: completed ? 'Completed' : value > 0 ? 'In progress' : 'Not started',
-      statusIcon: completed ? 'mdi-check-circle' : value > 0 ? 'mdi-progress-clock' : 'mdi-clock-outline'
+      statusClass: completed ? 'completed' : 'pending',
+      statusText: completed ? 'Completed' : 'Not started',
+      statusIcon: completed ? 'mdi-check-circle' : 'mdi-clock-outline'
     }
-  })
+  }))
+
   instrumentsWithDetails.value = detailsList
 
   const total = instruments.value.reduce((sum, inst) => sum + inst.value, 0)
@@ -414,135 +576,99 @@ function exportToExcel() {
 
   const workbook = XLSX.utils.book_new()
   const valuationDate = new Date().toISOString().split('T')[0]
-  
-  // Create summary sheet with logo and professional formatting
-  const summaryRows = []
-  
-  // Add header rows with logo placeholder and company info
-  summaryRows.push({ '': '', '': '', '': '' }) // Empty row for spacing
-  summaryRows.push({ '': 'DuraCapital', '': '', '': '' }) // Company name
-  summaryRows.push({ '': 'Portfolio Summary', '': '', '': '' }) // Report title
-  summaryRows.push({ '': `Session: ${activeSession.value.name}`, '': '', '': '' }) // Session name
-  summaryRows.push({ '': `Valuation Date: ${valuationDate}`, '': '', '': '' }) // Valuation date
-  summaryRows.push({ '': '', '': '', '': '' }) // Empty row for spacing
-  
-  // Add column headers
-  summaryRows.push({
-    'Instrument Name': 'Instrument Name',
-    'Face Value': 'Face Value',
-    'Calculated Value': 'Calculated Value',
-    'Difference': 'Difference',
-    'Yield (%)': 'Yield (%)',
-    'Valuation Date': 'Valuation Date',
-    'Maturity Date': 'Maturity Date'
-  })
-  
-  // Add data rows
-  const dataRows = []
-  toExport.forEach(inst => {
-    const faceValue = inst.faceValue || 0
-    const calculatedValue = inst.value || 0
-    const diff = faceValue - calculatedValue
-    let maturityDate = '—'
-    const detailInst = instrumentsWithDetails.value.find(d => d.id === inst.id);
-    if (detailInst && detailInst.details && detailInst.details.length) {
-      const firstRow = detailInst.details[0]
-      if (firstRow) {
-        maturityDate = firstRow.MaturityDate || firstRow.Maturity || firstRow['Maturity Date'] || '—'
-      }
-    }
-    dataRows.push({
-      'Instrument Name': inst.name,
-      'Face Value': faceValue,
-      'Calculated Value': calculatedValue,
-      'Difference': diff,
-      'Yield (%)': inst.avgRate !== null ? inst.avgRate : '—',
-      'Valuation Date': valuationDate,
-      'Maturity Date': maturityDate
-    });
-  });
-  summaryRows.push(...dataRows);
 
-  // Add totals row
-  const totals = {
-    'Instrument Name': 'TOTAL',
-    'Face Value': dataRows.reduce((s, r) => s + r['Face Value'], 0),
-    'Calculated Value': dataRows.reduce((s, r) => s + r['Calculated Value'], 0),
-    'Difference': dataRows.reduce((s, r) => s + r['Difference'], 0),
-    'Yield (%)': '—',
-    'Valuation Date': '',
-    'Maturity Date': ''
-  };
-  summaryRows.push(totals);
-  
-  const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
-  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+  const summaryRows = []
+  summaryRows.push(['', '', '', ''])
+  summaryRows.push(['DuraCapital', '', '', ''])
+  summaryRows.push(['Portfolio Summary', '', '', ''])
+  summaryRows.push([`Session: ${activeSession.value.name}`, '', '', ''])
+  summaryRows.push([`Valuation Date: ${valuationDate}`, '', '', ''])
+  summaryRows.push(['', '', '', ''])
+  summaryRows.push([
+    'Instrument Name',
+    'Face Value ($)',
+    'Calculated Value ($)',
+    'Difference ($)',
+    'Count',
+    'Avg Rate (%)',
+    'FRED Benchmark (%)',
+    'Status'
+  ])
+  toExport.forEach(inst => {
+    summaryRows.push([
+      inst.name,
+      inst.faceValue || 0,
+      inst.value,
+      (inst.faceValue || 0) - inst.value,
+      inst.count,
+      inst.avgRate !== null ? inst.avgRate : '—',
+      inst.fredBench !== null ? inst.fredBench : '—',
+      inst.statusText
+    ])
+  })
+  summaryRows.push([
+    'TOTAL',
+    totalFaceValue.value,
+    grandTotal.value,
+    totalFaceValue.value - grandTotal.value,
+    totalInstruments.value,
+    '',
+    '',
+    ''
+  ])
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows)
+  summarySheet['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 18 }, { wch: 14 }]
+  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
 
   for (const inst of instrumentsWithDetails.value) {
     if (selectedExportInstruments.value[inst.id] && inst.details && inst.details.length) {
-      const enrichedDetails = inst.details.map(row => {
-        const newRow = { ...row };
-        const face = parseFloat(row.FaceValue || row.Amount || row.Principal || 0);
-        const calcVal = parseFloat(row['Calculated Value']) || (inst.value / inst.details.length);
-        newRow['Calculated Value'] = calcVal;
-        newRow['Difference'] = face - calcVal;
-        newRow['Yield (%)'] = row.Yield || row['Yield'] || row.Rate || row['Rate'] || row.CouponRate || row['Coupon Rate'] || row.DiscountRate || row['Discount Rate'] || '—';
-        newRow['Valuation Date'] = row.ValuationDate || row['Valuation Date'] || valuationDate;
-        newRow['Maturity Date'] = row.MaturityDate || row.Maturity || row['Maturity Date'] || '—';
-        return newRow;
-      });
-      const sheet = XLSX.utils.json_to_sheet(enrichedDetails);
-      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31));
+      const detailData = [
+        [`${inst.name} – Detailed Instruments`],
+        [`Session: ${activeSession.value.name}`],
+        [`Valuation Date: ${valuationDate}`],
+        [],
+        inst.detailHeaders,
+        ...inst.details.map(row => inst.detailHeaders.map(h => row[h] !== undefined ? row[h] : ''))
+      ]
+      const sheet = XLSX.utils.aoa_to_sheet(detailData)
+      sheet['!cols'] = inst.detailHeaders.map(() => ({ wch: 16 }))
+      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
-  
-  const instrumentTotals = []
-  toExport.forEach(inst => {
-    const detailInst = instrumentsWithDetails.value.find(d => d.id === inst.id);
-    if (detailInst && detailInst.details && detailInst.details.length) {
-      const faceSum = detailInst.details.reduce((s, row) => s + (parseFloat(row.FaceValue || row.Amount || row.Principal || 0)), 0);
-      const calcSum = detailInst.details.reduce((s, row) => s + (parseFloat(row['Calculated Value']) || 0), 0);
-      instrumentTotals.push({
-        'Instrument Type': inst.name,
-        'Total Face Value': faceSum,
-        'Total Calculated Value': calcSum,
-        'Total Difference': faceSum - calcSum,
-        'Average Yield (%)': inst.avgRate || '—',
-        'Instrument Count': inst.count || detailInst.details.length
-      })
-    }
-  })
-  if (instrumentTotals.length > 0) {
-    const totalsSheet = XLSX.utils.json_to_sheet(instrumentTotals)
-    XLSX.utils.book_append_sheet(workbook, totalsSheet, 'Instrument Totals')
-  }
-  
-  XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name || 'session'}_${valuationDate}.xlsx`);
-  showExportDialog.value = false;
+
+  XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name}_${valuationDate}.xlsx`)
+  showExportDialog.value = false
 }
 
-onMounted(() => {
-  loadSummary().catch(err => console.error('Error loading summary:', err))
+onMounted(async () => {
+  await loadSummary()
 })
 </script>
 
 <style scoped>
+/* ===== SUMMARY PAGE STYLES ===== */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
+
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
 .subtitle { color: #666; margin: 0; }
+
 .session-chip { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 6px 12px; background: #e8ecf1; border-radius: 20px; font-size: 13px; }
 .session-chip.warn { background: #fff3e0; color: #e65100; }
+
 .grand-pill { text-align: right; padding: 20px 28px; background: linear-gradient(135deg, #0B2044, #1E88E5); border-radius: 14px; color: white; box-shadow: 0 8px 24px rgba(11,32,68,0.2); }
 .pill-label { display: block; font-size: 12px; opacity: 0.9; }
 .pill-amount { font-size: 30px; font-weight: 700; display: block; }
 .pill-sub { font-size: 12px; opacity: 0.85; }
+
 .kpi-strip { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }
 .kpi-mini { display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); flex: 1; min-width: 160px; }
 .kpi-mini-val { display: block; font-weight: 700; color: #0B2044; font-size: 16px; }
 .kpi-mini-lbl { font-size: 12px; color: #666; }
+
 .section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
 .section-header h2 { color: #0B2044; margin: 0; font-size: 20px; }
+
 .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
 .summary-card { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(11,32,68,0.1); background: white; }
 .card-top { padding: 20px; color: white; display: flex; align-items: center; gap: 12px; }
@@ -550,52 +676,103 @@ onMounted(() => {
 .card-body { padding: 16px; }
 .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 14px; }
 .stat-row.highlight strong { color: #0B2044; font-size: 16px; }
+
 .status-badge { margin-top: 12px; padding: 8px 12px; border-radius: 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .status-badge.completed { background: #e8f5e9; color: #2e7d32; }
 .status-badge.in-progress { background: #e3f2fd; color: #1565c0; }
 .status-badge.pending { background: #f5f5f5; color: #757575; }
 .status-badge.small { padding: 4px 10px; font-size: 11px; }
+
 .btn-open-inst { margin-top: 12px; width: 100%; padding: 10px; background: #0B2044; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .btn-open-inst:hover { background: #1a3a6e; }
+
 .action-buttons { display: flex; gap: 16px; justify-content: center; margin-top: 32px; }
 .btn-primary, .btn-secondary { padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; }
 .btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; }
 .btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; }
+
 .detail-section { margin-top: 32px; background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
 .detail-header h3 { color: #0B2044; margin: 0; }
 .detail-actions { display: flex; gap: 8px; }
+
 .btn-view-details { background: #0B2044; color: white; border: none; padding: 4px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .btn-view-details:hover { background: #1a3a6e; }
+
 .export-all-section { display: flex; justify-content: center; gap: 16px; margin: 32px 0 20px; flex-wrap: wrap; }
 .btn-export-all, .btn-view-portfolio { border: none; padding: 10px 24px; border-radius: 40px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
 .btn-export-all { background: #4CAF50; color: white; }
 .btn-export-all:hover { background: #45a049; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
 .btn-view-portfolio { background: #0B2044; color: white; }
 .btn-view-portfolio:hover { background: #1a3a6e; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
-.excel-dialog-title { background: #0B2044; color: white; padding: 16px 24px; display: flex; align-items: center; }
-.btn-close-dialog { background: transparent; border: none; color: white; cursor: pointer; padding: 8px; border-radius: 50%; }
-.btn-close-dialog:hover { background: rgba(255,255,255,0.1); }
-.export-instrument-select { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
-.export-checkbox { display: flex; align-items: center; gap: 10px; font-size: 16px; cursor: pointer; }
-.warning-badge { background: #ffebee; color: #c62828; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
+
+.excel-dialog-title-white {
+  background: white;
+  color: #0B2044;
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid #e0e0e0;
+}
+.excel-dialog-title-white .logo {
+  height: 40px;
+  width: auto;
+  object-fit: contain;
+}
+.excel-dialog-title-white .header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.excel-dialog-title-white .header-title h4 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #0B2044;
+}
+.excel-dialog-title-white .header-meta {
+  margin: 2px 0 0 0;
+  font-size: 13px;
+  color: #666;
+}
+.excel-dialog-title-white .btn-close-dialog {
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  font-size: 20px;
+}
+.excel-dialog-title-white .btn-close-dialog:hover {
+  background: #f0f0f0;
+  color: #0B2044;
+}
+
+.btn-close-dialog { background: transparent; border: none; color: #666; cursor: pointer; padding: 8px; border-radius: 50%; }
+.btn-close-dialog:hover { background: #f0f0f0; color: #0B2044; }
+
 .combined-excel-body { padding: 16px 24px; max-height: calc(100vh - 140px); overflow-y: auto; background: #f9fafc; }
 .combined-section { background: white; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
 .combined-section-title { color: #0B2044; font-size: 16px; font-weight: 600; margin: 0 0 12px 0; display: flex; align-items: center; gap: 10px; }
 .empty-note { font-weight: normal; color: #999; font-size: 14px; }
 .empty-placeholder { color: #999; padding: 12px 0; font-style: italic; text-align: center; }
-.summary-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.summary-table th { text-align: left; padding: 10px 8px; background: #f0f2f5; color: #0B2044; font-weight: 600; border-bottom: 2px solid #e0e0e0; }
-.summary-table td { padding: 8px; border-bottom: 1px solid #eee; }
-.summary-table tr:hover { background: #f8f9ff; }
-.excel-wrapper { border: 1px solid #e8ecf1; border-radius: 8px; overflow: hidden; }
-.excel-header { display: flex; align-items: center; gap: 20px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #0B2044; }
-.excel-logo-area { flex-shrink: 0; }
-.excel-logo { max-height: 60px; max-width: 200px; object-fit: contain; }
-.excel-title-area { flex: 1; }
-.excel-company { color: #0B2044; font-size: 24px; font-weight: 700; margin: 0 0 4px 0; }
-.excel-report-title { color: #1E88E5; font-size: 18px; font-weight: 600; margin: 0 0 8px 0; }
-.excel-session, .excel-date { color: #666; font-size: 14px; margin: 2px 0; }
+
+.excel-table-wrapper { overflow: auto; border: 1px solid #d4d4d4; border-radius: 4px; background: white; max-height: 500px; margin: 16px 0; }
+.excel-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #000; }
+.excel-table thead { position: sticky; top: 0; z-index: 10; }
+.excel-table th { background: #0B2044; color: white; border: 1px solid #1a3a6e; padding: 10px 14px; text-align: left; font-weight: 600; font-size: 12px; white-space: nowrap; letter-spacing: 0.3px; }
+.excel-table td { border: 1px solid #d4d4d4; padding: 8px 14px; text-align: left; font-size: 13px; font-variant-numeric: tabular-nums; }
+.excel-table tbody tr:nth-child(even) { background: #f9fafc; }
+.excel-table tbody tr:hover { background: #e8f0fe; }
+
+.sortable-header { cursor: pointer; transition: background 0.2s; }
+.sortable-header:hover { background: #1a3a6e; }
+.sort-indicator { margin-left: 6px; font-size: 10px; color: #fff; }
+
+.export-instrument-select { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.export-checkbox { display: flex; align-items: center; gap: 10px; font-size: 16px; cursor: pointer; }
+.warning-badge { background: #ffebee; color: #c62828; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
 
 .distribution-section { background: white; border-radius: 12px; padding: 20px; margin: 30px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 .distribution-section h3 { color: #0B2044; margin-bottom: 16px; }
@@ -605,4 +782,31 @@ onMounted(() => {
 .dist-track { flex: 1; height: 20px; background: #e8ecf1; border-radius: 10px; overflow: hidden; }
 .dist-fill { height: 100%; border-radius: 10px; transition: width 0.5s ease; }
 .dist-percent { width: 50px; text-align: right; font-weight: 600; color: #0B2044; }
+
+.popup-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  background: #f9fafc;
+  border-top: 1px solid #e0e0e0;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.valuation-date-footer { color: #666; font-size: 13px; }
+
+@media (max-width: 768px) {
+  .summary-page { padding: 16px; }
+  .hero-header { flex-direction: column; }
+  .grand-pill { width: 100%; text-align: center; }
+  .summary-cards { grid-template-columns: 1fr; }
+  .kpi-strip { flex-direction: column; }
+  .export-all-section { flex-direction: column; align-items: center; }
+  .action-buttons { flex-direction: column; align-items: center; }
+  .dist-bar-container { flex-wrap: wrap; }
+  .dist-label { width: 80px; }
+  .excel-dialog-title-white { flex-wrap: wrap; gap: 8px; }
+  .excel-dialog-title-white .header-left { flex-wrap: wrap; }
+}
 </style>

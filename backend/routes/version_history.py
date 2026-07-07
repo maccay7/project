@@ -278,11 +278,15 @@ def version_history_routes(app):
         report_snapshot = payload.get('report_snapshot')
         user_id = payload.get('user_id')
         
+        print(f'📝 Version creation request: session_id={session_id}, instrument_type={instrument_type}, change_summary={change_summary}')
+        
         if not session_id:
+            print('❌ Session ID is required')
             return jsonify({'success': False, 'message': 'Session ID is required'}), 400
         
         # Get next sequential version number
         next_version = get_next_version_number(session_id)
+        print(f'📝 Next version number: {next_version}')
         
         # Auto-generate change summary if not provided
         if not change_summary:
@@ -305,6 +309,7 @@ def version_history_routes(app):
             }
             
             change_summary = generate_change_summary(prev_snapshot, curr_snapshot, instrument_type)
+            print(f'📝 Auto-generated change summary: {change_summary}')
         
         version_id = create_version(
             session_id, next_version, instrument_type, change_summary,
@@ -312,10 +317,14 @@ def version_history_routes(app):
             portfolio_snapshot, report_snapshot, user_id
         )
         
+        print(f'📝 Version ID returned: {version_id}')
+        
         if version_id:
             version = restore_version(version_id)
+            print(f'✅ Version created successfully: {version_id}')
             return jsonify({'success': True, 'data': version})
         else:
+            print(f'❌ Failed to create version')
             return jsonify({'success': False, 'message': 'Failed to create version'}), 500
     
     @app.route('/api/version/session/<session_id>', methods=['GET', 'OPTIONS'])

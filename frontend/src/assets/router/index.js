@@ -70,7 +70,7 @@ const routes = [
   {
     path: '/instrument/bonds',
     name: 'bonds',
-    component: () => import('@/views/Bonds.vue'),
+    component: () => import('@/views/BondsInstrument.vue'),
     meta: { requiresAuth: true }
   },
   {

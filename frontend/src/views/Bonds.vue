@@ -1,14 +1,13 @@
 <template>
   <FixedLayout>
     <div class="instrument-page">
-      <!-- Page Header -->
+      <!-- Page Header – Simplified -->
       <div class="page-header">
         <div class="header-left">
           <h1>{{ instrumentName }}</h1>
-          <p>{{ instrumentDescription }}</p>
           <div v-if="activeSession" class="session-badge">
             <v-icon small>mdi-folder-outline</v-icon>
-            Session: <strong>{{ activeSession.name }}</strong>
+            <strong>{{ activeSession.name }}</strong>
           </div>
           <div v-else class="session-badge warning">
             <v-icon small>mdi-alert-outline</v-icon>
@@ -16,6 +15,9 @@
           </div>
         </div>
         <div class="header-right">
+          <button v-if="activeSession" class="btn-save-session" @click="saveToSession" title="Save a version to session history">
+            <v-icon small>mdi-content-save</v-icon> Save to Session
+          </button>
           <div class="step-indicator">
             Step {{ currentStepIndex + 1 }} of {{ totalSteps }}
           </div>
@@ -94,7 +96,21 @@
                 <button class="btn-mapping" @click="openMappingDialog" :disabled="!rawData.length">Map Columns</button>
               </div>
 
-              <!-- Preview -->
+              <!-- Worksheet Selector -->
+              <div v-if="worksheetWorkflow.workbookSheets.length > 0" class="worksheet-selector-section">
+                <WorksheetSelector
+                  :workbook-sheets="worksheetWorkflow.workbookSheets"
+                  :worksheet-status="worksheetWorkflow.worksheetStatus"
+                  :selected-worksheet="worksheetWorkflow.selectedWorksheet"
+                  :loading="fileLoading"
+                  :error="uploadError"
+                  @select-sheet="handleWorksheetSelect"
+                  @work-on-sheet="handleWorkOnSheet"
+                  @view-results="handleViewResults"
+                />
+              </div>
+
+              <!-- Preview – always shows mapping dropdowns after mapping is applied -->
               <div v-if="rawData.length && showPreview" class="excel-preview-section">
                 <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
                 <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
@@ -195,25 +211,33 @@
                 </v-card>
               </v-dialog>
 
-              <!-- Workbook Viewer Dialog -->
+              <!-- Workbook Viewer Dialog - NO LOGO + WORK ON SHEET BUTTON -->
               <v-dialog v-model="showWorkbookViewer" max-width="95%" fullscreen hide-overlay>
                 <v-card>
-                  <v-card-title class="excel-dialog-title">
-                    Excel Workbook Viewer
+                  <v-card-title class="excel-dialog-title-no-logo">
+                    <span>Excel Workbook – {{ currentSheetName || 'Select a sheet' }}</span>
                     <v-spacer></v-spacer>
+                    <button class="btn-work-on-sheet" @click="workOnSelectedSheet" v-if="currentSheetName && workbookSheets.length">
+                      <v-icon small>mdi-play-circle-outline</v-icon> Work on This Sheet
+                    </button>
                     <button class="btn-close-dialog" @click="showWorkbookViewer = false">
                       <v-icon>mdi-close</v-icon>
                     </button>
                   </v-card-title>
                   <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
-                    <ExcelWorkbookViewer 
-                      v-if="workbookData" 
-                      :workbookData="workbookData" 
-                      :fileName="uploadedFile?.name || 'Workbook'"
-                      @close="showWorkbookViewer = false"
-                      @selectSheet="handleSheetSelection"
+                    <ExcelViewer
+                      :data="workbookSheets.find(s => s.name === currentSheetName)?.data || []"
+                      :headers="workbookSheets.find(s => s.name === currentSheetName)?.headers || []"
+                      :workbook-sheets="workbookSheets"
+                      @sheet-selected="handleSheetSelected"
+                      @process-sheet="handleProcessSheet"
                     />
                   </v-card-text>
+                  <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
+                    <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
+                    <v-spacer></v-spacer>
+                    <button class="btn-secondary" @click="showWorkbookViewer = false">Close</button>
+                  </div>
                 </v-card>
               </v-dialog>
 
@@ -310,7 +334,21 @@
         <!-- ===== CALCULATIONS ===== -->
         <div v-if="activeTab === 'calculations'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-calculator-variant-outline</v-icon> {{ instrumentName }} Calculations</v-card-title>
+            <v-card-title class="calc-header">
+              <v-icon>mdi-calculator-variant-outline</v-icon> {{ instrumentName }} Calculations
+              <span v-if="currentlyViewingInstrument" class="viewing-badge">
+                <v-icon small>mdi-eye</v-icon> Currently Viewing: <strong>{{ currentlyViewingInstrument }}</strong>
+              </span>
+              <v-spacer></v-spacer>
+              <!-- CALCULATED INSTRUMENTS BUTTON - visible when 2+ instruments exist -->
+              <button 
+                v-if="instrumentSummary.rows.length >= 2" 
+                class="btn-calculated-instruments" 
+                @click="openAllCalculationsPopup"
+              >
+                <v-icon small>mdi-format-list-bulleted</v-icon> Calculated Instruments
+              </button>
+            </v-card-title>
             <v-card-text>
               <div v-if="!hasCleanedData" class="empty-state">
                 <v-icon size="48" color="#ccc">mdi-calculator-variant-outline</v-icon>
@@ -318,6 +356,7 @@
                 <button class="btn-primary" @click="switchTab('cleaning')">Go to Cleaning</button>
               </div>
               <div v-else>
+                <!-- ===== RESULTS ===== -->
                 <div class="summary-cards">
                   <div class="summary-card total" @click="showFormula('Total Portfolio Value')">
                     <div class="card-label">Total Portfolio Value</div>
@@ -344,6 +383,8 @@
                   <small class="fred-meta">{{ calculations.fred.country_name || calculations.fred.country }} · {{ calculations.fred.currency }} · {{ calculations.fred.maturity }} · FRED</small>
                   <small v-if="calculations.fred.note" class="fred-meta">{{ calculations.fred.note }}</small>
                 </div>
+
+                <!-- ===== DETAILED CALCULATIONS ===== -->
                 <div class="calculations-section">
                   <h3>{{ instrumentName }} Calculations</h3>
                   <div class="calculations-grid">
@@ -435,6 +476,71 @@
                     </template>
                   </div>
                 </div>
+
+                <!-- ===== MULTIPLE INSTRUMENTS POPUP (Calculated Instruments) ===== -->
+                <div v-if="showAllCalculationsPopup" class="excel-popup-overlay" @click="closeAllCalculationsPopup">
+                  <div class="excel-popup-content" @click.stop>
+                    <div class="popup-header-white">
+                      <div class="header-left">
+                        <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+                        <div class="header-title">
+                          <h4>Calculated Instruments</h4>
+                          <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+                        </div>
+                      </div>
+                      <button class="close-btn" @click="closeAllCalculationsPopup">×</button>
+                    </div>
+                    <div class="popup-body">
+                      <div v-if="instrumentSummary.rows.length === 0" class="empty-state">
+                        <p>No instruments detected. Please process a worksheet first.</p>
+                      </div>
+                      <div v-else>
+                        <p class="popup-instruction">Click any instrument below to load its calculations into the main view.</p>
+                        <div class="instrument-grid">
+                          <div 
+                            v-for="(row, idx) in instrumentSummary.rows" 
+                            :key="idx" 
+                            class="instrument-card"
+                            @click="selectInstrumentFromPopup(idx)"
+                          >
+                            <div class="instrument-card-header">
+                              <strong>{{ row['Instrument Name'] || `Instrument ${idx + 1}` }}</strong>
+                              <span class="instrument-type-badge">{{ row['Instrument Type'] || instrumentType }}</span>
+                            </div>
+                            <div class="instrument-card-body">
+                              <div class="card-metric">
+                                <span class="metric-label">Total Value</span>
+                                <span class="metric-value">${{ formatNumber(row['Total Value'] || row['Calculated Value'] || 0) }}</span>
+                              </div>
+                              <div class="card-metric">
+                                <span class="metric-label">Rate</span>
+                                <span class="metric-value">{{ row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0 }}%</span>
+                              </div>
+                              <div class="card-metric">
+                                <span class="metric-label">Counterparty</span>
+                                <span class="metric-value">{{ row['Counterparty'] || 'N/A' }}</span>
+                              </div>
+                            </div>
+                            <div class="instrument-card-footer">
+                              <button class="btn-select-instrument" @click.stop="selectInstrumentFromPopup(idx)">
+                                <v-icon small>mdi-arrow-right</v-icon> Select
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="popup-footer">
+                      <span v-if="currentlyViewingInstrument" class="viewing-indicator">
+                        <v-icon small>mdi-eye</v-icon> Currently viewing: <strong>{{ currentlyViewingInstrument }}</strong>
+                      </span>
+                      <v-spacer></v-spacer>
+                      <button class="btn-secondary" @click="closeAllCalculationsPopup">Close</button>
+                      <button class="btn-primary" @click="exportAllCalculations">📥 Download Excel</button>
+                    </div>
+                  </div>
+                </div>
+
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('cleaning')">Previous</button>
                   <button class="btn-primary" @click="continueToVisualizations">Continue</button>
@@ -464,27 +570,49 @@
                 </div>
               </div>
 
+              <!-- FILTERS WITH 5 EXAMPLES + CUSTOM INPUT -->
               <div class="filters-row">
                 <div class="filter-group">
                   <label>Country / Region</label>
                   <select v-model="selectedCountryOption" @change="onCountrySelectChange" class="filter-select">
-                    <option v-for="opt in countryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option v-for="opt in displayCountryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option value="__custom__">✏️ Custom...</option>
                   </select>
-                  <span class="filter-arrow">▼</span>
+                  <input 
+                    v-if="selectedCountryOption === '__custom__'" 
+                    v-model="customCountryInput" 
+                    @input="onCustomCountryInput"
+                    placeholder="Type country code (e.g. ZAF)" 
+                    class="filter-custom-input"
+                  />
                 </div>
                 <div class="filter-group">
                   <label>Currency</label>
                   <select v-model="selectedCurrencyOption" @change="onCurrencySelectChange" class="filter-select">
-                    <option v-for="opt in currencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option v-for="opt in displayCurrencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option value="__custom__">✏️ Custom...</option>
                   </select>
-                  <span class="filter-arrow">▼</span>
+                  <input 
+                    v-if="selectedCurrencyOption === '__custom__'" 
+                    v-model="customCurrencyInput" 
+                    @input="onCustomCurrencyInput"
+                    placeholder="Type currency code (e.g. ZWL)" 
+                    class="filter-custom-input"
+                  />
                 </div>
                 <div class="filter-group">
                   <label>Maturity</label>
                   <select v-model="selectedMaturityOption" @change="onMaturitySelectChange" class="filter-select">
-                    <option v-for="opt in maturityOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option v-for="opt in displayMaturityOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option value="__custom__">✏️ Custom...</option>
                   </select>
-                  <span class="filter-arrow">▼</span>
+                  <input 
+                    v-if="selectedMaturityOption === '__custom__'" 
+                    v-model="customMaturityInput" 
+                    @input="onCustomMaturityInput"
+                    placeholder="e.g. 3Y, 6M, 13W" 
+                    class="filter-custom-input"
+                  />
                 </div>
                 <button class="btn-secondary refresh-btn" @click="fetchYieldCurve" :disabled="yieldCurveLoading">Refresh curve</button>
               </div>
@@ -554,7 +682,7 @@
                 </div>
               </div>
               <div class="excel-viewer-button" style="margin-bottom: 20px; text-align: right;">
-                <button class="btn-secondary" @click="openExcelReview(cleanedData, `${instrumentName} - Cleaned Data`)">📊 View Instrument Data as Excel</button>
+                <button class="btn-secondary" @click="openExcelReview(cleanedData, `${instrumentName} Data`)">📊 View Instrument Data as Excel</button>
               </div>
 
               <!-- Instrument Summary -->
@@ -631,23 +759,32 @@
               <!-- Instrument Summary Excel Popup -->
               <div v-if="showInstrumentExcelPopup" class="excel-popup-overlay" @click="closeInstrumentExcelPopup">
                 <div class="excel-popup-content" @click.stop>
-                  <div class="popup-header">
-                    <h3>📊 Instrument Summary - Excel View</h3>
+                  <div class="popup-header-white">
+                    <div class="header-left">
+                      <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+                      <div class="header-title">
+                        <h4>Instrument Summary – {{ selectedInstrumentType }}</h4>
+                        <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+                      </div>
+                    </div>
                     <button class="close-btn" @click="closeInstrumentExcelPopup">×</button>
                   </div>
                   <div class="popup-body">
-                    <div class="summary-table-wrapper">
-                      <table class="summary-table">
+                    <div class="excel-table-wrapper">
+                      <table class="excel-table">
                         <thead>
                           <tr>
-                            <th v-for="col in instrumentSummary.columns" :key="col">
-                              {{ col }}
+                            <th v-for="col in instrumentSummaryColumnsForDisplay" :key="col" @click="sortByColumn(col)" class="sortable-header">
+                              <span>{{ col }}</span>
+                              <span class="sort-indicator" v-if="sortColumn === col">
+                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                              </span>
                             </th>
                           </tr>
                         </thead>
                         <tbody>
-                          <tr v-for="(row, idx) in instrumentSummary.rows" :key="idx">
-                            <td v-for="col in instrumentSummary.columns" :key="col">
+                          <tr v-for="(row, idx) in sortedInstrumentSummaryRows" :key="idx">
+                            <td v-for="col in instrumentSummaryColumnsForDisplay" :key="col">
                               {{ formatCellValue(row[col], col) }}
                             </td>
                           </tr>
@@ -658,13 +795,14 @@
                   <div class="popup-footer">
                     <button class="btn-secondary" @click="closeInstrumentExcelPopup">Close</button>
                     <button class="btn-primary" @click="exportInstrumentSummaryExcel">📥 Download Excel</button>
+                    <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
                   </div>
                 </div>
               </div>
 
               <!-- Portfolio Summary -->
               <div v-if="portfolioSummary.rows.length > 0" class="portfolio-summary-section">
-                <h3>📊 Portfolio Summary ({{ selectedInstrumentType }}) - {{ portfolioSummary.rows.length }} instruments</h3>
+                <h3>📊 Portfolio Summary ({{ selectedInstrumentType }}) – {{ portfolioSummary.rows.length }} instruments</h3>
                 
                 <!-- Instrument Breakdown -->
                 <div class="instrument-breakdown">
@@ -743,10 +881,62 @@
                 </div>
               </div>
 
+              <!-- Portfolio Summary Excel Popup -->
+              <div v-if="showPortfolioExcelPopup" class="excel-popup-overlay" @click="closePortfolioExcelPopup">
+                <div class="excel-popup-content" @click.stop>
+                  <div class="popup-header-white">
+                    <div class="header-left">
+                      <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+                      <div class="header-title">
+                        <h4>Portfolio Summary – {{ selectedInstrumentType }}</h4>
+                        <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+                      </div>
+                    </div>
+                    <button class="close-btn" @click="closePortfolioExcelPopup">×</button>
+                  </div>
+                  <div class="popup-body">
+                    <div class="excel-table-wrapper">
+                      <table class="excel-table">
+                        <thead>
+                          <tr>
+                            <th v-for="col in portfolioSummaryColumnsForDisplay" :key="col" @click="sortByColumn(col)" class="sortable-header">
+                              <span>{{ col }}</span>
+                              <span class="sort-indicator" v-if="sortColumn === col">
+                                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                              </span>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="(row, idx) in sortedPortfolioSummaryRows" :key="idx">
+                            <td v-for="col in portfolioSummaryColumnsForDisplay" :key="col">
+                              {{ formatCellValue(row[col], col) }}
+                            </td>
+                          </tr>
+                        </tbody>
+                        <tfoot v-if="hasNumericColumns">
+                          <tr class="total-row">
+                            <td v-for="col in portfolioSummaryColumnsForDisplay" :key="col">
+                              <strong v-if="isNumericField(col)">{{ calculateTotal(col) }}</strong>
+                              <span v-else></span>
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                  <div class="popup-footer">
+                    <button class="btn-secondary" @click="closePortfolioExcelPopup">Close</button>
+                    <button class="btn-primary" @click="exportPortfolioSummaryExcel">📥 Download Excel</button>
+                    <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
+                  </div>
+                </div>
+              </div>
+
               <!-- Workflow Popup -->
               <div v-if="showWorkflowPopup" class="excel-popup-overlay" @click="closeWorkflowPopup">
                 <div class="excel-popup-content" @click.stop>
-                  <div class="popup-header">
+                  <div class="popup-header-white">
                     <h3>🔄 Workflow Options</h3>
                     <button class="close-btn" @click="closeWorkflowPopup">×</button>
                   </div>
@@ -774,48 +964,6 @@
                   </div>
                   <div class="popup-footer">
                     <button class="btn-secondary" @click="closeWorkflowPopup">Close</button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Portfolio Summary Excel Popup -->
-              <div v-if="showPortfolioExcelPopup" class="excel-popup-overlay" @click="closePortfolioExcelPopup">
-                <div class="excel-popup-content" @click.stop>
-                  <div class="popup-header">
-                    <h3>📊 Portfolio Summary - All Instruments</h3>
-                    <button class="close-btn" @click="closePortfolioExcelPopup">×</button>
-                  </div>
-                  <div class="popup-body">
-                    <div class="summary-table-wrapper">
-                      <table class="summary-table">
-                        <thead>
-                          <tr>
-                            <th v-for="col in portfolioSummary.columns" :key="col">
-                              {{ col }}
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr v-for="(row, idx) in portfolioSummary.rows" :key="idx">
-                            <td v-for="col in portfolioSummary.columns" :key="col">
-                              {{ formatCellValue(row[col], col) }}
-                            </td>
-                          </tr>
-                        </tbody>
-                        <tfoot v-if="hasNumericColumns">
-                          <tr class="total-row">
-                            <td v-for="col in portfolioSummary.columns" :key="col">
-                              <strong v-if="isNumericField(col)">{{ calculateTotal(col) }}</strong>
-                              <span v-else></span>
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
-                  <div class="popup-footer">
-                    <button class="btn-secondary" @click="closePortfolioExcelPopup">Close</button>
-                    <button class="btn-primary" @click="exportPortfolioSummaryExcel">📥 Download Excel</button>
                   </div>
                 </div>
               </div>
@@ -883,8 +1031,14 @@
     <!-- Excel Review Dialog -->
     <v-dialog v-model="showExcelDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
-        <v-card-title class="excel-dialog-title">
-          {{ excelDialogTitle }} - Excel Viewer
+        <v-card-title class="excel-dialog-title-white">
+          <div class="header-left">
+            <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+            <div class="header-title">
+              <h4>{{ excelDialogTitle }}</h4>
+              <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+            </div>
+          </div>
           <v-spacer></v-spacer>
           <button class="btn-close-dialog" @click="closeExcelDialog">
             <v-icon>mdi-close</v-icon>
@@ -893,28 +1047,11 @@
         <v-card-text class="excel-dialog-content pa-0">
           <ExcelViewer :data="excelData" :headers="excelColumns" @data-update="onExcelDataUpdate" />
         </v-card-text>
-      </v-card>
-    </v-dialog>
-
-    <!-- Workbook Viewer Dialog with Sheet Tabs -->
-    <v-dialog v-model="showWorkbookViewer" max-width="95%" fullscreen hide-overlay>
-      <v-card>
-        <v-card-title class="excel-dialog-title">
-          Excel Workbook - {{ currentSheetName }}
+        <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
+          <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
           <v-spacer></v-spacer>
-          <button class="btn-close-dialog" @click="showWorkbookViewer = false">
-            <v-icon>mdi-close</v-icon>
-          </button>
-        </v-card-title>
-        <v-card-text class="excel-dialog-content pa-0">
-          <ExcelViewer
-            :data="workbookSheets.find(s => s.name === currentSheetName)?.data || []"
-            :headers="workbookSheets.find(s => s.name === currentSheetName)?.headers || []"
-            :workbook-sheets="workbookSheets"
-            @sheet-selected="handleSheetSelected"
-            @process-sheet="handleProcessSheet"
-          />
-        </v-card-text>
+          <button class="btn-secondary" @click="closeExcelDialog">Close</button>
+        </div>
       </v-card>
     </v-dialog>
 
@@ -935,8 +1072,14 @@
     <!-- Report Preview Dialog -->
     <v-dialog v-model="reportPreviewDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
-        <v-card-title class="excel-dialog-title">
-          Report Preview
+        <v-card-title class="excel-dialog-title-white">
+          <div class="header-left">
+            <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+            <div class="header-title">
+              <h4>Report Preview</h4>
+              <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+            </div>
+          </div>
           <v-spacer></v-spacer>
           <button class="btn-close-dialog" @click="reportPreviewDialog = false">
             <v-icon>mdi-close</v-icon>
@@ -945,16 +1088,17 @@
         <v-card-text class="report-preview-content" style="padding:0;">
           <iframe :srcdoc="reportPreviewHtml" frameborder="0" style="width:100%; height:80vh;"></iframe>
         </v-card-text>
-        <v-card-actions>
+        <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
+          <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
           <v-spacer></v-spacer>
           <button class="btn-primary" @click="downloadFromPreview('html')">Download HTML</button>
           <button class="btn-pdf" @click="downloadFromPreview('pdf')">Download PDF</button>
           <button class="btn-word" @click="downloadFromPreview('word')">Download Word</button>
-        </v-card-actions>
+        </div>
       </v-card>
     </v-dialog>
 
-    <!-- Modal Excel Viewer with Pagination -->
+    <!-- Modal Excel Viewer -->
     <ExcelModalViewer
       :visible="showModalViewer"
       :fileData="viewerFileData"
@@ -974,15 +1118,18 @@ import * as XLSX from 'xlsx'
 import api from '@/services/api.js'
 import sessionManager from '@/services/sessionManager.js'
 import { useFredMarket } from '@/composables/useFredMarket'
+import { useWorksheetWorkflow } from '@/composables/useWorksheetWorkflow.js'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import ExcelWorkbookViewer from '@/components/ExcelWorkbookViewer.vue'
 import ExcelModalViewer from '@/components/ExcelModalViewer.vue'
+import WorksheetSelector from '@/components/WorksheetSelector.vue'
 import { loadFredSeriesChart, loadFredSeriesForReport } from '@/utils/fredChartHelper'
-import { markStepCompleted } from '@/utils/workflowProgress.js'
+import { markStepCompleted, isStepPersistedCompleted } from '@/utils/workflowProgress.js'
 import { buildWorkflowSnapshot, applyWorkflowToPage } from '@/utils/instrumentSession.js'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
 import { autoMatchColumns, applyMappingToRows, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping'
 import { parseExcel } from '@/utils/intelligentParser'
+import { detectSheetType, extractSingleInstrumentValues, getRequiredFieldMappings } from '@/utils/sheetTypeDetector'
 import Chart from 'chart.js/auto'
 import { API_BASE_URL } from '@/config.js'
 import { getInstrumentColumns, getTotalFields } from '@/config/instrumentColumns.js'
@@ -990,8 +1137,12 @@ import { getInstrumentColumns, getTotalFields } from '@/config/instrumentColumns
 // ===== COMPOSABLES =====
 const router = useRouter()
 const route = useRoute()
+
+const instrumentType = computed(() => route.params.type || route.path.split('/').pop())
+
 const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInstrumentConfig(route.params.type)
 const { fredFilters, filterOptions, loadFilterOptions, fetchBenchmark } = useFredMarket('1Y')
+const worksheetWorkflow = useWorksheetWorkflow(instrumentType)
 
 // ===== REFS =====
 const activeSession = ref(null)
@@ -1007,10 +1158,15 @@ const selectedMaturityOption = ref('')
 const selectedCountryOption = ref('USA')
 const selectedCurrencyOption = ref('USD')
 
+// Custom filter inputs
+const customCountryInput = ref('')
+const customCurrencyInput = ref('')
+const customMaturityInput = ref('')
+
 const uploadedFile = ref(null)
-const uploadedFileId = ref(null) // Store file ID from backend
-const uploadedFilePath = ref(null) // Store file path from backend
-const uploadedFileBase64 = ref(null) // Store file as base64 for workbook viewer
+const uploadedFileId = ref(null)
+const uploadedFilePath = ref(null)
+const uploadedFileBase64 = ref(null)
 const rawData = ref([])
 const cleanedData = ref([])
 const previewData = ref([])
@@ -1022,16 +1178,22 @@ const fixedValuesTracker = ref(new Map())
 const calculations = ref({})
 const cleaningStats = ref({ totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 })
 const fileLoading = ref(false)
+const uploadError = ref('')
+const uploadProgress = ref(0)
+
 const showInstrumentExcelPopup = ref(false)
 const showPortfolioExcelPopup = ref(false)
 const showWorkflowPopup = ref(false)
 const selectedWorkflowInstrument = ref(null)
 const selectedWorkflowIndex = ref(0)
+const sortColumn = ref('')
+const sortOrder = ref('asc')
 const mappingApplied = ref(false)
 const cumulativeRecords = ref([])
 const showCumulativeHistory = ref(false)
 const originalRawData = ref([])
 const originalFileColumns = ref([])
+const originalFileBuffer = ref(null)
 const sessionSavedAt = ref(null)
 const showPreview = ref(false)
 const forceUpdate = ref(0)
@@ -1048,10 +1210,15 @@ const cleaningOptions = ref({
   specificColumn: '', standardizeNumericRange: false, removeEmptyRows: false, fillForward: false, fillBackward: false
 })
 
-// Instrument-specific summary state
 const selectedInstrumentType = ref('Bonds')
 const instrumentSummary = ref({ columns: [], rows: [] })
 const portfolioSummary = ref({ columns: [], rows: [] })
+const selectedCalculationInstrument = ref(-1)
+const currentlyViewingInstrument = ref(null)
+const showAllCalculationsPopup = ref(false)
+const sheetType = ref('multi')
+const extractedValues = ref({})
+const worksheetStatus = ref({})
 
 const uploadHistory = ref([])
 
@@ -1066,30 +1233,77 @@ const excelDialogTitle = ref('')
 
 const showWorkbookViewer = ref(false)
 const workbookData = ref(null)
-const workbookSheets = ref([]) // Store all sheets for viewer
+const workbookSheets = ref([])
 const currentSheetName = ref('')
 
-// Modal viewer for Excel files
 const showModalViewer = ref(false)
 const viewerFileData = ref(null)
 
 const formulaDialog = ref(false)
 const formulaText = ref('')
 
+const formulas = ref({})
+const manualInputs = ref({})
+
 let saveTimeout = null
 let lastInstrument = ''
 let lastSessionId = ''
 let lastSaveTime = 0
-const SAVE_DEBOUNCE_MS = 2000 // Increase debounce time to reduce API calls
+const SAVE_DEBOUNCE_MS = 2000
+
+// ===== FILTER DISPLAY OPTIONS =====
+const displayCountryOptions = [
+  { value: 'USA', label: 'United States' },
+  { value: 'GBR', label: 'United Kingdom' },
+  { value: 'EUR', label: 'Eurozone' },
+  { value: 'JPN', label: 'Japan' },
+  { value: 'CAN', label: 'Canada' }
+]
+
+const displayCurrencyOptions = [
+  { value: 'USD', label: 'USD' },
+  { value: 'EUR', label: 'EUR' },
+  { value: 'GBP', label: 'GBP' },
+  { value: 'JPY', label: 'JPY' },
+  { value: 'CAD', label: 'CAD' }
+]
+
+const displayMaturityOptions = computed(() => {
+  let base = []
+  if (instrumentType.value === 'money-market') {
+    base = [
+      { value: '1M', label: '1 Month' },
+      { value: '3M', label: '3 Months' },
+      { value: '6M', label: '6 Months' },
+      { value: '1Y', label: '1 Year' }
+    ]
+  } else if (instrumentType.value === 'bonds') {
+    base = [
+      { value: '2Y', label: '2 Years' },
+      { value: '5Y', label: '5 Years' },
+      { value: '10Y', label: '10 Years' },
+      { value: '30Y', label: '30 Years' }
+    ]
+  } else if (instrumentType.value === 'tbills') {
+    base = [
+      { value: '4W', label: '4 Weeks' },
+      { value: '13W', label: '13 Weeks' },
+      { value: '26W', label: '26 Weeks' },
+      { value: '52W', label: '52 Weeks' }
+    ]
+  } else {
+    base = [
+      { value: '3M', label: '3 Months' },
+      { value: '1Y', label: '1 Year' },
+      { value: '5Y', label: '5 Years' },
+      { value: '10Y', label: '10 Years' }
+    ]
+  }
+  return base
+})
 
 // ===== COMPUTED =====
-const instrumentType = computed(() => route.params.type || route.path.split('/').pop())
 const instrumentName = computed(() => ({ 'money-market': 'Money Market', bonds: 'Bonds', tbills: 'T-Bills' }[instrumentType.value] || 'Instrument'))
-const instrumentDescription = computed(() => ({
-  'money-market': 'Short-term debt instruments including treasury bills, commercial paper',
-  bonds: 'Fixed income securities including government and corporate bonds',
-  tbills: 'Treasury bills - short-term government securities'
-}[instrumentType.value] || 'Financial instrument management'))
 
 const activeTab = computed({
   get: () => route.query.tab || 'upload',
@@ -1154,11 +1368,22 @@ const portfolioAvgRate = computed(() =>
   calculations.value.avgDiscountRate || 0
 )
 
-const effectiveMaturity = computed(() => selectedMaturityOption.value)
-const effectiveCountry = computed(() => selectedCountryOption.value)
-const effectiveCurrency = computed(() => selectedCurrencyOption.value)
+const effectiveMaturity = computed(() => {
+  if (selectedMaturityOption.value === '__custom__') return customMaturityInput.value || '1Y'
+  return selectedMaturityOption.value
+})
+const effectiveCountry = computed(() => {
+  if (selectedCountryOption.value === '__custom__') return customCountryInput.value || 'USA'
+  return selectedCountryOption.value
+})
+const effectiveCurrency = computed(() => {
+  if (selectedCurrencyOption.value === '__custom__') return customCurrencyInput.value || 'USD'
+  return selectedCurrencyOption.value
+})
+
 const selectedMaturityOptionLabel = computed(() => {
-  const opt = maturityOptions.value.find(o => o.value === selectedMaturityOption.value)
+  if (selectedMaturityOption.value === '__custom__') return customMaturityInput.value || 'Custom'
+  const opt = displayMaturityOptions.value.find(o => o.value === selectedMaturityOption.value)
   return opt ? opt.label : selectedMaturityOption.value
 })
 
@@ -1167,46 +1392,49 @@ const benchmarkYield = computed(() => {
   return getRateForMaturity(effectiveMaturity.value)
 })
 
-const SUPPORTED_COUNTRIES = ['USA', 'GBR', 'EUR', 'JPN', 'CAN']
+const instrumentSummaryColumnsForDisplay = computed(() => {
+  return instrumentSummary.value.columns.filter(c => 
+    !['_raw', '_source', 'index', '__v'].includes(c)
+  )
+})
 
-const countryOptions = computed(() => [
-  { value: 'USA', label: 'United States' },
-  { value: 'GBR', label: 'United Kingdom' },
-  { value: 'EUR', label: 'Eurozone' },
-  { value: 'JPN', label: 'Japan' },
-  { value: 'CAN', label: 'Canada' }
-])
+const portfolioSummaryColumnsForDisplay = computed(() => {
+  return portfolioSummary.value.columns.filter(c => 
+    !['_raw', '_source', 'index', '__v'].includes(c)
+  )
+})
 
-const currencyOptions = computed(() => [
-  { value: 'USD', label: 'USD' },
-  { value: 'EUR', label: 'EUR' },
-  { value: 'GBP', label: 'GBP' },
-  { value: 'JPY', label: 'JPY' },
-  { value: 'CAD', label: 'CAD' }
-])
+const sortedInstrumentSummaryRows = computed(() => {
+  if (!sortColumn.value) return instrumentSummary.value.rows
+  return [...instrumentSummary.value.rows].sort((a, b) => {
+    let valA = a[sortColumn.value]
+    let valB = b[sortColumn.value]
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      return sortOrder.value === 'asc' ? valA - valB : valB - valA
+    }
+    valA = String(valA || '')
+    valB = String(valB || '')
+    return sortOrder.value === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
+  })
+})
 
-const maturityOptions = computed(() => {
-  let baseOptions = []
-  if (filterOptions.value.maturities?.length) baseOptions = filterOptions.value.maturities
-  else baseOptions = [
-    { value: '1M', label: '1 Month' }, { value: '3M', label: '3 Months' },
-    { value: '6M', label: '6 Months' }, { value: '1Y', label: '1 Year' },
-    { value: '2Y', label: '2 Years' }, { value: '5Y', label: '5 Years' },
-    { value: '10Y', label: '10 Years' }, { value: '30Y', label: '30 Years' },
-    { value: '4W', label: '4 Weeks' }, { value: '8W', label: '8 Weeks' },
-    { value: '13W', label: '13 Weeks' }, { value: '26W', label: '26 Weeks' },
-    { value: '52W', label: '52 Weeks' }
-  ]
-  if (instrumentType.value === 'money-market') return baseOptions.filter(opt => ['1M','3M','6M','1Y'].includes(opt.value))
-  if (instrumentType.value === 'bonds') return baseOptions.filter(opt => ['2Y','5Y','10Y','30Y'].includes(opt.value))
-  if (instrumentType.value === 'tbills') return baseOptions.filter(opt => ['4W','8W','13W','26W','52W'].includes(opt.value))
-  return baseOptions
+const sortedPortfolioSummaryRows = computed(() => {
+  if (!sortColumn.value) return portfolioSummary.value.rows
+  return [...portfolioSummary.value.rows].sort((a, b) => {
+    let valA = a[sortColumn.value]
+    let valB = b[sortColumn.value]
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      return sortOrder.value === 'asc' ? valA - valB : valB - valA
+    }
+    valA = String(valA || '')
+    valB = String(valB || '')
+    return sortOrder.value === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
+  })
 })
 
 // ===== FUNCTIONS =====
 function isStepComplete(tab) {
-  // Use persisted completion state from workflowProgress.js
-  return isStepPersistedCompleted(sessionId.value, tab)
+  return isStepPersistedCompleted(activeSession.value?.id, tab)
 }
 
 function switchTab(tab) {
@@ -1292,8 +1520,68 @@ function getRateForMaturity(mat) {
   return null
 }
 
-function getCountryLabel(code) { const found = countryOptions.value.find(c => c.value === code); return found ? found.label : code }
-function getCurrencyLabel(code) { const found = currencyOptions.value.find(c => c.value === code); return found ? found.label : code }
+function getCountryLabel(code) {
+  const allCountries = [
+    ...displayCountryOptions,
+    { value: 'ZAF', label: 'South Africa' },
+    { value: 'AUS', label: 'Australia' },
+    { value: 'CHE', label: 'Switzerland' },
+    { value: 'NZL', label: 'New Zealand' },
+    { value: 'NOR', label: 'Norway' },
+    { value: 'SWE', label: 'Sweden' },
+    { value: 'DNK', label: 'Denmark' },
+    { value: 'BRA', label: 'Brazil' },
+    { value: 'MEX', label: 'Mexico' },
+    { value: 'IND', label: 'India' },
+    { value: 'CHN', label: 'China' },
+    { value: 'KOR', label: 'South Korea' },
+    { value: 'SGP', label: 'Singapore' },
+    { value: 'HKG', label: 'Hong Kong' },
+    { value: 'RUS', label: 'Russia' },
+    { value: 'TUR', label: 'Turkey' },
+    { value: 'SAU', label: 'Saudi Arabia' },
+    { value: 'ARE', label: 'UAE' },
+    { value: 'ISR', label: 'Israel' }
+  ]
+  const found = allCountries.find(c => c.value === code)
+  return found ? found.label : code
+}
+
+function getCurrencyLabel(code) {
+  const allCurrencies = [
+    ...displayCurrencyOptions,
+    { value: 'AUD', label: 'AUD' },
+    { value: 'CHF', label: 'CHF' },
+    { value: 'NZD', label: 'NZD' },
+    { value: 'NOK', label: 'NOK' },
+    { value: 'SEK', label: 'SEK' },
+    { value: 'DKK', label: 'DKK' },
+    { value: 'ZAR', label: 'ZAR' },
+    { value: 'BRL', label: 'BRL' },
+    { value: 'MXN', label: 'MXN' },
+    { value: 'INR', label: 'INR' },
+    { value: 'CNY', label: 'CNY' },
+    { value: 'KRW', label: 'KRW' },
+    { value: 'SGD', label: 'SGD' },
+    { value: 'HKD', label: 'HKD' },
+    { value: 'RUB', label: 'RUB' },
+    { value: 'TRY', label: 'TRY' },
+    { value: 'SAR', label: 'SAR' },
+    { value: 'AED', label: 'AED' },
+    { value: 'ILS', label: 'ILS' }
+  ]
+  const found = allCurrencies.find(c => c.value === code)
+  return found ? found.label : code
+}
+
+function formatLabel(key) {
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
+}
+
+function formatNumber(num) {
+  if (num === undefined || num === null) return '0.00'
+  return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 // ===== UPLOAD FUNCTIONS =====
 const fileInput = ref(null)
@@ -1316,7 +1604,7 @@ function addToHistory(filename, data) {
     name: filename,
     date: Date.now(),
     data: JSON.stringify(data),
-    fileData: uploadedFileBase64.value // Store base64 if available (for small files)
+    fileData: uploadedFileBase64.value
   })
   if (uploadHistory.value.length > 10) uploadHistory.value.pop()
   saveUploadHistory()
@@ -1330,7 +1618,6 @@ async function loadHistoryFile(item) {
     originalFileColumns.value = Object.keys(data[0] || {})
     fileColumns.value = [...originalFileColumns.value]
     
-    // Restore file data if available
     if (item.fileData) {
       uploadedFileBase64.value = item.fileData
       try {
@@ -1362,123 +1649,59 @@ function deleteHistoryItem(idx) {
 function handleFileUpload(e) {
   const file = e.target.files[0]
   if (file) {
-    // Store a copy of the file to prevent it from being cleared
     const fileCopy = new File([file], file.name, { type: file.type })
     uploadedFile.value = fileCopy
-    setTimeout(() => readFileData(fileCopy), 50)
+    readFileData(fileCopy)
   }
 }
 
 function handleDrop(e) {
   e.preventDefault()
-  isDragging.value = false
   const file = e.dataTransfer.files[0]
   if (file) {
-    // Store a copy of the file to prevent it from being cleared
     const fileCopy = new File([file], file.name, { type: file.type })
     uploadedFile.value = fileCopy
-    setTimeout(() => readFileData(fileCopy), 50)
+    readFileData(fileCopy)
   }
 }
 
 async function readFileData(file) {
   console.log('readFileData called with file:', file.name, 'size:', file.size)
   fileLoading.value = true
-  uploadProgress.value = 0
-  const ext = file.name.split('.').pop().toLowerCase()
-  let data = []
+  uploadError.value = ''
   
   try {
-    // Client-side Excel parsing with XLSX library (fast, no backend needed)
-    if (['xlsx', 'xls', 'xlsm', 'xlsb', 'ods'].includes(ext)) {
-      uploadProgress.value = 10
-      
-      console.log('Starting client-side Excel parsing...')
-      const arrayBuffer = await file.arrayBuffer()
-      uploadProgress.value = 30
-      
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' })
-      console.log('Workbook loaded, sheets:', workbook.SheetNames)
-      uploadProgress.value = 50
-      
-      // Parse all sheets for viewer
-      const sheets = []
-      for (const sheetName of workbook.SheetNames) {
-        const worksheet = workbook.Sheets[sheetName]
-        // Use raw: false to preserve Excel formatting exactly as it appears
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
-        const sheetHeaders = jsonData.length > 0 ? Object.keys(jsonData[0]) : []
-        
-        sheets.push({
-          name: sheetName,
-          data: jsonData,
-          headers: sheetHeaders,
-          row_count: jsonData.length,
-          column_count: sheetHeaders.length
-        })
-        
-        console.log(`Sheet ${sheetName}: ${jsonData.length} rows, ${sheetHeaders.length} columns`)
-      }
-      
-      // Store workbook sheets for viewer
-      workbookSheets.value = sheets
-      console.log('✅ Stored workbook sheets:', sheets.length)
-      console.log('✅ workbookSheets.value after storage:', workbookSheets.value.length)
-      
-      // Use first sheet for initial data
-      if (sheets.length > 0) {
-        data = sheets[0].data
-        rawData.value = sheets[0].data
-        // Don't set headers.value - it doesn't exist, use fileColumns instead
-        currentSheetName.value = sheets[0].name
-        
-        // Don't auto-open viewer - let user click button
-        console.log('✅ Workbook sheets loaded, ready for viewer')
-      }
-      
-      uploadProgress.value = 100
-    } else if (ext === 'csv') {
-      uploadProgress.value = 20
-      const text = await file.text()
-      uploadProgress.value = 40
-      const lines = text.split(/\r?\n/).filter(l => l.trim())
-      if (lines.length === 0) throw new Error('Empty file')
-      let delimiter = ','
-      if (lines[0].includes(';') && !lines[0].includes(',')) delimiter = ';'
-      const csvHeaders = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ''))
-      uploadProgress.value = 60
-      data = lines.slice(1).map(line => {
-        const vals = line.split(delimiter).map(v => v.trim().replace(/"/g, ''))
-        const row = {}
-        csvHeaders.forEach((h, i) => { row[h] = vals[i] !== undefined ? vals[i] : '' })
-        return row
-      })
-      uploadProgress.value = 80
-    } else {
-      throw new Error('Unsupported file format. Please upload Excel or CSV files.')
-    }
+    const result = await worksheetWorkflow.handleFileUpload(file)
     
-    uploadProgress.value = 100
-    rawData.value = data
-    originalRawData.value = JSON.parse(JSON.stringify(data))
-    originalFileColumns.value = Object.keys(data[0] || {})
-    fileColumns.value = [...originalFileColumns.value]
-    columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-    applyCurrentMapping()
-    // Show preview after upload
-    showPreview.value = true
-    addToHistory(file.name, data)
-    debouncedSave()
-    forceUpdate.value++
+    if (result.success) {
+      workbookSheets.value = worksheetWorkflow.workbookSheets.value
+      worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
+      originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
+      
+      console.log('✅ Workbook loaded via worksheet workflow:', result.sheets.length, 'sheets')
+      
+      if (result.sheets.length > 0) {
+        const firstSheet = result.sheets[0]
+        const selection = worksheetWorkflow.selectWorksheet(firstSheet.name)
+        if (selection.success) {
+          currentSheetName.value = firstSheet.name
+          console.log('✅ Auto-selected first sheet:', firstSheet.name)
+        }
+      }
+      
+      addToHistory(file.name, result.sheets[0]?.data || [])
+      debouncedSave()
+      forceUpdate.value++
+    } else {
+      throw new Error(result.error || 'Failed to upload workbook')
+    }
   } catch (err) {
     console.error('Upload error:', err)
+    uploadError.value = err.message
     alert(`Failed to parse file: ${err.message}`)
-    // Don't clear uploadedFile on error so user can retry
-    // uploadedFile.value = null
     rawData.value = []
   } finally {
     fileLoading.value = false
-    uploadProgress.value = 0
   }
 }
 
@@ -1498,9 +1721,75 @@ function removeFile() {
   columnMapping.value = {}
   fileColumns.value = []
   showPreview.value = false
+  uploadError.value = ''
+  worksheetWorkflow.reset()
   debouncedSave()
   forceUpdate.value++
   if (fileInput.value) fileInput.value.value = ''
+}
+
+function handleWorksheetSelect(sheetName) {
+  worksheetWorkflow.selectWorksheet(sheetName)
+  currentSheetName.value = sheetName
+}
+
+async function handleWorkOnSheet(sheetName) {
+  fileLoading.value = true
+  uploadError.value = ''
+  
+  try {
+    const result = await worksheetWorkflow.processWorksheet(
+      sheetName,
+      requiredColumns.value,
+      columnVariations.value
+    )
+    
+    if (result.success) {
+      rawData.value = result.tabularData || []
+      sheetType.value = result.sheetType || 'multi'
+      extractedValues.value = result.extractedValues || {}
+      
+      worksheetStatus.value[sheetName] = {
+        ...worksheetStatus.value[sheetName],
+        processed: true,
+        sheetType: result.sheetType
+      }
+      
+      // Ensure preview shows the mapped data
+      if (result.sheetType === 'multi') {
+        // Auto-map columns and show preview
+        const headers = Object.keys(rawData.value[0] || {})
+        columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
+        applyCurrentMapping()
+        showPreview.value = true
+      }
+      
+      if (result.sheetType === 'single') {
+        showPreview.value = true
+      }
+      
+      debouncedSave()
+      forceUpdate.value++
+    } else {
+      uploadError.value = result.error || 'Failed to process worksheet'
+    }
+  } catch (err) {
+    console.error('Worksheet processing error:', err)
+    uploadError.value = err.message
+  } finally {
+    fileLoading.value = false
+  }
+}
+
+function handleViewResults(sheetName) {
+  const status = worksheetStatus.value[sheetName]
+  if (status?.processed) {
+    if (status.sheetType === 'single') {
+      activeTab.value = 'summary'
+    } else {
+      activeTab.value = 'calculations'
+    }
+  }
 }
 
 function applyCurrentMapping() {
@@ -1522,6 +1811,8 @@ function applyCurrentMapping() {
   rawData.value = mappedData
   const allMapped = requiredColumns.value.every(col => columnMapping.value[col])
   mappingApplied.value = allMapped
+  // Ensure preview shows mapping controls
+  showPreview.value = true
 }
 
 function updateColumnMapping(newMapping) {
@@ -1558,7 +1849,6 @@ function openMappingDialog() {
     originalFileColumns.value = [...fileColumns.value]
   }
   
-  // Auto-load saved mapping for this file
   if (uploadedFile.value) {
     const mappingKey = `mapping_${uploadedFile.value.name}_${uploadedFile.value.size}`
     const savedMapping = localStorage.getItem(mappingKey)
@@ -1582,7 +1872,6 @@ function closeMappingDialog() {
 function applyColumnMappingAndClose() {
   applyCurrentMapping()
   
-  // Auto-save mapping for this file
   if (uploadedFile.value && columnMapping.value) {
     const mappingKey = `mapping_${uploadedFile.value.name}_${uploadedFile.value.size}`
     localStorage.setItem(mappingKey, JSON.stringify(columnMapping.value))
@@ -1590,6 +1879,8 @@ function applyColumnMappingAndClose() {
   }
   
   showMappingDialog.value = false
+  // Ensure preview stays visible with mapping controls
+  showPreview.value = true
   forceUpdate.value++
   refreshFileColumns()
 }
@@ -1605,16 +1896,13 @@ function resetMapping() {
 function handleSheetSelected(sheetName, sheetData, sheetHeaders) {
   console.log('Sheet selected:', sheetName)
   currentSheetName.value = sheetName
-  // Update the data that will be used for mapping
   rawData.value = sheetData
-  headers.value = sheetHeaders
 }
 
 function handleProcessSheet(sheetName, sheetData, sheetHeaders) {
   console.log('Processing sheet:', sheetName)
   showWorkbookViewer.value = false
   rawData.value = sheetData
-  headers.value = sheetHeaders
   applyCurrentMapping()
 }
 
@@ -1760,25 +2048,53 @@ function togglePreview() {
   showPreview.value = !showPreview.value
 }
 
-async function openWorkbookViewer() {
+// ----- WORKBOOK VIEWER FUNCTIONS -----
+function openWorkbookViewer() {
   console.log('=== Opening Workbook Viewer ===')
-  console.log('workbookSheets.value:', workbookSheets.value?.length)
   
-  // Use client-side parsed data (no backend needed)
   if (workbookSheets.value && workbookSheets.value.length > 0) {
-    // Build the workbook object for the modal viewer
-    viewerFileData.value = {
-      name: uploadedFile.value?.name || 'Excel File',
-      sheets: workbookSheets.value
+    showWorkbookViewer.value = true
+    if (!currentSheetName.value && workbookSheets.value.length) {
+      currentSheetName.value = workbookSheets.value[0].name
     }
-    showModalViewer.value = true
-    console.log('✅ Opening modal viewer with client-side data')
     return
   }
   
-  // Fallback if no sheets available
-  console.warn('⚠️ No workbook sheets available')
-  throw new Error('No workbook data available. Please upload a file first.')
+  if (rawData.value && rawData.value.length > 0) {
+    console.log('⚠️ No workbook sheets, creating from current data')
+    const headers = Object.keys(rawData.value[0] || {})
+    workbookSheets.value = [{
+      name: currentSheetName.value || 'Sheet1',
+      data: rawData.value,
+      headers: headers,
+      row_count: rawData.value.length,
+      column_count: headers.length
+    }]
+    showWorkbookViewer.value = true
+    return
+  }
+  
+  alert('No workbook data available. Please upload a file first.')
+}
+
+function closeWorkbookViewer() {
+  showWorkbookViewer.value = false
+}
+
+function workOnSelectedSheet() {
+  if (!currentSheetName.value) {
+    alert('Please select a sheet first.')
+    return
+  }
+  const sheet = workbookSheets.value.find(s => s.name === currentSheetName.value)
+  if (!sheet || !sheet.data || !sheet.data.length) {
+    alert('No data found in the selected sheet.')
+    return
+  }
+  handleWorkOnSheet(currentSheetName.value)
+  showWorkbookViewer.value = false
+  activeTab.value = 'upload'
+  forceUpdate.value++
 }
 
 function handleProcessSheetFromModal(payload) {
@@ -1786,17 +2102,90 @@ function handleProcessSheetFromModal(payload) {
   console.log('📈 Rows:', payload.data.length)
   console.log('📋 Headers:', payload.headers)
   
-  // Update the page state with the selected sheet data
+  worksheetStatus.value[payload.sheetName] = 'in_progress'
+  
   rawData.value = payload.data
   originalRawData.value = JSON.parse(JSON.stringify(payload.data))
   originalFileColumns.value = payload.headers || []
   fileColumns.value = [...originalFileColumns.value]
-  columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+  currentSheetName.value = payload.sheetName
   
-  // Apply the existing mapping workflow
+  const sheetDetection = detectSheetType(payload.data, instrumentType.value)
+  console.log('🔍 Sheet type detection:', sheetDetection)
+  
+  sheetType.value = sheetDetection.type
+  
+  if (sheetDetection.type === 'single') {
+    console.log('📋 Single-instrument sheet detected - extracting values')
+    handleSingleInstrumentSheet(payload.data, payload.sheetName)
+  } else {
+    console.log('📊 Multi-instrument sheet detected - proceeding with mapping workflow')
+    handleMultiInstrumentSheet(payload.data, payload.headers)
+  }
+}
+
+function handleMultiInstrumentSheet(data, headers) {
+  columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
   applyCurrentMapping()
+  showMappingDialog.value = true
+  console.log('✅ Multi-instrument sheet processed, mapping dialog shown')
+}
+
+function handleSingleInstrumentSheet(data, sheetName) {
+  const fieldMappings = getRequiredFieldMappings(instrumentType.value)
+  const extractedValues = extractSingleInstrumentValues(data, fieldMappings)
   
-  console.log('✅ Sheet processed and mapping applied')
+  console.log('📋 Extracted values:', extractedValues)
+  
+  const tabularData = convertExtractedToTabular(extractedValues)
+  
+  rawData.value = tabularData
+  originalRawData.value = JSON.parse(JSON.stringify(tabularData))
+  fileColumns.value = Object.keys(tabularData[0] || {})
+  originalFileColumns.value = [...fileColumns.value]
+  
+  columnMapping.value = {}
+  fileColumns.value.forEach(col => {
+    const requiredCol = findMatchingRequiredColumn(col, requiredColumns.value)
+    if (requiredCol) {
+      columnMapping.value[requiredCol] = col
+    }
+  })
+  
+  applyCurrentMapping()
+  activeTab.value = 'preview'
+  
+  console.log('✅ Single-instrument sheet processed, skipping to preview')
+}
+
+function convertExtractedToTabular(extractedValues) {
+  const row = {}
+  const columnMapping = {
+    faceValue: 'Face Value',
+    issueDate: 'Issue Date',
+    maturityDate: 'Maturity Date',
+    couponRate: 'Coupon Rate',
+    yield: 'Yield',
+    price: 'Price',
+    discountRate: 'Discount Rate',
+    frequency: 'Frequency'
+  }
+  
+  for (const [key, value] of Object.entries(extractedValues)) {
+    const columnName = columnMapping[key] || key
+    row[columnName] = value
+  }
+  
+  return [row]
+}
+
+function findMatchingRequiredColumn(column, requiredColumns) {
+  const lowerColumn = column.toLowerCase()
+  return requiredColumns.find(req => 
+    req.toLowerCase() === lowerColumn ||
+    lowerColumn.includes(req.toLowerCase()) ||
+    req.toLowerCase().includes(lowerColumn)
+  )
 }
 
 function autoDetectColumns(data, instrumentType) {
@@ -1839,10 +2228,10 @@ function buildDynamicColumns(results) {
   return [...allFields]
 }
 
+// ---- Process instrument data and update summaries ----
 function processInstrumentData(sheetName, data, instrumentType) {
   console.log(`🎯 Processing ${instrumentType} data from sheet: ${sheetName}`)
   
-  // Detect if multiple instruments exist in this sheet
   const instruments = detectInstruments(data)
   
   if (instruments.length > 1) {
@@ -1850,28 +2239,40 @@ function processInstrumentData(sheetName, data, instrumentType) {
     return calculateAllInstruments(instruments, sheetName, instrumentType)
   }
   
-  // Single instrument processing
   const results = runInstrumentCalculations(data, instrumentType)
   
   const instrumentResult = {
+    Source: sheetName,
     instrumentName: sheetName,
     instrumentType: instrumentType,
     ...results
   }
   
-  const columns = buildDynamicColumns([instrumentResult])
+  const newColumns = buildDynamicColumns([...instrumentSummary.value.rows, instrumentResult])
+  instrumentSummary.value.rows.push(instrumentResult)
+  instrumentSummary.value.columns = newColumns
   
-  instrumentSummary.value = {
-    columns: columns,
-    rows: [instrumentResult]
+  const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+  if (sid) {
+    const summaryKey = `${instrumentType.value}_session_${sid}_summary`
+    localStorage.setItem(summaryKey, JSON.stringify(instrumentSummary.value))
   }
   
-  const newColumns = buildDynamicColumns([...portfolioSummary.value.rows, instrumentResult])
+  worksheetStatus.value[sheetName] = 'completed'
+  console.log('✅ Worksheet marked as completed:', sheetName)
+  
+  const portfolioNewColumns = buildDynamicColumns([...portfolioSummary.value.rows, instrumentResult])
   portfolioSummary.value.rows.push(instrumentResult)
-  portfolioSummary.value.columns = newColumns
+  portfolioSummary.value.columns = portfolioNewColumns
   
   console.log('✅ Instrument processed and saved to summaries')
-  console.log('📊 Dynamic columns:', columns)
+  console.log('📊 Dynamic columns:', newColumns)
+  
+  if (instruments.length > 1 && !showAllCalculationsPopup.value) {
+    setTimeout(() => {
+      showAllCalculationsPopup.value = true
+    }, 500)
+  }
 }
 
 function calculateAllInstruments(instruments, sheetName, instrumentType) {
@@ -1880,6 +2281,7 @@ function calculateAllInstruments(instruments, sheetName, instrumentType) {
   instruments.forEach((data, index) => {
     const result = runInstrumentCalculations(data, instrumentType)
     const instrumentResult = {
+      Source: sheetName,
       instrumentName: `${sheetName} - Instrument ${index + 1}`,
       instrumentType: instrumentType,
       ...result
@@ -1887,18 +2289,31 @@ function calculateAllInstruments(instruments, sheetName, instrumentType) {
     results.push(instrumentResult)
   })
   
-  const columns = buildDynamicColumns(results)
-  instrumentSummary.value = {
-    columns: columns,
-    rows: results
+  const newColumns = buildDynamicColumns([...instrumentSummary.value.rows, ...results])
+  instrumentSummary.value.rows.push(...results)
+  instrumentSummary.value.columns = newColumns
+  
+  const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+  if (sid) {
+    const summaryKey = `${instrumentType.value}_session_${sid}_summary`
+    localStorage.setItem(summaryKey, JSON.stringify(instrumentSummary.value))
   }
   
-  const newColumns = buildDynamicColumns([...portfolioSummary.value.rows, ...results])
+  worksheetStatus.value[sheetName] = 'completed'
+  console.log('✅ Worksheet marked as completed:', sheetName)
+  
+  const portfolioNewColumns = buildDynamicColumns([...portfolioSummary.value.rows, ...results])
   portfolioSummary.value.rows.push(...results)
-  portfolioSummary.value.columns = newColumns
+  portfolioSummary.value.columns = portfolioNewColumns
   
   console.log(`✅ Processed ${results.length} instruments from sheet`)
-  console.log('📊 Dynamic columns:', columns)
+  console.log('📊 Dynamic columns:', newColumns)
+  
+  if (results.length > 1 && !showAllCalculationsPopup.value) {
+    setTimeout(() => {
+      showAllCalculationsPopup.value = true
+    }, 500)
+  }
   
   return results
 }
@@ -1906,19 +2321,75 @@ function calculateAllInstruments(instruments, sheetName, instrumentType) {
 function runInstrumentCalculations(data, instrumentType) {
   const results = {}
   
-  if (data.length > 0) {
-    const columns = getInstrumentColumns(instrumentType)
-    columns.forEach(col => {
-      const matchingKey = Object.keys(data[0]).find(key => 
-        key.toLowerCase().includes(col.toLowerCase()) || 
-        col.toLowerCase().includes(key.toLowerCase())
+  if (data.length === 0) return results
+  
+  const getNumber = (val) => {
+    const num = parseFloat(val)
+    return isNaN(num) ? 0 : num
+  }
+  
+  const findColumn = (patterns) => {
+    const availableCols = Object.keys(data[0] || {})
+    for (const pattern of patterns) {
+      const found = availableCols.find(col => 
+        col.toLowerCase().includes(pattern.toLowerCase()) || 
+        pattern.toLowerCase().includes(col.toLowerCase())
       )
-      if (matchingKey) {
-        results[col] = data[0][matchingKey]
-      } else {
-        results[col] = ''
-      }
-    })
+      if (found) return found
+    }
+    return null
+  }
+  
+  const amountCol = findColumn(['Amount', 'FaceValue', 'Face Value', 'Principal', 'Value', 'Notional', 'Nominal', 'Par Value', 'Investment'])
+  const rateCol = findColumn(['Rate', 'InterestRate', 'Interest Rate', 'CouponRate', 'Coupon Rate', 'DiscountRate', 'Discount Rate', 'Yield', 'YTM'])
+  const instrumentCol = findColumn(['Instrument', 'Instrument Name', 'Name', 'Security', 'Description'])
+  
+  const totalValue = data.reduce((s, r) => s + getNumber(r[amountCol] || 0), 0)
+  const totalRate = data.reduce((s, r) => s + getNumber(r[rateCol] || 0), 0)
+  const weightedSum = data.reduce((s, r) => s + (getNumber(r[rateCol] || 0) * getNumber(r[amountCol] || 0)), 0)
+  const avgRateVal = totalRate / (data.length || 1)
+  
+  if (instrumentType === 'money-market') {
+    results['Total Value'] = totalValue
+    results['Instrument Count'] = data.length
+    results['Avg Rate'] = avgRateVal.toFixed(2)
+    results['Weighted Avg Rate'] = (totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : '0.00')
+    results['Total Interest'] = (totalValue * avgRateVal / 100).toFixed(2)
+    results['Interest Earned'] = (totalValue * avgRateVal / 100 * 90 / 365).toFixed(2)
+    results['Annual Yield'] = ((Math.pow(1 + avgRateVal / 100, 365 / 90) - 1) * 100).toFixed(2)
+    results['Effective Annual Rate'] = ((Math.pow(1 + avgRateVal / 100, 1) - 1) * 100).toFixed(2)
+    results['Avg Days to Maturity'] = 90
+    results['Total Principal'] = totalValue
+  } else if (instrumentType === 'bonds') {
+    const yieldCol = findColumn(['Yield', 'YTM', 'YieldToMaturity']) || rateCol
+    const totalYield = data.reduce((s, r) => s + getNumber(r[yieldCol] || 0), 0)
+    const avgCoupon = totalRate / (data.length || 1)
+    const avgYieldVal = totalYield / (data.length || 1)
+    
+    results['Total Value'] = totalValue
+    results['Instrument Count'] = data.length
+    results['Avg Coupon Rate'] = avgCoupon.toFixed(2)
+    results['Weighted Avg Coupon'] = (totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : '0.00')
+    results['Total Annual Income'] = (totalValue * avgCoupon / 100).toFixed(2)
+    results['Avg YTM'] = avgYieldVal.toFixed(2)
+    results['Duration'] = (10 * 0.7).toFixed(2)
+  } else {
+    const avgDiscount = totalRate / (data.length || 1)
+    const discountAmount = totalValue * (avgDiscount / 100) * 91 / 360
+    const price = totalValue - discountAmount
+    
+    results['Total Value'] = totalValue
+    results['Instrument Count'] = data.length
+    results['Avg Discount Rate'] = avgDiscount.toFixed(2)
+    results['Weighted Avg Discount'] = (totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : '0.00')
+    results['Total Discount'] = discountAmount.toFixed(2)
+    results['Effective Yield'] = (price > 0 ? ((Math.pow(1 + discountAmount / price, 365 / 91) - 1) * 100).toFixed(2) : '0.00')
+    results['Bond Equivalent Yield'] = (price > 0 ? ((discountAmount / price) * (365 / 91) * 100).toFixed(2) : '0.00')
+    results['Discount Yield'] = (totalValue > 0 ? ((discountAmount / totalValue) * (360 / 91) * 100).toFixed(2) : '0.00')
+    results['Price per 100'] = (100 * (1 - (avgDiscount / 100) * (91 / 360))).toFixed(2)
+    results['Total Purchase Price'] = price.toFixed(2)
+    results['Avg Investment'] = (data.length > 0 ? (price / data.length).toFixed(2) : '0.00')
+    results['Avg Days to Maturity'] = 91
   }
   
   return results
@@ -2008,11 +2479,22 @@ function exportSummary() {
 
 function viewInstrumentSummaryExcel() {
   showInstrumentExcelPopup.value = true
+  sortColumn.value = ''
+  sortOrder.value = 'asc'
   console.log('📊 Opening Instrument Summary Excel popup')
 }
 
 function closeInstrumentExcelPopup() {
   showInstrumentExcelPopup.value = false
+}
+
+function sortByColumn(col) {
+  if (sortColumn.value === col) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortColumn.value = col
+    sortOrder.value = 'asc'
+  }
 }
 
 function exportInstrumentSummaryExcel() {
@@ -2111,77 +2593,7 @@ function goToPreviousStep() {
   }
 }
 
-// ─── Cumulative Recording ───────────────────────────────
-function saveToCumulativeRecords(instrumentData) {
-  const record = {
-    id: Date.now(),
-    timestamp: new Date().toISOString(),
-    instrumentType: selectedInstrumentType.value,
-    data: JSON.parse(JSON.stringify(instrumentData))
-  }
-  
-  cumulativeRecords.value.push(record)
-  
-  const storageKey = `cumulative_records_${selectedInstrumentType.value}`
-  localStorage.setItem(storageKey, JSON.stringify(cumulativeRecords.value))
-  
-  console.log('💾 Saved to cumulative records:', record)
-}
-
-function loadCumulativeRecords() {
-  const storageKey = `cumulative_records_${selectedInstrumentType.value}`
-  const saved = localStorage.getItem(storageKey)
-  
-  if (saved) {
-    try {
-      cumulativeRecords.value = JSON.parse(saved)
-      console.log('📂 Loaded cumulative records:', cumulativeRecords.value.length)
-    } catch (e) {
-      console.error('Error loading cumulative records:', e)
-      cumulativeRecords.value = []
-    }
-  }
-}
-
-function showCumulativeHistoryPopup() {
-  showCumulativeHistory.value = true
-}
-
-function closeCumulativeHistoryPopup() {
-  showCumulativeHistory.value = false
-}
-
-function clearCumulativeRecords() {
-  if (confirm('Are you sure you want to clear all cumulative records?')) {
-    cumulativeRecords.value = []
-    const storageKey = `cumulative_records_${selectedInstrumentType.value}`
-    localStorage.removeItem(storageKey)
-    console.log('🗑️ Cleared cumulative records')
-  }
-}
-
-function exportCumulativeRecords() {
-  const data = {
-    instrumentType: selectedInstrumentType.value,
-    records: cumulativeRecords.value,
-    exportDate: new Date().toISOString()
-  }
-  
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${selectedInstrumentType.value.replace(' ', '_')}_cumulative_records.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-  
-  alert('Cumulative records exported successfully!')
-}
-
 function handleSheetSelection(sheetData) {
-  // Process selected worksheet data
   if (sheetData && sheetData.data) {
     rawData.value = sheetData.data
     originalRawData.value = JSON.parse(JSON.stringify(sheetData.data))
@@ -2237,7 +2649,6 @@ async function continueAfterUpload() {
   if (!uploadedFile.value) { alert('Please upload a file first.'); return }
   if (!rawData.value.length) { alert('No data loaded. Please upload a valid file.'); return }
   saveSessionData()
-  // Force tab switch with nextTick to ensure DOM updates
   await nextTick()
   activeTab.value = 'cleaning'
   await nextTick()
@@ -2246,7 +2657,6 @@ async function continueAfterUpload() {
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
     await markStepCompleted(String(sid), 'upload')
-    completedSteps.value.add('upload')
     saveSessionData()
   }
 }
@@ -2344,7 +2754,7 @@ async function continueAfterCleaning() {
   }
 }
 
-// ===== CALCULATIONS (BACKEND INTEGRATION) =====
+// ===== CALCULATIONS (BACKEND + SYNC TO SUMMARIES) =====
 async function calculateMetrics() {
   if (!cleanedData.value.length) {
     console.warn('No cleaned data to calculate')
@@ -2352,13 +2762,88 @@ async function calculateMetrics() {
   }
 
   try {
-    const response = await dataAPI.calculate(cleanedData.value, instrumentType.value, {
+    const response = await api.calculationsAPI.calculate(cleanedData.value, instrumentType.value, {
       country: effectiveCountry.value,
       currency: effectiveCurrency.value,
-      maturity: effectiveMaturity.value
+      maturity: effectiveMaturity.value,
+      manualInputs: manualInputs.value
     })
     if (response?.success && response?.data) {
       calculations.value = response.data
+      formulas.value = response.data.formulas || {}
+      
+      // ---- SYNC CALCULATIONS TO INSTRUMENT SUMMARY ----
+      const summaryRow = {
+        'Instrument Name': instrumentName.value,
+        'Instrument Type': instrumentType.value,
+        'Total Value': calculations.value.totalValue || 0,
+        'Instrument Count': calculations.value.instrumentCount || 0,
+        'Avg Rate': calculations.value.avgRate || 0,
+        'Weighted Avg Rate': calculations.value.weightedAvgRate || 0,
+        'Total Interest': calculations.value.totalInterest || 0,
+        'Interest Earned': calculations.value.interestEarned || 0,
+        'Annual Yield': calculations.value.annualYield || 0,
+        'Effective Annual Rate': calculations.value.effectiveAnnualRate || 0,
+        'Avg Days to Maturity': calculations.value.avgDaysToMaturity || 0,
+        'Total Principal': calculations.value.totalPrincipal || 0,
+        'Weighted Avg Coupon': calculations.value.weightedAvgCoupon || 0,
+        'Total Annual Income': calculations.value.totalAnnualIncome || 0,
+        'Avg YTM': calculations.value.avgYTM || 0,
+        'Duration': calculations.value.duration || 0,
+        'Weighted Avg Discount': calculations.value.weightedAvgDiscount || 0,
+        'Total Discount': calculations.value.totalDiscount || 0,
+        'Effective Yield': calculations.value.effectiveYield || 0,
+        'Bond Equivalent Yield': calculations.value.bondEquivalentYield || 0,
+        'Price per 100': calculations.value.pricePer100 || 0,
+        'Total Purchase Price': calculations.value.totalPurchasePrice || 0,
+        'Avg Investment': calculations.value.avgInvestment || 0,
+        'Holding Period Yield': calculations.value.holdingPeriodYield || 0,
+        'Annualized Yield': calculations.value.annualizedYield || 0,
+        'FRED Benchmark': calculations.value.fred?.benchmark_rate || null
+      }
+      
+      // Remove existing row for this instrument type
+      const existingIndex = instrumentSummary.value.rows.findIndex(r => r['Instrument Type'] === instrumentType.value)
+      if (existingIndex !== -1) {
+        instrumentSummary.value.rows.splice(existingIndex, 1)
+      }
+      instrumentSummary.value.rows.push(summaryRow)
+      const allFields = new Set()
+      instrumentSummary.value.rows.forEach(r => {
+        Object.keys(r).forEach(k => allFields.add(k))
+      })
+      instrumentSummary.value.columns = Array.from(allFields)
+      
+      // Also update portfolioSummary
+      const portExisting = portfolioSummary.value.rows.findIndex(r => r['Instrument Type'] === instrumentType.value)
+      if (portExisting !== -1) {
+        portfolioSummary.value.rows.splice(portExisting, 1)
+      }
+      portfolioSummary.value.rows.push(summaryRow)
+      const portFields = new Set()
+      portfolioSummary.value.rows.forEach(r => {
+        Object.keys(r).forEach(k => portFields.add(k))
+      })
+      portfolioSummary.value.columns = Array.from(portFields)
+      
+      // Save to localStorage
+      const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+      if (sid) {
+        const summaryKey = `${instrumentType.value}_session_${sid}_summary`
+        localStorage.setItem(summaryKey, JSON.stringify(instrumentSummary.value))
+        const portfolioKey = `${instrumentType.value}_session_${sid}_portfolio`
+        localStorage.setItem(portfolioKey, JSON.stringify(portfolioSummary.value))
+      }
+      
+      console.log('✅ Calculations synced to instrumentSummary and portfolioSummary')
+      
+      // If multiple instruments, show the popup
+      if (instrumentSummary.value.rows.length >= 2 && !showAllCalculationsPopup.value) {
+        setTimeout(() => {
+          showAllCalculationsPopup.value = true
+        }, 500)
+      }
+      
       saveSessionData()
     } else {
       console.error('Backend calculation failed:', response?.message)
@@ -2369,6 +2854,14 @@ async function calculateMetrics() {
   await enrichCalculationsWithFred()
   debouncedSave()
   forceUpdate.value++
+}
+
+function updateInput(key, value) {
+  manualInputs.value[key] = parseFloat(value) || 0
+}
+
+async function recalculateWithInputs() {
+  await calculateMetrics()
 }
 
 async function continueToVisualizations() {
@@ -2404,8 +2897,9 @@ async function fetchYieldCurve() {
   const maturity = effectiveMaturity.value
   const currency = effectiveCurrency.value || 'USD'
 
-  if (!country || !SUPPORTED_COUNTRIES.includes(country)) {
-    yieldCurveError.value = `Country "${country || 'none'}" is not supported. Please select one of: ${SUPPORTED_COUNTRIES.join(', ')}.`
+  const supportedCountries = ['USA', 'GBR', 'EUR', 'JPN', 'CAN', 'AUS', 'CHE', 'NZL', 'NOR', 'SWE', 'DNK', 'BRA', 'MEX', 'IND', 'CHN', 'KOR', 'SGP', 'HKG', 'RUS', 'TUR', 'SAU', 'ARE', 'ISR', 'ZAF']
+  if (!country || !supportedCountries.includes(country) && country !== '__custom__') {
+    yieldCurveError.value = `Country "${country || 'none'}" is not supported. Please select one from the list or use Custom.`
     yieldCurveData.value = []
     return
   }
@@ -2538,7 +3032,6 @@ async function renderYieldCurveChart() {
     return
   }
 
-  // Transform data to appropriate units
   const transformed = filtered.map(d => {
     let xValue = d.maturity
     if (unitLabel === 'Months' && d.maturity < 1) {
@@ -2605,18 +3098,46 @@ async function renderYieldCurveChart() {
   })
 }
 
+// ---- Custom filter handlers ----
+function onCustomCountryInput() {
+  selectedCountryOption.value = '__custom__'
+  onFredFilterChange()
+}
+
+function onCustomCurrencyInput() {
+  selectedCurrencyOption.value = '__custom__'
+  onFredFilterChange()
+}
+
+function onCustomMaturityInput() {
+  selectedMaturityOption.value = '__custom__'
+  onFredFilterChange()
+}
+
 function onCountrySelectChange() {
-  fredFilters.value.country = selectedCountryOption.value
+  if (selectedCountryOption.value !== '__custom__') {
+    fredFilters.value.country = selectedCountryOption.value
+  } else {
+    fredFilters.value.country = customCountryInput.value || 'USA'
+  }
   onFredFilterChange()
 }
 
 function onCurrencySelectChange() {
-  fredFilters.value.currency = selectedCurrencyOption.value
+  if (selectedCurrencyOption.value !== '__custom__') {
+    fredFilters.value.currency = selectedCurrencyOption.value
+  } else {
+    fredFilters.value.currency = customCurrencyInput.value || 'USD'
+  }
   onFredFilterChange()
 }
 
 function onMaturitySelectChange() {
-  fredFilters.value.maturity = selectedMaturityOption.value
+  if (selectedMaturityOption.value !== '__custom__') {
+    fredFilters.value.maturity = selectedMaturityOption.value
+  } else {
+    fredFilters.value.maturity = customMaturityInput.value || '1Y'
+  }
   onFredFilterChange()
 }
 
@@ -2711,195 +3232,211 @@ function deleteTemplateFromPopup(name) {
   }
 }
 
-// ===== SESSION MANAGEMENT =====
-function saveSessionData() {
-  const datasetId = route.query.dataset_id
-  if (datasetId) {
-    const payload = {
-      name: uploadedFile.value?.name || `${instrumentType.value}_${Date.now()}`,
-      file_base64: '',
-      sheet_names: [],
-      upload_id: datasetId,
-      data: cleanedData.value.length ? cleanedData.value : rawData.value,
-      headers: Object.keys((cleanedData.value[0] || rawData.value[0]) || {})
-    }
-    api.datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, payload.data, payload.headers, instrumentType.value)
-    if (activeSession.value) sessionManager.updateSession(activeSession.value.id, { last_tab: activeTab.value })
-    else localStorage.setItem(`instrument_${instrumentType.value}_last_tab`, activeTab.value)
+// ===== CALCULATION INSTRUMENT SELECTOR =====
+function selectInstrumentFromPopup(index) {
+  if (index < 0 || index >= instrumentSummary.value.rows.length) {
+    selectedCalculationInstrument.value = -1
+    currentlyViewingInstrument.value = null
     return
   }
+  
+  selectedCalculationInstrument.value = index
+  const selectedRow = instrumentSummary.value.rows[index]
+  const instrumentName = selectedRow['Instrument Name'] || `Instrument ${index + 1}`
+  currentlyViewingInstrument.value = instrumentName
+  
+  // Populate calculation fields with the selected instrument's data
+  calculations.value = {
+    totalValue: parseFloat(selectedRow['Total Value'] || selectedRow['Calculated Value'] || 0),
+    instrumentCount: 1,
+    avgRate: parseFloat(selectedRow['Avg Rate'] || 0),
+    avgCouponRate: parseFloat(selectedRow['Avg Coupon Rate'] || 0),
+    avgDiscountRate: parseFloat(selectedRow['Avg Discount Rate'] || 0),
+    weightedAvgRate: parseFloat(selectedRow['Weighted Avg Rate'] || 0),
+    weightedAvgCoupon: parseFloat(selectedRow['Weighted Avg Coupon'] || 0),
+    weightedAvgDiscount: parseFloat(selectedRow['Weighted Avg Discount'] || 0),
+    totalInterest: parseFloat(selectedRow['Total Interest'] || 0),
+    interestEarned: parseFloat(selectedRow['Interest Earned'] || 0),
+    annualYield: parseFloat(selectedRow['Annual Yield'] || 0),
+    effectiveAnnualRate: parseFloat(selectedRow['Effective Annual Rate'] || 0),
+    avgDaysToMaturity: parseFloat(selectedRow['Avg Days to Maturity'] || 0),
+    totalPrincipal: parseFloat(selectedRow['Total Principal'] || 0),
+    totalAnnualIncome: parseFloat(selectedRow['Total Annual Income'] || 0),
+    avgYTM: parseFloat(selectedRow['Avg YTM'] || 0),
+    duration: parseFloat(selectedRow['Duration'] || 0),
+    totalDiscount: parseFloat(selectedRow['Total Discount'] || 0),
+    effectiveYield: parseFloat(selectedRow['Effective Yield'] || 0),
+    bondEquivalentYield: parseFloat(selectedRow['Bond Equivalent Yield'] || 0),
+    pricePer100: parseFloat(selectedRow['Price per 100'] || 0),
+    totalPurchasePrice: parseFloat(selectedRow['Total Purchase Price'] || 0),
+    avgInvestment: parseFloat(selectedRow['Avg Investment'] || 0),
+    holdingPeriodYield: parseFloat(selectedRow['Holding Period Yield'] || 0),
+    annualizedYield: parseFloat(selectedRow['Annualized Yield'] || 0)
+  }
+  
+  // Also update the fred benchmark if available
+  if (selectedRow['FRED Benchmark']) {
+    calculations.value.fred = calculations.value.fred || {}
+    calculations.value.fred.benchmark_rate = parseFloat(selectedRow['FRED Benchmark'])
+  }
+  
+  console.log(`📊 Loaded calculations for: ${instrumentName}`, calculations.value)
+  
+  // Close the popup
+  closeAllCalculationsPopup()
+}
 
+function openAllCalculationsPopup() {
+  showAllCalculationsPopup.value = true
+  console.log('📊 Opening all calculations popup')
+}
+
+function closeAllCalculationsPopup() {
+  showAllCalculationsPopup.value = false
+}
+
+function exportAllCalculations() {
+  const allData = instrumentSummary.value.rows
+  const columns = instrumentSummary.value.columns
+  
+  const worksheet = XLSX.utils.json_to_sheet(allData)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'All Calculations')
+  XLSX.writeFile(workbook, 'all_instruments_calculations.xlsx')
+  
+  alert('All calculations exported successfully!')
+}
+
+// ===== SESSION MANAGEMENT =====
+function notifySessionUpdated(explicitSave = false, saveOptions = {}) {
   if (!activeSession.value) return
   const sid = activeSession.value.id
-  const wf = buildWorkflowSnapshot({
+  const instrumentCount = sessionManager.countSessionInstruments(sid)
+  sessionManager.updateSession(sid, { instrumentCount })
+  const detail = {
+    sessionId: sid,
+    explicitSave,
+    ...saveOptions
+  }
+  if (!explicitSave) detail.skipCapture = true
+  window.dispatchEvent(new CustomEvent('session-updated', { detail }))
+}
+
+async function saveToSession() {
+  if (!activeSession.value) {
+    alert('Please select or create a session on the Dashboard first.')
+    return
+  }
+  
+  const datasetSnapshot = {
     rawData: rawData.value,
     cleanedData: cleanedData.value,
     calculations: calculations.value,
-    activeTab: activeTab.value,
-    uploadedFile: uploadedFile.value,
-    cleaningStats: cleaningStats.value,
     columnMapping: columnMapping.value,
-    mappingApplied: mappingApplied.value,
-    originalRawData: originalRawData.value,
-    originalFileColumns: originalFileColumns.value,
+    worksheetStatus: worksheetStatus.value,
+    workbookSheets: workbookSheets.value,
+    instrumentSummary: instrumentSummary.value,
+    portfolioSummary: portfolioSummary.value,
     yieldCurveData: yieldCurveData.value,
     fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
-    sessionSavedAt: sessionSavedAt.value,
-    showPreview: showPreview.value,
-    completedSteps: Array.from(completedSteps.value)
-  })
-  sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, wf)
-  sessionManager.updateSession(sid, { last_tab: activeTab.value })
+    manualInputs: manualInputs.value,
+    formulas: formulas.value
+  }
 
-  const key = `${instrumentType.value}_session_${sid}`
-  localStorage.setItem(`${key}_raw`, JSON.stringify(rawData.value))
-  localStorage.setItem(`${key}_original`, JSON.stringify(originalRawData.value))
-  localStorage.setItem(`${key}_clean`, JSON.stringify(cleanedData.value))
-  localStorage.setItem(`${key}_calc`, JSON.stringify(calculations.value))
-  localStorage.setItem(`${key}_yieldCurve`, JSON.stringify(yieldCurveData.value))
-  localStorage.setItem(`${key}_mapping`, JSON.stringify(columnMapping.value))
-  localStorage.setItem(`${key}_fredFilters`, JSON.stringify({ country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value }))
-  localStorage.setItem(`${key}_showPreview`, JSON.stringify(showPreview.value))
-  localStorage.setItem(`${key}_completed`, JSON.stringify(Array.from(completedSteps.value)))
-  if (uploadedFile.value) localStorage.setItem(`${instrumentType.value}_uploaded_file_name`, uploadedFile.value.name)
+  try {
+    const response = await api.versionAPI.create(
+      activeSession.value.id,
+      instrumentType.value,
+      `Saved ${instrumentName.value} from ${activeTab.value}`,
+      datasetSnapshot,
+      null,
+      null,
+      null,
+      null,
+      null
+    )
+    console.log('✅ Version created:', response)
+
+    const updatedSession = await sessionManager.getSession(activeSession.value.id)
+    if (updatedSession) {
+      activeSession.value = updatedSession
+      window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: activeSession.value.id } }))
+    }
+
+    await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
+      ...datasetSnapshot,
+      uploadedFile: uploadedFile.value?.name || null,
+      cleaningStats: cleaningStats.value,
+      sessionSavedAt: new Date().toISOString()
+    })
+
+    alert('✅ Saved to session. A new version has been recorded in Version History.')
+  } catch (err) {
+    console.error('Failed to save version:', err)
+    alert('❌ Failed to save to session: ' + err.message)
+  }
+}
+
+function saveSessionData() {
+  if (!activeSession.value) return
+  const sid = activeSession.value.id
+  const datasetSnapshot = {
+    rawData: rawData.value,
+    cleanedData: cleanedData.value,
+    calculations: calculations.value,
+    columnMapping: columnMapping.value,
+    worksheetStatus: worksheetStatus.value,
+    workbookSheets: workbookSheets.value,
+    instrumentSummary: instrumentSummary.value,
+    portfolioSummary: portfolioSummary.value,
+    yieldCurveData: yieldCurveData.value,
+    fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+    uploadedFile: uploadedFile.value?.name || null,
+    cleaningStats: cleaningStats.value,
+    sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
+    manualInputs: manualInputs.value,
+    formulas: formulas.value
+  }
+  sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
+    .then(() => {
+      const count = sessionManager.countSessionInstruments(sid)
+      sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
+    })
+    .catch(err => console.error('Failed to save workflow:', err))
 }
 
 async function loadSavedData() {
-  const datasetId = route.query.dataset_id
-  if (datasetId) {
-    try {
-      const res = await api.datasetAPI.load(ddatasetId)
-      if (res && res.success && res.data) {
-        const last = res.data
-        rawData.value = last.data || []
-        originalRawData.value = JSON.parse(JSON.stringify(rawData.value))
-        originalFileColumns.value = Object.keys(rawData.value[0] || {})
-        fileColumns.value = [...originalFileColumns.value]
-        cleanedData.value = last.data || []
-        calculations.value = {}
-        uploadedFile.value = { name: last.name || '', size: 0 }
-        cleaningStats.value = { totalRows: rawData.value.length, validRows: cleanedData.value.length, removedRows: rawData.value.length - cleanedData.value.length, fixedMissing: 0 }
-        columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-        applyCurrentMapping()
-        showPreview.value = false
-        forceUpdate.value++
-        return true
-      }
-    } catch (err) { console.error(err) }
-  }
-
   if (!activeSession.value) return false
   const sid = activeSession.value.id
   let loaded = false
-  let wf = sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
-  if (!wf) {
-    await sessionManager.loadSessionFromDb(sid)
-    wf = sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
-  }
-  if (wf) {
-    loaded = applyWorkflowToPage(wf, {
-      rawData, cleanedData, calculations, uploadedFile, cleaningStats,
-      columnMapping, mappingApplied, originalRawData, originalFileColumns
-    })
-    if (wf.completedSteps) {
-      completedSteps.value = new Set(wf.completedSteps)
-    }
-    if (wf.sessionSavedAt) sessionSavedAt.value = wf.sessionSavedAt
-    if (originalFileColumns.value.length) fileColumns.value = [...originalFileColumns.value]
-    else if (originalRawData.value.length) fileColumns.value = Object.keys(originalRawData.value[0] || {})
-    if (wf.yieldCurveData) yieldCurveData.value = wf.yieldCurveData
-    if (wf.fredFilters) {
-      fredFilters.value = { ...fredFilters.value, ...wf.fredFilters }
-      if (wf.fredFilters.maturity) {
-        selectedMaturityOption.value = wf.fredFilters.maturity
+  try {
+    const wf = await sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
+    if (wf) {
+      rawData.value = wf.rawData || []
+      cleanedData.value = wf.cleanedData || []
+      calculations.value = wf.calculations || {}
+      columnMapping.value = wf.columnMapping || {}
+      worksheetStatus.value = wf.worksheetStatus || {}
+      workbookSheets.value = wf.workbookSheets || []
+      instrumentSummary.value = wf.instrumentSummary || { rows: [], columns: [] }
+      portfolioSummary.value = wf.portfolioSummary || { rows: [], columns: [] }
+      yieldCurveData.value = wf.yieldCurveData || []
+      manualInputs.value = wf.manualInputs || {}
+      formulas.value = wf.formulas || {}
+      if (wf.fredFilters) {
+        selectedCountryOption.value = wf.fredFilters.country || 'USA'
+        selectedCurrencyOption.value = wf.fredFilters.currency || 'USD'
+        selectedMaturityOption.value = wf.fredFilters.maturity || defaultMaturityForInstrument()
       }
-      if (wf.fredFilters.country) {
-        selectedCountryOption.value = wf.fredFilters.country
+      if (wf.uploadedFile) {
+        uploadedFile.value = { name: wf.uploadedFile, size: 0 }
       }
-      if (wf.fredFilters.currency) {
-        selectedCurrencyOption.value = wf.fredFilters.currency
-      }
-    }
-    if (wf.last_tab && !route.query.tab) activeTab.value = wf.last_tab
-    applyCurrentMapping()
-    showPreview.value = false
-    forceUpdate.value++
-  }
-
-  const s = sessionManager.getSession(sid)
-  if (!loaded && s) {
-    if (s.data?.length) {
-      rawData.value = s.data
-      originalRawData.value = JSON.parse(JSON.stringify(s.data))
-      originalFileColumns.value = Object.keys(s.data[0] || {})
-      fileColumns.value = [...originalFileColumns.value]
+      if (wf.cleaningStats) cleaningStats.value = wf.cleaningStats
+      if (wf.sessionSavedAt) sessionSavedAt.value = wf.sessionSavedAt
       loaded = true
     }
-    if (s.cleanedData?.length) { cleanedData.value = s.cleanedData; loaded = true }
-    if (s.calculations) { calculations.value = s.calculations; loaded = true }
-    if (s.uploaded_file_name) { uploadedFile.value = { name: s.uploaded_file_name, size: 0 }; loaded = true }
-    if (fileColumns.value.length) {
-      columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-      applyCurrentMapping()
-    }
-    showPreview.value = false
-    forceUpdate.value++
-  }
-
-  if (!loaded) {
-    const key = `${instrumentType.value}_session_${sid}`
-    const savedRaw = localStorage.getItem(`${key}_raw`)
-    const savedClean = localStorage.getItem(`${key}_clean`)
-    const savedCalc = localStorage.getItem(`${key}_calc`)
-    const savedFileName = localStorage.getItem(`${instrumentType.value}_uploaded_file_name`)
-    const savedYieldCurve = localStorage.getItem(`${key}_yieldCurve`)
-    const savedFredFilters = localStorage.getItem(`${key}_fredFilters`)
-    const savedMapping = localStorage.getItem(`${key}_mapping`)
-    const savedCompleted = localStorage.getItem(`${key}_completed`)
-    if (savedRaw) {
-      rawData.value = JSON.parse(savedRaw)
-      originalRawData.value = JSON.parse(JSON.stringify(rawData.value))
-      originalFileColumns.value = Object.keys(rawData.value[0] || {})
-      fileColumns.value = [...originalFileColumns.value]
-      loaded = true
-    }
-    if (savedClean) { cleanedData.value = JSON.parse(savedClean); loaded = true }
-    if (savedCalc) { calculations.value = JSON.parse(savedCalc); loaded = true }
-    if (savedFileName) { uploadedFile.value = { name: savedFileName, size: 0 }; loaded = true }
-    if (savedYieldCurve) { yieldCurveData.value = JSON.parse(savedYieldCurve); loaded = true }
-    if (savedFredFilters) {
-      fredFilters.value = { ...fredFilters.value, ...JSON.parse(savedFredFilters) }
-      loaded = true
-    }
-    if (savedMapping) {
-      columnMapping.value = JSON.parse(savedMapping)
-      applyCurrentMapping()
-    } else if (fileColumns.value.length) {
-      columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-      applyCurrentMapping()
-    }
-    showPreview.value = false
-    forceUpdate.value++
-  }
-
-  if (cleanedData.value.length && rawData.value.length) {
-    cleaningStats.value = {
-      totalRows: rawData.value.length,
-      validRows: cleanedData.value.length,
-      removedRows: rawData.value.length - cleanedData.value.length,
-      fixedMissing: 0
-    }
-  }
-
-  if (!effectiveCountry.value && countryOptions.value.length) {
-    const def = countryOptions.value[0].value
-    selectedCountryOption.value = def
-    fredFilters.value.country = def
-  }
-  if (!effectiveMaturity.value) {
-    const def = defaultMaturityForInstrument()
-    selectedMaturityOption.value = def
-    fredFilters.value.maturity = def
+  } catch (err) {
+    console.error('Failed to load saved data:', err)
   }
   return loaded
 }
@@ -2907,10 +3444,9 @@ async function loadSavedData() {
 function debouncedSave(explicitSave = false) {
   if (saveTimeout) clearTimeout(saveTimeout)
   const now = Date.now()
-  // Skip if saved recently (unless explicit)
   if (!explicitSave && now - lastSaveTime < SAVE_DEBOUNCE_MS) return
   saveTimeout = setTimeout(() => {
-    saveSessionData(explicitSave)
+    saveSessionData()
     lastSaveTime = Date.now()
   }, explicitSave ? 100 : SAVE_DEBOUNCE_MS)
 }
@@ -2951,32 +3487,99 @@ function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: f
 function getInstrumentData(instrumentId) {
   if (!activeSession.value) return null
   const sid = activeSession.value.id
-  let wf = sessionManager.getInstrumentWorkflow(sid, instrumentId)
-  if (!wf) {
-    const stored = activeSession.value.instrumentData?.[instrumentId]
-    if (stored) return stored
-    const savedCalc = localStorage.getItem(`${instrumentId}_session_${sid}_calc`)
-    if (savedCalc) try { return JSON.parse(savedCalc) } catch { }
-    return null
+  if (instrumentSummary.value.rows.length > 0) {
+    const rows = instrumentSummary.value.rows.filter(r => r['Instrument Type'] === instrumentId)
+    if (rows.length > 0) {
+      let totalValue = 0
+      let totalFaceValue = 0
+      let totalAvgRate = 0
+      rows.forEach(row => {
+        const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
+        const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
+        const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
+        if (!isNaN(value)) totalValue += value
+        if (!isNaN(faceValue)) totalFaceValue += faceValue
+        if (!isNaN(rate)) totalAvgRate += rate
+      })
+      const avgRate = rows.length > 0 && totalAvgRate > 0 ? totalAvgRate / rows.length : null
+      return {
+        totalValue,
+        instrumentCount: rows.length,
+        avgRate,
+        avgCouponRate: instrumentId === 'bonds' ? avgRate : null,
+        avgDiscountRate: instrumentId === 'tbills' ? avgRate : null,
+        totalPrincipal: totalFaceValue
+      }
+    }
   }
-  return wf.calculations || null
+  return null
 }
 
+// ===== REPORT PREVIEW DATA (FIXED - reads from instrumentSummary) =====
 const reportPreviewData = computed(() => {
   const instrumentsData = []
-  if (selectedInstruments.value.moneyMarket) {
-    const data = getInstrumentData('money-market')
-    if (data && Object.keys(data).length && data.totalValue > 0) instrumentsData.push({ name: 'Money Market', calculations: data })
+  const instrumentTypes = [
+    { key: 'money-market', label: 'Money Market' },
+    { key: 'bonds', label: 'Bonds' },
+    { key: 'tbills', label: 'T-Bills' }
+  ]
+  
+  for (const type of instrumentTypes) {
+    const key = type.key
+    const selected = selectedInstruments.value[key]
+    if (selected) {
+      const data = getInstrumentData(key)
+      if (data && data.totalValue > 0) {
+        instrumentsData.push({ 
+          name: type.label, 
+          calculations: data,
+          id: key
+        })
+      }
+    }
   }
-  if (selectedInstruments.value.bonds) {
-    const data = getInstrumentData('bonds')
-    if (data && Object.keys(data).length && data.totalValue > 0) instrumentsData.push({ name: 'Bonds', calculations: data })
+  
+  // If no instruments have data, check if instrumentSummary has any rows
+  if (instrumentsData.length === 0 && instrumentSummary.value.rows.length > 0) {
+    // Include all instruments from summary
+    const summaryRows = instrumentSummary.value.rows
+    const grouped = {}
+    summaryRows.forEach(row => {
+      const type = row['Instrument Type'] || 'unknown'
+      if (!grouped[type]) grouped[type] = []
+      grouped[type].push(row)
+    })
+    
+    for (const [type, rows] of Object.entries(grouped)) {
+      let totalValue = 0
+      let instrumentCount = rows.length
+      let totalAvgRate = 0
+      rows.forEach(row => {
+        const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
+        const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
+        if (!isNaN(value)) totalValue += value
+        if (!isNaN(rate)) totalAvgRate += rate
+      })
+      const avgRate = instrumentCount > 0 ? totalAvgRate / instrumentCount : null
+      const nameMap = { 'money-market': 'Money Market', 'bonds': 'Bonds', 'tbills': 'T-Bills' }
+      instrumentsData.push({
+        name: nameMap[type] || type,
+        calculations: {
+          totalValue,
+          instrumentCount,
+          avgRate,
+          avgCouponRate: type === 'bonds' ? avgRate : null,
+          avgDiscountRate: type === 'tbills' ? avgRate : null
+        }
+      })
+    }
   }
-  if (selectedInstruments.value.tbills) {
-    const data = getInstrumentData('tbills')
-    if (data && Object.keys(data).length && data.totalValue > 0) instrumentsData.push({ name: 'T-Bills', calculations: data })
+  
+  return { 
+    session: activeSession.value?.name || 'No session', 
+    date: new Date().toLocaleString(), 
+    instruments: instrumentsData 
   }
-  return { session: activeSession.value?.name || 'No session', date: new Date().toLocaleString(), instruments: instrumentsData }
 })
 
 // ===== REPORT GENERATION =====
@@ -3047,7 +3650,7 @@ async function generateReportHtml() {
   await loadSavedData()
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
-    alert('No data available for the selected instruments.')
+    alert('No data available for the selected instruments. Please ensure you have run calculations and have data in the instrument summary.')
     return null
   }
 
@@ -3064,13 +3667,16 @@ async function generateReportHtml() {
   let appendixRows = ''
   let allDataRows = []
   for (const inst of report.instruments) {
-    const instKey = inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills'
+    const instKey = inst.id || (inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills')
     let cleanData = []
-    const wf = sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
+    const wf = await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
     if (wf && wf.cleanedData && wf.cleanedData.length) cleanData = wf.cleanedData
     else {
-      const saved = localStorage.getItem(`${instKey}_session_${activeSession.value?.id}_clean`)
-      if (saved) cleanData = JSON.parse(saved)
+      const sid = activeSession.value?.id
+      if (sid) {
+        const saved = localStorage.getItem(`${instKey}_session_${sid}_clean`)
+        if (saved) cleanData = JSON.parse(saved)
+      }
     }
     if (cleanData && cleanData.length) {
       cleanData.forEach((item, idx) => {
@@ -3317,6 +3923,8 @@ async function previewReport() {
   if (html) {
     reportPreviewHtml.value = html
     reportPreviewDialog.value = true
+  } else {
+    alert('No data available to generate the report. Please run calculations first.')
   }
 }
 
@@ -3335,23 +3943,17 @@ async function exportToRealExcel() {
   const workbook = XLSX.utils.book_new()
   const valuationDate = new Date().toISOString().split('T')[0]
   
-  // Create summary sheet with DuraCapital branding
   const summaryData = []
-  
-  // Add header rows with company branding
-  summaryData.push(['', '', '']) // Empty row for spacing
-  summaryData.push(['DuraCapital', '', '']) // Company name
-  summaryData.push(['Valuation Assessment Report', '', '']) // Report title
-  summaryData.push([`Session: ${report.session}`, '', '']) // Session name
-  summaryData.push([`Valuation Date: ${valuationDate}`, '', '']) // Valuation date
-  summaryData.push(['', '', '']) // Empty row for spacing
-  summaryData.push(['Report Generated', new Date().toLocaleString(), '']) // Generation timestamp
-  summaryData.push(['', '', '']) // Empty row for spacing
-  
-  // Add column headers
+  summaryData.push(['', '', ''])
+  summaryData.push(['DuraCapital', '', ''])
+  summaryData.push(['Valuation Assessment Report', '', ''])
+  summaryData.push([`Session: ${report.session}`, '', ''])
+  summaryData.push([`Valuation Date: ${valuationDate}`, '', ''])
+  summaryData.push(['', '', ''])
+  summaryData.push(['Report Generated', new Date().toLocaleString(), ''])
+  summaryData.push(['', '', ''])
   summaryData.push(['Instrument', 'Metric', 'Value'])
   
-  // Add data rows
   for (const inst of report.instruments) {
     for (const [key, val] of Object.entries(inst.calculations)) {
       if (key === 'completed' || key === 'timestamp' || key === 'fred') continue
@@ -3370,13 +3972,16 @@ async function exportToRealExcel() {
     ['Asset Class', 'Instrument Name', 'BB Ticker', 'Face Value ($)', 'Rate (%)', 'Term (Yrs)', 'Valuation Date']
   ]
   for (const inst of report.instruments) {
-    const instKey = inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills'
+    const instKey = inst.id || (inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills')
     let instrumentData = []
-    const wf = sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
+    const wf = await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
     if (wf && wf.cleanedData && wf.cleanedData.length) instrumentData = wf.cleanedData
     else {
       const sid = activeSession.value?.id
-      if (sid) { const saved = localStorage.getItem(`${instKey}_session_${sid}_clean`); if (saved) instrumentData = JSON.parse(saved) }
+      if (sid) {
+        const saved = localStorage.getItem(`${instKey}_session_${sid}_clean`)
+        if (saved) instrumentData = JSON.parse(saved)
+      }
     }
     if (instrumentData.length) {
       instrumentData.forEach((item, idx) => {
@@ -3394,13 +3999,16 @@ async function exportToRealExcel() {
   XLSX.utils.book_append_sheet(workbook, appendixSheet, 'Appendix')
 
   for (const inst of report.instruments) {
-    const instKey = inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills'
+    const instKey = inst.id || (inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills')
     let instrumentData = []
-    const wf = sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
+    const wf = await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
     if (wf && wf.cleanedData && wf.cleanedData.length) instrumentData = wf.cleanedData
     else {
       const sid = activeSession.value?.id
-      if (sid) { const saved = localStorage.getItem(`${instKey}_session_${sid}_clean`); if (saved) instrumentData = JSON.parse(saved) }
+      if (sid) {
+        const saved = localStorage.getItem(`${instKey}_session_${sid}_clean`)
+        if (saved) instrumentData = JSON.parse(saved)
+      }
     }
     if (instrumentData.length) {
       const sheet = XLSX.utils.json_to_sheet(instrumentData)
@@ -3473,7 +4081,7 @@ async function checkAndReset() {
     lastInstrument = currentInstrument
     lastSessionId = currentSessionId
     if (currentSessionId) {
-      const s = sessionManager.getSession(String(currentSessionId))
+      const s = await sessionManager.getSession(String(currentSessionId))
       activeSession.value = s || null
     } else {
       activeSession.value = null
@@ -3481,12 +4089,12 @@ async function checkAndReset() {
     const loaded = await loadSavedData()
     if (!loaded) {
       if (!rawData.value.length && !cleanedData.value.length) {
-        // only reset if no data
+        // keep empty
       }
       if (!route.query.tab) activeTab.value = 'upload'
     } else {
       if (!route.query.tab) {
-        const savedTab = sessionManager.getInstrumentWorkflow(activeSession.value?.id, instrumentType.value)?.last_tab
+        const savedTab = (await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instrumentType.value))?.last_tab
         if (savedTab && steps.value.some(s => s.tab === savedTab)) {
           activeTab.value = savedTab
         } else {
@@ -3508,14 +4116,13 @@ onMounted(async () => {
   await loadConfig(instrumentType.value)
   const qSid = route.query.session
   if (qSid) {
-    await sessionManager.loadSessionFromDb(String(qSid))
-    const s = sessionManager.getSession(String(qSid))
+    await sessionManager.getSession(String(qSid))
+    const s = await sessionManager.getSession(String(qSid))
     if (s) { activeSession.value = s; sessionManager.setActiveSession(s) }
   }
   await checkAndReset()
   loadUploadHistory()
   loadSavedTemplates()
-  loadCumulativeRecords()
   window.addEventListener('storage', () => checkAndReset())
   await loadFilterOptions()
   if (!effectiveMaturity.value) { const def = defaultMaturityForInstrument(); selectedMaturityOption.value = def; fredFilters.value.maturity = def }
@@ -3533,14 +4140,49 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 </script>
 
 <style scoped>
-/* ===== STYLES ===== */
+/* ===== INSTRUMENT PAGE STYLES ===== */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
-.header-left h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin-bottom: 5px; }
-.header-left p { color: #666; font-size: 14px; }
-.session-badge { background: #e8ecf1; padding: 4px 8px; border-radius: 12px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; }
-.session-badge.warning { background: #fff3e0; color: #e65100; }
-.step-indicator { background: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; color: #0B2044; font-weight: 600; }
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 25px;
+  padding: 16px 20px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.header-left { flex: 1; min-width: 200px; }
+.header-left h1 { color: #0B2044; font-size: 26px; font-weight: 700; margin: 0 0 6px 0; }
+.header-left .session-badge { display: inline-flex; align-items: center; gap: 6px; background: #e8ecf1; padding: 4px 12px; border-radius: 20px; font-size: 13px; color: #0B2044; }
+.header-left .session-badge.warning { background: #fff3e0; color: #e65100; }
+.header-left .session-badge strong { color: #0B2044; }
+
+.header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+
+.btn-save-session {
+  background: linear-gradient(135deg, #0B2044, #1E88E5);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s;
+  white-space: nowrap;
+}
+.btn-save-session:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(11,32,68,0.3); }
+
+.step-indicator { background: #f5f5f5; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600; color: #0B2044; white-space: nowrap; }
+
 .progress-bar-container { margin-bottom: 30px; padding: 0 10px; }
 .progress-steps { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); position: relative; }
 .progress-step { flex: 1; text-align: center; cursor: pointer; position: relative; }
@@ -3550,27 +4192,371 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .progress-step.completed .step-circle { background: #4CAF50; color: white; }
 .step-label { font-size: 11px; color: #999; margin-top: 8px; }
 .progress-step.active .step-label { color: #0B2044; font-weight: 600; }
+
 .content-card { margin-bottom: 20px; }
+
 .upload-area { border: 2px dashed #ccc; border-radius: 12px; padding: 50px; text-align: center; cursor: pointer; transition: all 0.3s; }
 .upload-area:hover { border-color: #0B2044; background: #f8f9ff; }
 .browse-link { color: #0B2044; cursor: pointer; font-weight: 600; }
+
 .file-info { margin-top: 20px; padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .file-size { font-size: 11px; color: #999; margin-left: auto; }
 .remove-btn { margin-left: auto; background: none; border: none; font-size: 20px; cursor: pointer; color: #f44336; }
+
 .btn-preview { background: #2196F3; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
 .btn-preview:hover:not(:disabled) { background: #0b7dda; transform: translateY(-1px); }
 .btn-preview:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Instrument Type Selector */
-.instrument-selector { margin: 20px 0; padding: 15px; background: #f8f9ff; border-radius: 8px; display: flex; align-items: center; gap: 10px; }
-.instrument-selector label { font-weight: 600; color: #0B2044; display: flex; align-items: center; gap: 6px; }
-.instrument-dropdown { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; background: white; min-width: 200px; cursor: pointer; }
+.btn-review-excel { background: #4CAF50; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
+.btn-review-excel:hover:not(:disabled) { background: #45a049; transform: translateY(-1px); }
+.btn-review-excel:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Summary Sections */
+.btn-mapping { background: #FF9800; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
+.btn-mapping:hover:not(:disabled) { background: #F57C00; transform: translateY(-1px); }
+.btn-mapping:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-view-workbook { background: #9C27B0; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
+.btn-view-workbook:hover:not(:disabled) { background: #7B1FA2; transform: translateY(-1px); }
+.btn-view-workbook:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-review-excel-small { background: #2196F3; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; transition: all 0.2s; }
+.btn-review-excel-small:hover { background: #0b7dda; }
+
+.mapping-dialog-title { background: #0B2044; color: white; padding: 16px 24px; }
+.mapping-dialog-title .mapping-count { font-size: 14px; font-weight: 400; opacity: 0.8; }
+.mapping-dialog-body { padding: 20px 24px 16px; }
+.mapping-grid { display: flex; flex-direction: column; gap: 12px; margin: 16px 0; }
+.mapping-row { display: flex; align-items: center; gap: 12px; }
+.required-label { width: 140px; font-weight: 600; color: #0B2044; font-size: 14px; }
+.dropdown-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; }
+.mapping-select { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.mapping-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.2); }
+
+.saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }
+.save-section { margin-bottom: 20px; }
+.save-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.save-row .template-input { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; min-width: 150px; }
+.saved-list { max-height: 300px; overflow-y: auto; border-top: 1px solid #e8ecf1; padding-top: 12px; }
+.saved-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #eee; flex-wrap: wrap; gap: 8px; }
+.template-info { display: flex; flex-direction: column; gap: 2px; }
+.template-name { font-weight: 600; color: #0B2044; }
+.template-timestamp { font-size: 12px; color: #999; }
+.template-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-secondary.small, .btn-danger.small { padding: 4px 10px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer; }
+.btn-secondary.small { background: #e0e0e0; color: #333; }
+.btn-secondary.small:hover { background: #c0c0c0; }
+.btn-danger.small { background: #f44336; color: white; }
+.btn-danger.small:hover { background: #d32f2f; }
+.empty-saved { text-align: center; color: #999; padding: 20px 0; }
+
+/* No-logo header for workbook viewer */
+.excel-dialog-title-no-logo {
+  background: #f5f5f5;
+  color: #0B2044;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid #d0d0d0;
+}
+.excel-dialog-title-no-logo span { font-weight: 600; font-size: 18px; }
+
+.btn-work-on-sheet {
+  background: #0B2044;
+  color: white;
+  border: none;
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  margin-right: 12px;
+}
+.btn-work-on-sheet:hover { background: #1a3a6e; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(11,32,68,0.2); }
+
+.excel-dialog-title-white {
+  background: white;
+  color: #0B2044;
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid #e0e0e0;
+}
+.excel-dialog-title-white .logo {
+  height: 40px;
+  width: auto;
+  object-fit: contain;
+}
+.excel-dialog-title-white .header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.excel-dialog-title-white .header-title h4 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #0B2044;
+}
+.excel-dialog-title-white .header-meta {
+  margin: 2px 0 0 0;
+  font-size: 13px;
+  color: #666;
+}
+.excel-dialog-title-white .btn-close-dialog {
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  font-size: 20px;
+}
+.excel-dialog-title-white .btn-close-dialog:hover {
+  background: #f0f0f0;
+  color: #0B2044;
+}
+
+.btn-close-dialog { background: transparent; border: none; color: #666; cursor: pointer; padding: 8px; border-radius: 50%; }
+.btn-close-dialog:hover { background: #f0f0f0; color: #0B2044; }
+.excel-dialog-content { padding: 0; height: calc(100vh - 140px); }
+
+.required-columns { margin: 20px 0; }
+.columns-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.column-badge { background: #e8ecf1; padding: 6px 12px; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+.column-badge.missing-column { background: #FFEBEE; color: #c62828; }
+.column-badge.mapped-column { background: #E8F5E9; color: #2E7D32; }
+.success-message { margin-top: 10px; padding: 8px 12px; background: #E8F5E9; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #2E7D32; }
+.warning-message { margin-top: 10px; padding: 8px 12px; background: #FFF3E0; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E65100; }
+
+.cleaning-options-panel { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+.filter-scroll-container { max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px; background: #fafafa; margin: 12px 0; padding: 8px 4px; }
+.options-list { display: flex; flex-direction: column; gap: 8px; }
+.option-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 8px; border-radius: 4px; transition: background 0.1s; flex-wrap: wrap; }
+.option-checkbox:hover { background: #f0f0f0; }
+.option-checkbox select, .option-checkbox input[type="text"] { margin-left: 4px; padding: 2px 6px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
+.cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; flex-wrap: wrap; }
+
+.summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
+.summary-card { background: linear-gradient(135deg, #1B5E20, #4CAF50); padding: 20px; border-radius: 16px; color: white; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s; }
+.summary-card.total { background: linear-gradient(135deg, #1B5E20, #4CAF50); }
+.summary-card.rate { background: linear-gradient(135deg, #0D47A1, #2196F3); }
+.summary-card.count { background: linear-gradient(135deg, #E65100, #FF9800); }
+.summary-card:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
+.card-label { font-size: 14px; opacity: 0.9; margin-bottom: 8px; }
+.card-value { font-size: 28px; font-weight: 700; }
+
+.calculations-section { margin-top: 10px; }
+.calculations-section h3 { color: #0B2044; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #0B2044; }
+.calculations-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
+.calculation-card { padding: 20px; background: linear-gradient(135deg, #f8f9ff, #fff); border-radius: 12px; text-align: center; border: 1px solid rgba(11,32,68,0.1); transition: transform 0.2s; cursor: pointer; }
+.calculation-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.calc-name { font-size: 14px; color: #666; margin-bottom: 10px; }
+.calc-value { font-size: 24px; font-weight: 700; color: #0B2044; margin-bottom: 5px; }
+
+.comparison-card { background: linear-gradient(135deg, #f8f9ff, #eef2ff); border-radius: 12px; padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 15px; }
+.comparison-item { text-align: center; }
+.comparison-label { font-size: 13px; color: #666; display: block; }
+.comparison-value { font-size: 24px; font-weight: 700; }
+.comparison-value.portfolio { color: #0B2044; }
+.comparison-value.market { color: #1E88E5; }
+.comparison-difference { font-size: 16px; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
+.comparison-difference.positive { background: #e8f5e9; color: #2e7d32; }
+.comparison-difference.negative { background: #ffebee; color: #c62828; }
+
+.btn-calculated-instruments {
+  background: #0B2044;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+.btn-calculated-instruments:hover { background: #1a3a6e; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(11,32,68,0.2); }
+
+.viewing-badge {
+  background: #e8f5e9;
+  color: #2e7d32;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+.instrument-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.instrument-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.instrument-card:hover { border-color: #0B2044; box-shadow: 0 4px 16px rgba(11,32,68,0.12); transform: translateY(-2px); }
+.instrument-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
+.instrument-card-header strong { color: #0B2044; font-size: 14px; }
+.instrument-type-badge { background: #e8ecf1; color: #0B2044; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.instrument-card-body { display: flex; flex-direction: column; gap: 6px; }
+.card-metric { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
+.metric-label { color: #666; }
+.metric-value { color: #0B2044; font-weight: 600; }
+.instrument-card-footer { margin-top: 12px; padding-top: 8px; border-top: 1px solid #eee; }
+.btn-select-instrument { background: #0B2044; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; width: 100%; justify-content: center; transition: all 0.2s; }
+.btn-select-instrument:hover { background: #1a3a6e; }
+
+.popup-header-white {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  background: white;
+  border-bottom: 2px solid #e0e0e0;
+  flex-shrink: 0;
+}
+.popup-header-white .header-left { display: flex; align-items: center; gap: 16px; }
+.popup-header-white .logo { height: 40px; width: auto; object-fit: contain; }
+.popup-header-white .header-title h4 { margin: 0; font-size: 18px; font-weight: 600; color: #0B2044; }
+.popup-header-white .header-meta { margin: 2px 0 0 0; font-size: 13px; color: #666; }
+.popup-header-white .close-btn {
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 24px;
+  padding: 4px 8px;
+  border-radius: 50%;
+}
+.popup-header-white .close-btn:hover { background: #f0f0f0; color: #0B2044; }
+
+.popup-body { flex: 1; overflow-y: auto; padding: 20px; }
+.popup-instruction { color: #666; margin-bottom: 16px; font-size: 14px; }
+
+.popup-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  background: #f9fafc;
+  border-top: 1px solid #e0e0e0;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.valuation-date-footer { color: #666; font-size: 13px; }
+
+.viewing-indicator { display: inline-flex; align-items: center; gap: 4px; color: #2e7d32; font-size: 14px; }
+
+.navigation-buttons { display: flex; gap: 15px; justify-content: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; flex-wrap: wrap; }
+.btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s; }
+.btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(11,32,68,0.3); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s; }
+.btn-secondary:hover { background: #0B2044; color: white; transform: translateY(-2px); }
+
+.excel-table-wrapper { overflow: auto; border: 1px solid #d4d4d4; border-radius: 4px; background: white; max-height: 500px; margin: 16px 0; }
+.excel-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #000; }
+.excel-table thead { position: sticky; top: 0; z-index: 10; }
+.excel-table th { background: #0B2044; color: white; border: 1px solid #1a3a6e; padding: 10px 14px; text-align: left; font-weight: 600; font-size: 12px; white-space: nowrap; letter-spacing: 0.3px; }
+.excel-table td { border: 1px solid #d4d4d4; padding: 8px 14px; text-align: left; font-size: 13px; font-variant-numeric: tabular-nums; }
+.excel-table tbody tr:nth-child(even) { background: #f9fafc; }
+.excel-table tbody tr:hover { background: #e8f0fe; }
+.excel-table tfoot tr.total-row { background: #0B2044 !important; color: white; font-weight: 700; }
+.excel-table tfoot td { border: 1px solid #1a3a6e; padding: 10px 14px; font-weight: 700; font-size: 14px; }
+.excel-table tfoot td:first-child { text-align: right; padding-right: 20px; }
+
+.sortable-header { cursor: pointer; transition: background 0.2s; }
+.sortable-header:hover { background: #1a3a6e; }
+.sort-indicator { margin-left: 6px; font-size: 10px; color: #fff; }
+
+.excel-popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.excel-popup-content {
+  background: white;
+  border-radius: 12px;
+  max-width: 95%;
+  max-height: 90vh;
+  width: 1400px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 60px rgba(0,0,0,0.3);
+  overflow: hidden;
+}
+
+.filters-row { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap; }
+.filter-group label { display: block; font-size: 12px; font-weight: 600; color: #0B2044; margin-bottom: 4px; }
+.filter-group { position: relative; display: flex; align-items: center; flex-wrap: wrap; flex: 1; min-width: 150px; }
+.filter-select { width: 100%; padding: 10px 32px 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: linear-gradient(to bottom, #ffffff 0%, #f5f7fa 100%); color: #0B2044; font-size: 14px; cursor: pointer; transition: border 0.2s, box-shadow 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 2px rgba(255,255,255,0.8); appearance: none; -webkit-appearance: none; }
+.filter-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.15), 0 4px 8px rgba(0,0,0,0.1); }
+.filter-group .filter-arrow { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 14px; color: #0B2044; font-weight: bold; }
+.filter-custom-input {
+  width: 100%;
+  padding: 8px 12px;
+  margin-top: 4px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+  transition: border 0.2s;
+}
+.filter-custom-input:focus {
+  outline: none;
+  border-color: #0B2044;
+  box-shadow: 0 0 0 2px rgba(11,32,68,0.1);
+}
+
+.chart-container--fred { position: relative; height: 400px; width: 100%; background: white; border-radius: 8px; padding: 10px; }
+.chart-container--fred canvas { width: 100% !important; height: 100% !important; }
+
+.loading-container, .error-container { text-align: center; padding: 40px; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.visualization-placeholder { text-align: center; padding: 60px; background: #f8f9ff; border-radius: 12px; }
+.visualization-placeholder h3 { color: #0B2044; margin: 20px 0 10px; }
+.visualization-placeholder p { color: #666; margin-bottom: 20px; }
+
+.summary-hero { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 24px; margin-bottom: 24px; padding: 30px 20px; background: linear-gradient(135deg, #0B2044, #1E88E5); border-radius: 16px; color: white; text-align: center; }
+.hero-stat { flex: 1; min-width: 140px; display: flex; flex-direction: column; align-items: center; }
+.hero-value { font-size: 32px; font-weight: 700; margin-bottom: 4px; }
+.hero-label { font-size: 14px; opacity: 0.9; }
+
+.summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 30px; }
+.summary-section { padding: 20px; background: #f8f9ff; border-radius: 12px; }
+.summary-section h3 { color: #0B2044; margin-bottom: 15px; }
+.summary-section p { margin: 8px 0; color: #555; }
+.card-panel { background: #f8f9ff; padding: 16px; border-radius: 10px; border: 1px solid #e8ecf1; }
+
 .instrument-summary-section, .portfolio-summary-section { margin: 30px 0; padding: 20px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 .instrument-summary-section h3, .portfolio-summary-section h3 { color: #0B2044; font-size: 18px; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
 
-/* Instrument Breakdown */
 .instrument-breakdown { margin: 20px 0; padding: 15px; background: #f8f9ff; border-radius: 8px; }
 .instrument-breakdown h4 { color: #0B2044; font-size: 16px; margin-bottom: 15px; }
 .breakdown-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
@@ -3588,155 +4574,14 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .workflow-btn { background: #0B2044; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; width: 100%; }
 .workflow-btn:hover { background: #1a3a6e; transform: translateY(-1px); }
 
-.summary-table-wrapper { overflow-x: auto; margin: 15px 0; }
-.summary-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.summary-table thead { background: #0B2044; color: white; }
-.summary-table th { padding: 12px 8px; text-align: left; font-weight: 600; white-space: nowrap; }
-.summary-table tbody tr { border-bottom: 1px solid #eee; }
-.summary-table tbody tr:hover { background: #f8f9ff; }
-.summary-table td { padding: 10px 8px; border: 1px solid #eee; }
-.summary-table tfoot { background: #f5f5f5; }
-.summary-table tfoot .total-row { font-weight: 700; }
-.summary-table tfoot td { padding: 12px 8px; border-top: 2px solid #0B2044; }
-
-.editable-cell { width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
-.editable-cell:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.1); }
-
-.export-buttons { margin-top: 20px; text-align: right; }
+.export-buttons { margin-top: 20px; text-align: right; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 .export-buttons .btn-primary { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s; }
 .export-buttons .btn-primary:hover { background: #45a049; transform: translateY(-1px); }
 
-.btn-preview { background: #2196F3; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
-.btn-preview:hover:not(:disabled) { background: #0b7dda; transform: translateY(-1px); }
-.btn-preview:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-review-excel { background: #4CAF50; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
-.btn-review-excel:hover:not(:disabled) { background: #45a049; transform: translateY(-1px); }
-.btn-review-excel:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-mapping { background: #FF9800; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
-.btn-mapping:hover:not(:disabled) { background: #F57C00; transform: translateY(-1px); }
-.btn-mapping:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-view-workbook { background: #9C27B0; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
-.btn-view-workbook:hover:not(:disabled) { background: #7B1FA2; transform: translateY(-1px); }
-.btn-view-workbook:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-review-excel-small { background: #2196F3; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; transition: all 0.2s; }
-.btn-review-excel-small:hover { background: #0b7dda; }
-.excel-dialog-title { background: #0B2044; color: white; padding: 16px 24px; }
-.btn-close-dialog { background: transparent; border: none; color: white; cursor: pointer; padding: 8px; border-radius: 50%; }
-.btn-close-dialog:hover { background: rgba(255,255,255,0.1); }
-.excel-dialog-content { padding: 0; height: calc(100vh - 140px); }
-.mapping-dialog-title {
-  background: #0B2044;
-  color: white;
-  padding: 16px 24px;
-}
-.mapping-dialog-title .mapping-count {
-  font-size: 14px;
-  font-weight: 400;
-  opacity: 0.8;
-}
-.mapping-dialog-body {
-  padding: 20px 24px 16px;
-}
-.mapping-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 16px 0;
-}
-.mapping-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.required-label {
-  width: 140px;
-  font-weight: 600;
-  color: #0B2044;
-  font-size: 14px;
-}
-.dropdown-wrapper {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.mapping-select {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
-  background: white;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 36px;
-}
-.mapping-select:focus {
-  outline: none;
-  border-color: #0B2044;
-  box-shadow: 0 0 0 2px rgba(11,32,68,0.2);
-}
-.saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }
-.save-section { margin-bottom: 20px; }
-.save-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.save-row .template-input { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; min-width: 150px; }
-.saved-list { max-height: 300px; overflow-y: auto; border-top: 1px solid #e8ecf1; padding-top: 12px; }
-.saved-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #eee; flex-wrap: wrap; gap: 8px; }
-.template-info { display: flex; flex-direction: column; gap: 2px; }
-.template-name { font-weight: 600; color: #0B2044; }
-.template-timestamp { font-size: 12px; color: #999; }
-.template-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.btn-secondary.small, .btn-danger.small { padding: 4px 10px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer; }
-.btn-secondary.small { background: #e0e0e0; color: #333; }
-.btn-secondary.small:hover { background: #c0c0c0; }
-.btn-danger.small { background: #f44336; color: white; }
-.btn-danger.small:hover { background: #d32f2f; }
-.empty-saved { text-align: center; color: #999; padding: 20px 0; }
-.filter-group { position: relative; display: flex; align-items: center; flex-wrap: wrap; flex: 1; min-width: 150px; }
-.filter-select { width: 100%; padding: 10px 32px 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: linear-gradient(to bottom, #ffffff 0%, #f5f7fa 100%); color: #0B2044; font-size: 14px; cursor: pointer; transition: border 0.2s, box-shadow 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 2px rgba(255,255,255,0.8); appearance: none; -webkit-appearance: none; }
-.filter-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.15), 0 4px 8px rgba(0,0,0,0.1); }
-.filter-group .filter-arrow { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 14px; color: #0B2044; font-weight: bold; }
-.custom-maturity-input { margin-top: 8px; width: 100%; }
-.required-columns { margin: 20px 0; }
-.columns-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-.column-badge { background: #e8ecf1; padding: 6px 12px; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
-.column-badge.missing-column { background: #FFEBEE; color: #c62828; }
-.column-badge.mapped-column { background: #E8F5E9; color: #2E7D32; }
-.success-message { margin-top: 10px; padding: 8px 12px; background: #E8F5E9; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #2E7D32; }
-.warning-message { margin-top: 10px; padding: 8px 12px; background: #FFF3E0; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E65100; }
-.cleaning-options-panel { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-.filter-scroll-container { max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px; background: #fafafa; margin: 12px 0; padding: 8px 4px; }
-.options-list { display: flex; flex-direction: column; gap: 8px; }
-.option-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 8px; border-radius: 4px; transition: background 0.1s; flex-wrap: wrap; }
-.option-checkbox:hover { background: #f0f0f0; }
-.option-checkbox select, .option-checkbox input[type="text"] { margin-left: 4px; padding: 2px 6px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
-.cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; flex-wrap: wrap; }
-.summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
-.summary-card { background: linear-gradient(135deg, #1B5E20, #4CAF50); padding: 20px; border-radius: 16px; color: white; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s; }
-.summary-card.total { background: linear-gradient(135deg, #1B5E20, #4CAF50); }
-.summary-card.rate { background: linear-gradient(135deg, #0D47A1, #2196F3); }
-.summary-card.count { background: linear-gradient(135deg, #E65100, #FF9800); }
-.summary-card:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
-.card-label { font-size: 14px; opacity: 0.9; margin-bottom: 8px; }
-.card-value { font-size: 28px; font-weight: 700; }
-.calculations-section { margin-top: 10px; }
-.calculations-section h3 { color: #0B2044; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #0B2044; }
-.calculations-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
-.calculation-card { padding: 20px; background: linear-gradient(135deg, #f8f9ff, #fff); border-radius: 12px; text-align: center; border: 1px solid rgba(11,32,68,0.1); transition: transform 0.2s; cursor: pointer; }
-.calculation-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-.calc-name { font-size: 14px; color: #666; margin-bottom: 10px; }
-.calc-value { font-size: 24px; font-weight: 700; color: #0B2044; margin-bottom: 5px; }
-.visualization-placeholder { text-align: center; padding: 60px; background: #f8f9ff; border-radius: 12px; }
-.visualization-placeholder h3 { color: #0B2044; margin: 20px 0 10px; }
-.visualization-placeholder p { color: #666; margin-bottom: 20px; }
-.summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 30px; }
-.summary-section { padding: 20px; background: #f8f9ff; border-radius: 12px; }
-.summary-section h3 { color: #0B2044; margin-bottom: 15px; }
-.summary-section p { margin: 8px 0; color: #555; }
+.workflow-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+.workflow-option-btn { background: #f8f9ff; border: 2px solid #e8ecf1; border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; gap: 8px; font-weight: 600; color: #0B2044; }
+.workflow-option-btn:hover { border-color: #0B2044; background: white; transform: translateY(-2px); }
+
 .report-options { padding: 20px; }
 .instrument-selection { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
 .selection-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 20px 0; }
@@ -3747,60 +4592,38 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .selection-actions { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
 .report-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px; }
 .btn-preview { background: #673AB7; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-.btn-json { background: #607d8b; }
-.btn-csv { background: #4caf50; }
-.btn-html { background: #ff9800; }
-.btn-pdf { background: #f44336; }
-.btn-word { background: #2196f3; }
-.btn-excel { background: #8bc34a; }
-.btn-json, .btn-csv, .btn-html, .btn-pdf, .btn-word, .btn-excel { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; color: white; }
+.btn-json { background: #607d8b; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.btn-csv { background: #4caf50; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.btn-html { background: #ff9800; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.btn-pdf { background: #f44336; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.btn-word { background: #2196f3; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.btn-excel { background: #8bc34a; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+
 .empty-state { text-align: center; padding: 60px; color: #999; }
 .empty-state p { margin: 20px 0; }
-.navigation-buttons { display: flex; gap: 15px; justify-content: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; flex-wrap: wrap; }
-.btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s; }
-.btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(11,32,68,0.3); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s; }
-.btn-secondary:hover { background: #0B2044; color: white; transform: translateY(-2px); }
-.highlight-box { background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
-.comparison-card { background: linear-gradient(135deg, #f8f9ff, #eef2ff); border-radius: 12px; padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 15px; }
-.comparison-item { text-align: center; }
-.comparison-label { font-size: 13px; color: #666; display: block; }
-.comparison-value { font-size: 24px; font-weight: 700; }
-.comparison-value.portfolio { color: #0B2044; }
-.comparison-value.market { color: #1E88E5; }
-.comparison-difference { font-size: 16px; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
-.comparison-difference.positive { background: #e8f5e9; color: #2e7d32; }
-.comparison-difference.negative { background: #ffebee; color: #c62828; }
-.loading-container, .error-container { text-align: center; padding: 40px; }
-.spin { animation: spin 1s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.chart-container--fred { position: relative; height: 400px; width: 100%; background: white; border-radius: 8px; padding: 10px; }
-.chart-container--fred canvas { width: 100% !important; height: 100% !important; }
-.filters-row { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap; }
-.filter-group label { display: block; font-size: 12px; font-weight: 600; color: #0B2044; margin-bottom: 4px; }
-.refresh-btn { flex-shrink: 0; align-self: flex-end; }
-.summary-hero { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 24px; margin-bottom: 24px; padding: 30px 20px; background: linear-gradient(135deg, #0B2044, #1E88E5); border-radius: 16px; color: white; text-align: center; }
-.hero-stat { flex: 1; min-width: 140px; display: flex; flex-direction: column; align-items: center; }
-.hero-value { font-size: 32px; font-weight: 700; margin-bottom: 4px; }
-.hero-label { font-size: 14px; opacity: 0.9; }
-.card-panel { background: #f8f9ff; padding: 16px; border-radius: 10px; border: 1px solid #e8ecf1; }
-.fred-calc-card { margin: 16px 0; }
-.fred-meta { display: block; margin-top: 8px; color: #666; font-size: 12px; }
-.chart-footer { margin-top: 10px; text-align: center; color: #666; font-size: 12px; }
+
 .upload-history { margin-top: 20px; padding: 15px; background: #f8f9ff; border-radius: 12px; }
 .history-list { max-height: 200px; overflow-y: auto; }
 .history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s; flex-wrap: wrap; }
 .history-item:hover { background: #e8ecf1; }
 .history-item small { font-size: 11px; color: #666; margin-left: auto; }
 .btn-delete-history { background: none; border: none; cursor: pointer; color: #f44336; font-size: 16px; }
+
 .excel-viewer-button { margin-bottom: 20px; text-align: right; }
+
 .formula-dialog-title { background: #0B2044; color: white; }
 .formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; }
+
 .preview-info { font-size: 12px; color: #666; margin-bottom: 8px; }
 .excel-preview-section { margin-top: 20px; padding: 16px; background: #fafafa; border-radius: 12px; }
 .preview-section { margin-top: 20px; padding: 16px; background: #fafafa; border-radius: 12px; }
 .excel-scroll-wrapper { overflow-x: auto; }
+
+.highlight-box { background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
+
+.fred-meta { display: block; margin-top: 8px; color: #666; font-size: 12px; }
+.chart-footer { margin-top: 10px; text-align: center; color: #666; font-size: 12px; }
+
 @media (max-width: 768px) {
   .page-header { flex-direction: column; align-items: flex-start; gap: 10px; }
   .summary-cards, .selection-cards, .summary-grid { grid-template-columns: 1fr; }
@@ -3810,5 +4633,10 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   .progress-step { flex: 1 0 30%; }
   .filters-row { flex-direction: column; align-items: stretch; }
   .filter-group { min-width: 100%; }
+  .breakdown-grid { grid-template-columns: 1fr; }
+  .workflow-options { grid-template-columns: 1fr; }
+  .header-right { width: 100%; justify-content: flex-start; }
+  .btn-save-session { width: 100%; justify-content: center; }
+  .instrument-grid { grid-template-columns: 1fr; }
 }
 </style>

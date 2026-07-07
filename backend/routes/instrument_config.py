@@ -6,7 +6,7 @@ from utils.db import get_db
 DEFAULT_CONFIGS = {
     'money-market': {
         'required_columns': [
-            'Date', 'Instrument', 'Rate', 'Amount', 'MaturityDate', 'DaysToMaturity',
+            'Date', 'Instrument', 'Rate', 'Amount', 'MaturityDate',
             'Principal', 'InterestRate', 'DiscountRate', 'Price', 'FaceValue'
         ],
         'column_variations': {
@@ -34,7 +34,7 @@ DEFAULT_CONFIGS = {
     'bonds': {
         'required_columns': [
             'Date', 'BondName', 'CouponRate', 'FaceValue', 'Yield', 'MaturityDate',
-            'IssueDate', 'Frequency', 'Price', 'AccruedInterest', 'DaysToMaturity', 'RedemptionValue'
+            'IssueDate', 'Frequency', 'Price', 'AccruedInterest', 'RedemptionValue'
         ],
         'column_variations': {
             'Date': ['Date', 'date', 'DATE', 'Transaction Date', 'Trade Date', 'Settlement Date', 'Value Date'],
@@ -62,7 +62,7 @@ DEFAULT_CONFIGS = {
     'tbills': {
         'required_columns': [
             'Date', 'TBillName', 'DiscountRate', 'FaceValue', 'MaturityDate',
-            'DaysToMaturity', 'IssueDate', 'Price', 'Yield'
+            'IssueDate', 'Price', 'Yield'
         ],
         'column_variations': {
             'Date': ['Date', 'date', 'DATE', 'Transaction Date', 'Trade Date', 'Settlement Date'],
@@ -132,6 +132,18 @@ def instrument_config_routes(app):
                         json.dumps(cfg['required_columns']),
                         json.dumps(cfg['column_variations']),
                         json.dumps(cfg['workflow_steps'])
+                    ))
+                else:
+                    # Update existing records to match DEFAULT_CONFIGS
+                    cursor.execute('''
+                        UPDATE instrument_configs
+                        SET required_columns = %s, column_variations = %s, workflow_steps = %s
+                        WHERE instrument_type = %s
+                    ''', (
+                        json.dumps(cfg['required_columns']),
+                        json.dumps(cfg['column_variations']),
+                        json.dumps(cfg['workflow_steps']),
+                        inst_type
                     ))
             conn.commit()
             cursor.close()
