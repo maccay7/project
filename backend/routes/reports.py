@@ -18,12 +18,12 @@ def create_reports_table():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS reports (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                session_id INT NOT NULL,
+                session_id VARCHAR(64) NOT NULL,
                 report_type VARCHAR(50),
                 report_data JSON,
                 file_path VARCHAR(512),
                 generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                INDEX idx_session_id (session_id)
             )
         """)
         conn.commit()
@@ -37,10 +37,7 @@ def create_reports_table():
 
 
 def generate_appendix_data(data, instrument_type):
-    """
-    Generate appendix data for reports.
-    Returns: appendix data structure
-    """
+    """Generate appendix data for reports."""
     appendix = {
         'instrument_details': [],
         'metadata': {
@@ -73,18 +70,12 @@ def generate_appendix_data(data, instrument_type):
 
 
 def generate_report_excel(session_id, report_data, instrument_type):
-    """
-    Generate Excel report with cover, summary, data, and appendix sheets.
-    Returns: file path
-    """
-    # Create output directory if it doesn't exist
+    """Generate Excel report with cover, summary, data, and appendix sheets."""
     output_dir = 'reports'
     os.makedirs(output_dir, exist_ok=True)
     
-    # Create workbook
     wb = openpyxl.Workbook()
     
-    # Define styles for A4-like formatting
     title_font = Font(name='Arial', size=16, bold=True, color='0B2044')
     header_font = Font(name='Arial', size=12, bold=True, color='0B2044')
     normal_font = Font(name='Arial', size=10)
@@ -105,7 +96,7 @@ def generate_report_excel(session_id, report_data, instrument_type):
     ws_cover.title = 'Cover'
     
     ws_cover['A1'] = 'DURA CAPITAL (PRIVATE) LIMITED'
-    ws_cover ['A1'].font = Font(name='Arial', size=20, bold=True, color='0B2044')
+    ws_cover['A1'].font = Font(name='Arial', size=20, bold=True, color='0B2044')
     ws_cover['A1'].alignment = center_align
     
     ws_cover['A3'] = 'PORTFOLIO VALUATION REPORT'
@@ -128,7 +119,6 @@ def generate_report_excel(session_id, report_data, instrument_type):
     ws_cover['A9'].font = Font(name='Arial', size=14, bold=True, color='c62828')
     ws_cover['A9'].alignment = center_align
     
-    # Set column width for cover
     ws_cover.column_dimensions['A'].width = 50
     
     # Sheet 2: Summary
@@ -268,7 +258,6 @@ def generate_report_excel(session_id, report_data, instrument_type):
         sheet.page_margins.top = 0.5
         sheet.page_margins.bottom = 0.5
     
-    # Save file
     file_name = f"report_{session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     file_path = os.path.join(output_dir, file_name)
     wb.save(file_path)
@@ -319,10 +308,7 @@ def reports_routes(app):
         if not session_id:
             return jsonify({'success': False, 'message': 'Session ID is required'}), 400
         
-        # Generate Excel file
         file_path = generate_report_excel(session_id, report_data, instrument_type)
-        
-        # Save to database
         report_id = save_report(session_id, report_type, report_data, file_path)
         
         if report_id:
@@ -383,7 +369,7 @@ def reports_routes(app):
             conn.close()
             return jsonify({'success': False, 'message': str(e)}), 500
     
-    @app.route('/api/report/session/<int:session_id>', methods=['GET', 'OPTIONS'])
+    @app.route('/api/report/session/<session_id>', methods=['GET', 'OPTIONS'])
     def get_session_reports(session_id):
         if request.method == 'OPTIONS':
             return '', 200

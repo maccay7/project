@@ -34,9 +34,10 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      // SINGLE UNIFIED INSTRUMENT PAGE – handles all three instruments
       path: '/instrument/:type',
       name: 'instrument',
-      component: () => import('@/views/MoneyMarket.vue'),
+      component: () => import('@/views/InstrumentView.vue'),
       meta: { requiresAuth: true }
     },
     {
@@ -49,12 +50,6 @@ const router = createRouter({
       path: '/cleaning',
       name: 'cleaning',
       component: () => import('@/views/CleaningView.vue'),
-      meta: { requiresAuth: true }
-    },
-    {
-      path: '/calculations',
-      name: 'calculations',
-      component: () => import('@/views/CalculationsView.vue'),
       meta: { requiresAuth: true }
     },
     {

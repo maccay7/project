@@ -2,7 +2,6 @@ from utils.db import get_db
 
 
 def get_user_profile(user_id=1):
-    """Return the current user's profile (name, email). Returns empty dict if not found."""
     conn = get_db()
     if not conn:
         return {}
@@ -30,7 +29,6 @@ def get_user_profile(user_id=1):
 
 
 def get_user_preferences(user_id=1):
-    """Return user preferences (language, timezone, dateFormat, currency). Returns empty dict if none."""
     conn = get_db()
     if not conn:
         return {}
@@ -54,7 +52,6 @@ def get_user_preferences(user_id=1):
 
 
 def get_notification_settings(user_id=1):
-    """Return notification settings (camelCase keys). Returns empty dict if none."""
     conn = get_db()
     if not conn:
         return {}
@@ -81,7 +78,6 @@ def get_notification_settings(user_id=1):
 
 
 def get_system_info():
-    """Return system info (last_updated, version, apiStatus). Returns empty dict if none."""
     conn = get_db()
     if not conn:
         return {}

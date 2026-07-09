@@ -10,7 +10,6 @@ from utils.db import get_db
 
 
 def create_settings_table():
-    """Create the user_settings table if it doesn't exist."""
     conn = get_db()
     if not conn:
         return False
@@ -38,7 +37,6 @@ def create_settings_table():
 
 
 def get_setting(user_id, setting_key):
-    """Get a user setting."""
     conn = get_db()
     if not conn:
         return None
@@ -63,7 +61,6 @@ def get_setting(user_id, setting_key):
 
 
 def save_setting(user_id, setting_key, setting_value, setting_type='preference'):
-    """Save a user setting."""
     conn = get_db()
     if not conn:
         return False
@@ -89,7 +86,6 @@ def save_setting(user_id, setting_key, setting_value, setting_type='preference')
 
 
 def get_all_settings(user_id):
-    """Get all settings for a user."""
     conn = get_db()
     if not conn:
         return {}
@@ -115,9 +111,6 @@ def get_all_settings(user_id):
 
 
 def settings_routes(app):
-    """Register all settings routes."""
-    
-    # Create table on module load
     create_settings_table()
     
     @app.route('/api/user/profile', methods=['GET', 'OPTIONS'])
@@ -236,7 +229,6 @@ def settings_routes(app):
             return '', 200
         
         settings = get_all_settings(user_id)
-        
         return jsonify({'success': True, 'data': settings})
     
     @app.route('/api/settings/<int:user_id>/<setting_key>', methods=['GET', 'OPTIONS'])
@@ -291,10 +283,8 @@ def settings_routes(app):
         
         return jsonify({'success': True, 'data': saved_settings})
     
-    # FRED-specific settings endpoints
     @app.route('/api/settings/fred', methods=['POST', 'OPTIONS'])
     def save_fred_settings():
-        """Save FRED filter preferences (country, currency, maturity)."""
         if request.method == 'OPTIONS':
             return '', 200
         try:
@@ -320,7 +310,6 @@ def settings_routes(app):
     
     @app.route('/api/settings/fred', methods=['GET', 'OPTIONS'])
     def load_fred_settings():
-        """Load FRED filter preferences."""
         if request.method == 'OPTIONS':
             return '', 200
         try:
@@ -334,9 +323,7 @@ def settings_routes(app):
             if settings:
                 return jsonify({'success': True, 'data': settings})
             else:
-                # Return default settings
                 return jsonify({'success': True, 'data': {'country': 'US', 'currency': 'USD', 'maturity': '1Y'}})
         except Exception as e:
             print(f"Error loading FRED settings: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
-

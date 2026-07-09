@@ -17,7 +17,19 @@ class SessionManager {
   loadCache() {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
-      this.sessions = stored ? JSON.parse(stored) : []
+      const metadata = stored ? JSON.parse(stored) : []
+      this.sessions = metadata.map(m => ({
+        id: m.id,
+        name: m.name,
+        status: m.status || 'in-progress',
+        date: m.date,
+        created_at: m.created_at || m.date,
+        instrument_count: m.instrument_count || 0,
+        version_count: m.version_count || 0,
+        total_value: m.total_value || 0,
+        instrumentWorkflow: null,
+        versions: null
+      }))
     } catch {
       this.sessions = []
     }
@@ -26,7 +38,23 @@ class SessionManager {
   }
 
   saveCache() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.sessions))
+    const metadata = this.sessions.map(s => ({
+      id: s.id,
+      name: s.name,
+      status: s.status,
+      date: s.date,
+      created_at: s.created_at || s.date,
+      instrument_count: s.instrument_count || 0,
+      version_count: s.version_count || 0,
+      total_value: s.total_value || 0
+    }))
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(metadata))
+    } catch (e) {
+      console.error('LocalStorage quota exceeded, clearing old sessions:', e)
+      const recent = metadata.slice(0, 20)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(recent))
+    }
     if (this.activeSessionId) {
       localStorage.setItem(ACTIVE_KEY, this.activeSessionId)
     } else {
@@ -36,13 +64,10 @@ class SessionManager {
 
   // ---- API calls ----
 
-  // Fetch all sessions from backend, merge with cache
   async getAllSessions() {
     try {
       const data = await api.sessionsAPI.list()
-      // data is the array of sessions from backend
       const backendSessions = Array.isArray(data) ? data : []
-      // Merge: override local with backend data (preserve any extra fields)
       const merged = [...this.sessions]
       for (const bs of backendSessions) {
         const idx = merged.findIndex(s => s.id === bs.id || s.session_id === bs.id)
@@ -61,13 +86,10 @@ class SessionManager {
     }
   }
 
-  // Get a single session – from cache or fetch from backend
   async getSession(id) {
-    // Check cache first
     let session = this.sessions.find(s => s.id === id)
     if (session) return session
 
-    // Fetch from backend
     try {
       const data = await api.sessionsAPI.get(id)
       if (data) {
@@ -120,7 +142,6 @@ class SessionManager {
 
   // ---- CRUD operations ----
 
-  // Create a new session – persists to backend immediately
   async createSession(nameOverride = '') {
     const newSession = {
       id: Date.now().toString(),
@@ -133,12 +154,10 @@ class SessionManager {
       instrumentWorkflow: {},
       versions: [],
     }
-    // Add to cache
     this.sessions.unshift(newSession)
     this.saveCache()
     this.setActiveSession(newSession)
 
-    // Persist to backend
     try {
       await api.sessionsAPI.save({
         id: newSession.id,
@@ -155,12 +174,10 @@ class SessionManager {
     return newSession
   }
 
-  // Update session – persist to backend
   async updateSession(id, updates) {
     const idx = this.sessions.findIndex(s => s.id === id)
     if (idx === -1) return null
 
-    // Preserve versions if not overwritten
     const existingVersions = this.sessions[idx].versions || []
     this.sessions[idx] = { ...this.sessions[idx], ...updates, timestamp: Date.now() }
     if (!updates.versions) {
@@ -168,7 +185,6 @@ class SessionManager {
     }
     this.saveCache()
 
-    // Persist to backend
     try {
       await api.sessionsAPI.save({
         id: this.sessions[idx].id,
@@ -185,12 +201,10 @@ class SessionManager {
     return this.sessions[idx]
   }
 
-  // Rename session
   async renameSession(id, newName) {
     return this.updateSession(id, { name: newName.trim() })
   }
 
-  // Delete session – from cache and backend
   async deleteSession(id) {
     this.sessions = this.sessions.filter(s => s.id !== id)
     this.saveCache()
@@ -205,17 +219,44 @@ class SessionManager {
     }
   }
 
-  // ---- Workflow management (stored inside session payload) ----
+  // ---- Workflow management ----
 
-  // Save instrument workflow – updates session and persists
   async saveInstrumentWorkflow(sessionId, instrumentKey, workflow) {
+    // First, ensure we have the latest session
     const session = await this.getSession(sessionId)
     if (!session) return
+
+    // Update the workflow
     const iw = { ...(session.instrumentWorkflow || {}), [instrumentKey]: workflow }
-    await this.updateSession(sessionId, { instrumentWorkflow: iw })
+    // Compute the instrument count from the workflows
+    const instrumentCount = this.countSessionInstrumentsFromWorkflows(iw)
+
+    // Update the session with new workflow and count
+    await this.updateSession(sessionId, {
+      instrumentWorkflow: iw,
+      instrument_count: instrumentCount,
+    })
+
+    // Also ensure the backend gets the updated instrument_count
+    try {
+      await api.sessionsAPI.save({
+        id: sessionId,
+        session_id: sessionId,
+        name: session.name,
+        status: session.status,
+        payload: session,
+        instrument_workflows: iw,
+        versions: session.versions || [],
+        instrument_count: instrumentCount,
+      })
+    } catch (err) {
+      console.error('Failed to sync workflow to backend:', err)
+    }
+
+    // After saving, refresh the session from backend to ensure consistency
+    await this.getSession(sessionId)
   }
 
-  // Get instrument workflow – from session cache
   async getInstrumentWorkflow(sessionId, instrumentKey) {
     const session = await this.getSession(sessionId)
     return session?.instrumentWorkflow?.[instrumentKey] || null
@@ -223,12 +264,10 @@ class SessionManager {
 
   // ---- Version management ----
 
-  // Add a version record – calls versionAPI.create and refreshes session
   async addVersion(sessionId, version) {
     const session = await this.getSession(sessionId)
     if (!session) return null
 
-    // Local update
     const versions = session.versions || []
     const versionNumber = versions.length + 1
     const record = {
@@ -239,7 +278,6 @@ class SessionManager {
     versions.unshift(record)
     await this.updateSession(sessionId, { versions })
 
-    // Call backend version API to create a dedicated version record
     try {
       await api.versionAPI.create(
         sessionId,
@@ -250,9 +288,8 @@ class SessionManager {
         version.calculationSnapshot || null,
         version.portfolioSnapshot || null,
         version.reportSnapshot || null,
-        null // userId
+        null
       )
-      // Refresh the session to get updated version_count from backend
       await this.getSession(sessionId)
     } catch (err) {
       console.error('Failed to save version to backend:', err)
@@ -262,27 +299,34 @@ class SessionManager {
 
   // ---- Helpers ----
 
-  // Count distinct instruments (max 3) – uses instrument_count from backend if available
-  countSessionInstruments(sessionId) {
-    const session = this.sessions.find(s => s.id === sessionId)
-    if (!session) return 0
-    if (session.instrument_count !== undefined) return session.instrument_count
-    // Fallback: count from instrumentWorkflow
+  countSessionInstrumentsFromWorkflows(workflows) {
+    if (!workflows || typeof workflows !== 'object') return 0
     const keys = ['money-market', 'bonds', 'tbills']
     let count = 0
     for (const key of keys) {
-      const wf = session.instrumentWorkflow?.[key]
-      const hasData = wf && (
-        (wf.cleanedData?.length > 0) ||
-        (wf.data?.length > 0) ||
-        (wf.calculations && parseFloat(wf.calculations.totalValue) > 0)
-      )
-      if (hasData) count++
+      const wf = workflows[key]
+      if (wf && (
+        (wf.cleanedData && wf.cleanedData.length > 0) ||
+        (wf.rawData && wf.rawData.length > 0) ||
+        (wf.data && wf.data.length > 0) ||
+        (wf.calculations && parseFloat(wf.calculations.totalValue) > 0) ||
+        (wf.calculations && Object.keys(wf.calculations).length > 0)
+      )) {
+        count++
+      }
     }
     return Math.min(count, 3)
   }
 
-  // Clear all sessions (local only)
+  countSessionInstruments(sessionId) {
+    const session = this.sessions.find(s => s.id === sessionId)
+    if (!session) return 0
+    if (session.instrument_count !== undefined) {
+      return session.instrument_count
+    }
+    return this.countSessionInstrumentsFromWorkflows(session.instrumentWorkflow || {})
+  }
+
   clearAllSessions() {
     this.sessions = []
     localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
@@ -290,7 +334,6 @@ class SessionManager {
     this.activeSessionId = null
   }
 
-  // Get instrument name from key
   getInstrumentName(type) {
     const names = {
       treasury_bills: 'Treasury Bills',
@@ -303,5 +346,4 @@ class SessionManager {
   }
 }
 
-// Export a singleton instance
 export default new SessionManager()

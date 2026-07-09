@@ -1,15 +1,14 @@
 <template>
   <FixedLayout>
-    <div class="reports-page">
+    <div class="reports-view">
+      <!-- Header -->
       <div class="page-header">
-        <button class="back-btn" @click="goBack">
-          <v-icon>mdi-arrow-left</v-icon> Back
-        </button>
         <h1>Generate Report</h1>
         <p>Select report type and generate detailed analysis with appendix</p>
       </div>
 
-      <div class="report-actions-row">
+      <!-- Action Buttons -->
+      <div class="action-buttons">
         <v-btn color="#0B2A44" @click="loadDatasetPreview">
           <v-icon left>mdi-eye</v-icon> Preview Dataset
         </v-btn>
@@ -24,6 +23,7 @@
         </v-btn>
       </div>
 
+      <!-- Report Options -->
       <div class="report-options">
         <div class="option-card" @click="selectReportType('current')">
           <div class="option-icon" :class="{ active: selectedType === 'current' }">
@@ -42,6 +42,7 @@
         </div>
       </div>
 
+      <!-- Dataset Preview -->
       <div class="dataset-preview" v-if="showDatasetPreview">
         <h3>Excel Dataset Preview</h3>
         <div class="dataset-info-row">
@@ -60,10 +61,12 @@
         </div>
       </div>
 
+      <!-- Report Preview -->
       <div class="preview-section" v-if="previewData">
         <h3>Report Preview</h3>
         <v-alert v-if="reportError" type="warning" density="compact" class="mb-3">{{ reportError }}</v-alert>
         
+        <!-- Data Visualizations -->
         <div class="visualizations-section" v-if="previewData.allWorkedData">
           <h4>📊 Data Visualizations</h4>
           <div class="viz-grid">
@@ -83,9 +86,12 @@
           </div>
         </div>
         
+        <!-- Preview Content -->
         <div class="preview-content">
           <pre>{{ JSON.stringify(previewData, null, 2) }}</pre>
         </div>
+        
+        <!-- Download Row -->
         <div class="download-row">
           <button class="btn-primary" @click="downloadFullReport">
             <v-icon>mdi-download</v-icon> Download Full Report (HTML)
@@ -123,6 +129,7 @@ import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import { Document, Packer, Paragraph, TextRun } from 'docx'
 import { saveAs } from 'file-saver'
+import api from '@/services/api.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -151,8 +158,18 @@ async function resolveSession() {
   return session
 }
 
-// Load data from instrument summary (calculated results)
+// Load data from instrument summary (calculated results) - use backend as single source of truth
 async function loadSummaryData(sessionId, instrumentType) {
+  try {
+    const response = await api.calculationsAPI.getInstrumentSummary(sessionId, instrumentType)
+    if (response?.success && response?.data) {
+      return response.data
+    }
+  } catch (err) {
+    console.error('Failed to load instrument summary from backend:', err)
+  }
+  
+  // Fallback to localStorage if backend fails
   const summaryKey = `${instrumentType}_session_${sessionId}_summary`
   const saved = localStorage.getItem(summaryKey)
   if (saved) {
@@ -459,7 +476,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.reports-page { padding: 30px; max-width: 1200px; margin: 0 auto; }
+.reports-view { padding: 30px; max-width: 1200px; margin: 0 auto; }
 .page-header { margin-bottom: 30px; }
 .back-btn { background: transparent; border: none; color: #0B2044; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 8px; margin-bottom: 20px; }
 .page-header h1 { color: #0B2044; font-size: 28px; font-weight: 700; }

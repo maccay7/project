@@ -15,20 +15,15 @@ def get_kpi():
     try:
         cursor = conn.cursor()
         
-        # Total users
         cursor.execute('SELECT COUNT(*) AS total_users FROM users')
         total_users = cursor.fetchone().get('total_users', 0)
 
-        # Active users (sessions that haven't expired)
         cursor.execute("SELECT COUNT(*) AS active_users FROM auth_sessions WHERE expires_at > NOW()")
         active_users = cursor.fetchone().get('active_users', 0)
 
-        # Datasets processed
         cursor.execute("SELECT COUNT(*) AS datasets_processed FROM calculations WHERE calculation_status = 'completed'")
         datasets_processed = cursor.fetchone().get('datasets_processed', 0)
         
-        # Total instruments (max 3 - money_market, bonds, treasury_bills)
-        # Count unique instrument types in ui_sessions that have data
         cursor.execute("""
             SELECT COUNT(DISTINCT 
                 CASE 
@@ -47,7 +42,6 @@ def get_kpi():
         instrument_count_result = cursor.fetchone()
         total_instruments = min(instrument_count_result.get('instrument_count', 0) if instrument_count_result else 0, 3)
         
-        # Total versions across all sessions
         cursor.execute("SELECT COUNT(*) AS total_versions FROM version_history")
         total_versions = cursor.fetchone().get('total_versions', 0)
 
@@ -90,18 +84,12 @@ def get_recent_activity():
 
 
 def get_dashboard_charts():
-    """
-    Returns real chart data from the database.
-    If no data, returns empty arrays.
-    Replace the query with your actual table/columns.
-    """
     conn = get_db()
     if not conn:
         return {'labels': [], 'values': []}
 
     try:
         cursor = conn.cursor()
-        # Example query – adjust to your actual schema
         cursor.execute("""
             SELECT DATE(created_at) as date, COUNT(*) as count
             FROM calculations
@@ -113,7 +101,6 @@ def get_dashboard_charts():
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        # Reverse to show chronological order
         labels = [row.get('date').strftime('%b') if row.get('date') else '' for row in reversed(rows)]
         values = [row.get('count', 0) for row in reversed(rows)]
         return {'labels': labels, 'values': values}
@@ -122,7 +109,6 @@ def get_dashboard_charts():
 
 
 def get_yield_curve(instrument_type='all', country='US', currency='USD'):
-    """Fetch yield curves from FRED (one instrument or all three)."""
     from utils.fred_config import build_yield_curve_response, FRED_KEY
     if not FRED_KEY:
         return {'labels': [], 'current': [], 'datasets': [], 'error': 'FRED API key missing'}

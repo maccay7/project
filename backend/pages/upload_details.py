@@ -1,4 +1,3 @@
-
 import os
 import json
 import base64
@@ -269,7 +268,6 @@ def save_dataset(name, file_base64='', sheet_names=None, upload_id=None, data=No
     try:
         ds_id = upload_id or str(uuid.uuid4())
         cursor = conn.cursor()
-        # Store JSON fields as JSON strings
         cursor.execute(
             "REPLACE INTO datasets (id, name, file_base64, data, headers, instrument_type, upload_status, done) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
             (

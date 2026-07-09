@@ -589,45 +589,4 @@ onMounted(async () => {
   .action-buttons { flex-direction: column; }
   .chart-container { height: 300px; }
 }
-</style>>
-
-<style scoped>
-.visualizations-view { max-width: 1400px; margin: 0 auto; padding: 20px; }
-.page-header { margin-bottom: 30px; }
-.page-header h1 { color: #0B2A44; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
-.page-header p { color: #666; font-size: 16px; }
-
-.action-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 30px; }
-
-.stats-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); border-radius: 12px 12px 0 0; }
-
-.chart-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.chart-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); }
-
-.card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
-.title-icon { margin-right: 8px; }
-
-.fred-note { font-size: 13px; color: #666; }
-.chart-container { height: 400px; position: relative; padding: 16px; }
-
-.kpi-card { height: 120px; border-radius: 12px; transition: 0.2s; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50); }
-.kpi-card:hover { transform: translateY(-2px); }
-.kpi-content { display: flex; align-items: center; height: 100%; padding: 8px; }
-.kpi-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; flex-shrink: 0; }
-.kpi-value { font-size: 24px; font-weight: 700; color: #0B2A44; }
-.kpi-title { font-size: 12px; color: #666; }
-
-.action-card { border-radius: 12px; background: white; border: 1px solid rgba(11,42,68,0.08); text-align: center; padding: 16px; }
-
-.analytics-card { border-radius: 8px; background: #f8f9ff; border: 1px solid #e0e0e0; }
-.analytics-label { font-size: 12px; color: #666; margin-bottom: 4px; }
-.analytics-value { font-size: 18px; font-weight: 700; color: #0B2044; }
-
-@media (max-width: 600px) {
-  .visualizations-view { padding: 0 16px; }
-  .action-buttons { flex-direction: column; }
-  .chart-container { height: 300px; }
-}
 </style>

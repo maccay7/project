@@ -25,14 +25,12 @@ from routes.visualization import visualization_routes
 
 app = Flask(__name__)
 
-# Configure CORS to allow requests from localhost:3000
 CORS(app, 
      resources={r"/api/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173", "*"]}},
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-# Register routes
 auth_routes(app)
 dashboard_routes(app)
 calculations_routes(app)
@@ -51,7 +49,6 @@ version_history_routes(app)
 reports_routes(app)
 visualization_routes(app)
 
-# Global OPTIONS handler
 @app.route('/api/<path:path>', methods=['OPTIONS'])
 def handle_options(path):
     response = jsonify({})

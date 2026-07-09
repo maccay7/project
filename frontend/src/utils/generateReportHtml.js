@@ -47,7 +47,6 @@ export function generateReportHtml(data, instrument, session, date, valuationDat
 
   const logoUrl = '/DuraCapital logo.png'
   const backgroundCoverUrl = '/reportbackground.png'
-  const watermarkLogo = `<img src="${logoUrl}" alt="logo" style="position:absolute; top:20px; right:30px; width:80px; opacity:0.15; pointer-events:none;" />`
 
   return `<!DOCTYPE html>
 <html>
@@ -96,7 +95,6 @@ export function generateReportHtml(data, instrument, session, date, valuationDat
   </div>
 </div>
 <div class="page toc-page">
-  ${watermarkLogo}
   <h1>Table of Contents</h1>
   <div class="toc-item"><span>Introduction</span><span>1</span></div>
   <div class="toc-item"><span>Executive Summary</span><span>2</span></div>
@@ -107,14 +105,14 @@ export function generateReportHtml(data, instrument, session, date, valuationDat
   <div class="toc-item"><span>Appendix</span><span>7</span></div>
   <div class="toc-item"><span>Reference</span><span>8</span></div>
 </div>
-<div class="page">${watermarkLogo}<h1 class="section-title">Introduction</h1><p>Dura Capital (Private) Limited was contracted to provide a fair valuation assessment report of the following ${instrument} instruments as at ${valDate}.</p><ul style="margin:20px 0 20px 30px;"><li>${instrument} instruments</li><li>Valuation as at ${valDate}</li><li>${data.length} individual instruments assessed</li></ul></div>
-<div class="page">${watermarkLogo}<h1 class="section-title">Executive Summary</h1><div class="executive-summary"><p><strong>Key Findings:</strong></p><ul style="margin-left:20px;"><li>Total Portfolio Value: <span class="highlight">$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li><li>Number of Instruments: <span class="highlight">${data.length}</span></li><li>Average Rate: <span class="highlight">${avgRate.toFixed(2)}%</span></li><li>Valuation Date: <span class="highlight">${valDate}</span></li></ul><p><strong>Valuation Approach:</strong> ${methodology}</p></div></div>
-<div class="page">${watermarkLogo}<h1 class="section-title">Methodology</h1><div class="methodology-box"><p>${methodology}</p><div class="formula">${formulas}</div><p><strong>Assumptions:</strong> ${assumptions}</p></div></div>
-<div class="page">${watermarkLogo}<h1 class="section-title">Market Inputs</h1><p>Rates sourced from FRED for ${valDate}.</p></div>
-<div class="page">${watermarkLogo}<h1 class="section-title">Results</h1><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Total Portfolio Value</td><td>$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Number of Instruments</td><td>${data.length}</td></tr><tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr><tr><td>Total Interest Earned</td><td>$${totalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Valuation Date</td><td>${valDate}</td></tr></tbody></table></div>
-<div class="page">${watermarkLogo}<h1 class="section-title">Conclusion</h1><p>The valuation assessment is in accordance with IFRS 13 fair value measurement principles as at ${valDate}.</p></div>
-<div class="page">${watermarkLogo}<h1 class="section-title">Appendix: Detailed Instrument Data</h1><table class="appendix-table"><thead><tr><th>Instrument Name</th><th>BB Ticker</th><th>Face Value ($)</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead><tbody>${instrumentRows}</tbody></table></div>
-<div class="page">${watermarkLogo}<h1 class="section-title">Reference</h1><ul class="reference-list"><li>FRED – Federal Reserve Economic Data</li><li>IFRS 13: Fair Value Measurement</li><li>IFRS 9: Financial Instruments</li></ul><div class="footer"><p>© ${new Date().getFullYear()} Dura Capital (Private) Limited. Report generated ${date || valDate}.</p></div></div>
+<div class="page"><h1 class="section-title">Introduction</h1><p>Dura Capital (Private) Limited was contracted to provide a fair valuation assessment report of the following ${instrument} instruments as at ${valDate}.</p><ul style="margin:20px 0 20px 30px;"><li>${instrument} instruments</li><li>Valuation as at ${valDate}</li><li>${data.length} individual instruments assessed</li></ul></div>
+<div class="page"><h1 class="section-title">Executive Summary</h1><div class="executive-summary"><p><strong>Key Findings:</strong></p><ul style="margin-left:20px;"><li>Total Portfolio Value: <span class="highlight">$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li><li>Number of Instruments: <span class="highlight">${data.length}</span></li><li>Average Rate: <span class="highlight">${avgRate.toFixed(2)}%</span></li><li>Valuation Date: <span class="highlight">${valDate}</span></li></ul><p><strong>Valuation Approach:</strong> ${methodology}</p></div></div>
+<div class="page"><h1 class="section-title">Methodology</h1><div class="methodology-box"><p>${methodology}</p><div class="formula">${formulas}</div><p><strong>Assumptions:</strong> ${assumptions}</p></div></div>
+<div class="page"><h1 class="section-title">Market Inputs</h1><p>Rates sourced from FRED for ${valDate}.</p></div>
+<div class="page"><h1 class="section-title">Results</h1><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Total Portfolio Value</td><td>$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Number of Instruments</td><td>${data.length}</td></tr><tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr><tr><td>Total Interest Earned</td><td>$${totalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Valuation Date</td><td>${valDate}</td></tr></tbody></table></div>
+<div class="page"><h1 class="section-title">Conclusion</h1><p>The valuation assessment is in accordance with IFRS 13 fair value measurement principles as at ${valDate}.</p></div>
+<div class="page"><h1 class="section-title">Appendix: Detailed Instrument Data</h1><table class="appendix-table"><thead><tr><th>Instrument Name</th><th>BB Ticker</th><th>Face Value ($)</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead><tbody>${instrumentRows}</tbody></table></div>
+<div class="page"><h1 class="section-title">Reference</h1><ul class="reference-list"><li>FRED – Federal Reserve Economic Data</li><li>IFRS 13: Fair Value Measurement</li><li>IFRS 9: Financial Instruments</li></ul><div class="footer"><p>© ${new Date().getFullYear()} Dura Capital (Private) Limited. Report generated ${date || valDate}.</p></div></div>
 </body>
 </html>`
 }

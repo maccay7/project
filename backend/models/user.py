@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 import uuid
 
 
-# Ensure auth_sessions table exists (separate from UI sessions)
 def _ensure_auth_sessions_table():
     conn = get_db()
     if not conn:
@@ -39,7 +38,6 @@ class User:
     
     @staticmethod
     def find_by_email(email):
-        """Find user by email"""
         conn = get_db()
         if not conn:
             return None
@@ -98,14 +96,12 @@ class User:
 
     @staticmethod
     def verify_password(user, password):
-        """Verify password against stored hash"""
         if not user or not user.get('password_hash'):
             return False
         return check_password_hash(user['password_hash'], password)
     
     @staticmethod
     def create_session(user_id, ip_address=None, user_agent=None):
-        """Create a new session token for user"""
         conn = get_db()
         if not conn:
             return None
@@ -129,7 +125,6 @@ class User:
     
     @staticmethod
     def get_user_preferences(user_id):
-        """Get user preferences"""
         conn = get_db()
         if not conn:
             return {}
@@ -149,7 +144,6 @@ class User:
     
     @staticmethod
     def log_audit(user_id, action, resource=None, ip_address=None, user_agent=None):
-        """Log user action to audit_log table"""
         conn = get_db()
         if not conn:
             return

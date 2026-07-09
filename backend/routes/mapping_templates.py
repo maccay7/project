@@ -135,7 +135,6 @@ def update_mapping_template(template_id, column_mapping=None, file_columns=None,
     try:
         cursor = conn.cursor()
         
-        # Build dynamic update query
         updates = []
         params = []
         
@@ -188,7 +187,6 @@ def delete_mapping_template(template_id):
 def mapping_templates_routes(app):
     """Register all mapping template routes."""
     
-    # Create table on module load
     create_mapping_template_table()
     
     @app.route('/api/mapping-templates', methods=['GET', 'OPTIONS'])

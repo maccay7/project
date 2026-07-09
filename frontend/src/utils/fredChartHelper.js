@@ -31,7 +31,34 @@ export function chartJsOptions() {
     plugins: { legend: { position: 'top' } },
     scales: {
       y: { title: { display: true, text: 'Yield (%)' } },
-      x: { title: { display: true, text: 'Date' }, ticks: { maxRotation: 45, autoSkip: true } }
+      x: { 
+        title: { display: true, text: 'Date' }, 
+        ticks: { 
+          maxRotation: 45, 
+          autoSkip: true,
+          maxTicksLimit: 12
+        },
+        time: {
+          unit: 'day',
+          displayFormats: {
+            day: 'MMM d',
+            week: 'MMM d',
+            month: 'MMM yyyy'
+          }
+        }
+      }
     }
   }
+}
+
+export function determineTimeUnit(dataPoints) {
+  if (!dataPoints || dataPoints.length < 2) return 'day'
+  
+  const firstDate = new Date(dataPoints[0])
+  const lastDate = new Date(dataPoints[dataPoints.length - 1])
+  const daysDiff = (lastDate - firstDate) / (1000 * 60 * 60 * 24)
+  
+  if (daysDiff > 365) return 'month'
+  if (daysDiff > 30) return 'week'
+  return 'day'
 }

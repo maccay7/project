@@ -202,11 +202,20 @@ function loadSheetData() {
   if (!activeSheet.value) return
   
   const sheet = activeSheet.value
-  const data = sheet.data || []
-  const headers = sheet.headers || []
   
-  visibleRows.value = data.slice(0, 30) // Show first 30 rows for performance
-  columnHeaders.value = getColumnHeaders(Math.max(headers.length, 10))
+  // Use fullData if available (preserves empty cells and structure)
+  if (sheet.fullData && sheet.fullData.length > 0) {
+    visibleRows.value = sheet.fullData.slice(0, 50) // Show first 50 rows
+    // Generate column headers from actual data structure
+    const colCount = sheet.full_column_count || sheet.fullData[0]?.length || 10
+    columnHeaders.value = getColumnHeaders(colCount)
+  } else {
+    // Fallback to JSON data
+    const data = sheet.data || []
+    const headers = sheet.headers || []
+    visibleRows.value = data.slice(0, 30)
+    columnHeaders.value = getColumnHeaders(Math.max(headers.length, 10))
+  }
 }
 
 function closeViewer() {

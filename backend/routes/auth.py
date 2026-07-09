@@ -245,7 +245,7 @@ def auth_routes(app):
             password_hash = generate_password_hash(new_password)
             cursor.execute('UPDATE users SET password_hash = %s WHERE id = %s', (password_hash, reset['user_id']))
             cursor.execute('UPDATE password_resets SET used = TRUE WHERE token = %s', (token,))
-            cursor.execute('DELETE FROM sessions WHERE user_id = %s', (reset['user_id'],))
+            cursor.execute('DELETE FROM auth_sessions WHERE user_id = %s', (reset['user_id'],))
             conn.commit()
             cursor.close()
             conn.close()
@@ -272,7 +272,7 @@ def auth_routes(app):
         try:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT u.id, u.password_hash FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = %s AND s.expires_at > NOW()',
+                'SELECT u.id, u.password_hash FROM auth_sessions s JOIN users u ON s.user_id = u.id WHERE s.token = %s AND s.expires_at > NOW()',
                 (token,)
             )
             session = cursor.fetchone()
@@ -282,7 +282,7 @@ def auth_routes(app):
                 return jsonify({'success': False, 'message': 'Incorrect old password'}), 400
             new_hash = generate_password_hash(new_password)
             cursor.execute('UPDATE users SET password_hash = %s WHERE id = %s', (new_hash, session['id']))
-            cursor.execute('DELETE FROM sessions WHERE user_id = %s AND token != %s', (session['id'], token))
+            cursor.execute('DELETE FROM auth_sessions WHERE user_id = %s AND token != %s', (session['id'], token))
             conn.commit()
             cursor.close()
             conn.close()

@@ -8,12 +8,10 @@ import openpyxl
 import pandas as pd
 from datetime import datetime
 
-# Configuration
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
-MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
+MAX_FILE_SIZE = 16 * 1024 * 1024
 
-# Ensure upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
@@ -22,7 +20,6 @@ def allowed_file(filename):
 
 
 def create_dataset_table():
-    """Create the datasets table if it doesn't exist."""
     conn = get_db()
     if not conn:
         return False
@@ -58,7 +55,6 @@ def create_dataset_table():
 
 
 def save_dataset_metadata(file_name, original_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, user_id=None, session_id=None, metadata=None):
-    """Save dataset metadata to database."""
     conn = get_db()
     if not conn:
         return None
@@ -82,10 +78,6 @@ def save_dataset_metadata(file_name, original_name, file_path, file_size, instru
 
 
 def parse_excel_file(file_path, instrument_type):
-    """
-    Parse Excel file and extract structured data with intelligent detection.
-    Returns: { sheets: [], metadata: {}, warnings: [] }
-    """
     result = {
         'sheets': [],
         'metadata': {},
@@ -93,14 +85,12 @@ def parse_excel_file(file_path, instrument_type):
     }
     
     try:
-        # Use openpyxl for better structure detection
         import openpyxl
         workbook = openpyxl.load_workbook(file_path, data_only=False, read_only=False)
         
         result['metadata']['sheet_names'] = workbook.sheetnames
         result['metadata']['sheet_count'] = len(workbook.sheetnames)
         
-        # Detect named ranges
         named_ranges = []
         for name in workbook.defined_names:
             named_ranges.append({
@@ -116,7 +106,6 @@ def parse_excel_file(file_path, instrument_type):
             try:
                 sheet = workbook[sheet_name]
                 
-                # Detect tables in the sheet
                 tables = []
                 for table in sheet.tables:
                     tables.append({
@@ -125,19 +114,16 @@ def parse_excel_file(file_path, instrument_type):
                         'display_name': table.displayName
                     })
                 
-                # Detect data ranges (contiguous data blocks)
                 data_ranges = []
                 if sheet.dimensions:
                     data_ranges.append(sheet.dimensions)
                 
-                # Read all data
                 headers = []
                 data = []
                 
                 for row_idx, row in enumerate(sheet.iter_rows(values_only=False)):
                     row_data = []
                     for cell in row:
-                        # Store both value and formula
                         cell_info = {
                             'value': cell.value if cell.value is not None else '',
                             'formula': None,
@@ -155,7 +141,6 @@ def parse_excel_file(file_path, instrument_type):
                             row_dict[str(header)] = value
                         data.append(row_dict)
                 
-                # Get merged cell ranges
                 merged_ranges = []
                 for merge_range in sheet.merged_cells.ranges:
                     merged_ranges.append(str(merge_range))
@@ -184,7 +169,6 @@ def parse_excel_file(file_path, instrument_type):
         result['metadata']['total_columns'] = total_columns
         
     except ImportError:
-        # Fallback to pandas if openpyxl not available
         excel_file = pd.ExcelFile(file_path)
         
         result['metadata']['sheet_names'] = excel_file.sheet_names
@@ -197,7 +181,6 @@ def parse_excel_file(file_path, instrument_type):
             try:
                 df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
                 
-                # Detect header row
                 header_row_idx = 0
                 max_non_null = 0
                 for idx, row in df.iterrows():
@@ -246,10 +229,6 @@ def parse_excel_file(file_path, instrument_type):
 
 
 def parse_full_workbook(file_path, instrument_type):
-    """
-    Parse full workbook structure for Excel viewer.
-    Returns: { sheets: [], metadata: {}, warnings: [] }
-    """
     print(f"=== parse_full_workbook called ===")
     print(f"File path: {file_path}")
     print(f"Instrument type: {instrument_type}")
@@ -264,7 +243,6 @@ def parse_full_workbook(file_path, instrument_type):
         import openpyxl
         print("openpyxl imported successfully")
         
-        # Load workbook without data_only to preserve formulas
         workbook = openpyxl.load_workbook(file_path, data_only=False, read_only=False)
         print(f"Workbook loaded. Sheets: {workbook.sheetnames}")
         
@@ -278,18 +256,15 @@ def parse_full_workbook(file_path, instrument_type):
                 headers = []
                 data = []
                 
-                # Read all rows without limit for complete workbook display
                 for row_idx, row in enumerate(sheet.iter_rows(values_only=False)):
                     row_data = []
                     for cell in row:
-                        # Store both value and formula if present
                         cell_info = {
                             'value': cell.value if cell.value is not None else '',
                             'formula': None
                         }
-                        if cell.data_type == 'f':  # Formula cell
+                        if cell.data_type == 'f':
                             cell_info['formula'] = cell.value
-                            # Also get the calculated value
                             try:
                                 cell_info['value'] = openpyxl.load_workbook(file_path, data_only=True, read_only=True)[sheet_name].cell(row=cell.row, column=cell.column).value
                             except:
@@ -304,7 +279,6 @@ def parse_full_workbook(file_path, instrument_type):
                             row_dict[str(header)] = value
                         data.append(row_dict)
                 
-                # Get merged cell ranges
                 merged_ranges = []
                 for merge_range in sheet.merged_cells.ranges:
                     merged_ranges.append(str(merge_range))
@@ -325,7 +299,6 @@ def parse_full_workbook(file_path, instrument_type):
             except Exception as e:
                 print(f"Error parsing sheet '{sheet_name}': {str(e)}")
                 result['warnings'].append(f"Error parsing sheet '{sheet_name}': {str(e)}")
-                # Continue with other sheets even if one fails
         
         workbook.close()
         
@@ -336,14 +309,12 @@ def parse_full_workbook(file_path, instrument_type):
         
     except ImportError as e:
         print(f"ImportError: {e}")
-        # Fallback to pandas if openpyxl not available
         result = parse_excel_file(file_path, instrument_type)
     except Exception as e:
         print(f"Exception in parse_full_workbook: {e}")
         import traceback
         traceback.print_exc()
         result['warnings'].append(f"Error parsing workbook: {str(e)}")
-        # Try pandas fallback
         try:
             result = parse_excel_file(file_path, instrument_type)
         except:
@@ -353,11 +324,6 @@ def parse_full_workbook(file_path, instrument_type):
 
 
 def intelligent_parse(file_path, instrument_type):
-    """
-    Intelligent parsing that extracts required fields regardless of layout.
-    Returns: { data: [], warnings: [], metadata: {} }
-    """
-    # Define required fields per instrument
     field_map = {
         'money-market': {
             'required': ['Principal', 'InterestRate', 'DaysToMaturity'],
@@ -404,19 +370,16 @@ def intelligent_parse(file_path, instrument_type):
     all_fields = field_config['required'] + field_config['optional']
     keywords = field_config['keywords']
     
-    # Parse the file
     parsed = parse_excel_file(file_path, instrument_type)
     warnings = parsed.get('warnings', [])
     metadata = parsed.get('metadata', {})
     
-    # Extract data from sheets
     extracted_data = []
     
     for sheet in parsed.get('sheets', []):
         headers = sheet.get('headers', [])
         data = sheet.get('data', [])
         
-        # Create column mapping based on keywords
         column_map = {}
         for field in all_fields:
             field_keywords = keywords.get(field, [])
@@ -426,7 +389,6 @@ def intelligent_parse(file_path, instrument_type):
                     column_map[field] = idx
                     break
         
-        # Extract data using column mapping
         for row in data:
             row_data = {}
             for field in all_fields:
@@ -445,9 +407,6 @@ def intelligent_parse(file_path, instrument_type):
 
 
 def dataset_routes(app):
-    """Register all dataset routes."""
-    
-    # Create table on module load
     create_dataset_table()
     
     @app.route('/api/dataset/upload', methods=['POST', 'OPTIONS'])
@@ -469,7 +428,6 @@ def dataset_routes(app):
         if not allowed_file(file.filename):
             return jsonify({'success': False, 'message': 'Invalid file type. Only Excel files allowed.'}), 400
         
-        # Generate unique filename
         file_ext = file.filename.rsplit('.', 1)[1].lower()
         unique_filename = f"{uuid.uuid4().hex}.{file_ext}"
         file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
@@ -478,13 +436,11 @@ def dataset_routes(app):
             file.save(file_path)
             file_size = os.path.getsize(file_path)
             
-            # Parse file to get metadata
             parsed = parse_excel_file(file_path, instrument_type)
             sheet_count = parsed['metadata'].get('sheet_count', 0)
             total_rows = parsed['metadata'].get('total_rows', 0)
             total_columns = parsed['metadata'].get('total_columns', 0)
             
-            # Save metadata to database
             dataset_id = save_dataset_metadata(
                 unique_filename,
                 file.filename,
@@ -542,7 +498,6 @@ def dataset_routes(app):
             if not os.path.exists(file_path):
                 return jsonify({'success': False, 'message': 'File not found on server'}), 404
             
-            # Parse the file
             parsed = parse_excel_file(file_path, instrument_type)
             
             return jsonify({
@@ -579,7 +534,6 @@ def dataset_routes(app):
             if not os.path.exists(file_path):
                 return jsonify({'success': False, 'message': 'File not found on server'}), 404
             
-            # Intelligent parse
             result = intelligent_parse(file_path, instrument_type)
             
             return jsonify({
@@ -607,11 +561,9 @@ def dataset_routes(app):
             
             if dataset:
                 file_path = dataset['file_path']
-                # Delete file from disk
                 if os.path.exists(file_path):
                     os.remove(file_path)
                 
-                # Delete from database
                 cursor.execute("DELETE FROM datasets WHERE id = %s", (dataset_id,))
                 conn.commit()
             

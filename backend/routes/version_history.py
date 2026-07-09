@@ -12,11 +12,8 @@ def create_version_history_table():
         return False
     try:
         cursor = conn.cursor()
-        # Drop existing table if it has wrong schema
-        cursor.execute("DROP TABLE IF EXISTS version_history")
-        
         cursor.execute("""
-            CREATE TABLE version_history (
+            CREATE TABLE IF NOT EXISTS version_history (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 session_id VARCHAR(255) NOT NULL,
                 version_number INT NOT NULL,
@@ -49,9 +46,11 @@ def create_version(session_id, version_number, instrument_type, change_summary, 
     """Create a new version."""
     conn = get_db()
     if not conn:
+        print("❌ Failed to get database connection for version creation")
         return None
     try:
         cursor = conn.cursor()
+        print(f"📝 Inserting version: session_id={session_id}, version_number={version_number}, instrument_type={instrument_type}")
         cursor.execute(
             """INSERT INTO version_history 
                (session_id, version_number, instrument_type, change_summary, dataset_snapshot, mapping_snapshot, calculation_snapshot, portfolio_snapshot, report_snapshot, user_id) 
@@ -66,6 +65,15 @@ def create_version(session_id, version_number, instrument_type, change_summary, 
         )
         conn.commit()
         version_id = cursor.lastrowid
+        print(f"✅ Version inserted with ID: {version_id}")
+        
+        # ===== FIX: Update session version_count =====
+        try:
+            cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (version_number, session_id))
+            conn.commit()
+            print(f"✅ Session {session_id} version_count updated to {version_number}")
+        except Exception as e:
+            print(f"⚠️ Failed to update version_count: {e}")
         
         # Create audit trail entry
         try:
@@ -74,6 +82,7 @@ def create_version(session_id, version_number, instrument_type, change_summary, 
                 VALUES (%s, %s, %s, NOW())
             """, (user_id, 'Save to Session', f'Version {version_number} - {instrument_type}'))
             conn.commit()
+            print(f"✅ Audit log entry created")
         except Exception as audit_error:
             print(f"Warning: Failed to create audit log entry: {audit_error}")
         
@@ -81,8 +90,11 @@ def create_version(session_id, version_number, instrument_type, change_summary, 
         conn.close()
         return version_id
     except Exception as e:
-        print(f"Error creating version: {e}")
-        conn.close()
+        print(f"❌ Error creating version: {e}")
+        import traceback
+        traceback.print_exc()
+        if conn:
+            conn.close()
         return None
 
 
@@ -201,18 +213,15 @@ def generate_change_summary(previous_snapshot, current_snapshot, instrument_type
     """Generate automatic change summary based on differences between snapshots."""
     changes = []
     
-    # Check dataset changes
     if previous_snapshot.get('dataset') != current_snapshot.get('dataset'):
         if current_snapshot.get('dataset'):
             changes.append('Dataset uploaded')
         else:
             changes.append('Dataset removed')
     
-    # Check mapping changes
     if previous_snapshot.get('mapping') != current_snapshot.get('mapping'):
         changes.append('Excel mapping changed')
     
-    # Check calculation changes
     prev_calc = previous_snapshot.get('calculation', {})
     curr_calc = current_snapshot.get('calculation', {})
     
@@ -225,11 +234,9 @@ def generate_change_summary(previous_snapshot, current_snapshot, instrument_type
     if prev_calc.get('formula') != curr_calc.get('formula'):
         changes.append('Formula updated')
     
-    # Check portfolio changes
     if previous_snapshot.get('portfolio') != current_snapshot.get('portfolio'):
         changes.append('Portfolio recalculated')
     
-    # If no specific changes detected but something changed
     if not changes and previous_snapshot != current_snapshot:
         changes.append('Data updated')
     
@@ -259,7 +266,6 @@ def get_next_version_number(session_id):
 
 def version_history_routes(app):
     
-    # Create table on module load
     create_version_history_table()
     
     @app.route('/api/version', methods=['POST', 'OPTIONS'])
@@ -278,19 +284,16 @@ def version_history_routes(app):
         report_snapshot = payload.get('report_snapshot')
         user_id = payload.get('user_id')
         
-        print(f'📝 Version creation request: session_id={session_id}, instrument_type={instrument_type}, change_summary={change_summary}')
+        print(f'📝 Version creation request: session_id={session_id}, instrument_type={instrument_type}')
         
         if not session_id:
             print('❌ Session ID is required')
             return jsonify({'success': False, 'message': 'Session ID is required'}), 400
         
-        # Get next sequential version number
         next_version = get_next_version_number(session_id)
         print(f'📝 Next version number: {next_version}')
         
-        # Auto-generate change summary if not provided
         if not change_summary:
-            # Get previous version for comparison
             previous = get_latest_version(session_id)
             prev_snapshot = {}
             if previous:
@@ -322,6 +325,7 @@ def version_history_routes(app):
         if version_id:
             version = restore_version(version_id)
             print(f'✅ Version created successfully: {version_id}')
+            # Update session version_count (already done in create_version)
             return jsonify({'success': True, 'data': version})
         else:
             print(f'❌ Failed to create version')
@@ -333,7 +337,6 @@ def version_history_routes(app):
             return '', 200
         
         versions = get_version_history(session_id)
-        
         return jsonify({'success': True, 'data': versions})
     
     @app.route('/api/version/session/<session_id>/latest', methods=['GET', 'OPTIONS'])
@@ -362,7 +365,6 @@ def version_history_routes(app):
 
     @app.route('/api/version/count', methods=['GET', 'OPTIONS'])
     def get_total_version_count():
-        """Get total count of all versions across all sessions."""
         if request.method == 'OPTIONS':
             return '', 200
         

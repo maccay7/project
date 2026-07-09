@@ -89,10 +89,28 @@ def get_mapping_by_dataset(dataset_id):
         return None
 
 
+def apply_column_mapping(data, column_mapping):
+    """Apply column mapping to transform data according to mapping rules."""
+    if not data or not column_mapping:
+        return data
+    
+    mapped_data = []
+    for row in data:
+        mapped_row = {}
+        for target_col, source_col in column_mapping.items():
+            if source_col and source_col in row:
+                mapped_row[target_col] = row[source_col]
+        # Preserve any unmapped columns
+        for key, value in row.items():
+            if key not in column_mapping.values():
+                mapped_row[key] = value
+        mapped_data.append(mapped_row)
+    
+    return mapped_data
+
 def mapping_routes(app):
     """Register all mapping routes."""
     
-    # Create table on module load
     create_mapping_table()
     
     @app.route('/api/mapping/auto-match', methods=['POST', 'OPTIONS'])
@@ -104,7 +122,6 @@ def mapping_routes(app):
         file_columns = payload.get('file_columns', [])
         required_columns = payload.get('required_columns', [])
         
-        # Import auto-match function from data_processing
         from routes.data_processing import auto_match_columns
         
         mapping = auto_match_columns(file_columns, required_columns)
@@ -133,6 +150,28 @@ def mapping_routes(app):
         mapping_id = save_mapping(dataset_id, instrument_type, column_mapping, file_columns, required_columns, mapping_type)
         
         if mapping_id:
+            try:
+                from routes.data_processing import get_dataset_data
+                from routes.calculations import calculate_data, normalize_instrument_type
+                
+                dataset_data = get_dataset_data(dataset_id)
+                if dataset_data and dataset_data.get('data'):
+                    mapped_data = apply_column_mapping(dataset_data['data'], column_mapping)
+                    inst_type = normalize_instrument_type(instrument_type)
+                    calc_result = calculate_data(mapped_data, inst_type)
+                    
+                    return jsonify({
+                        'success': True,
+                        'data': {
+                            'mapping_id': mapping_id,
+                            'column_mapping': column_mapping,
+                            'calculations': calc_result
+                        }
+                    })
+            except Exception as e:
+                print(f"Auto-calculation after mapping failed: {e}")
+                pass
+            
             return jsonify({
                 'success': True,
                 'data': {
@@ -167,7 +206,6 @@ def mapping_routes(app):
         column_mapping = payload.get('column_mapping', {})
         required_columns = payload.get('required_columns', [])
         
-        # Check if all required columns are mapped
         missing_columns = [col for col in required_columns if col not in column_mapping or not column_mapping[col]]
         
         return jsonify({

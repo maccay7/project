@@ -23,25 +23,12 @@ def create_sessions_table():
                 versions JSON,
                 instrument_workflows JSON,
                 payload JSON,
+                instrument_count INT DEFAULT 0,
+                version_count INT DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
-        # Add optional columns if they don't exist
-        optional_columns = {
-            'user_id': 'INT DEFAULT NULL',
-            'payload': 'JSON DEFAULT NULL',
-            'versions': 'JSON DEFAULT NULL',
-            'instrument_workflows': 'JSON DEFAULT NULL',
-            'workflow_data': 'JSON DEFAULT NULL'
-        }
-        for col, definition in optional_columns.items():
-            try:
-                cursor.execute('SHOW COLUMNS FROM ui_sessions LIKE %s', (col,))
-                if not cursor.fetchone():
-                    cursor.execute(f"ALTER TABLE ui_sessions ADD COLUMN {col} {definition}")
-            except Exception:
-                pass
         conn.commit()
         cursor.close()
         conn.close()
@@ -67,40 +54,46 @@ def sessions_routes(app):
         versions = payload.get('versions', [])
         instrument_workflows = payload.get('instrument_workflows', {})
         legacy_payload = payload.get('payload')
+        instrument_count = payload.get('instrument_count', 0)
+        version_count = payload.get('version_count', 0)
         
-        # Version control data
-        create_version = payload.get('create_version', False)
-        instrument_type = payload.get('instrument_type')
-        change_summary = payload.get('change_summary')
-        dataset_snapshot = payload.get('dataset_snapshot')
-        mapping_snapshot = payload.get('mapping_snapshot')
-        calculation_snapshot = payload.get('calculation_snapshot')
-        portfolio_snapshot = payload.get('portfolio_snapshot')
-        report_snapshot = payload.get('report_snapshot')
+        # ===== FIX: Compute instrument_count if not provided or zero =====
+        if not instrument_count and instrument_workflows and isinstance(instrument_workflows, dict):
+            instrument_count = 0
+            for key in ['money-market', 'bonds', 'tbills']:
+                wf = instrument_workflows.get(key)
+                if wf and (
+                    (wf.get('cleanedData') and len(wf.get('cleanedData')) > 0) or
+                    (wf.get('data') and len(wf.get('data')) > 0) or
+                    (wf.get('calculations') and wf.get('calculations', {}).get('totalValue', 0) > 0)
+                ):
+                    instrument_count += 1
+            # If still zero, check legacy payload
+            if instrument_count == 0 and legacy_payload:
+                for key in ['money-market', 'bonds', 'tbills']:
+                    if legacy_payload.get(key):
+                        instrument_count += 1
+            instrument_count = min(instrument_count, 3)
+        else:
+            instrument_count = min(instrument_count, 3)
 
         conn = get_db()
         if not conn:
             return jsonify({'success': False, 'message': 'DB connection failed'}), 500
         try:
             cursor = conn.cursor()
-
-            # Extract workflow_data from payload if present (backwards compatibility)
-            workflow_data = None
-            try:
-                workflow_data = legacy_payload.get('workflow_progress') if isinstance(legacy_payload, dict) else None
-            except Exception:
-                workflow_data = None
-
             cursor.execute('''
-                INSERT INTO ui_sessions (session_id, user_id, name, status, versions, instrument_workflows, payload, workflow_data)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO ui_sessions (session_id, user_id, name, status, versions, instrument_workflows, payload, instrument_count, version_count)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
                     status = VALUES(status),
                     versions = VALUES(versions),
                     instrument_workflows = VALUES(instrument_workflows),
                     payload = VALUES(payload),
-                    workflow_data = VALUES(workflow_data)
+                    instrument_count = VALUES(instrument_count),
+                    version_count = VALUES(version_count),
+                    updated_at = CURRENT_TIMESTAMP
             ''', (
                 session_id,
                 user_id if user_id is not None else 0,
@@ -109,28 +102,39 @@ def sessions_routes(app):
                 json.dumps(versions) if versions else None,
                 json.dumps(instrument_workflows) if instrument_workflows else None,
                 json.dumps(legacy_payload) if legacy_payload else None,
-                json.dumps(workflow_data) if workflow_data else None
+                instrument_count,
+                version_count
             ))
-
             conn.commit()
-            cursor.close()
-            conn.close()
             
-            # Create version entry if requested (only on Save to Session click)
-            if create_version and instrument_type:
+            # ===== FIX: Create version entry if requested =====
+            if payload.get('create_version', False) and payload.get('instrument_type'):
                 from routes.version_history import create_version, get_next_version_number
                 next_version = get_next_version_number(session_id)
                 version_id = create_version(
-                    session_id, next_version, instrument_type, change_summary,
-                    dataset_snapshot, mapping_snapshot, calculation_snapshot,
-                    portfolio_snapshot, report_snapshot, user_id
+                    session_id, next_version, payload['instrument_type'], 
+                    payload.get('change_summary'),
+                    payload.get('dataset_snapshot'), 
+                    payload.get('mapping_snapshot'),
+                    payload.get('calculation_snapshot'),
+                    payload.get('portfolio_snapshot'),
+                    payload.get('report_snapshot'),
+                    user_id
                 )
                 if version_id:
                     print(f"✅ Created version {next_version} for session {session_id}")
+                    # version_count already updated in create_version, but we update again to be safe
+                    cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (next_version, session_id))
+                    conn.commit()
+            
+            cursor.close()
+            conn.close()
             
             return jsonify({'success': True, 'session_id': session_id})
         except Exception as e:
             print(f"❌ Save session error: {e}")
+            import traceback
+            traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/sessions/get', methods=['POST', 'OPTIONS'])
@@ -145,9 +149,10 @@ def sessions_routes(app):
         if not conn:
             return jsonify({'success': False, 'message': 'DB error'}), 500
         try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)  # <-- FIXED
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute('''
-                SELECT session_id, name, status, versions, instrument_workflows, payload, created_at, updated_at
+                SELECT session_id, name, status, versions, instrument_workflows, payload, 
+                       instrument_count, version_count, created_at, updated_at
                 FROM ui_sessions WHERE session_id = %s LIMIT 1
             ''', (session_id,))
             row = cursor.fetchone()
@@ -177,18 +182,24 @@ def sessions_routes(app):
             return jsonify({
                 'success': True,
                 'data': {
+                    'id': row['session_id'],
                     'session_id': row['session_id'],
                     'name': row['name'],
                     'status': row['status'],
                     'versions': versions,
                     'instrument_workflows': instrument_workflows,
+                    'instrument_workflow': instrument_workflows,  # alias for frontend
                     'payload': payload,
+                    'instrument_count': row.get('instrument_count', 0),
+                    'version_count': row.get('version_count', 0),
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None
                 }
             })
         except Exception as e:
             print(f"❌ Get session error: {e}")
+            import traceback
+            traceback.print_exc()
             return jsonify({'success': False, 'message': 'Query failed'}), 500
 
     @app.route('/api/sessions/list', methods=['GET', 'OPTIONS'])
@@ -201,9 +212,11 @@ def sessions_routes(app):
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute('''
-                SELECT s.session_id, s.name, s.status, s.instrument_workflows, s.created_at, s.updated_at,
-                       (SELECT COUNT(*) FROM version_history v WHERE v.session_id = s.session_id) as version_count
+                SELECT s.session_id, s.name, s.status, s.instrument_workflows, 
+                       s.created_at, s.updated_at, s.instrument_count, s.version_count,
+                       (SELECT COUNT(*) FROM version_history v WHERE v.session_id = s.session_id) as version_count_from_history
                 FROM ui_sessions s
+                ORDER BY created_at DESC
                 LIMIT 200
             ''')
             rows = cursor.fetchall()
@@ -217,21 +230,34 @@ def sessions_routes(app):
                         instrument_workflows = json.loads(row['instrument_workflows']) if isinstance(row['instrument_workflows'], str) else row['instrument_workflows']
                     except:
                         pass
+                # Use instrument_count from column if available, else calculate
+                instrument_count = row.get('instrument_count', 0)
+                if instrument_count == 0 and instrument_workflows:
+                    # Calculate from workflows
+                    for key in ['money-market', 'bonds', 'tbills']:
+                        wf = instrument_workflows.get(key)
+                        if wf and (
+                            (wf.get('cleanedData') and len(wf.get('cleanedData')) > 0) or
+                            (wf.get('data') and len(wf.get('data')) > 0) or
+                            (wf.get('calculations') and wf.get('calculations', {}).get('totalValue', 0) > 0)
+                        ):
+                            instrument_count += 1
+                    instrument_count = min(instrument_count, 3)
                 sessions_list.append({
                     'id': row['session_id'],
                     'name': row['name'],
                     'status': row['status'],
-                    'versions': [],  # Empty array, count comes from version_count field
-                    'version_count': row.get('version_count', 0),
-                    'instrumentCount': len(instrument_workflows) if instrument_workflows else 0,
-                    'date': row['created_at'].isoformat() if row['created_at'] else None
+                    'versions': [],
+                    'version_count': row.get('version_count', 0) or row.get('version_count_from_history', 0),
+                    'instrument_count': instrument_count,
+                    'date': row['created_at'].isoformat() if row['created_at'] else None,
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None
                 })
             return jsonify({'success': True, 'data': sessions_list})
         except Exception as e:
             print(f"❌ List sessions error: {e}")
             import traceback
             traceback.print_exc()
-            # Return empty list with 200 to avoid breaking the frontend
             return jsonify({'success': False, 'message': 'Query failed', 'data': []}), 200
 
     @app.route('/api/sessions/delete', methods=['POST', 'OPTIONS'])
@@ -247,7 +273,6 @@ def sessions_routes(app):
             return jsonify({'success': False, 'message': 'DB error'}), 500
         try:
             cursor = conn.cursor()
-            # Cascade delete: delete all related records first
             cursor.execute('DELETE FROM version_history WHERE session_id = %s', (session_id,))
             cursor.execute('DELETE FROM ui_sessions WHERE session_id = %s', (session_id,))
             conn.commit()

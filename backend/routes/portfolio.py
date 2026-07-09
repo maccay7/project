@@ -5,7 +5,6 @@ from pages.calculations_details import calculate_data
 
 
 def create_portfolio_table():
-    """Create the portfolios table if it doesn't exist."""
     conn = get_db()
     if not conn:
         return False
@@ -14,7 +13,7 @@ def create_portfolio_table():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS portfolios (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                session_id INT NOT NULL,
+                session_id VARCHAR(64) NOT NULL,
                 instrument_type VARCHAR(50),
                 total_value DECIMAL(20, 2),
                 instrument_count INT,
@@ -25,7 +24,7 @@ def create_portfolio_table():
                 avg_days_to_maturity DECIMAL(10, 2),
                 portfolio_data JSON,
                 calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                INDEX idx_session_id (session_id)
             )
         """)
         conn.commit()
@@ -39,10 +38,6 @@ def create_portfolio_table():
 
 
 def aggregate_portfolio(data, instrument_type):
-    """
-    Aggregate portfolio data from individual instrument calculations.
-    Returns: portfolio summary object
-    """
     if not data or not isinstance(data, list):
         return {
             'total_value': 0,
@@ -54,7 +49,6 @@ def aggregate_portfolio(data, instrument_type):
             'avg_days_to_maturity': 0
         }
     
-    # Use calculation engine to get portfolio summary
     calculation_result = calculate_data(data, instrument_type)
     
     return {
@@ -70,7 +64,6 @@ def aggregate_portfolio(data, instrument_type):
 
 
 def save_portfolio(session_id, instrument_type, portfolio_data):
-    """Save portfolio summary to database."""
     conn = get_db()
     if not conn:
         return None
@@ -107,9 +100,6 @@ def save_portfolio(session_id, instrument_type, portfolio_data):
 
 
 def portfolio_routes(app):
-    """Register all portfolio routes."""
-    
-    # Create table on module load
     create_portfolio_table()
     
     @app.route('/api/portfolio/aggregate', methods=['POST', 'OPTIONS'])
@@ -128,7 +118,7 @@ def portfolio_routes(app):
             'data': portfolio_summary
         })
     
-    @app.route('/api/portfolio/session/<int:session_id>', methods=['GET', 'OPTIONS'])
+    @app.route('/api/portfolio/session/<session_id>', methods=['GET', 'OPTIONS'])
     def get_session_portfolio(session_id):
         if request.method == 'OPTIONS':
             return '', 200
@@ -199,10 +189,6 @@ def portfolio_routes(app):
     
     @app.route('/api/portfolio/export', methods=['POST', 'OPTIONS'])
     def export_summary():
-        """
-        Receives the Portfolio Summary data from frontend
-        and saves it as an Excel file.
-        """
         if request.method == 'OPTIONS':
             return '', 200
         
@@ -213,10 +199,7 @@ def portfolio_routes(app):
         if not data or 'summary' not in data:
             return jsonify({'error': 'No summary data provided'}), 400
         
-        # Convert the summary list to a pandas DataFrame
         df = pd.DataFrame(data['summary'])
-        
-        # Save to Excel in the backend folder
         file_path = 'portfolio_summary.xlsx'
         df.to_excel(file_path, index=False)
         

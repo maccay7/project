@@ -168,7 +168,8 @@ export default {
     columnMapping: { type: Object, default: () => ({}) },
     availableFileColumns: { type: Array, default: () => [] },
     requiredColumns: { type: Array, default: () => [] },
-    workbookSheets: { type: Array, default: () => [] }, // Array of {name, data, headers}
+    workbookSheets: { type: Array, default: () => [] },
+    currentSheetName: { type: String, default: '' },
     useLuckysheet: { type: Boolean, default: false },
   },
   emits: ['data-update', 'mapping-update', 'sheet-selected'],
@@ -206,9 +207,6 @@ export default {
     const pageSize = ref(100)
     const currentPage = ref(1)
     const loadAllMode = ref(false)
-
-    // Sheet name for multi-sheet workbooks
-    const currentSheetName = ref('')
 
     // ─── Computed ─────────────────────────────────────────
     const displayData = computed(() => internalData.value)
@@ -597,7 +595,6 @@ export default {
 
     // ─── Sheet Selection ──────────────────────────────────
     function selectSheet(sheetName) {
-      currentSheetName.value = sheetName
       const sheet = props.workbookSheets.find(s => s.name === sheetName)
       if (sheet) {
         internalData.value = sheet.data || []
@@ -623,13 +620,12 @@ export default {
       const sheetData = internalData.value.map(row => Object.values(row))
       const headers = displayHeaders.value
       
-      // Add headers as first row
       sheetData.unshift(headers)
       
       const options = {
         container: luckysheetContainer.value,
         data: [sheetData],
-        title: currentSheetName.value || 'Sheet 1',
+        title: props.currentSheetName || 'Sheet 1',
         showinfobar: false,
         showsheetbar: false,
         showstatisticBar: false,
@@ -673,14 +669,12 @@ export default {
       (newData) => {
         internalData.value = newData.map(row => ({ ...row }))
         
-        // Initialize Luckysheet if enabled
         if (props.useLuckysheet) {
           nextTick(() => {
             initializeLuckysheet()
           })
         }
         
-        // Reset selection and editing
         selectedCell.value = null
         selectedRange.value = null
         editingCell.value = null
@@ -705,7 +699,6 @@ export default {
     onMounted(() => {
       document.addEventListener('keydown', handleKeyDown)
       
-      // Initialize Luckysheet if enabled
       if (props.useLuckysheet) {
         nextTick(() => {
           initializeLuckysheet()
@@ -720,7 +713,6 @@ export default {
       document.removeEventListener('mousemove', onRowResize)
       document.removeEventListener('mouseup', stopRowResize)
       
-      // Destroy Luckysheet
       destroyLuckysheet()
     })
 
@@ -780,8 +772,8 @@ export default {
       updateFormulaBarFromSelection,
       updateFormulaBarValue,
       applyFormulaBarEdit,
-      currentSheetName,
       workbookSheets: computed(() => props.workbookSheets),
+      currentSheetName: computed(() => props.currentSheetName),
       selectSheet,
       luckysheetContainer,
     }
@@ -798,12 +790,6 @@ export default {
   font-size: 13px;
   max-width: 100%;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.6);
-}
-
-.luckysheet-container {
-  width: 100%;
-  height: 500px;
-  background: #fff;
 }
 
 .sheet-tabs {
@@ -830,6 +816,12 @@ export default {
   color: #0B2044;
   font-weight: 600;
   border-bottom: 2px solid #0B2044;
+}
+
+.luckysheet-container {
+  width: 100%;
+  height: 500px;
+  background: #fff;
 }
 
 .formula-bar {
@@ -1053,10 +1045,8 @@ export default {
   display: flex;
   justify-content: space-between;
 }
-</style>
 
-<style>
-/* Additional global override – just in case */
+/* Global override */
 .excel-viewer td,
 .excel-viewer td *,
 .excel-viewer .cell-content,

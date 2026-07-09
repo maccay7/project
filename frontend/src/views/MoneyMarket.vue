@@ -6,17 +6,15 @@
         <div class="header-left">
           <h1>{{ instrumentName }}</h1>
           <div v-if="activeSession" class="session-badge">
-            <v-icon small>mdi-folder-outline</v-icon>
             <strong>{{ activeSession.name }}</strong>
           </div>
           <div v-else class="session-badge warning">
-            <v-icon small>mdi-alert-outline</v-icon>
             No active session – please select a session from Dashboard
           </div>
         </div>
         <div class="header-right">
           <button v-if="activeSession" class="btn-save-session" @click="saveToSession" title="Save a version to session history">
-            <v-icon small>mdi-content-save</v-icon> Save to Session
+            Save to Session
           </button>
           <div class="step-indicator">
             Step {{ currentStepIndex + 1 }} of {{ totalSteps }}
@@ -49,7 +47,7 @@
         <!-- ===== UPLOAD ===== -->
         <div v-if="activeTab === 'upload'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-cloud-upload-outline</v-icon> Upload {{ instrumentName }} Dataset</v-card-title>
+            <v-card-title>Upload {{ instrumentName }} Dataset</v-card-title>
             <v-card-text>
               <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
                 <input
@@ -59,41 +57,37 @@
                   accept=".csv,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.xlam,.ods,.xml,.html,.prn,.dif,.slk,.dbf"
                   style="display: none"
                 >
-                <v-icon size="48" color="#0B2044" class="upload-icon">mdi-cloud-upload-outline</v-icon>
                 <p>Drag & drop or <span class="browse-link" @click="$refs.fileInput.click()">browse</span></p>
                 <small>Supported: CSV, Excel (including .xlsm, .xlsb, .ods), and many other spreadsheet formats</small>
               </div>
 
               <!-- Upload History -->
               <div v-if="uploadHistory.length" class="upload-history">
-                <h4><v-icon small>mdi-history</v-icon> Upload History ({{ uploadHistory.length }} files)</h4>
+                <h4>Upload History ({{ uploadHistory.length }} files)</h4>
                 <div class="history-list">
                   <div v-for="(item, idx) in uploadHistory" :key="idx" class="history-item" @click="loadHistoryFile(item)">
-                    <v-icon small>mdi-file-excel-outline</v-icon>
                     <span>{{ item.name }}</span>
                     <small>{{ new Date(item.date).toLocaleString() }}</small>
                     <button class="btn-delete-history" @click.stop="deleteHistoryItem(idx)">
-                      <v-icon small color="error">mdi-delete</v-icon>
+                      ×
                     </button>
                   </div>
                 </div>
               </div>
 
               <div v-if="fileLoading" class="loading-container">
-                <v-icon size="48" class="spin">mdi-loading</v-icon>
                 <p>{{ uploadProgress > 0 ? `Processing file... ${uploadProgress}%` : 'Parsing file... Please wait.' }}</p>
                 <v-progress-linear v-if="uploadProgress > 0" :value="uploadProgress" color="#0B2044" height="6"></v-progress-linear>
               </div>
 
               <div v-if="uploadedFile" class="file-info">
-                <v-icon>mdi-file-excel-outline</v-icon>
                 <span>{{ uploadedFile.name }}</span>
                 <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
                 <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
-                <button class="btn-preview" @click="togglePreview" :disabled="!rawData.length">Preview</button>
-                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData.length">Review Excel</button>
-                <button class="btn-mapping" @click="openMappingDialog" :disabled="!rawData.length">Map Columns</button>
+                <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
+                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!worksheetSelected">Review Excel</button>
+                <button class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
               </div>
 
               <!-- Worksheet Selector -->
@@ -126,14 +120,16 @@
                   @data-update="onRawExcelUpdate"
                   @mapping-update="updateColumnMapping"
                 />
-                <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
+                <div class="preview-actions">
+                  <button class="btn-primary" @click="saveFinalMapping">Save Mapping</button>
+                  <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
+                </div>
               </div>
 
               <!-- ===== MAPPING DIALOG ===== -->
               <v-dialog v-model="showMappingDialog" max-width="650px">
                 <v-card>
                   <v-card-title class="mapping-dialog-title">
-                    <v-icon>mdi-arrow-split-horizontal</v-icon> 
                     Map Columns – {{ instrumentName }}
                     <v-spacer></v-spacer>
                     <span class="mapping-count">{{ requiredColumns.length }} required fields</span>
@@ -152,11 +148,9 @@
                     </div>
 
                     <div v-if="missingColumns.length" class="warning-message">
-                      <v-icon color="warning">mdi-alert-outline</v-icon>
                       <span>Missing mappings for: {{ missingColumns.join(', ') }}</span>
                     </div>
                     <div v-if="!missingColumns.length && Object.values(columnMapping).some(v => v)" class="success-message">
-                      <v-icon color="success">mdi-check-circle-outline</v-icon>
                       <span>All columns mapped! Ready to continue.</span>
                     </div>
 
@@ -175,10 +169,10 @@
               <v-dialog v-model="showSavedMappingsDialog" max-width="700px">
                 <v-card>
                   <v-card-title class="saved-mappings-popup-title">
-                    <v-icon left>mdi-content-save-outline</v-icon> Saved Mappings
+                    Saved Mappings
                     <v-spacer></v-spacer>
                     <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">
-                      <v-icon>mdi-close</v-icon>
+                      ×
                     </button>
                   </v-card-title>
                   <v-card-text>
@@ -193,7 +187,7 @@
                       <div v-for="(tmpl, name) in savedTemplates" :key="name" class="saved-item">
                         <div class="template-info">
                           <span class="template-name">{{ name }}</span>
-                          <span class="template-timestamp">Saved: {{ tmpl.timestamp ? new Date(tmpl.timestamp).toLocaleString() : 'unknown' }}</span>
+                          <span class="template-timestamp">Saved: {{ tmpl.timestamp ? new Date(tmpl.timestamp).toLocaleString() : '' }}</span>
                         </div>
                         <div class="template-actions">
                           <button class="btn-secondary small" @click="loadTemplateFromPopup(name)">Load</button>
@@ -218,10 +212,10 @@
                     <span>Excel Workbook – {{ currentSheetName || 'Select a sheet' }}</span>
                     <v-spacer></v-spacer>
                     <button class="btn-work-on-sheet" @click="workOnSelectedSheet" v-if="currentSheetName && workbookSheets.length">
-                      <v-icon small>mdi-play-circle-outline</v-icon> Work on This Sheet
+                      Work on This Sheet
                     </button>
                     <button class="btn-close-dialog" @click="showWorkbookViewer = false">
-                      <v-icon>mdi-close</v-icon>
+                      ×
                     </button>
                   </v-card-title>
                   <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
@@ -245,15 +239,13 @@
                 <h4>Required Columns:</h4>
                 <div class="columns-list">
                   <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
-                    <v-icon size="12">{{ hasRequiredColumn(col) ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline' }}</v-icon> {{ col }}
+                    {{ col }}
                   </span>
                 </div>
                 <div v-if="rawData.length && missingColumns.length" class="warning-message">
-                  <v-icon color="warning">mdi-alert-outline</v-icon>
                   <span>Missing required columns. Use the dropdowns on the column headers or click "Map Columns" to assign them.</span>
                 </div>
                 <div v-if="rawData.length && missingColumns.length === 0 && mappingApplied" class="success-message">
-                  <v-icon color="success">mdi-check-circle-outline</v-icon>
                   <span>All columns mapped. Ready to continue.</span>
                 </div>
               </div>
@@ -269,10 +261,9 @@
         <!-- ===== CLEANING ===== -->
         <div v-if="activeTab === 'cleaning'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-broom</v-icon> Clean {{ instrumentName }} Data</v-card-title>
+            <v-card-title>Clean {{ instrumentName }} Data</v-card-title>
             <v-card-text>
               <div v-if="!hasData" class="empty-state">
-                <v-icon size="48" color="#ccc">mdi-database-outline</v-icon>
                 <p>No data uploaded yet.</p>
                 <button class="btn-primary" @click="switchTab('upload')">Go to Upload</button>
               </div>
@@ -335,23 +326,22 @@
         <div v-if="activeTab === 'calculations'" class="content-card">
           <v-card>
             <v-card-title class="calc-header">
-              <v-icon>mdi-calculator-variant-outline</v-icon> {{ instrumentName }} Calculations
+              {{ instrumentName }} Calculations
               <span v-if="currentlyViewingInstrument" class="viewing-badge">
-                <v-icon small>mdi-eye</v-icon> Currently Viewing: <strong>{{ currentlyViewingInstrument }}</strong>
+                Currently Viewing: <strong>{{ currentlyViewingInstrument }}</strong>
               </span>
               <v-spacer></v-spacer>
-              <!-- CALCULATED INSTRUMENTS BUTTON - visible when 2+ instruments exist -->
+              <!-- CALCULATED INSTRUMENTS BUTTON - visible when 2+ instruments exist and multi-instrument sheet -->
               <button 
-                v-if="instrumentSummary.rows.length >= 2" 
+                v-if="instrumentSummary.rows.length >= 2 && sheetType === 'multi'" 
                 class="btn-calculated-instruments" 
                 @click="openAllCalculationsPopup"
               >
-                <v-icon small>mdi-format-list-bulleted</v-icon> Calculated Instruments
+                Calculated Instruments
               </button>
             </v-card-title>
             <v-card-text>
               <div v-if="!hasCleanedData" class="empty-state">
-                <v-icon size="48" color="#ccc">mdi-calculator-variant-outline</v-icon>
                 <p>No cleaned data. Please clean first.</p>
                 <button class="btn-primary" @click="switchTab('cleaning')">Go to Cleaning</button>
               </div>
@@ -479,13 +469,13 @@
 
                 <!-- ===== MULTIPLE INSTRUMENTS POPUP (Calculated Instruments) ===== -->
                 <div v-if="showAllCalculationsPopup" class="excel-popup-overlay" @click="closeAllCalculationsPopup">
-                  <div class="excel-popup-content" @click.stop>
+                  <div class="excel-popup-content excel-table-popup" @click.stop>
                     <div class="popup-header-white">
                       <div class="header-left">
                         <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
                         <div class="header-title">
                           <h4>Calculated Instruments</h4>
-                          <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+                          <p class="header-meta"><strong>{{ activeSession?.name || '' }}</strong></p>
                         </div>
                       </div>
                       <button class="close-btn" @click="closeAllCalculationsPopup">×</button>
@@ -494,40 +484,27 @@
                       <div v-if="instrumentSummary.rows.length === 0" class="empty-state">
                         <p>No instruments detected. Please process a worksheet first.</p>
                       </div>
-                      <div v-else>
-                        <p class="popup-instruction">Click any instrument below to load its calculations into the main view.</p>
-                        <div class="instrument-grid">
-                          <div 
-                            v-for="(row, idx) in instrumentSummary.rows" 
-                            :key="idx" 
-                            class="instrument-card"
-                            @click="selectInstrumentFromPopup(idx)"
-                          >
-                            <div class="instrument-card-header">
-                              <strong>{{ row['Instrument Name'] || `Instrument ${idx + 1}` }}</strong>
-                              <span class="instrument-type-badge">{{ row['Instrument Type'] || instrumentType }}</span>
-                            </div>
-                            <div class="instrument-card-body">
-                              <div class="card-metric">
-                                <span class="metric-label">Total Value</span>
-                                <span class="metric-value">${{ formatNumber(row['Total Value'] || row['Calculated Value'] || 0) }}</span>
-                              </div>
-                              <div class="card-metric">
-                                <span class="metric-label">Rate</span>
-                                <span class="metric-value">{{ row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0 }}%</span>
-                              </div>
-                              <div class="card-metric">
-                                <span class="metric-label">Counterparty</span>
-                                <span class="metric-value">{{ row['Counterparty'] || 'N/A' }}</span>
-                              </div>
-                            </div>
-                            <div class="instrument-card-footer">
-                              <button class="btn-select-instrument" @click.stop="selectInstrumentFromPopup(idx)">
-                                <v-icon small>mdi-arrow-right</v-icon> Select
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                      <div v-else class="excel-table-container">
+                        <p class="popup-instruction">Click any row to load its calculations into the main view.</p>
+                        <table class="calculated-instruments-table">
+                          <thead>
+                            <tr>
+                              <th v-for="col in instrumentSummary.columns" :key="col">{{ col }}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr 
+                              v-for="(row, idx) in instrumentSummary.rows" 
+                              :key="idx"
+                              :class="{ 'selected-row': currentlyViewingInstrument === (row['Instrument Name'] || `Instrument ${idx + 1}`) }"
+                              @click="selectInstrumentFromPopup(idx)"
+                            >
+                              <td v-for="col in instrumentSummary.columns" :key="col">
+                                {{ formatTableCell(row[col], col) }}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                     <div class="popup-footer">
@@ -682,7 +659,7 @@
                 </div>
               </div>
               <div class="excel-viewer-button" style="margin-bottom: 20px; text-align: right;">
-                <button class="btn-secondary" @click="openExcelReview(cleanedData, `${instrumentName} Data`)">📊 View Instrument Data as Excel</button>
+                <button class="btn-secondary" @click="openInstrumentDataExcel">📊 View Instrument Data as Excel</button>
               </div>
 
               <!-- Instrument Summary -->
@@ -701,7 +678,7 @@
                       <div class="card-body">
                         <div class="metric">
                           <span class="label">Counterparty:</span>
-                          <span class="value">{{ row['Counterparty'] || 'N/A' }}</span>
+                          <span class="value">{{ row['Counterparty'] || '' }}</span>
                         </div>
                         <div class="metric" v-if="row['Face Value'] !== undefined">
                           <span class="label">Face Value:</span>
@@ -816,7 +793,7 @@
                       <div class="card-body">
                         <div class="metric">
                           <span class="label">Counterparty:</span>
-                          <span class="value">{{ row['Counterparty'] || 'N/A' }}</span>
+                          <span class="value">{{ row['Counterparty'] || '' }}</span>
                         </div>
                         <div class="metric" v-if="row['Face Value'] !== undefined">
                           <span class="label">Face Value:</span>
@@ -1196,6 +1173,7 @@ const originalFileColumns = ref([])
 const originalFileBuffer = ref(null)
 const sessionSavedAt = ref(null)
 const showPreview = ref(false)
+const worksheetSelected = ref(false)
 const forceUpdate = ref(0)
 
 const savedTemplates = ref({})
@@ -1303,7 +1281,7 @@ const displayMaturityOptions = computed(() => {
 })
 
 // ===== COMPUTED =====
-const instrumentName = computed(() => ({ 'money-market': 'Money Market', bonds: 'Bonds', tbills: 'T-Bills' }[instrumentType.value] || 'Instrument'))
+const instrumentName = computed(() => ({ 'money-market': 'Money Market', bonds: 'Bonds', tbills: 'T-Bills' })[instrumentType.value] || 'Instrument')
 
 const activeTab = computed({
   get: () => route.query.tab || 'upload',
@@ -1680,14 +1658,10 @@ async function readFileData(file) {
       
       console.log('✅ Workbook loaded via worksheet workflow:', result.sheets.length, 'sheets')
       
-      if (result.sheets.length > 0) {
-        const firstSheet = result.sheets[0]
-        const selection = worksheetWorkflow.selectWorksheet(firstSheet.name)
-        if (selection.success) {
-          currentSheetName.value = firstSheet.name
-          console.log('✅ Auto-selected first sheet:', firstSheet.name)
-        }
-      }
+      // Don't auto-select the first sheet - user must explicitly select it
+      // This ensures Preview/Review Excel/Map Columns buttons remain disabled until worksheet is selected
+      worksheetSelected.value = false
+      currentSheetName.value = ''
       
       addToHistory(file.name, result.sheets[0]?.data || [])
       debouncedSave()
@@ -1721,6 +1695,7 @@ function removeFile() {
   columnMapping.value = {}
   fileColumns.value = []
   showPreview.value = false
+  worksheetSelected.value = false
   uploadError.value = ''
   worksheetWorkflow.reset()
   debouncedSave()
@@ -1731,6 +1706,7 @@ function removeFile() {
 function handleWorksheetSelect(sheetName) {
   worksheetWorkflow.selectWorksheet(sheetName)
   currentSheetName.value = sheetName
+  worksheetSelected.value = true
 }
 
 async function handleWorkOnSheet(sheetName) {
@@ -1818,6 +1794,25 @@ function applyCurrentMapping() {
 function updateColumnMapping(newMapping) {
   columnMapping.value = { ...newMapping }
   applyCurrentMapping()
+  debouncedSave()
+}
+
+function saveFinalMapping() {
+  // Save the current mapping to localStorage for future use
+  const mappingKey = `mapping_${instrumentType.value}_${uploadedFile.value?.name || 'default'}`
+  localStorage.setItem(mappingKey, JSON.stringify(columnMapping.value))
+  
+  // Also save to saved templates
+  const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'}`
+  savedTemplates.value[templateName] = {
+    columnMapping: columnMapping.value,
+    requiredColumns: requiredColumns.value,
+    fileColumns: fileColumns.value,
+    savedAt: new Date().toISOString()
+  }
+  localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates.value))
+  
+  alert('✅ Mapping saved successfully')
   debouncedSave()
 }
 
@@ -2261,9 +2256,9 @@ function processInstrumentData(sheetName, data, instrumentType) {
   worksheetStatus.value[sheetName] = 'completed'
   console.log('✅ Worksheet marked as completed:', sheetName)
   
-  const portfolioNewColumns = buildDynamicColumns([...portfolioSummary.value.rows, instrumentResult])
-  portfolioSummary.value.rows.push(instrumentResult)
-  portfolioSummary.value.columns = portfolioNewColumns
+  // Sync portfolioSummary with instrumentSummary to ensure they match
+  portfolioSummary.value.rows = [...instrumentSummary.value.rows]
+  portfolioSummary.value.columns = [...instrumentSummary.value.columns]
   
   console.log('✅ Instrument processed and saved to summaries')
   console.log('📊 Dynamic columns:', newColumns)
@@ -2302,9 +2297,9 @@ function calculateAllInstruments(instruments, sheetName, instrumentType) {
   worksheetStatus.value[sheetName] = 'completed'
   console.log('✅ Worksheet marked as completed:', sheetName)
   
-  const portfolioNewColumns = buildDynamicColumns([...portfolioSummary.value.rows, ...results])
-  portfolioSummary.value.rows.push(...results)
-  portfolioSummary.value.columns = portfolioNewColumns
+  // Sync portfolioSummary with instrumentSummary to ensure they match
+  portfolioSummary.value.rows = [...instrumentSummary.value.rows]
+  portfolioSummary.value.columns = [...instrumentSummary.value.columns]
   
   console.log(`✅ Processed ${results.length} instruments from sheet`)
   console.log('📊 Dynamic columns:', newColumns)
@@ -2529,25 +2524,30 @@ function closePortfolioExcelPopup() {
 }
 
 function exportPortfolioSummaryExcel() {
-  const summaryData = {
-    instrumentType: selectedInstrumentType.value,
-    summary: portfolioSummary.value.rows,
-    columns: portfolioSummary.value.columns
-  }
+  // Use the same data as displayed in the portfolio summary
+  const data = portfolioSummary.value.rows
+  const columns = portfolioSummaryColumnsForDisplay.value
   
-  console.log('📥 Exporting Portfolio Summary as Excel:', summaryData)
+  // Filter data to only include displayed columns
+  const filteredData = data.map(row => {
+    const filteredRow = {}
+    columns.forEach(col => {
+      filteredRow[col] = row[col]
+    })
+    return filteredRow
+  })
   
-  const blob = new Blob([JSON.stringify(summaryData, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${selectedInstrumentType.value.replace(' ', '_')}_Portfolio_Summary.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  console.log('📥 Exporting Portfolio Summary as Excel:', filteredData)
   
-  alert('Portfolio Summary exported successfully!')
+  // Create worksheet from filtered data
+  const worksheet = XLSX.utils.json_to_sheet(filteredData)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Portfolio Summary')
+  
+  // Generate Excel file
+  XLSX.writeFile(workbook, `${selectedInstrumentType.value.replace(' ', '_')}_Portfolio_Summary.xlsx`)
+  
+  alert('Portfolio Summary exported successfully as Excel!')
 }
 
 function openWorkflowPopup(row, idx) {
@@ -2618,6 +2618,56 @@ function openExcelReview(data, title) {
   excelData.value = data
   excelColumns.value = Object.keys(data[0] || {})
   excelDialogTitle.value = title || 'Data Review'
+  showExcelDialog.value = true
+}
+
+function openInstrumentDataExcel() {
+  // Create filtered data showing only calculations and yield curve values
+  const instrumentData = []
+  
+  // Add calculation values
+  const calcRow = {
+    'Metric': 'Calculations',
+    'Total Value': calculations.value.totalValue || 0,
+    'Average Rate': calculations.value.avgRate || 0,
+    'Weighted Average Rate': calculations.value.weightedAvgRate || 0,
+    'Total Interest': calculations.value.totalInterest || 0,
+    'Annual Yield': calculations.value.annualYield || 0,
+    'Effective Annual Rate': calculations.value.effectiveAnnualRate || 0
+  }
+  
+  // Add instrument-specific calculations
+  if (instrumentType.value === 'bonds') {
+    calcRow['Average Coupon Rate'] = calculations.value.avgCouponRate || 0
+    calcRow['Weighted Average Coupon'] = calculations.value.weightedAvgCoupon || 0
+    calcRow['Average YTM'] = calculations.value.avgYTM || 0
+    calcRow['Duration'] = calculations.value.duration || 0
+  } else if (instrumentType.value === 'tbills') {
+    calcRow['Average Discount Rate'] = calculations.value.avgDiscountRate || 0
+    calcRow['Weighted Average Discount'] = calculations.value.weightedAvgDiscount || 0
+    calcRow['Effective Yield'] = calculations.value.effectiveYield || 0
+  }
+  
+  instrumentData.push(calcRow)
+  
+  // Add FRED benchmark data if available
+  if (calculations.value.fred) {
+    const fredRow = {
+      'Metric': 'FRED Benchmark',
+      'Series ID': calculations.value.fred.series_id || '',
+      'Series Label': calculations.value.fred.series_label || '',
+      'Benchmark Rate': calculations.value.fred.benchmark_rate || 0,
+      'Spread vs Market': calculations.value.fred.spread_vs_market || 0,
+      'Country': calculations.value.fred.country || '',
+      'Currency': calculations.value.fred.currency || '',
+      'Maturity': calculations.value.fred.maturity || ''
+    }
+    instrumentData.push(fredRow)
+  }
+  
+  excelData.value = instrumentData
+  excelColumns.value = Object.keys(instrumentData[0] || {})
+  excelDialogTitle.value = `${instrumentName} - Calculations & Yield Curve`
   showExcelDialog.value = true
 }
 
@@ -2762,69 +2812,106 @@ async function calculateMetrics() {
   }
 
   try {
-    const response = await api.calculationsAPI.calculate(cleanedData.value, instrumentType.value, {
-      country: effectiveCountry.value,
-      currency: effectiveCurrency.value,
-      maturity: effectiveMaturity.value,
-      manualInputs: manualInputs.value
-    })
+    const response = await api.calculationsAPI.executeByType(
+      instrumentType.value,
+      cleanedData.value,
+      {
+        country: effectiveCountry.value,
+        currency: effectiveCurrency.value,
+        maturity: effectiveMaturity.value,
+        manualInputs: manualInputs.value
+      },
+      null,
+      activeSession.value?.id
+    )
     if (response?.success && response?.data) {
       calculations.value = response.data
       formulas.value = response.data.formulas || {}
       
-      // ---- SYNC CALCULATIONS TO INSTRUMENT SUMMARY ----
-      const summaryRow = {
-        'Instrument Name': instrumentName.value,
-        'Instrument Type': instrumentType.value,
-        'Total Value': calculations.value.totalValue || 0,
-        'Instrument Count': calculations.value.instrumentCount || 0,
-        'Avg Rate': calculations.value.avgRate || 0,
-        'Weighted Avg Rate': calculations.value.weightedAvgRate || 0,
-        'Total Interest': calculations.value.totalInterest || 0,
-        'Interest Earned': calculations.value.interestEarned || 0,
-        'Annual Yield': calculations.value.annualYield || 0,
-        'Effective Annual Rate': calculations.value.effectiveAnnualRate || 0,
-        'Avg Days to Maturity': calculations.value.avgDaysToMaturity || 0,
-        'Total Principal': calculations.value.totalPrincipal || 0,
-        'Weighted Avg Coupon': calculations.value.weightedAvgCoupon || 0,
-        'Total Annual Income': calculations.value.totalAnnualIncome || 0,
-        'Avg YTM': calculations.value.avgYTM || 0,
-        'Duration': calculations.value.duration || 0,
-        'Weighted Avg Discount': calculations.value.weightedAvgDiscount || 0,
-        'Total Discount': calculations.value.totalDiscount || 0,
-        'Effective Yield': calculations.value.effectiveYield || 0,
-        'Bond Equivalent Yield': calculations.value.bondEquivalentYield || 0,
-        'Price per 100': calculations.value.pricePer100 || 0,
-        'Total Purchase Price': calculations.value.totalPurchasePrice || 0,
-        'Avg Investment': calculations.value.avgInvestment || 0,
-        'Holding Period Yield': calculations.value.holdingPeriodYield || 0,
-        'Annualized Yield': calculations.value.annualizedYield || 0,
-        'FRED Benchmark': calculations.value.fred?.benchmark_rate || null
+      // ---- USE BACKEND FOR INSTRUMENT SUMMARY ----
+      if (activeSession.value?.id) {
+        try {
+          const summaryResponse = await api.calculationsAPI.getInstrumentSummary(
+            activeSession.value.id,
+            instrumentType.value
+          )
+          if (summaryResponse?.success && summaryResponse?.data) {
+            instrumentSummary.value = summaryResponse.data
+          }
+        } catch (err) {
+          console.error('Failed to fetch instrument summary from backend:', err)
+          // Fallback to frontend calculation if backend fails
+          const summaryRow = {
+            'Instrument Name': instrumentName.value,
+            'Instrument Type': instrumentType.value,
+            'Total Value': calculations.value.totalValue || 0,
+            'Instrument Count': calculations.value.instrumentCount || 0,
+            'Avg Rate': calculations.value.avgRate || 0,
+            'Weighted Avg Rate': calculations.value.weightedAvgRate || 0,
+            'Total Interest': calculations.value.totalInterest || 0,
+            'Interest Earned': calculations.value.interestEarned || 0,
+            'Annual Yield': calculations.value.annualYield || 0,
+            'Effective Annual Rate': calculations.value.effectiveAnnualRate || 0,
+            'Avg Days to Maturity': calculations.value.avgDaysToMaturity || 0,
+            'Total Principal': calculations.value.totalPrincipal || 0,
+            'Weighted Avg Coupon': calculations.value.weightedAvgCoupon || 0,
+            'Total Annual Income': calculations.value.totalAnnualIncome || 0,
+            'Avg YTM': calculations.value.avgYTM || 0,
+            'Duration': calculations.value.duration || 0,
+            'Weighted Avg Discount': calculations.value.weightedAvgDiscount || 0,
+            'Total Discount': calculations.value.totalDiscount || 0,
+            'Effective Yield': calculations.value.effectiveYield || 0,
+            'Bond Equivalent Yield': calculations.value.bondEquivalentYield || 0,
+            'Price per 100': calculations.value.pricePer100 || 0,
+            'Total Purchase Price': calculations.value.totalPurchasePrice || 0,
+            'Avg Investment': calculations.value.avgInvestment || 0,
+            'Holding Period Yield': calculations.value.holdingPeriodYield || 0,
+            'Annualized Yield': calculations.value.annualizedYield || 0,
+            'FRED Benchmark': calculations.value.fred?.benchmark_rate || null
+          }
+          
+          // Use unique identifier (Instrument Name + Worksheet) to avoid overwriting
+          const uniqueId = `${summaryRow['Instrument Name'] || 'Instrument'}_${currentSheetName.value}`
+          const existingIndex = instrumentSummary.value.rows.findIndex(r => 
+            (r['Instrument Name'] || 'Instrument') + '_' + (r['Worksheet'] || '') === uniqueId
+          )
+          if (existingIndex !== -1) {
+            // Update existing instrument instead of overwriting
+            instrumentSummary.value.rows[existingIndex] = { ...summaryRow, 'Worksheet': currentSheetName.value }
+          } else {
+            // Add new instrument with worksheet identifier
+            instrumentSummary.value.rows.push({ ...summaryRow, 'Worksheet': currentSheetName.value })
+          }
+          const allFields = new Set()
+          instrumentSummary.value.rows.forEach(r => {
+            Object.keys(r).forEach(k => allFields.add(k))
+          })
+          instrumentSummary.value.columns = Array.from(allFields)
+        }
       }
       
-      // Remove existing row for this instrument type
-      const existingIndex = instrumentSummary.value.rows.findIndex(r => r['Instrument Type'] === instrumentType.value)
-      if (existingIndex !== -1) {
-        instrumentSummary.value.rows.splice(existingIndex, 1)
+      // Also update portfolioSummary using backend
+      if (activeSession.value?.id) {
+        try {
+          const portfolioResponse = await api.calculationsAPI.getPortfolioSummary(activeSession.value.id)
+          if (portfolioResponse?.success && portfolioResponse?.data) {
+            portfolioSummary.value = portfolioResponse.data
+          }
+        } catch (err) {
+          console.error('Failed to fetch portfolio summary from backend:', err)
+          // Fallback to frontend calculation
+          const portExisting = portfolioSummary.value.rows.findIndex(r => r['Instrument Type'] === instrumentType.value)
+          if (portExisting !== -1) {
+            portfolioSummary.value.rows.splice(portExisting, 1)
+          }
+          portfolioSummary.value.rows.push(summaryRow)
+          const portFields = new Set()
+          portfolioSummary.value.rows.forEach(r => {
+            Object.keys(r).forEach(k => portFields.add(k))
+          })
+          portfolioSummary.value.columns = Array.from(portFields)
+        }
       }
-      instrumentSummary.value.rows.push(summaryRow)
-      const allFields = new Set()
-      instrumentSummary.value.rows.forEach(r => {
-        Object.keys(r).forEach(k => allFields.add(k))
-      })
-      instrumentSummary.value.columns = Array.from(allFields)
-      
-      // Also update portfolioSummary
-      const portExisting = portfolioSummary.value.rows.findIndex(r => r['Instrument Type'] === instrumentType.value)
-      if (portExisting !== -1) {
-        portfolioSummary.value.rows.splice(portExisting, 1)
-      }
-      portfolioSummary.value.rows.push(summaryRow)
-      const portFields = new Set()
-      portfolioSummary.value.rows.forEach(r => {
-        Object.keys(r).forEach(k => portFields.add(k))
-      })
-      portfolioSummary.value.columns = Array.from(portFields)
       
       // Save to localStorage
       const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
@@ -3260,30 +3347,39 @@ function selectInstrumentFromPopup(index) {
     annualYield: parseFloat(selectedRow['Annual Yield'] || 0),
     effectiveAnnualRate: parseFloat(selectedRow['Effective Annual Rate'] || 0),
     avgDaysToMaturity: parseFloat(selectedRow['Avg Days to Maturity'] || 0),
-    totalPrincipal: parseFloat(selectedRow['Total Principal'] || 0),
-    totalAnnualIncome: parseFloat(selectedRow['Total Annual Income'] || 0),
-    avgYTM: parseFloat(selectedRow['Avg YTM'] || 0),
-    duration: parseFloat(selectedRow['Duration'] || 0),
-    totalDiscount: parseFloat(selectedRow['Total Discount'] || 0),
-    effectiveYield: parseFloat(selectedRow['Effective Yield'] || 0),
-    bondEquivalentYield: parseFloat(selectedRow['Bond Equivalent Yield'] || 0),
-    pricePer100: parseFloat(selectedRow['Price per 100'] || 0),
-    totalPurchasePrice: parseFloat(selectedRow['Total Purchase Price'] || 0),
-    avgInvestment: parseFloat(selectedRow['Avg Investment'] || 0),
-    holdingPeriodYield: parseFloat(selectedRow['Holding Period Yield'] || 0),
-    annualizedYield: parseFloat(selectedRow['Annualized Yield'] || 0)
+    // Add all other calculation fields from the row
+    ...Object.keys(selectedRow).reduce((acc, key) => {
+      if (key !== 'Instrument Name' && key !== 'Instrument Type' && typeof selectedRow[key] === 'number') {
+        acc[key] = selectedRow[key]
+      }
+      return acc
+    }, {})
   }
   
-  // Also update the fred benchmark if available
-  if (selectedRow['FRED Benchmark']) {
-    calculations.value.fred = calculations.value.fred || {}
-    calculations.value.fred.benchmark_rate = parseFloat(selectedRow['FRED Benchmark'])
-  }
-  
-  console.log(`📊 Loaded calculations for: ${instrumentName}`, calculations.value)
-  
-  // Close the popup
+  console.log('✅ Loaded instrument calculations:', instrumentName)
   closeAllCalculationsPopup()
+}
+
+function formatTableCell(value, column) {
+  if (value === null || value === undefined || value === '') return '—'
+  
+  // Format currency columns
+  if (column.toLowerCase().includes('value') || column.toLowerCase().includes('amount') || column.toLowerCase().includes('price')) {
+    return '$' + formatNumber(value)
+  }
+  
+  // Format percentage columns
+  if (column.toLowerCase().includes('rate') || column.toLowerCase().includes('yield') || column.toLowerCase().includes('coupon') || column.toLowerCase().includes('discount')) {
+    return formatNumber(value) + '%'
+  }
+  
+  // Format dates
+  if (column.toLowerCase().includes('date') && typeof value === 'string') {
+    return value
+  }
+  
+  // Default formatting
+  return typeof value === 'number' ? formatNumber(value) : value
 }
 
 function openAllCalculationsPopup() {
@@ -3344,6 +3440,7 @@ async function saveToSession() {
   }
 
   try {
+    console.log('📝 Creating version for session:', activeSession.value.id, 'instrument:', instrumentType.value)
     const response = await api.versionAPI.create(
       activeSession.value.id,
       instrumentType.value,
@@ -3357,18 +3454,15 @@ async function saveToSession() {
     )
     console.log('✅ Version created:', response)
 
-    const updatedSession = await sessionManager.getSession(activeSession.value.id)
-    if (updatedSession) {
-      activeSession.value = updatedSession
-      window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: activeSession.value.id } }))
-    }
-
     await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
       ...datasetSnapshot,
       uploadedFile: uploadedFile.value?.name || null,
       cleaningStats: cleaningStats.value,
       sessionSavedAt: new Date().toISOString()
     })
+
+    // Trigger dashboard refresh to get updated counts from backend
+    window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: activeSession.value.id } }))
 
     alert('✅ Saved to session. A new version has been recorded in Version History.')
   } catch (err) {
@@ -3615,23 +3709,35 @@ function formatMetricValue(key, value) {
 
 async function captureChartImage() {
   return new Promise((resolve) => {
-    const canvas = yieldCurveChart.value
-    if (canvas && canvas.toDataURL) {
-      try {
-        const dataUrl = canvas.toDataURL('image/png')
-        resolve(dataUrl)
-        return
-      } catch (e) { console.warn('Canvas capture failed', e) }
-    }
-    const canvasEl = document.querySelector('.chart-container--fred canvas')
-    if (canvasEl && canvasEl.toDataURL) {
-      try {
-        const dataUrl = canvasEl.toDataURL('image/png')
-        resolve(dataUrl)
-        return
-      } catch (e) { console.warn('DOM canvas capture failed', e) }
-    }
-    resolve('')
+    // Wait a moment for chart to fully render
+    setTimeout(() => {
+      const canvas = yieldCurveChart.value
+      if (canvas && canvas.toDataURL) {
+        try {
+          const dataUrl = canvas.toDataURL('image/png', 1.0)
+          resolve(dataUrl)
+          return
+        } catch (e) { console.warn('Canvas capture failed', e) }
+      }
+      const canvasEl = document.querySelector('.chart-container--fred canvas')
+      if (canvasEl && canvasEl.toDataURL) {
+        try {
+          const dataUrl = canvasEl.toDataURL('image/png', 1.0)
+          resolve(dataUrl)
+          return
+        } catch (e) { console.warn('DOM canvas capture failed', e) }
+      }
+      // Try alternative selectors
+      const altCanvas = document.querySelector('canvas')
+      if (altCanvas && altCanvas.toDataURL) {
+        try {
+          const dataUrl = altCanvas.toDataURL('image/png', 1.0)
+          resolve(dataUrl)
+          return
+        } catch (e) { console.warn('Alternative canvas capture failed', e) }
+      }
+      resolve('')
+    }, 500)
   })
 }
 
@@ -3681,7 +3787,7 @@ async function generateReportHtml() {
     if (cleanData && cleanData.length) {
       cleanData.forEach((item, idx) => {
         const name = item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
-        const ticker = item.BBTicker || item.Ticker || item.Security || 'N/A'
+        const ticker = item.BBTicker || item.Ticker || item.Security || ''
         const faceValue = parseFloat(item.FaceValue || item.Amount || item.Principal || 0)
         const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
         const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
@@ -3710,8 +3816,6 @@ async function generateReportHtml() {
       <p class="chart-caption">FRED Yield Curve – ${report.instruments.map(i => i.name).join(', ')}</p>
     </div>
   ` : '<p>Yield curve chart not available.</p>'
-
-  const watermarkLogo = `<img src="${logoUrl}" alt="logo" style="position:absolute; top:20px; right:30px; width:80px; opacity:0.15; pointer-events:none;" />`
 
   const html = `<!DOCTYPE html>
 <html>
@@ -3757,16 +3861,13 @@ async function generateReportHtml() {
 <body>
 
 <div class="page cover-page">
-  <div class="cover-logo"><img src="${logoUrl}" alt="Dura Capital Logo" /></div>
   <div class="cover-content">
-    <div class="cover-session-name">${report.session}</div>
     <h1 class="cover-title">Valuation Assessment Report</h1>
     <p class="cover-subtitle">${report.instruments.map(i => i.name).join(' & ')}</p>
   </div>
 </div>
 
 <div class="page toc-page">
-  ${watermarkLogo}
   <h1>Table of Contents</h1>
   <div class="toc-item"><span>Introduction</span><span>1</span></div>
   <div class="toc-item"><span>Executive Summary</span><span>2</span></div>
@@ -3780,7 +3881,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Introduction</h1>
   <p>Dura Capital (Private) Limited ("Dura Capital", "us", "we") was contracted to provide a fair valuation assessment report of the following fixed income instruments as at ${valuationDate}:</p>
   <ul style="margin: 20px 0 20px 30px;">${report.instruments.map(i => `<li>${i.name}</li>`).join('')}</ul>
@@ -3788,7 +3888,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Executive Summary</h1>
   <div class="executive-summary">
     <p><strong>Valuation Assessment Summary</strong></p>
@@ -3804,7 +3903,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Methodology</h1>
   <p>The audit team provided us with data for ${report.instruments.map(i => i.name).join(', ')}. This section outlines the methodologies used to provide a fair value of the fixed income assets in terms of IFRS 13.</p>
   <br>
@@ -3815,7 +3913,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Market Inputs</h1>
   <p>Market data for Zimbabwe is not available and there have not been any Zimbabwe issued instruments trading on international markets. As such, we have used the OIS SOFR rates from Bloomberg as a risk-free yield curve and added a country risk premium sourced from country risk premiums published by Damodaran.</p>
   <br>
@@ -3831,7 +3928,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Results</h1>
   <p>Below is a summary of the key findings of the valuation for the selected instruments.</p>
   <br>
@@ -3858,14 +3954,12 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Yield Curve</h1>
   <p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>
   ${chartHtml}
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Conclusion</h1>
   <p>The valuation assessment conducted by Dura Capital provides a comprehensive fair value assessment of the ${report.instruments.map(i => i.name).join(', ')} instruments as at ${valuationDate}.</p>
   <br>
@@ -3881,7 +3975,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Appendix: Detailed Instrument Data</h1>
   <p><strong>Valuation Date:</strong> ${valuationDate}</p>
   <p><strong>Total Instruments:</strong> ${allDataRows.length}</p>
@@ -3895,7 +3988,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Reference</h1>
   <ul class="reference-list">
     <li>Bloomberg Financial Services – SOFR OIS Yield Curve as at ${valuationDate}</li>
@@ -3931,9 +4023,21 @@ async function previewReport() {
 async function downloadFromPreview(format) {
   if (!reportPreviewHtml.value) return
   const filename = `combined_report_${Date.now()}`
-  if (format === 'html') downloadBlob(reportPreviewHtml.value, `${filename}.html`, 'text/html')
-  else if (format === 'pdf') { const win = window.open(); win.document.write(reportPreviewHtml.value); win.print() }
-  else if (format === 'word') downloadBlob(reportPreviewHtml.value, `${filename}.doc`, 'application/msword')
+  
+  if (format === 'html') {
+    // Ensure HTML includes all styles for proper formatting
+    const htmlWithStyles = reportPreviewHtml.value
+    downloadBlob(htmlWithStyles, `${filename}.html`, 'text/html')
+  } else if (format === 'pdf') {
+    // Open in new window with print dialog for better PDF generation
+    const win = window.open('', '_blank')
+    win.document.write(reportPreviewHtml.value)
+    win.document.close()
+    setTimeout(() => win.print(), 500)
+  } else if (format === 'word') {
+    // Use proper MIME type for Word documents
+    downloadBlob(reportPreviewHtml.value, `${filename}.doc`, 'application/msword')
+  }
 }
 
 async function exportToRealExcel() {
@@ -3986,7 +4090,7 @@ async function exportToRealExcel() {
     if (instrumentData.length) {
       instrumentData.forEach((item, idx) => {
         const name = item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
-        const ticker = item.BBTicker || item.Ticker || item.Security || 'N/A'
+        const ticker = item.BBTicker || item.Ticker || item.Security || ''
         const faceValue = parseFloat(item.FaceValue || item.Amount || item.Principal || 0)
         const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
         const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
@@ -4229,7 +4333,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .mapping-row { display: flex; align-items: center; gap: 12px; }
 .required-label { width: 140px; font-weight: 600; color: #0B2044; font-size: 14px; }
 .dropdown-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; }
-.mapping-select { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.mapping-select { flex: 1; padding: 8px 36px 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
 .mapping-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.2); }
 
 .saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }

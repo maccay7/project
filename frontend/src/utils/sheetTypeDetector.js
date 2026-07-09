@@ -155,7 +155,8 @@ function checkRepeatedHeaders(data) {
  * Checks for instrument labels (multi-instrument indicator)
  */
 function checkInstrumentLabels(data, instrumentType) {
-  const labels = ['Instrument', 'Bond', 'T-Bill', 'Money Market', 'Treasury Bill', 'Security', 'Issuer']
+  const labels = ['Instrument', 'Bond', 'T-Bill', 'Money Market', 'Treasury Bill', 'Security', 'Issuer', 
+                  'Company', 'Name', 'Description', 'Ticker', 'Symbol', 'Entity']
   const lowerLabels = labels.map(l => l.toLowerCase())
   let labelCount = 0
 
@@ -172,6 +173,82 @@ function checkInstrumentLabels(data, instrumentType) {
   }
 
   return labelCount >= 2
+}
+
+/**
+ * Detects instrument name column in multi-instrument data
+ * @param {Array} data - The sheet data
+ * @returns {Object} - { columnName: string, confidence: number }
+ */
+export function detectInstrumentNameColumn(data) {
+  if (!data || data.length < 2) return { columnName: null, confidence: 0 }
+
+  const headers = Object.keys(data[0])
+  const nameKeywords = ['name', 'instrument', 'company', 'issuer', 'security', 'entity', 'ticker', 'symbol', 'description']
+  
+  let bestMatch = null
+  let bestConfidence = 0
+
+  for (const header of headers) {
+    const lowerHeader = header.toLowerCase()
+    let confidence = 0
+    
+    // Direct match
+    if (nameKeywords.some(keyword => lowerHeader === keyword)) {
+      confidence = 0.9
+    }
+    // Partial match
+    else if (nameKeywords.some(keyword => lowerHeader.includes(keyword))) {
+      confidence = 0.7
+    }
+    // Check if column contains varied string values (likely names)
+    else {
+      const uniqueValues = new Set()
+      for (let i = 0; i < Math.min(data.length, 20); i++) {
+        const val = data[i][header]
+        if (val && typeof val === 'string' && val.length > 2) {
+          uniqueValues.add(val)
+        }
+      }
+      // If column has many unique string values, it might be names
+      if (uniqueValues.size >= 3 && uniqueValues.size <= data.length * 0.8) {
+        confidence = 0.5
+      }
+    }
+
+    if (confidence > bestConfidence) {
+      bestMatch = header
+      bestConfidence = confidence
+    }
+  }
+
+  return { columnName: bestMatch, confidence: bestConfidence }
+}
+
+/**
+ * Extracts instrument names from multi-instrument data
+ * @param {Array} data - The sheet data
+ * @param {string} columnName - The column containing instrument names
+ * @returns {Array} - Array of instrument names
+ */
+export function extractInstrumentNames(data, columnName) {
+  if (!data || !columnName) return []
+
+  const names = []
+  const seen = new Set()
+
+  for (const row of data) {
+    const name = row[columnName]
+    if (name && typeof name === 'string' && name.trim()) {
+      const trimmedName = name.trim()
+      if (!seen.has(trimmedName)) {
+        seen.add(trimmedName)
+        names.push(trimmedName)
+      }
+    }
+  }
+
+  return names
 }
 
 /**

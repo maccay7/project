@@ -44,7 +44,7 @@
                     <div class="session-row-name">{{ session.name }}</div>
                     <div class="session-row-meta">{{ formatDate(session.date) }}</div>
                   </div>
-                  <div class="session-row-stats"><span>{{ getInstrumentCount(session) }}/3 instruments</span></div>
+                  <div class="session-row-stats" @click.stop="openInstrumentModal(session.id)" style="cursor: pointer;"><span>{{ getInstrumentCount(session) }}/3 instruments</span></div>
                   <div class="session-row-status" :class="session.status">{{ session.status === 'completed' ? '✓' : '⟳' }}</div>
                   <button class="version-btn" @click.stop="openVersionModal(session.id)">
                     <v-icon size="12">mdi-history</v-icon>
@@ -187,6 +187,49 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Session Instruments Modal -->
+    <v-dialog v-model="instrumentDialogVisible" max-width="600px" persistent>
+      <v-card>
+        <v-card-title class="version-dialog-title">
+          Session Instruments – {{ selectedSessionForInstruments?.name || 'Session' }}
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="instrumentDialogVisible = false">✕</button>
+        </v-card-title>
+        <v-card-text class="version-dialog-body">
+          <div v-if="!sessionInstruments.length" class="empty-versions">
+            <v-icon size="36" color="#ccc">mdi-chart-line</v-icon>
+            <p>No instruments saved yet.</p>
+          </div>
+          <div v-else class="version-list">
+            <div v-for="(inst, idx) in sessionInstruments" :key="idx" class="version-entry">
+              <div class="version-entry-header">
+                <div class="version-entry-time">{{ inst.instrument_type || 'Instrument' }}</div>
+                <div class="version-entry-badge">{{ inst.status || 'Saved' }}</div>
+              </div>
+              <div class="version-entry-details">
+                <div class="version-entry-row">
+                  <span class="label">Name</span>
+                  <span class="value" style="font-weight:600; color:#0B2044;">{{ inst.instrument_name || '—' }}</span>
+                </div>
+                <div class="version-entry-row">
+                  <span class="label">Saved At</span>
+                  <span class="value">{{ formatVersionTime(inst.saved_at) }}</span>
+                </div>
+                <div class="version-entry-row">
+                  <span class="label">Versions</span>
+                  <span class="value">{{ inst.version_count || 0 }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions class="version-dialog-actions">
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="instrumentDialogVisible = false">Close</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -212,6 +255,9 @@ const versionDialogVisible = ref(false)
 const selectedSessionForVersions = ref(null)
 const versionSearchQuery = ref('')
 const currentUserFullName = ref('')
+const instrumentDialogVisible = ref(false)
+const selectedSessionForInstruments = ref(null)
+const sessionInstruments = ref([])
 
 // ---- Instruments data ----
 const instruments = [
@@ -230,8 +276,17 @@ const totalSessions = computed(() => sessions.value.length)
 const completedSessions = computed(() => sessions.value.filter(s => s.status === 'completed').length)
 const inProgressSessions = computed(() => sessions.value.filter(s => s.status === 'in-progress').length)
 
-// KPI stats – directly from session objects (backend)
+// KPI stats – consume from backend API as single source of truth
+const backendKpiData = ref(null)
 const kpiStats = computed(() => {
+  if (backendKpiData.value) {
+    return [
+      { title: 'Active Sessions', value: backendKpiData.value.active_sessions || totalSessions.value, icon: 'mdi-folder-multiple', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
+      { title: 'Worked Instruments', value: backendKpiData.value.total_instruments || 0, icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
+      { title: 'Portfolio Total', value: formatCurrency(backendKpiData.value.portfolio_total || 0), icon: 'mdi-cash', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
+    ]
+  }
+  // Fallback to local computation if backend data not available
   const totalInstruments = sessions.value.reduce((sum, s) => sum + (s.instrument_count || 0), 0)
   const portfolioTotal = sessions.value.reduce((sum, s) => sum + (s.total_value || 0), 0)
   return [
@@ -273,27 +328,45 @@ function getInstrumentCount(session) {
 // ---- Refresh Dashboard from backend ----
 async function refreshDashboard() {
   try {
-    // Fetch fresh sessions from MySQL via sessionManager
     const backendSessions = await sessionManager.getAllSessions()
     sessions.value = backendSessions.map(s => ({
       ...s,
       version_count: s.version_count || 0,
       instrument_count: Math.min(s.instrument_count || 0, 3)
     }))
-    // Update active session if present
     if (activeSession.value) {
       const updated = sessions.value.find(s => s.id === activeSession.value.id)
       if (updated) {
         activeSession.value = updated
       } else {
-        // Active session was deleted
         activeSession.value = null
         localStorage.removeItem(ACTIVE_KEY)
       }
     }
-    // Save to local cache (optional, sessionManager does it)
   } catch (error) {
     console.error('Failed to refresh dashboard:', error)
+  }
+}
+
+// ===== FIX: Force refresh of a specific session =====
+async function refreshSession(sessionId) {
+  try {
+    const session = await sessionManager.getSession(sessionId)
+    if (session) {
+      const idx = sessions.value.findIndex(s => s.id === sessionId)
+      if (idx !== -1) {
+        sessions.value[idx] = {
+          ...session,
+          version_count: session.version_count || 0,
+          instrument_count: Math.min(session.instrument_count || 0, 3)
+        }
+      }
+      if (activeSession.value?.id === sessionId) {
+        activeSession.value = sessions.value[idx]
+      }
+    }
+  } catch (error) {
+    console.error('Failed to refresh session:', error)
   }
 }
 
@@ -303,7 +376,6 @@ async function createNewSession() {
   try {
     const created = await sessionManager.createSession(newSessionName.value.trim())
     await refreshDashboard()
-    // Set active session to the newly created one
     const fresh = sessions.value.find(s => s.id === created.id)
     if (fresh) {
       activeSession.value = fresh
@@ -318,13 +390,12 @@ async function createNewSession() {
 
 async function loadExistingSession(sessionId) {
   try {
-    // Ensure the session is loaded (sessionManager.getSession will fetch if needed)
     const session = await sessionManager.getSession(sessionId)
     if (session) {
       activeSession.value = session
       sessionManager.setActiveSession(session)
       localStorage.setItem(ACTIVE_KEY, session.id)
-      await refreshDashboard() // Update counts from backend
+      await refreshDashboard()
     }
   } catch (err) {
     alert('Error loading session: ' + err.message)
@@ -364,10 +435,8 @@ async function deleteSession(sessionId) {
 // ---- Version history modal ----
 async function openVersionModal(sessionId) {
   try {
-    // Fetch the session with versions from backend
     const session = await sessionManager.getSession(sessionId)
     if (session) {
-      // If versions are not loaded, fetch them via versionAPI
       if (!session.versions || session.versions.length === 0) {
         const res = await api.versionAPI.getVersions(sessionId)
         session.versions = res || []
@@ -382,10 +451,59 @@ async function openVersionModal(sessionId) {
 }
 
 async function restoreVersion(sessionId, index) {
-  // Placeholder – implement restore logic if needed
   alert('Restore functionality not implemented yet.')
   versionDialogVisible.value = false
   await refreshDashboard()
+}
+
+// ---- Session instruments modal ----
+async function openInstrumentModal(sessionId) {
+  try {
+    const session = await sessionManager.getSession(sessionId)
+    if (session) {
+      selectedSessionForInstruments.value = session
+      const instruments = []
+      const workflows = session.instrument_workflows || session.instrumentWorkflow || {}
+      console.log('Instrument workflows for session:', workflows)
+      if (workflows && typeof workflows === 'object') {
+        Object.keys(workflows).forEach(key => {
+          const workflow = workflows[key]
+          if (workflow && (workflow.cleanedData?.length > 0 || workflow.data?.length > 0 || workflow.calculations)) {
+            let instrumentName = workflow.instrumentName || workflow.uploadedFile || key
+            if (instrumentName && instrumentName.includes('.')) {
+              instrumentName = instrumentName.split('.')[0]
+            }
+            instruments.push({
+              instrument_type: key,
+              instrument_name: instrumentName || 'Unnamed',
+              status: 'Saved',
+              saved_at: workflow.sessionSavedAt || session.updated_at || Date.now(),
+              version_count: session.version_count || 0,
+              has_data: true
+            })
+          }
+        })
+      }
+      if (session.instrument_count > 0 && instruments.length === 0) {
+        const instrumentTypes = ['money-market', 'bonds', 'tbills']
+        for (let i = 0; i < Math.min(session.instrument_count, 3); i++) {
+          instruments.push({
+            instrument_type: instrumentTypes[i] || 'unknown',
+            instrument_name: `Instrument ${i + 1}`,
+            status: 'Saved',
+            saved_at: session.updated_at || Date.now(),
+            version_count: session.version_count || 0,
+            has_data: true
+          })
+        }
+      }
+      sessionInstruments.value = instruments
+      instrumentDialogVisible.value = true
+    }
+  } catch (err) {
+    console.error('Error loading instruments:', err)
+    alert('Error loading instruments: ' + err.message)
+  }
 }
 
 // ---- Active session rename ----
@@ -428,9 +546,24 @@ function handleLogout() {
   window.location.href = '/login'
 }
 
+// ---- Functions ----
+async function fetchBackendKPI() {
+  try {
+    const response = await api.dashboardAPI.getKPI()
+    if (response?.success && response?.data) {
+      backendKpiData.value = {
+        active_sessions: response.data.total_users || 0,
+        total_instruments: response.data.total_instruments || 0,
+        portfolio_total: response.data.datasets_processed || 0
+      }
+    }
+  } catch (err) {
+    console.error('Failed to fetch backend KPI data:', err)
+  }
+}
+
 // ---- Lifecycle ----
 onMounted(async () => {
-  // Get user name
   try {
     const user = JSON.parse(localStorage.getItem('user'))
     if (user) {
@@ -438,10 +571,9 @@ onMounted(async () => {
     }
   } catch {}
 
-  // Load sessions from backend
+  await fetchBackendKPI()
   await refreshDashboard()
 
-  // Restore active session
   let activeId = localStorage.getItem(ACTIVE_KEY)
   if (activeId) {
     const session = sessions.value.find(s => s.id === activeId)
@@ -449,13 +581,11 @@ onMounted(async () => {
       activeSession.value = session
       sessionManager.setActiveSession(session)
     } else {
-      // Invalid active – clear it
       localStorage.removeItem(ACTIVE_KEY)
       activeId = null
     }
   }
 
-  // If still no active, pick first
   if (!activeSession.value && sessions.value.length) {
     activeSession.value = sessions.value[0]
     sessionManager.setActiveSession(activeSession.value)
@@ -466,23 +596,18 @@ onMounted(async () => {
   window.addEventListener('session-updated', async (event) => {
     const { sessionId } = event.detail || {}
     if (sessionId) {
+      await refreshSession(sessionId)
       await refreshDashboard()
-      // If active session was updated, refresh it
-      if (activeSession.value?.id === sessionId) {
-        const updated = sessions.value.find(s => s.id === sessionId)
-        if (updated) activeSession.value = updated
-      }
     }
   })
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('session-updated', refreshDashboard)
+  window.removeEventListener('session-updated', () => {})
 })
 </script>
 
 <style scoped>
-/* All styles unchanged – keep your existing dashboard styles */
 .dashboard { min-height: 100vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px 40px; }
 .top-navbar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: white; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); z-index: 1000; }
 .logo-placeholder { display: flex; align-items: center; }

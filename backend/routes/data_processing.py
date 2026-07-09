@@ -145,7 +145,6 @@ def parse_intelligent_excel(file_path, instrument_type):
     
     workbook.close()
     
-    # Return in the same format as parse_full_workbook
     return {
         'sheets': [{
             'name': workbook.sheetnames[0] if workbook.sheetnames else 'Sheet1',
@@ -257,20 +256,16 @@ def data_processing_routes(app):
 
     @app.route('/api/data/workbook/<file_id>', methods=['GET'])
     def get_workbook_by_id(file_id):
-        """Load workbook by file ID without re-uploading."""
         print(f"=== Get Workbook by ID: {file_id} ===")
         
-        # Check cache first
         if file_id in _workbook_cache:
             print(f"✅ Returning cached workbook data for {file_id}")
             return jsonify({'success': True, 'data': _workbook_cache[file_id]})
         
-        # Find file in uploads folder
         upload_folder = 'uploads'
         if not os.path.exists(upload_folder):
             return jsonify({'success': False, 'error': 'Uploads folder not found'}), 404
         
-        # Search for file with this ID
         matching_files = []
         for filename in os.listdir(upload_folder):
             if filename.startswith(file_id):
@@ -284,14 +279,12 @@ def data_processing_routes(app):
         file_path = matching_files[0]
         print(f"Found file: {file_path}")
         
-        # Get instrument type from query params
         instrument_type = request.args.get('instrument_type', 'money-market')
         
         try:
             result = parse_full_workbook(file_path, instrument_type)
             print(f"Workbook parsed: {len(result.get('sheets', []))} sheets")
             
-            # Cache the result
             _workbook_cache[file_id] = result
             print(f"✅ Cached workbook data for {file_id}")
             
@@ -324,7 +317,7 @@ def data_processing_routes(app):
         print(f"File content type: {file.content_type if file else 'None'}")
         print(f"File size: {len(file.read()) if file else 0} bytes")
         if file:
-            file.seek(0)  # Reset file pointer after reading
+            file.seek(0)
         print(f"Instrument type: {instrument_type}")
         print(f"Return full workbook: {return_full_workbook}")
         
@@ -332,12 +325,10 @@ def data_processing_routes(app):
             print("ERROR: No file uploaded")
             return jsonify({'success': False, 'error': 'No file uploaded'}), 400
         
-        # Generate unique file ID
         import uuid
         file_id = str(uuid.uuid4())
         upload_timestamp = datetime.now().isoformat()
         
-        # Save file permanently with file ID
         upload_folder = 'uploads'
         os.makedirs(upload_folder, exist_ok=True)
         file_path = os.path.join(upload_folder, f"{file_id}_{file.filename}")
@@ -345,13 +336,11 @@ def data_processing_routes(app):
         print(f"File saved to: {file_path} with ID: {file_id}")
         
         try:
-            # Use full workbook parsing when viewer is opened, otherwise use fast parsing
             if return_full_workbook:
                 print("Calling parse_full_workbook (for viewer)...")
                 result = parse_full_workbook(file_path, instrument_type)
                 print(f"Parse result type: {type(result)}")
                 print(f"Parse result sheets: {len(result.get('sheets', []))}")
-                # Cache the parsed workbook
                 _workbook_cache[file_id] = result
                 print(f"✅ Cached workbook data for {file_id}")
             else:
@@ -359,11 +348,9 @@ def data_processing_routes(app):
                 result = parse_intelligent_excel(file_path, instrument_type)
                 print(f"Parse result type: {type(result)}")
                 print(f"Parse result sheets: {len(result.get('sheets', []))}")
-                # Also cache the fast result for potential use
                 _workbook_cache[file_id] = result
                 print(f"✅ Cached workbook data for {file_id}")
             
-            # Add file metadata to result
             if result and isinstance(result, dict):
                 result['metadata'] = result.get('metadata', {})
                 result['metadata']['file_id'] = file_id
@@ -374,20 +361,14 @@ def data_processing_routes(app):
                 print(f"ERROR: parsing returned invalid type: {type(result)}")
                 result = {'sheets': [], 'metadata': {'file_id': file_id, 'original_filename': file.filename, 'upload_timestamp': upload_timestamp}, 'warnings': ['Parsing failed']}
             
-            # Check if result has valid data
             if not result or not isinstance(result, dict):
                 print("ERROR: Invalid parsing result")
                 result = {'sheets': [], 'metadata': {'file_id': file_id, 'original_filename': file.filename, 'upload_timestamp': upload_timestamp}, 'warnings': ['Invalid parsing result']}
             
-            # Ensure sheets array exists
             if 'sheets' not in result:
                 result['sheets'] = []
-            
-            # Ensure metadata exists
             if 'metadata' not in result:
                 result['metadata'] = {}
-            
-            # Ensure warnings exists
             if 'warnings' not in result:
                 result['warnings'] = []
             

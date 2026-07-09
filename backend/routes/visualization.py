@@ -35,6 +35,7 @@ def create_visualization_cache_table():
         return True
     except Exception as e:
         print(f"Error creating cache table: {e}")
+        conn.close()
         return False
 
 def get_cached_visualization(cache_key):
@@ -84,8 +85,10 @@ def cache_visualization(cache_key, instrument_type, country, currency, maturity,
         print(f"Cache save error: {e}")
         return False
 
-def fetch_fred_rate(series_id):
+def fetch_fred_rate(series_id, observation_date=None):
+    """Fetch a rate from FRED with comprehensive error handling."""
     if not FRED_API_KEY:
+        print("❌ FRED API key not configured")
         return None
     try:
         params = {
@@ -93,33 +96,59 @@ def fetch_fred_rate(series_id):
             'api_key': FRED_API_KEY,
             'file_type': 'json',
             'sort_order': 'desc',
-            'limit': 1
+            'limit': 100
         }
+        if observation_date:
+            params['observation_start'] = observation_date
+            params['observation_end'] = observation_date
         resp = requests.get(f'{FRED_BASE_URL}/series/observations', params=params, timeout=5)
+        
+        if resp.status_code == 429:
+            print(f"❌ FRED rate limit exceeded for {series_id}")
+            return None
+        elif resp.status_code == 404:
+            print(f"❌ FRED series not found: {series_id}")
+            return None
+        elif resp.status_code == 403:
+            print(f"❌ FRED authentication failed for {series_id}")
+            return None
+            
         resp.raise_for_status()
         data = resp.json()
+        
         if 'error_code' in data:
+            print(f"❌ FRED API error: {data.get('error_message')}")
             return None
+            
         obs = data.get('observations', [])
         if not obs:
+            print(f"⚠️ No observations for {series_id}")
             return None
-        val = obs[0].get('value')
-        if val == '.' or val is None:
+            
+        if observation_date:
+            for o in obs:
+                if o['date'] == observation_date and o['value'] != '.':
+                    return float(o['value'])
             return None
-        return float(val)
+            
+        for o in obs:
+            val = o.get('value')
+            if val != '.' and val is not None and val != '':
+                return float(val)
+        return None
     except Exception as e:
-        print(f"Error fetching {series_id}: {e}")
+        print(f"❌ Error fetching {series_id}: {e}")
         return None
 
 def get_maturities_for_instrument(inst_type):
-    if inst_type == 'money-market':
-        return ['1M','3M','6M','1Y']
+    if inst_type in ('money-market', 'money_market'):
+        return ['1M', '3M', '6M', '1Y']
     elif inst_type == 'bonds':
-        return ['2Y','5Y','10Y','30Y']
-    elif inst_type == 'tbills':
-        return ['4W','8W','13W','26W','52W']
+        return ['2Y', '5Y', '10Y', '30Y']
+    elif inst_type in ('tbills', 'treasury_bills'):
+        return ['4W', '8W', '13W', '26W', '52W']
     else:
-        return ['1M','3M','6M','1Y','2Y','5Y','10Y','30Y']
+        return ['1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y']
 
 def parse_maturity_to_years(mat):
     num = float(mat[:-1])
@@ -133,8 +162,43 @@ def parse_maturity_to_years(mat):
     else:
         return num
 
-def prepare_yield_curve_data(instrument_type, country, currency, maturity):
-    cache_key = f"yield_curve_{instrument_type}_{country}_{currency}_{maturity}"
+def get_display_unit_for_maturity(maturity_code):
+    if not maturity_code:
+        return 'Years'
+    unit = maturity_code[-1].upper()
+    if unit == 'Y':
+        return 'Years'
+    elif unit == 'M':
+        return 'Months'
+    elif unit == 'W':
+        return 'Days'
+    else:
+        return 'Years'
+
+def get_ticks_for_maturity(maturity_code, num_points):
+    """Generate appropriate tick labels and step sizes for the x-axis."""
+    if not maturity_code:
+        return {'step_size': 1, 'unit': 'Years'}
+    
+    unit = maturity_code[-1].upper()
+    num = float(maturity_code[:-1]) if maturity_code[:-1].isdigit() else 1
+    
+    if unit == 'Y':
+        step = 1 if num <= 5 else (5 if num <= 20 else 10)
+        return {'step_size': step, 'unit': 'Years', 'max_value': num}
+    elif unit == 'M':
+        step = 1 if num <= 12 else (3 if num <= 24 else 6)
+        return {'step_size': step, 'unit': 'Months', 'max_value': num}
+    elif unit == 'W':
+        days = num * 7
+        step = 1 if days <= 14 else (2 if days <= 30 else (5 if days <= 60 else 7))
+        return {'step_size': step, 'unit': 'Days', 'max_value': days}
+    else:
+        return {'step_size': 1, 'unit': 'Years', 'max_value': num}
+
+def prepare_yield_curve_data(instrument_type, country, currency, maturity, observation_date=None):
+    cache_key = f"yield_curve_{instrument_type}_{country}_{currency}_{maturity}_{observation_date or 'latest'}"
+    
     cached = get_cached_visualization(cache_key)
     if cached:
         return cached['chart_data']
@@ -148,13 +212,14 @@ def prepare_yield_curve_data(instrument_type, country, currency, maturity):
         else:
             series_id, label, used_mat, _, _, note = series_for_country(country, mat)
         if not series_id:
+            print(f"⚠️ No series ID for {mat} in {country}")
             return None, None, None
-        rate = fetch_fred_rate(series_id)
+        rate = fetch_fred_rate(series_id, observation_date)
         if rate is None:
             return None, None, None
         return parse_maturity_to_years(used_mat), rate, used_mat
 
-    # Try primary country
+    # Primary country
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(fetch_one, m) for m in maturities]
         for future in as_completed(futures):
@@ -162,7 +227,6 @@ def prepare_yield_curve_data(instrument_type, country, currency, maturity):
             if result[0] is not None:
                 points.append({'maturity': result[0], 'rate': result[1], 'code': result[2]})
 
-    # If no points and country is not US, fallback to US
     if not points and country.upper() not in ('US', 'USA'):
         print(f"⚠️ No data for {country}, falling back to US for {instrument_type} {maturity}")
         with ThreadPoolExecutor(max_workers=10) as executor:
@@ -175,12 +239,75 @@ def prepare_yield_curve_data(instrument_type, country, currency, maturity):
     if not points:
         return {'error': 'No data available from FRED for this country/maturity. Try selecting a different country or maturity.'}
 
+    seen_maturities = set()
+    unique_points = []
+    for p in points:
+        if p['maturity'] not in seen_maturities:
+            seen_maturities.add(p['maturity'])
+            unique_points.append(p)
+    points = unique_points
+
     points.sort(key=lambda x: x['maturity'])
+    
+    display_info = get_ticks_for_maturity(maturity, len(points))
+    
+    maturity_labels = []
+    maturity_values = []
+    for p in points:
+        code = p['code']
+        if display_info['unit'] == 'Days':
+            num_weeks = float(code[:-1]) if code[:-1].isdigit() else 1
+            days = num_weeks * 7
+            maturity_values.append(days)
+            maturity_labels.append(f"{int(days)}d")
+        elif display_info['unit'] == 'Months':
+            if code.endswith('M'):
+                num_months = float(code[:-1]) if code[:-1].isdigit() else 1
+                maturity_values.append(num_months)
+                maturity_labels.append(code)
+            elif code.endswith('Y'):
+                num_years = float(code[:-1]) if code[:-1].isdigit() else 1
+                maturity_values.append(num_years * 12)
+                maturity_labels.append(code)
+            elif code.endswith('W'):
+                num_weeks = float(code[:-1]) if code[:-1].isdigit() else 1
+                maturity_values.append(num_weeks / 4)
+                maturity_labels.append(code)
+            else:
+                maturity_values.append(p['maturity'])
+                maturity_labels.append(code)
+        elif display_info['unit'] == 'Years':
+            if code.endswith('Y'):
+                num_years = float(code[:-1]) if code[:-1].isdigit() else 1
+                maturity_values.append(num_years)
+                maturity_labels.append(code)
+            elif code.endswith('M'):
+                num_months = float(code[:-1]) if code[:-1].isdigit() else 1
+                maturity_values.append(num_months / 12)
+                maturity_labels.append(code)
+            elif code.endswith('W'):
+                num_weeks = float(code[:-1]) if code[:-1].isdigit() else 1
+                maturity_values.append(num_weeks / 52)
+                maturity_labels.append(code)
+            else:
+                maturity_values.append(p['maturity'])
+                maturity_labels.append(code)
+        else:
+            maturity_values.append(p['maturity'])
+            maturity_labels.append(code)
+
     chart_data = {
-        'maturities': [p['code'] for p in points],
+        'maturities': maturity_values,
         'rates': [p['rate'] for p in points],
-        'labels': [p['code'] for p in points]
+        'labels': maturity_labels,
+        'observation_date': observation_date,
+        'data_points': len(points),
+        'display_unit': display_info['unit'],
+        'step_size': display_info['step_size'],
+        'max_value': display_info.get('max_value', max(maturity_values) if maturity_values else 10),
+        'maturity_codes': [p['code'] for p in points]
     }
+    
     cache_visualization(cache_key, instrument_type, country, currency, maturity, chart_data)
     return chart_data
 
@@ -196,7 +323,9 @@ def visualization_routes(app):
         country = payload.get('country', 'US')
         currency = payload.get('currency', 'USD')
         maturity = payload.get('maturity', '1Y')
-        chart_data = prepare_yield_curve_data(instrument_type, country, currency, maturity)
+        observation_date = payload.get('observation_date')
+        
+        chart_data = prepare_yield_curve_data(instrument_type, country, currency, maturity, observation_date)
         if 'error' in chart_data:
             return jsonify({'success': False, 'error': chart_data['error']}), 400
         return jsonify({'success': True, 'data': chart_data})

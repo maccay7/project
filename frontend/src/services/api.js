@@ -54,10 +54,17 @@ export const dashboardAPI = {
 }
 
 export const calculationsAPI = {
-  execute: (type, data = [], params = {}, datasetId = null) =>
-    callAPI('/api/calculate', 'POST', { instrument_type: type, data, params, dataset_id: datasetId }),
+  execute: (type, data = [], params = {}, datasetId = null, sessionId = null) =>
+    callAPI('/api/calculate', 'POST', { instrument_type: type, data, params, dataset_id: datasetId, session_id: sessionId }),
+  executeByType: (type, data = [], params = {}, datasetId = null, sessionId = null) =>
+    callAPI(`/api/calculate/${encodeURIComponent(type)}`, 'POST', { data, dataset_id: datasetId, session_id: sessionId, ...params }),
   getHistory: () => callAPI('/api/calculations/history'),
-  getLatest: (datasetId) => callAPI(`/api/calculations/latest?dataset_id=${encodeURIComponent(datasetId)}`)
+  getLatest: (datasetId) => callAPI(`/api/calculations/latest?dataset_id=${encodeURIComponent(datasetId)}`),
+  getBySession: (sessionId) => callAPI(`/api/calculations/session/${encodeURIComponent(sessionId)}`),
+  getInstrumentSummary: (sessionId, instrumentType = null) =>
+    callAPI('/api/calculations/instrument-summary', 'POST', { session_id: sessionId, instrument_type: instrumentType }),
+  getPortfolioSummary: (sessionId) =>
+    callAPI('/api/calculations/portfolio-summary', 'POST', { session_id: sessionId })
 }
 
 export const userAPI = {

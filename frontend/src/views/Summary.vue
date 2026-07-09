@@ -149,7 +149,7 @@
       </v-card>
     </v-dialog>
 
-    <!-- Combined Modal (View Portfolio as Excel) – White Header with Logo, NO duplicate header inside -->
+    <!-- Combined Modal (View Portfolio as Excel) – White Header with Logo -->
     <v-dialog v-model="combinedModalVisible" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title-white">
@@ -166,7 +166,7 @@
           </button>
         </v-card-title>
         <v-card-text class="combined-excel-body">
-          <!-- Summary Section (no duplicate header) -->
+          <!-- Summary Section -->
           <div class="combined-section">
             <h4 class="combined-section-title">Summary</h4>
             <div class="excel-table-wrapper">
@@ -275,10 +275,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import sessionManager from '@/services/sessionManager.js'
+import api from '@/services/api.js'
 import * as XLSX from 'xlsx'
 
 const router = useRouter()
@@ -292,6 +293,8 @@ const showExportDialog = ref(false)
 const selectedExportInstruments = ref({})
 const sortColumn = ref('')
 const sortOrder = ref('asc')
+const loading = ref(false)
+const error = ref('')
 
 const totalFaceValue = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.faceValue || 0), 0))
 const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
@@ -368,7 +371,6 @@ function openCombinedModal() {
 }
 
 function exportCombinedExcel() {
-  // Export the combined modal view as Excel
   const workbook = XLSX.utils.book_new()
   const valuationDate = new Date().toISOString().split('T')[0]
   const sessionName = activeSession.value?.name || 'N/A'
@@ -436,137 +438,248 @@ function exportCombinedExcel() {
   combinedModalVisible.value = false
 }
 
+// ===== FIXED: Load summary from backend =====
 async function loadSummary() {
-  let session = sessionManager.getActiveSession()
-  if (!session) {
-    const sid = sessionManager.getActiveSessionId()
-    if (sid) {
-      await sessionManager.getSession(sid)
-      session = sessionManager.getActiveSession()
+  loading.value = true
+  error.value = ''
+  
+  try {
+    // 1. Resolve active session
+    let session = sessionManager.getActiveSession()
+    if (!session) {
+      const sid = sessionManager.getActiveSessionId()
+      if (sid) {
+        await sessionManager.getSession(sid)
+        session = sessionManager.getActiveSession()
+      }
     }
-  }
-  if (!session) {
-    const all = await sessionManager.getAllSessions()
-    if (all.length) session = all[0]
-  }
-  activeSession.value = session
+    if (!session) {
+      const all = await sessionManager.getAllSessions()
+      if (all.length) session = all[0]
+    }
+    activeSession.value = session
 
-  if (!activeSession.value) {
-    console.warn('No active session found')
-    instruments.value = []
-    instrumentsWithDetails.value = []
-    return
-  }
+    if (!activeSession.value) {
+      console.warn('No active session found')
+      instruments.value = []
+      instrumentsWithDetails.value = []
+      loading.value = false
+      return
+    }
 
-  const sid = activeSession.value.id
-  const templates = [
-    { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', rateLabel: 'Avg interest rate', barColor: '#1E88E5' },
-    { id: 'bonds', name: 'Bonds', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', rateLabel: 'Avg coupon', barColor: '#4CAF50' },
-    { id: 'tbills', name: 'T-Bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', rateLabel: 'Avg discount', barColor: '#FF9800' }
-  ]
+    const sid = activeSession.value.id
+    
+    // 2. Try to get portfolio summary from backend first
+    let portfolioData = null
+    try {
+      const portfolioResponse = await api.calculationsAPI.getPortfolioSummary(sid)
+      if (portfolioResponse?.success && portfolioResponse?.data) {
+        portfolioData = portfolioResponse.data
+        console.log('✅ Portfolio summary loaded from backend:', portfolioData)
+      }
+    } catch (err) {
+      console.warn('Failed to load portfolio from backend, trying fallback:', err)
+    }
 
-  const detailsList = []
-  instruments.value = await Promise.all(templates.map(async (template) => {
-    const wf = await sessionManager.getInstrumentWorkflow(sid, template.id)
-    let details = []
-    let totalValue = 0
-    let totalFaceValue = 0
-    let totalAvgRate = 0
-    let instrumentCount = 0
-
-    // Try to get instrument summary first (this contains calculated rows from each sheet)
-    const summaryKey = `${template.id}_session_${sid}_summary`
-    const savedSummary = localStorage.getItem(summaryKey)
-    if (savedSummary) {
+    // 3. Try to get instrument summaries from backend
+    const instrumentTypes = ['money-market', 'bonds', 'tbills']
+    const instrumentDataMap = {}
+    
+    for (const instType of instrumentTypes) {
       try {
-        const summaryData = JSON.parse(savedSummary)
-        if (summaryData.rows && summaryData.rows.length) {
-          details = summaryData.rows
-          instrumentCount = details.length
-          details.forEach(row => {
-            const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
-            const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
-            const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
-            if (!isNaN(value)) totalValue += value
-            if (!isNaN(faceValue)) totalFaceValue += faceValue
-            if (!isNaN(rate)) totalAvgRate += rate
-          })
+        const summaryResponse = await api.calculationsAPI.getInstrumentSummary(sid, instType)
+        if (summaryResponse?.success && summaryResponse?.data) {
+          instrumentDataMap[instType] = summaryResponse.data
+          console.log(`✅ ${instType} summary loaded from backend`)
         }
-      } catch(e) {}
-    }
-
-    // Fallback to workflow data
-    if (!details.length && wf && wf.cleanedData && wf.cleanedData.length) {
-      details = wf.cleanedData
-      instrumentCount = details.length
-      details.forEach(row => {
-        const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
-        const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
-        const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
-        if (!isNaN(value)) totalValue += value
-        if (!isNaN(faceValue)) totalFaceValue += faceValue
-        if (!isNaN(rate)) totalAvgRate += rate
-      })
-    } else if (!details.length && wf && wf.data && wf.data.length) {
-      details = wf.data
-      instrumentCount = details.length
-    }
-
-    const avgRate = instrumentCount > 0 && totalAvgRate > 0 ? totalAvgRate / instrumentCount : null
-    const completed = instrumentCount > 0
-    const value = totalValue
-    const faceValue = totalFaceValue
-    const difference = faceValue - value
-
-    // Try to get FRED benchmark from stored calculations
-    let fredBench = null
-    if (wf && wf.calculations && wf.calculations.fred) {
-      fredBench = wf.calculations.fred.benchmark_rate
-    } else {
-      // Try to get from localStorage
-      const calcKey = `${template.id}_fred_benchmark`
-      const savedFred = localStorage.getItem(calcKey)
-      if (savedFred) {
-        try { fredBench = parseFloat(savedFred) } catch(e) {}
+      } catch (err) {
+        console.warn(`Failed to load ${instType} from backend:`, err)
       }
     }
 
-    const headers = details.length ? Object.keys(details[0]) : []
-    detailsList.push({
-      id: template.id,
-      name: template.name,
-      details: details,
-      detailHeaders: headers
-    })
+    // 4. Templates for display
+    const templates = [
+      { 
+        id: 'money-market', 
+        name: 'Money Market', 
+        icon: 'mdi-chart-line', 
+        gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', 
+        rateLabel: 'Avg interest rate', 
+        barColor: '#1E88E5' 
+      },
+      { 
+        id: 'bonds', 
+        name: 'Bonds', 
+        icon: 'mdi-chart-timeline', 
+        gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', 
+        rateLabel: 'Avg coupon', 
+        barColor: '#4CAF50' 
+      },
+      { 
+        id: 'tbills', 
+        name: 'T-Bills', 
+        icon: 'mdi-finance', 
+        gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', 
+        rateLabel: 'Avg discount', 
+        barColor: '#FF9800' 
+      }
+    ]
 
-    return {
-      ...template,
-      value,
-      faceValue,
-      difference,
-      count: instrumentCount,
-      avgRate,
-      fredBench,
-      completed,
-      statusClass: completed ? 'completed' : 'pending',
-      statusText: completed ? 'Completed' : 'Not started',
-      statusIcon: completed ? 'mdi-check-circle' : 'mdi-clock-outline'
+    const detailsList = []
+    const instrumentResults = []
+
+    // 5. Process each instrument type
+    for (const template of templates) {
+      let details = []
+      let totalValue = 0
+      let totalFaceValue = 0
+      let totalAvgRate = 0
+      let instrumentCount = 0
+      let fredBench = null
+
+      // Check if we have backend data for this instrument
+      const backendSummary = instrumentDataMap[template.id]
+      
+      if (backendSummary && backendSummary.rows && backendSummary.rows.length > 0) {
+        // Use backend data
+        details = backendSummary.rows
+        instrumentCount = details.length
+        
+        details.forEach(row => {
+          const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
+          const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
+          const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
+          if (!isNaN(value)) totalValue += value
+          if (!isNaN(faceValue)) totalFaceValue += faceValue
+          if (!isNaN(rate)) totalAvgRate += rate
+        })
+        
+        // Try to get FRED benchmark from the summary data
+        if (backendSummary.metadata && backendSummary.metadata.fred_benchmark) {
+          fredBench = backendSummary.metadata.fred_benchmark
+        }
+      } else {
+        // Fallback: try to get from workflow
+        try {
+          const wf = await sessionManager.getInstrumentWorkflow(sid, template.id)
+          
+          if (wf) {
+            // Try to get FRED benchmark from calculations
+            if (wf.calculations && wf.calculations.fred) {
+              fredBench = wf.calculations.fred.benchmark_rate
+            } else {
+              // Try localStorage
+              const calcKey = `${template.id}_fred_benchmark`
+              const savedFred = localStorage.getItem(calcKey)
+              if (savedFred) {
+                try { fredBench = parseFloat(savedFred) } catch(e) {}
+              }
+            }
+            
+            // Get data from workflow
+            let dataRows = []
+            if (wf.cleanedData && wf.cleanedData.length > 0) {
+              dataRows = wf.cleanedData
+            } else if (wf.data && wf.data.length > 0) {
+              dataRows = wf.data
+            }
+            
+            if (dataRows.length > 0) {
+              details = dataRows
+              instrumentCount = dataRows.length
+              
+              dataRows.forEach(row => {
+                const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
+                const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
+                const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
+                if (!isNaN(value)) totalValue += value
+                if (!isNaN(faceValue)) totalFaceValue += faceValue
+                if (!isNaN(rate)) totalAvgRate += rate
+              })
+            }
+          }
+        } catch (err) {
+          console.warn(`Failed to get workflow for ${template.id}:`, err)
+        }
+      }
+
+      // Also try localStorage as fallback
+      if (details.length === 0) {
+        try {
+          const summaryKey = `${template.id}_session_${sid}_summary`
+          const savedSummary = localStorage.getItem(summaryKey)
+          if (savedSummary) {
+            const summaryData = JSON.parse(savedSummary)
+            if (summaryData.rows && summaryData.rows.length) {
+              details = summaryData.rows
+              instrumentCount = details.length
+              details.forEach(row => {
+                const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
+                const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
+                const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
+                if (!isNaN(value)) totalValue += value
+                if (!isNaN(faceValue)) totalFaceValue += faceValue
+                if (!isNaN(rate)) totalAvgRate += rate
+              })
+            }
+          }
+        } catch(e) {}
+      }
+
+      const avgRate = instrumentCount > 0 && totalAvgRate > 0 ? totalAvgRate / instrumentCount : null
+      const completed = instrumentCount > 0
+      const value = totalValue
+      const faceValue = totalFaceValue
+      const difference = faceValue - value
+
+      const headers = details.length ? Object.keys(details[0]) : []
+      detailsList.push({
+        id: template.id,
+        name: template.name,
+        details: details,
+        detailHeaders: headers
+      })
+
+      instrumentResults.push({
+        ...template,
+        value,
+        faceValue,
+        difference,
+        count: instrumentCount,
+        avgRate,
+        fredBench: fredBench !== null ? parseFloat(fredBench) : null,
+        completed,
+        statusClass: completed ? 'completed' : 'pending',
+        statusText: completed ? 'Completed' : 'Not started',
+        statusIcon: completed ? 'mdi-check-circle' : 'mdi-clock-outline'
+      })
     }
-  }))
 
-  instrumentsWithDetails.value = detailsList
+    instrumentsWithDetails.value = detailsList
+    instruments.value = instrumentResults
 
-  const total = instruments.value.reduce((sum, inst) => sum + inst.value, 0)
-  instruments.value = instruments.value.map(inst => ({
-    ...inst,
-    percent: total > 0 ? ((inst.value / total) * 100).toFixed(1) : 0
-  }))
+    // Calculate percentages
+    const total = instruments.value.reduce((sum, inst) => sum + inst.value, 0)
+    instruments.value = instruments.value.map(inst => ({
+      ...inst,
+      percent: total > 0 ? ((inst.value / total) * 100).toFixed(1) : 0
+    }))
 
-  const initSelections = {}
-  instruments.value.forEach(inst => {
-    initSelections[inst.id] = inst.completed || inst.value > 0
-  })
-  selectedExportInstruments.value = initSelections
+    // Initialize export selections
+    const initSelections = {}
+    instruments.value.forEach(inst => {
+      initSelections[inst.id] = inst.completed || inst.value > 0
+    })
+    selectedExportInstruments.value = initSelections
+
+  } catch (err) {
+    console.error('Error loading summary:', err)
+    error.value = err.message || 'Failed to load summary data'
+    instruments.value = []
+    instrumentsWithDetails.value = []
+  } finally {
+    loading.value = false
+  }
 }
 
 function exportToExcel() {
@@ -640,8 +753,27 @@ function exportToExcel() {
   showExportDialog.value = false
 }
 
+// ===== FIXED: Load data on mount with retry =====
 onMounted(async () => {
   await loadSummary()
+  
+  // Also listen for session updates
+  const handleSessionUpdate = async (event) => {
+    const { sessionId } = event.detail || {}
+    if (sessionId && activeSession.value?.id === sessionId) {
+      await loadSummary()
+    } else if (!sessionId) {
+      // Refresh all
+      await loadSummary()
+    }
+  }
+  
+  window.addEventListener('session-updated', handleSessionUpdate)
+  
+  // Cleanup
+  return () => {
+    window.removeEventListener('session-updated', handleSessionUpdate)
+  }
 })
 </script>
 

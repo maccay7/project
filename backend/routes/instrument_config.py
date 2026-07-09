@@ -2,7 +2,6 @@ import json
 from flask import request, jsonify
 from utils.db import get_db
 
-# Default configs seeded into DB on first access
 DEFAULT_CONFIGS = {
     'money-market': {
         'required_columns': [
@@ -134,7 +133,6 @@ def instrument_config_routes(app):
                         json.dumps(cfg['workflow_steps'])
                     ))
                 else:
-                    # Update existing records to match DEFAULT_CONFIGS
                     cursor.execute('''
                         UPDATE instrument_configs
                         SET required_columns = %s, column_variations = %s, workflow_steps = %s

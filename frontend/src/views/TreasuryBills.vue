@@ -1,22 +1,20 @@
 <template>
   <FixedLayout>
     <div class="instrument-page">
-      <!-- Page Header – Simplified -->
+      <!-- Page Header -->
       <div class="page-header">
         <div class="header-left">
           <h1>{{ instrumentName }}</h1>
           <div v-if="activeSession" class="session-badge">
-            <v-icon small>mdi-folder-outline</v-icon>
             <strong>{{ activeSession.name }}</strong>
           </div>
           <div v-else class="session-badge warning">
-            <v-icon small>mdi-alert-outline</v-icon>
             No active session – please select a session from Dashboard
           </div>
         </div>
         <div class="header-right">
           <button v-if="activeSession" class="btn-save-session" @click="saveToSession" title="Save a version to session history">
-            <v-icon small>mdi-content-save</v-icon> Save to Session
+            Save to Session
           </button>
           <div class="step-indicator">
             Step {{ currentStepIndex + 1 }} of {{ totalSteps }}
@@ -49,7 +47,7 @@
         <!-- ===== UPLOAD ===== -->
         <div v-if="activeTab === 'upload'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-cloud-upload-outline</v-icon> Upload {{ instrumentName }} Dataset</v-card-title>
+            <v-card-title>Upload {{ instrumentName }} Dataset</v-card-title>
             <v-card-text>
               <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
                 <input
@@ -59,41 +57,37 @@
                   accept=".csv,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.xlam,.ods,.xml,.html,.prn,.dif,.slk,.dbf"
                   style="display: none"
                 >
-                <v-icon size="48" color="#0B2044" class="upload-icon">mdi-cloud-upload-outline</v-icon>
                 <p>Drag & drop or <span class="browse-link" @click="$refs.fileInput.click()">browse</span></p>
                 <small>Supported: CSV, Excel (including .xlsm, .xlsb, .ods), and many other spreadsheet formats</small>
               </div>
 
               <!-- Upload History -->
               <div v-if="uploadHistory.length" class="upload-history">
-                <h4><v-icon small>mdi-history</v-icon> Upload History ({{ uploadHistory.length }} files)</h4>
+                <h4>Upload History ({{ uploadHistory.length }} files)</h4>
                 <div class="history-list">
                   <div v-for="(item, idx) in uploadHistory" :key="idx" class="history-item" @click="loadHistoryFile(item)">
-                    <v-icon small>mdi-file-excel-outline</v-icon>
                     <span>{{ item.name }}</span>
                     <small>{{ new Date(item.date).toLocaleString() }}</small>
                     <button class="btn-delete-history" @click.stop="deleteHistoryItem(idx)">
-                      <v-icon small color="error">mdi-delete</v-icon>
+                      ×
                     </button>
                   </div>
                 </div>
               </div>
 
               <div v-if="fileLoading" class="loading-container">
-                <v-icon size="48" class="spin">mdi-loading</v-icon>
                 <p>{{ uploadProgress > 0 ? `Processing file... ${uploadProgress}%` : 'Parsing file... Please wait.' }}</p>
                 <v-progress-linear v-if="uploadProgress > 0" :value="uploadProgress" color="#0B2044" height="6"></v-progress-linear>
               </div>
 
               <div v-if="uploadedFile" class="file-info">
-                <v-icon>mdi-file-excel-outline</v-icon>
                 <span>{{ uploadedFile.name }}</span>
                 <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
                 <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
-                <button class="btn-preview" @click="togglePreview" :disabled="!rawData.length">Preview</button>
-                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!rawData.length">Review Excel</button>
-                <button class="btn-mapping" @click="openMappingDialog" :disabled="!rawData.length">Map Columns</button>
+                <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
+                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!worksheetSelected">Review Excel</button>
+                <button class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
               </div>
 
               <!-- Worksheet Selector -->
@@ -110,7 +104,7 @@
                 />
               </div>
 
-              <!-- Preview – always shows mapping dropdowns after mapping is applied -->
+              <!-- Preview -->
               <div v-if="rawData.length && showPreview" class="excel-preview-section">
                 <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
                 <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
@@ -126,14 +120,16 @@
                   @data-update="onRawExcelUpdate"
                   @mapping-update="updateColumnMapping"
                 />
-                <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
+                <div class="preview-actions">
+                  <button class="btn-primary" @click="saveFinalMapping">Save Mapping</button>
+                  <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
+                </div>
               </div>
 
               <!-- ===== MAPPING DIALOG ===== -->
               <v-dialog v-model="showMappingDialog" max-width="650px">
                 <v-card>
                   <v-card-title class="mapping-dialog-title">
-                    <v-icon>mdi-arrow-split-horizontal</v-icon> 
                     Map Columns – {{ instrumentName }}
                     <v-spacer></v-spacer>
                     <span class="mapping-count">{{ requiredColumns.length }} required fields</span>
@@ -152,11 +148,9 @@
                     </div>
 
                     <div v-if="missingColumns.length" class="warning-message">
-                      <v-icon color="warning">mdi-alert-outline</v-icon>
                       <span>Missing mappings for: {{ missingColumns.join(', ') }}</span>
                     </div>
                     <div v-if="!missingColumns.length && Object.values(columnMapping).some(v => v)" class="success-message">
-                      <v-icon color="success">mdi-check-circle-outline</v-icon>
                       <span>All columns mapped! Ready to continue.</span>
                     </div>
 
@@ -175,10 +169,10 @@
               <v-dialog v-model="showSavedMappingsDialog" max-width="700px">
                 <v-card>
                   <v-card-title class="saved-mappings-popup-title">
-                    <v-icon left>mdi-content-save-outline</v-icon> Saved Mappings
+                    Saved Mappings
                     <v-spacer></v-spacer>
                     <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">
-                      <v-icon>mdi-close</v-icon>
+                      ×
                     </button>
                   </v-card-title>
                   <v-card-text>
@@ -193,7 +187,7 @@
                       <div v-for="(tmpl, name) in savedTemplates" :key="name" class="saved-item">
                         <div class="template-info">
                           <span class="template-name">{{ name }}</span>
-                          <span class="template-timestamp">Saved: {{ tmpl.timestamp ? new Date(tmpl.timestamp).toLocaleString() : 'unknown' }}</span>
+                          <span class="template-timestamp">Saved: {{ tmpl.timestamp ? new Date(tmpl.timestamp).toLocaleString() : '' }}</span>
                         </div>
                         <div class="template-actions">
                           <button class="btn-secondary small" @click="loadTemplateFromPopup(name)">Load</button>
@@ -211,17 +205,17 @@
                 </v-card>
               </v-dialog>
 
-              <!-- Workbook Viewer Dialog - NO LOGO + WORK ON SHEET BUTTON -->
+              <!-- Workbook Viewer Dialog -->
               <v-dialog v-model="showWorkbookViewer" max-width="95%" fullscreen hide-overlay>
                 <v-card>
                   <v-card-title class="excel-dialog-title-no-logo">
                     <span>Excel Workbook – {{ currentSheetName || 'Select a sheet' }}</span>
                     <v-spacer></v-spacer>
                     <button class="btn-work-on-sheet" @click="workOnSelectedSheet" v-if="currentSheetName && workbookSheets.length">
-                      <v-icon small>mdi-play-circle-outline</v-icon> Work on This Sheet
+                      Work on This Sheet
                     </button>
                     <button class="btn-close-dialog" @click="showWorkbookViewer = false">
-                      <v-icon>mdi-close</v-icon>
+                      ×
                     </button>
                   </v-card-title>
                   <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
@@ -245,15 +239,13 @@
                 <h4>Required Columns:</h4>
                 <div class="columns-list">
                   <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
-                    <v-icon size="12">{{ hasRequiredColumn(col) ? 'mdi-check-circle-outline' : 'mdi-close-circle-outline' }}</v-icon> {{ col }}
+                    {{ col }}
                   </span>
                 </div>
                 <div v-if="rawData.length && missingColumns.length" class="warning-message">
-                  <v-icon color="warning">mdi-alert-outline</v-icon>
                   <span>Missing required columns. Use the dropdowns on the column headers or click "Map Columns" to assign them.</span>
                 </div>
                 <div v-if="rawData.length && missingColumns.length === 0 && mappingApplied" class="success-message">
-                  <v-icon color="success">mdi-check-circle-outline</v-icon>
                   <span>All columns mapped. Ready to continue.</span>
                 </div>
               </div>
@@ -269,10 +261,9 @@
         <!-- ===== CLEANING ===== -->
         <div v-if="activeTab === 'cleaning'" class="content-card">
           <v-card>
-            <v-card-title><v-icon>mdi-broom</v-icon> Clean {{ instrumentName }} Data</v-card-title>
+            <v-card-title>Clean {{ instrumentName }} Data</v-card-title>
             <v-card-text>
               <div v-if="!hasData" class="empty-state">
-                <v-icon size="48" color="#ccc">mdi-database-outline</v-icon>
                 <p>No data uploaded yet.</p>
                 <button class="btn-primary" @click="switchTab('upload')">Go to Upload</button>
               </div>
@@ -288,7 +279,7 @@
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.convertToNumbers"> Convert text numbers to numeric</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeOutliers"> Remove outliers (3σ) from numeric columns</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeDates"> Standardize date formats to YYYY-MM-DD</label>
-                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeSpecialChars"> Remove special characters from text columns (keep alphanumeric and spaces)</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeSpecialChars"> Remove special characters from text columns</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.changeCase"> Change text case:
                         <select v-model="cleaningOptions.caseType"><option value="none">None</option><option value="upper">UPPER CASE</option><option value="lower">lower case</option><option value="title">Title Case</option></select>
                       </label>
@@ -296,13 +287,13 @@
                         <input type="text" v-model="cleaningOptions.customFillValue" placeholder="Custom value" style="width:100px">
                       </label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeColumnsAllMissing"> Remove columns where ALL values are missing</label>
-                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.capOutliers"> Cap outliers at 3 standard deviations (winsorize)</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.capOutliers"> Cap outliers at 3 standard deviations</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeRowsSpecificColumnEmpty"> Remove rows where a specific column is empty:
                         <select v-model="cleaningOptions.specificColumn"><option value="">-- Select column --</option><option v-for="col in Object.keys(rawData[0]||{})" :key="col" :value="col">{{ col }}</option></select>
                       </label>
-                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeNumericRange"> Standardize numeric columns to range [0,1] (min-max scaling)</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeNumericRange"> Standardize numeric columns to range [0,1]</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeEmptyRows"> Remove rows that are completely empty</label>
-                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillForward"> Forward fill missing values (carry last valid observation forward)</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillForward"> Forward fill missing values</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillBackward"> Backward fill missing values</label>
                     </div>
                   </div>
@@ -335,23 +326,21 @@
         <div v-if="activeTab === 'calculations'" class="content-card">
           <v-card>
             <v-card-title class="calc-header">
-              <v-icon>mdi-calculator-variant-outline</v-icon> {{ instrumentName }} Calculations
+              {{ instrumentName }} Calculations
               <span v-if="currentlyViewingInstrument" class="viewing-badge">
-                <v-icon small>mdi-eye</v-icon> Currently Viewing: <strong>{{ currentlyViewingInstrument }}</strong>
+                Currently Viewing: <strong>{{ currentlyViewingInstrument }}</strong>
               </span>
               <v-spacer></v-spacer>
-              <!-- CALCULATED INSTRUMENTS BUTTON - visible when 2+ instruments exist -->
               <button 
-                v-if="instrumentSummary.rows.length >= 2" 
+                v-if="instrumentSummary.rows.length >= 2 && sheetType === 'multi'" 
                 class="btn-calculated-instruments" 
                 @click="openAllCalculationsPopup"
               >
-                <v-icon small>mdi-format-list-bulleted</v-icon> Calculated Instruments
+                Calculated Instruments
               </button>
             </v-card-title>
             <v-card-text>
               <div v-if="!hasCleanedData" class="empty-state">
-                <v-icon size="48" color="#ccc">mdi-calculator-variant-outline</v-icon>
                 <p>No cleaned data. Please clean first.</p>
                 <button class="btn-primary" @click="switchTab('cleaning')">Go to Cleaning</button>
               </div>
@@ -363,8 +352,8 @@
                     <div class="card-value">${{ calculations.totalValue?.toLocaleString() || 0 }}</div>
                   </div>
                   <div class="summary-card rate" @click="showFormula('Average Rate')">
-                    <div class="card-label">{{ instrumentType === 'money-market' ? 'Avg Interest Rate' : instrumentType === 'bonds' ? 'Avg Coupon Rate' : 'Avg Discount Rate' }}</div>
-                    <div class="card-value">{{ instrumentType === 'money-market' ? (calculations.avgRate || 0) : instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) : (calculations.avgDiscountRate || 0) }}%</div>
+                    <div class="card-label">Avg Discount Rate</div>
+                    <div class="card-value">{{ calculations.avgDiscountRate || 0 }}%</div>
                   </div>
                   <div class="summary-card count" @click="showFormula('Number of Instruments')">
                     <div class="card-label">Number of Instruments</div>
@@ -388,104 +377,54 @@
                 <div class="calculations-section">
                   <h3>{{ instrumentName }} Calculations</h3>
                   <div class="calculations-grid">
-                    <template v-if="instrumentType === 'money-market'">
-                      <div class="calculation-card" @click="showFormula('weightedAvgRate')">
-                        <div class="calc-name">Weighted Average Rate</div>
-                        <div class="calc-value">{{ calculations.weightedAvgRate || 0 }}%</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('totalInterest')">
-                        <div class="calc-name">Total Interest (Annualized)</div>
-                        <div class="calc-value">${{ calculations.totalInterest?.toLocaleString() || 0 }}</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('interestEarned')">
-                        <div class="calc-name">Interest Earned</div>
-                        <div class="calc-value">${{ calculations.interestEarned?.toLocaleString() || 0 }}</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('annualYield')">
-                        <div class="calc-name">Annual Yield</div>
-                        <div class="calc-value">{{ calculations.annualYield || 0 }}%</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('effectiveAnnualRate')">
-                        <div class="calc-name">Effective Annual Rate</div>
-                        <div class="calc-value">{{ calculations.effectiveAnnualRate || 0 }}%</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('avgDaysToMaturity')">
-                        <div class="calc-name">Average Days to Maturity</div>
-                        <div class="calc-value">{{ calculations.avgDaysToMaturity || 0 }} days</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('totalPrincipal')">
-                        <div class="calc-name">Total Principal</div>
-                        <div class="calc-value">${{ calculations.totalPrincipal?.toLocaleString() || 0 }}</div>
-                      </div>
-                    </template>
-                    <template v-else-if="instrumentType === 'bonds'">
-                      <div class="calculation-card" @click="showFormula('weightedAvgCoupon')">
-                        <div class="calc-name">Weighted Average Coupon</div>
-                        <div class="calc-value">{{ calculations.weightedAvgCoupon || 0 }}%</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('totalAnnualIncome')">
-                        <div class="calc-name">Total Annual Income</div>
-                        <div class="calc-value">${{ calculations.totalAnnualIncome?.toLocaleString() || 0 }}</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('avgYTM')">
-                        <div class="calc-name">Average Yield to Maturity</div>
-                        <div class="calc-value">{{ calculations.avgYTM || 0 }}%</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('duration')">
-                        <div class="calc-name">Duration (years)</div>
-                        <div class="calc-value">{{ calculations.duration || 0 }}</div>
-                      </div>
-                    </template>
-                    <template v-else>
-                      <div class="calculation-card" @click="showFormula('weightedAvgDiscount')">
-                        <div class="calc-name">Weighted Average Discount</div>
-                        <div class="calc-value">{{ calculations.weightedAvgDiscount || 0 }}%</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('totalDiscount')">
-                        <div class="calc-name">Total Discount</div>
-                        <div class="calc-value">${{ calculations.totalDiscount?.toLocaleString() || 0 }}</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('effectiveYield')">
-                        <div class="calc-name">Effective Yield</div>
-                        <div class="calc-value">{{ calculations.effectiveYield || 0 }}%</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('bondEquivalentYield')">
-                        <div class="calc-name">Bond Equivalent Yield</div>
-                        <div class="calc-value">{{ calculations.bondEquivalentYield || 0 }}%</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('pricePer100')">
-                        <div class="calc-name">Price per $100</div>
-                        <div class="calc-value">${{ calculations.pricePer100 || 0 }}</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('totalPurchasePrice')">
-                        <div class="calc-name">Total Purchase Price</div>
-                        <div class="calc-value">${{ calculations.totalPurchasePrice?.toLocaleString() || 0 }}</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('avgInvestment')">
-                        <div class="calc-name">Average Investment</div>
-                        <div class="calc-value">${{ calculations.avgInvestment?.toLocaleString() || 0 }}</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('holdingPeriodYield')">
-                        <div class="calc-name">Holding Period Yield</div>
-                        <div class="calc-value">{{ calculations.holdingPeriodYield || 0 }}%</div>
-                      </div>
-                      <div class="calculation-card" @click="showFormula('annualizedYield')">
-                        <div class="calc-name">Annualized Yield</div>
-                        <div class="calc-value">{{ calculations.annualizedYield || 0 }}%</div>
-                      </div>
-                    </template>
+                    <div class="calculation-card" @click="showFormula('weightedAvgDiscount')">
+                      <div class="calc-name">Weighted Average Discount</div>
+                      <div class="calc-value">{{ calculations.weightedAvgDiscount || 0 }}%</div>
+                    </div>
+                    <div class="calculation-card" @click="showFormula('totalDiscount')">
+                      <div class="calc-name">Total Discount</div>
+                      <div class="calc-value">${{ calculations.totalDiscount?.toLocaleString() || 0 }}</div>
+                    </div>
+                    <div class="calculation-card" @click="showFormula('effectiveYield')">
+                      <div class="calc-name">Effective Yield</div>
+                      <div class="calc-value">{{ calculations.effectiveYield || 0 }}%</div>
+                    </div>
+                    <div class="calculation-card" @click="showFormula('bondEquivalentYield')">
+                      <div class="calc-name">Bond Equivalent Yield</div>
+                      <div class="calc-value">{{ calculations.bondEquivalentYield || 0 }}%</div>
+                    </div>
+                    <div class="calculation-card" @click="showFormula('pricePer100')">
+                      <div class="calc-name">Price per $100</div>
+                      <div class="calc-value">${{ calculations.pricePer100 || 0 }}</div>
+                    </div>
+                    <div class="calculation-card" @click="showFormula('totalPurchasePrice')">
+                      <div class="calc-name">Total Purchase Price</div>
+                      <div class="calc-value">${{ calculations.totalPurchasePrice?.toLocaleString() || 0 }}</div>
+                    </div>
+                    <div class="calculation-card" @click="showFormula('avgInvestment')">
+                      <div class="calc-name">Average Investment</div>
+                      <div class="calc-value">${{ calculations.avgInvestment?.toLocaleString() || 0 }}</div>
+                    </div>
+                    <div class="calculation-card" @click="showFormula('holdingPeriodYield')">
+                      <div class="calc-name">Holding Period Yield</div>
+                      <div class="calc-value">{{ calculations.holdingPeriodYield || 0 }}%</div>
+                    </div>
+                    <div class="calculation-card" @click="showFormula('annualizedYield')">
+                      <div class="calc-name">Annualized Yield</div>
+                      <div class="calc-value">{{ calculations.annualizedYield || 0 }}%</div>
+                    </div>
                   </div>
                 </div>
 
-                <!-- ===== MULTIPLE INSTRUMENTS POPUP (Calculated Instruments) ===== -->
+                <!-- ===== MULTIPLE INSTRUMENTS POPUP ===== -->
                 <div v-if="showAllCalculationsPopup" class="excel-popup-overlay" @click="closeAllCalculationsPopup">
-                  <div class="excel-popup-content" @click.stop>
+                  <div class="excel-popup-content excel-table-popup" @click.stop>
                     <div class="popup-header-white">
                       <div class="header-left">
                         <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
                         <div class="header-title">
                           <h4>Calculated Instruments</h4>
-                          <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+                          <p class="header-meta"><strong>{{ activeSession?.name || '' }}</strong></p>
                         </div>
                       </div>
                       <button class="close-btn" @click="closeAllCalculationsPopup">×</button>
@@ -494,40 +433,27 @@
                       <div v-if="instrumentSummary.rows.length === 0" class="empty-state">
                         <p>No instruments detected. Please process a worksheet first.</p>
                       </div>
-                      <div v-else>
-                        <p class="popup-instruction">Click any instrument below to load its calculations into the main view.</p>
-                        <div class="instrument-grid">
-                          <div 
-                            v-for="(row, idx) in instrumentSummary.rows" 
-                            :key="idx" 
-                            class="instrument-card"
-                            @click="selectInstrumentFromPopup(idx)"
-                          >
-                            <div class="instrument-card-header">
-                              <strong>{{ row['Instrument Name'] || `Instrument ${idx + 1}` }}</strong>
-                              <span class="instrument-type-badge">{{ row['Instrument Type'] || instrumentType }}</span>
-                            </div>
-                            <div class="instrument-card-body">
-                              <div class="card-metric">
-                                <span class="metric-label">Total Value</span>
-                                <span class="metric-value">${{ formatNumber(row['Total Value'] || row['Calculated Value'] || 0) }}</span>
-                              </div>
-                              <div class="card-metric">
-                                <span class="metric-label">Rate</span>
-                                <span class="metric-value">{{ row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0 }}%</span>
-                              </div>
-                              <div class="card-metric">
-                                <span class="metric-label">Counterparty</span>
-                                <span class="metric-value">{{ row['Counterparty'] || 'N/A' }}</span>
-                              </div>
-                            </div>
-                            <div class="instrument-card-footer">
-                              <button class="btn-select-instrument" @click.stop="selectInstrumentFromPopup(idx)">
-                                <v-icon small>mdi-arrow-right</v-icon> Select
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                      <div v-else class="excel-table-container">
+                        <p class="popup-instruction">Click any row to load its calculations into the main view.</p>
+                        <table class="calculated-instruments-table">
+                          <thead>
+                            <tr>
+                              <th v-for="col in instrumentSummary.columns" :key="col">{{ col }}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr 
+                              v-for="(row, idx) in instrumentSummary.rows" 
+                              :key="idx"
+                              :class="{ 'selected-row': currentlyViewingInstrument === (row['Instrument Name'] || `Instrument ${idx + 1}`) }"
+                              @click="selectInstrumentFromPopup(idx)"
+                            >
+                              <td v-for="col in instrumentSummary.columns" :key="col">
+                                {{ formatTableCell(row[col], col) }}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                     <div class="popup-footer">
@@ -570,7 +496,7 @@
                 </div>
               </div>
 
-              <!-- FILTERS WITH 5 EXAMPLES + CUSTOM INPUT -->
+              <!-- FILTERS -->
               <div class="filters-row">
                 <div class="filter-group">
                   <label>Country / Region</label>
@@ -676,20 +602,20 @@
                 </div>
                 <div class="summary-section card-panel">
                   <h3><v-icon size="20">mdi-finance</v-icon> Valuation metrics</h3>
-                  <p><strong>Average rate:</strong> {{ instrumentType === 'money-market' ? (calculations.avgRate || 0) : instrumentType === 'bonds' ? (calculations.avgCouponRate || 0) : (calculations.avgDiscountRate || 0) }}%</p>
-                  <p><strong>Weighted average:</strong> {{ instrumentType === 'money-market' ? (calculations.weightedAvgRate || 0) : instrumentType === 'bonds' ? (calculations.weightedAvgCoupon || 0) : (calculations.weightedAvgDiscount || 0) }}%</p>
+                  <p><strong>Average discount rate:</strong> {{ calculations.avgDiscountRate || 0 }}%</p>
+                  <p><strong>Weighted average discount:</strong> {{ calculations.weightedAvgDiscount || 0 }}%</p>
+                  <p><strong>Effective yield:</strong> {{ calculations.effectiveYield || 0 }}%</p>
+                  <p><strong>Bond equivalent yield:</strong> {{ calculations.bondEquivalentYield || 0 }}%</p>
                   <p v-if="calculations.fred?.spread_vs_market != null"><strong>Spread vs FRED:</strong> {{ calculations.fred.spread_vs_market }}%</p>
                 </div>
               </div>
               <div class="excel-viewer-button" style="margin-bottom: 20px; text-align: right;">
-                <button class="btn-secondary" @click="openExcelReview(cleanedData, `${instrumentName} Data`)">📊 View Instrument Data as Excel</button>
+                <button class="btn-secondary" @click="openInstrumentDataExcel">📊 View Instrument Data as Excel</button>
               </div>
 
               <!-- Instrument Summary -->
               <div v-if="instrumentSummary.rows.length > 0" class="instrument-summary-section">
                 <h3>📊 Instrument Summary ({{ selectedInstrumentType }})</h3>
-                
-                <!-- Instrument Breakdown -->
                 <div class="instrument-breakdown">
                   <h4>📋 Instrument Breakdown</h4>
                   <div class="breakdown-grid">
@@ -701,7 +627,7 @@
                       <div class="card-body">
                         <div class="metric">
                           <span class="label">Counterparty:</span>
-                          <span class="value">{{ row['Counterparty'] || 'N/A' }}</span>
+                          <span class="value">{{ row['Counterparty'] || '' }}</span>
                         </div>
                         <div class="metric" v-if="row['Face Value'] !== undefined">
                           <span class="label">Face Value:</span>
@@ -726,14 +652,11 @@
                     </div>
                   </div>
                 </div>
-                
                 <div class="summary-table-wrapper">
                   <table class="summary-table">
                     <thead>
                       <tr>
-                        <th v-for="col in instrumentSummary.columns" :key="col">
-                          {{ col }}
-                        </th>
+                        <th v-for="col in instrumentSummary.columns" :key="col">{{ col }}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -803,8 +726,6 @@
               <!-- Portfolio Summary -->
               <div v-if="portfolioSummary.rows.length > 0" class="portfolio-summary-section">
                 <h3>📊 Portfolio Summary ({{ selectedInstrumentType }}) – {{ portfolioSummary.rows.length }} instruments</h3>
-                
-                <!-- Instrument Breakdown -->
                 <div class="instrument-breakdown">
                   <h4>📋 Instrument Breakdown</h4>
                   <div class="breakdown-grid">
@@ -816,7 +737,7 @@
                       <div class="card-body">
                         <div class="metric">
                           <span class="label">Counterparty:</span>
-                          <span class="value">{{ row['Counterparty'] || 'N/A' }}</span>
+                          <span class="value">{{ row['Counterparty'] || '' }}</span>
                         </div>
                         <div class="metric" v-if="row['Face Value'] !== undefined">
                           <span class="label">Face Value:</span>
@@ -841,14 +762,11 @@
                     </div>
                   </div>
                 </div>
-                
                 <div class="summary-table-wrapper">
                   <table class="summary-table">
                     <thead>
                       <tr>
-                        <th v-for="col in portfolioSummary.columns" :key="col">
-                          {{ col }}
-                        </th>
+                        <th v-for="col in portfolioSummary.columns" :key="col">{{ col }}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1141,7 +1059,7 @@ const route = useRoute()
 const instrumentType = computed(() => route.params.type || route.path.split('/').pop())
 
 const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInstrumentConfig(route.params.type)
-const { fredFilters, filterOptions, loadFilterOptions, fetchBenchmark } = useFredMarket('1Y')
+const { fredFilters, filterOptions, loadFilterOptions, fetchBenchmark } = useFredMarket('13W') // default for tbills
 const worksheetWorkflow = useWorksheetWorkflow(instrumentType)
 
 // ===== REFS =====
@@ -1158,7 +1076,6 @@ const selectedMaturityOption = ref('')
 const selectedCountryOption = ref('USA')
 const selectedCurrencyOption = ref('USD')
 
-// Custom filter inputs
 const customCountryInput = ref('')
 const customCurrencyInput = ref('')
 const customMaturityInput = ref('')
@@ -1196,6 +1113,7 @@ const originalFileColumns = ref([])
 const originalFileBuffer = ref(null)
 const sessionSavedAt = ref(null)
 const showPreview = ref(false)
+const worksheetSelected = ref(false)
 const forceUpdate = ref(0)
 
 const savedTemplates = ref({})
@@ -1210,7 +1128,7 @@ const cleaningOptions = ref({
   specificColumn: '', standardizeNumericRange: false, removeEmptyRows: false, fillForward: false, fillBackward: false
 })
 
-const selectedInstrumentType = ref('Bonds')
+const selectedInstrumentType = ref('T-Bills')
 const instrumentSummary = ref({ columns: [], rows: [] })
 const portfolioSummary = ref({ columns: [], rows: [] })
 const selectedCalculationInstrument = ref(-1)
@@ -1269,41 +1187,18 @@ const displayCurrencyOptions = [
 ]
 
 const displayMaturityOptions = computed(() => {
-  let base = []
-  if (instrumentType.value === 'money-market') {
-    base = [
-      { value: '1M', label: '1 Month' },
-      { value: '3M', label: '3 Months' },
-      { value: '6M', label: '6 Months' },
-      { value: '1Y', label: '1 Year' }
-    ]
-  } else if (instrumentType.value === 'bonds') {
-    base = [
-      { value: '2Y', label: '2 Years' },
-      { value: '5Y', label: '5 Years' },
-      { value: '10Y', label: '10 Years' },
-      { value: '30Y', label: '30 Years' }
-    ]
-  } else if (instrumentType.value === 'tbills') {
-    base = [
-      { value: '4W', label: '4 Weeks' },
-      { value: '13W', label: '13 Weeks' },
-      { value: '26W', label: '26 Weeks' },
-      { value: '52W', label: '52 Weeks' }
-    ]
-  } else {
-    base = [
-      { value: '3M', label: '3 Months' },
-      { value: '1Y', label: '1 Year' },
-      { value: '5Y', label: '5 Years' },
-      { value: '10Y', label: '10 Years' }
-    ]
-  }
-  return base
+  // T-Bills specific
+  return [
+    { value: '4W', label: '4 Weeks' },
+    { value: '8W', label: '8 Weeks' },
+    { value: '13W', label: '13 Weeks' },
+    { value: '26W', label: '26 Weeks' },
+    { value: '52W', label: '52 Weeks' }
+  ]
 })
 
 // ===== COMPUTED =====
-const instrumentName = computed(() => ({ 'money-market': 'Money Market', bonds: 'Bonds', tbills: 'T-Bills' }[instrumentType.value] || 'Instrument'))
+const instrumentName = computed(() => 'T-Bills')
 
 const activeTab = computed({
   get: () => route.query.tab || 'upload',
@@ -1362,14 +1257,10 @@ const uploadPreviewHeaders = computed(() => {
 
 const cleanPreviewHeaders = computed(() => Object.keys((cleanedData.value[0]) || {}))
 
-const portfolioAvgRate = computed(() => 
-  instrumentType.value === 'money-market' ? calculations.value.avgRate || 0 : 
-  instrumentType.value === 'bonds' ? calculations.value.avgCouponRate || 0 : 
-  calculations.value.avgDiscountRate || 0
-)
+const portfolioAvgRate = computed(() => calculations.value.avgDiscountRate || 0)
 
 const effectiveMaturity = computed(() => {
-  if (selectedMaturityOption.value === '__custom__') return customMaturityInput.value || '1Y'
+  if (selectedMaturityOption.value === '__custom__') return customMaturityInput.value || '13W'
   return selectedMaturityOption.value
 })
 const effectiveCountry = computed(() => {
@@ -1487,11 +1378,7 @@ async function goToReportTab() {
 }
 
 function defaultMaturityForInstrument() {
-  const inst = instrumentType.value
-  if (inst === 'bonds') return '10Y'
-  if (inst === 'money-market') return '1Y'
-  if (inst === 'tbills') return '13W'
-  return '3M'
+  return '13W'
 }
 
 function parseMaturityToYears(mat) {
@@ -1572,10 +1459,6 @@ function getCurrencyLabel(code) {
   ]
   const found = allCurrencies.find(c => c.value === code)
   return found ? found.label : code
-}
-
-function formatLabel(key) {
-  return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
 }
 
 function formatNumber(num) {
@@ -1680,14 +1563,8 @@ async function readFileData(file) {
       
       console.log('✅ Workbook loaded via worksheet workflow:', result.sheets.length, 'sheets')
       
-      if (result.sheets.length > 0) {
-        const firstSheet = result.sheets[0]
-        const selection = worksheetWorkflow.selectWorksheet(firstSheet.name)
-        if (selection.success) {
-          currentSheetName.value = firstSheet.name
-          console.log('✅ Auto-selected first sheet:', firstSheet.name)
-        }
-      }
+      worksheetSelected.value = false
+      currentSheetName.value = ''
       
       addToHistory(file.name, result.sheets[0]?.data || [])
       debouncedSave()
@@ -1721,6 +1598,7 @@ function removeFile() {
   columnMapping.value = {}
   fileColumns.value = []
   showPreview.value = false
+  worksheetSelected.value = false
   uploadError.value = ''
   worksheetWorkflow.reset()
   debouncedSave()
@@ -1731,6 +1609,7 @@ function removeFile() {
 function handleWorksheetSelect(sheetName) {
   worksheetWorkflow.selectWorksheet(sheetName)
   currentSheetName.value = sheetName
+  worksheetSelected.value = true
 }
 
 async function handleWorkOnSheet(sheetName) {
@@ -1755,9 +1634,7 @@ async function handleWorkOnSheet(sheetName) {
         sheetType: result.sheetType
       }
       
-      // Ensure preview shows the mapped data
       if (result.sheetType === 'multi') {
-        // Auto-map columns and show preview
         const headers = Object.keys(rawData.value[0] || {})
         columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
         applyCurrentMapping()
@@ -1811,13 +1688,29 @@ function applyCurrentMapping() {
   rawData.value = mappedData
   const allMapped = requiredColumns.value.every(col => columnMapping.value[col])
   mappingApplied.value = allMapped
-  // Ensure preview shows mapping controls
   showPreview.value = true
 }
 
 function updateColumnMapping(newMapping) {
   columnMapping.value = { ...newMapping }
   applyCurrentMapping()
+  debouncedSave()
+}
+
+function saveFinalMapping() {
+  const mappingKey = `mapping_${instrumentType.value}_${uploadedFile.value?.name || 'default'}`
+  localStorage.setItem(mappingKey, JSON.stringify(columnMapping.value))
+  
+  const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'}`
+  savedTemplates.value[templateName] = {
+    columnMapping: columnMapping.value,
+    requiredColumns: requiredColumns.value,
+    fileColumns: fileColumns.value,
+    savedAt: new Date().toISOString()
+  }
+  localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates.value))
+  
+  alert('✅ Mapping saved successfully')
   debouncedSave()
 }
 
@@ -1879,7 +1772,6 @@ function applyColumnMappingAndClose() {
   }
   
   showMappingDialog.value = false
-  // Ensure preview stays visible with mapping controls
   showPreview.value = true
   forceUpdate.value++
   refreshFileColumns()
@@ -2048,7 +1940,6 @@ function togglePreview() {
   showPreview.value = !showPreview.value
 }
 
-// ----- WORKBOOK VIEWER FUNCTIONS -----
 function openWorkbookViewer() {
   console.log('=== Opening Workbook Viewer ===')
   
@@ -2164,11 +2055,9 @@ function convertExtractedToTabular(extractedValues) {
     faceValue: 'Face Value',
     issueDate: 'Issue Date',
     maturityDate: 'Maturity Date',
-    couponRate: 'Coupon Rate',
-    yield: 'Yield',
-    price: 'Price',
     discountRate: 'Discount Rate',
-    frequency: 'Frequency'
+    yield: 'Yield',
+    price: 'Price'
   }
   
   for (const [key, value] of Object.entries(extractedValues)) {
@@ -2228,7 +2117,6 @@ function buildDynamicColumns(results) {
   return [...allFields]
 }
 
-// ---- Process instrument data and update summaries ----
 function processInstrumentData(sheetName, data, instrumentType) {
   console.log(`🎯 Processing ${instrumentType} data from sheet: ${sheetName}`)
   
@@ -2261,9 +2149,8 @@ function processInstrumentData(sheetName, data, instrumentType) {
   worksheetStatus.value[sheetName] = 'completed'
   console.log('✅ Worksheet marked as completed:', sheetName)
   
-  const portfolioNewColumns = buildDynamicColumns([...portfolioSummary.value.rows, instrumentResult])
-  portfolioSummary.value.rows.push(instrumentResult)
-  portfolioSummary.value.columns = portfolioNewColumns
+  portfolioSummary.value.rows = [...instrumentSummary.value.rows]
+  portfolioSummary.value.columns = [...instrumentSummary.value.columns]
   
   console.log('✅ Instrument processed and saved to summaries')
   console.log('📊 Dynamic columns:', newColumns)
@@ -2302,9 +2189,8 @@ function calculateAllInstruments(instruments, sheetName, instrumentType) {
   worksheetStatus.value[sheetName] = 'completed'
   console.log('✅ Worksheet marked as completed:', sheetName)
   
-  const portfolioNewColumns = buildDynamicColumns([...portfolioSummary.value.rows, ...results])
-  portfolioSummary.value.rows.push(...results)
-  portfolioSummary.value.columns = portfolioNewColumns
+  portfolioSummary.value.rows = [...instrumentSummary.value.rows]
+  portfolioSummary.value.columns = [...instrumentSummary.value.columns]
   
   console.log(`✅ Processed ${results.length} instruments from sheet`)
   console.log('📊 Dynamic columns:', newColumns)
@@ -2349,48 +2235,25 @@ function runInstrumentCalculations(data, instrumentType) {
   const weightedSum = data.reduce((s, r) => s + (getNumber(r[rateCol] || 0) * getNumber(r[amountCol] || 0)), 0)
   const avgRateVal = totalRate / (data.length || 1)
   
-  if (instrumentType === 'money-market') {
-    results['Total Value'] = totalValue
-    results['Instrument Count'] = data.length
-    results['Avg Rate'] = avgRateVal.toFixed(2)
-    results['Weighted Avg Rate'] = (totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : '0.00')
-    results['Total Interest'] = (totalValue * avgRateVal / 100).toFixed(2)
-    results['Interest Earned'] = (totalValue * avgRateVal / 100 * 90 / 365).toFixed(2)
-    results['Annual Yield'] = ((Math.pow(1 + avgRateVal / 100, 365 / 90) - 1) * 100).toFixed(2)
-    results['Effective Annual Rate'] = ((Math.pow(1 + avgRateVal / 100, 1) - 1) * 100).toFixed(2)
-    results['Avg Days to Maturity'] = 90
-    results['Total Principal'] = totalValue
-  } else if (instrumentType === 'bonds') {
-    const yieldCol = findColumn(['Yield', 'YTM', 'YieldToMaturity']) || rateCol
-    const totalYield = data.reduce((s, r) => s + getNumber(r[yieldCol] || 0), 0)
-    const avgCoupon = totalRate / (data.length || 1)
-    const avgYieldVal = totalYield / (data.length || 1)
-    
-    results['Total Value'] = totalValue
-    results['Instrument Count'] = data.length
-    results['Avg Coupon Rate'] = avgCoupon.toFixed(2)
-    results['Weighted Avg Coupon'] = (totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : '0.00')
-    results['Total Annual Income'] = (totalValue * avgCoupon / 100).toFixed(2)
-    results['Avg YTM'] = avgYieldVal.toFixed(2)
-    results['Duration'] = (10 * 0.7).toFixed(2)
-  } else {
-    const avgDiscount = totalRate / (data.length || 1)
-    const discountAmount = totalValue * (avgDiscount / 100) * 91 / 360
-    const price = totalValue - discountAmount
-    
-    results['Total Value'] = totalValue
-    results['Instrument Count'] = data.length
-    results['Avg Discount Rate'] = avgDiscount.toFixed(2)
-    results['Weighted Avg Discount'] = (totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : '0.00')
-    results['Total Discount'] = discountAmount.toFixed(2)
-    results['Effective Yield'] = (price > 0 ? ((Math.pow(1 + discountAmount / price, 365 / 91) - 1) * 100).toFixed(2) : '0.00')
-    results['Bond Equivalent Yield'] = (price > 0 ? ((discountAmount / price) * (365 / 91) * 100).toFixed(2) : '0.00')
-    results['Discount Yield'] = (totalValue > 0 ? ((discountAmount / totalValue) * (360 / 91) * 100).toFixed(2) : '0.00')
-    results['Price per 100'] = (100 * (1 - (avgDiscount / 100) * (91 / 360))).toFixed(2)
-    results['Total Purchase Price'] = price.toFixed(2)
-    results['Avg Investment'] = (data.length > 0 ? (price / data.length).toFixed(2) : '0.00')
-    results['Avg Days to Maturity'] = 91
-  }
+  // T-Bills calculations
+  const avgDiscount = totalRate / (data.length || 1)
+  const discountAmount = totalValue * (avgDiscount / 100) * 91 / 360
+  const price = totalValue - discountAmount
+  
+  results['Total Value'] = totalValue
+  results['Instrument Count'] = data.length
+  results['Avg Discount Rate'] = avgDiscount.toFixed(2)
+  results['Weighted Avg Discount'] = (totalValue > 0 ? (weightedSum / totalValue).toFixed(2) : '0.00')
+  results['Total Discount'] = discountAmount.toFixed(2)
+  results['Effective Yield'] = (price > 0 ? ((Math.pow(1 + discountAmount / price, 365 / 91) - 1) * 100).toFixed(2) : '0.00')
+  results['Bond Equivalent Yield'] = (price > 0 ? ((discountAmount / price) * (365 / 91) * 100).toFixed(2) : '0.00')
+  results['Discount Yield'] = (totalValue > 0 ? ((discountAmount / totalValue) * (360 / 91) * 100).toFixed(2) : '0.00')
+  results['Price per 100'] = (100 * (1 - (avgDiscount / 100) * (91 / 360))).toFixed(2)
+  results['Total Purchase Price'] = price.toFixed(2)
+  results['Avg Investment'] = (data.length > 0 ? (price / data.length).toFixed(2) : '0.00')
+  results['Avg Days to Maturity'] = 91
+  results['Holding Period Yield'] = (price > 0 ? ((discountAmount / price) * 100).toFixed(2) : '0.00')
+  results['Annualized Yield'] = (price > 0 ? ((discountAmount / price) * (365 / 91) * 100).toFixed(2) : '0.00')
   
   return results
 }
@@ -2529,25 +2392,26 @@ function closePortfolioExcelPopup() {
 }
 
 function exportPortfolioSummaryExcel() {
-  const summaryData = {
-    instrumentType: selectedInstrumentType.value,
-    summary: portfolioSummary.value.rows,
-    columns: portfolioSummary.value.columns
-  }
+  const data = portfolioSummary.value.rows
+  const columns = portfolioSummaryColumnsForDisplay.value
   
-  console.log('📥 Exporting Portfolio Summary as Excel:', summaryData)
+  const filteredData = data.map(row => {
+    const filteredRow = {}
+    columns.forEach(col => {
+      filteredRow[col] = row[col]
+    })
+    return filteredRow
+  })
   
-  const blob = new Blob([JSON.stringify(summaryData, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${selectedInstrumentType.value.replace(' ', '_')}_Portfolio_Summary.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  console.log('📥 Exporting Portfolio Summary as Excel:', filteredData)
   
-  alert('Portfolio Summary exported successfully!')
+  const worksheet = XLSX.utils.json_to_sheet(filteredData)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Portfolio Summary')
+  
+  XLSX.writeFile(workbook, `${selectedInstrumentType.value.replace(' ', '_')}_Portfolio_Summary.xlsx`)
+  
+  alert('Portfolio Summary exported successfully as Excel!')
 }
 
 function openWorkflowPopup(row, idx) {
@@ -2618,6 +2482,46 @@ function openExcelReview(data, title) {
   excelData.value = data
   excelColumns.value = Object.keys(data[0] || {})
   excelDialogTitle.value = title || 'Data Review'
+  showExcelDialog.value = true
+}
+
+function openInstrumentDataExcel() {
+  const instrumentData = []
+  
+  const calcRow = {
+    'Metric': 'Calculations',
+    'Total Value': calculations.value.totalValue || 0,
+    'Average Discount Rate': calculations.value.avgDiscountRate || 0,
+    'Weighted Average Discount': calculations.value.weightedAvgDiscount || 0,
+    'Total Discount': calculations.value.totalDiscount || 0,
+    'Effective Yield': calculations.value.effectiveYield || 0,
+    'Bond Equivalent Yield': calculations.value.bondEquivalentYield || 0,
+    'Price per $100': calculations.value.pricePer100 || 0,
+    'Total Purchase Price': calculations.value.totalPurchasePrice || 0,
+    'Average Investment': calculations.value.avgInvestment || 0,
+    'Holding Period Yield': calculations.value.holdingPeriodYield || 0,
+    'Annualized Yield': calculations.value.annualizedYield || 0
+  }
+  
+  instrumentData.push(calcRow)
+  
+  if (calculations.value.fred) {
+    const fredRow = {
+      'Metric': 'FRED Benchmark',
+      'Series ID': calculations.value.fred.series_id || '',
+      'Series Label': calculations.value.fred.series_label || '',
+      'Benchmark Rate': calculations.value.fred.benchmark_rate || 0,
+      'Spread vs Market': calculations.value.fred.spread_vs_market || 0,
+      'Country': calculations.value.fred.country || '',
+      'Currency': calculations.value.fred.currency || '',
+      'Maturity': calculations.value.fred.maturity || ''
+    }
+    instrumentData.push(fredRow)
+  }
+  
+  excelData.value = instrumentData
+  excelColumns.value = Object.keys(instrumentData[0] || {})
+  excelDialogTitle.value = `${instrumentName} - Calculations & Yield Curve`
   showExcelDialog.value = true
 }
 
@@ -2762,71 +2666,89 @@ async function calculateMetrics() {
   }
 
   try {
-    const response = await api.calculationsAPI.calculate(cleanedData.value, instrumentType.value, {
-      country: effectiveCountry.value,
-      currency: effectiveCurrency.value,
-      maturity: effectiveMaturity.value,
-      manualInputs: manualInputs.value
-    })
+    const response = await api.calculationsAPI.executeByType(
+      instrumentType.value,
+      cleanedData.value,
+      {
+        country: effectiveCountry.value,
+        currency: effectiveCurrency.value,
+        maturity: effectiveMaturity.value,
+        manualInputs: manualInputs.value
+      },
+      null,
+      activeSession.value?.id
+    )
     if (response?.success && response?.data) {
       calculations.value = response.data
       formulas.value = response.data.formulas || {}
       
-      // ---- SYNC CALCULATIONS TO INSTRUMENT SUMMARY ----
-      const summaryRow = {
-        'Instrument Name': instrumentName.value,
-        'Instrument Type': instrumentType.value,
-        'Total Value': calculations.value.totalValue || 0,
-        'Instrument Count': calculations.value.instrumentCount || 0,
-        'Avg Rate': calculations.value.avgRate || 0,
-        'Weighted Avg Rate': calculations.value.weightedAvgRate || 0,
-        'Total Interest': calculations.value.totalInterest || 0,
-        'Interest Earned': calculations.value.interestEarned || 0,
-        'Annual Yield': calculations.value.annualYield || 0,
-        'Effective Annual Rate': calculations.value.effectiveAnnualRate || 0,
-        'Avg Days to Maturity': calculations.value.avgDaysToMaturity || 0,
-        'Total Principal': calculations.value.totalPrincipal || 0,
-        'Weighted Avg Coupon': calculations.value.weightedAvgCoupon || 0,
-        'Total Annual Income': calculations.value.totalAnnualIncome || 0,
-        'Avg YTM': calculations.value.avgYTM || 0,
-        'Duration': calculations.value.duration || 0,
-        'Weighted Avg Discount': calculations.value.weightedAvgDiscount || 0,
-        'Total Discount': calculations.value.totalDiscount || 0,
-        'Effective Yield': calculations.value.effectiveYield || 0,
-        'Bond Equivalent Yield': calculations.value.bondEquivalentYield || 0,
-        'Price per 100': calculations.value.pricePer100 || 0,
-        'Total Purchase Price': calculations.value.totalPurchasePrice || 0,
-        'Avg Investment': calculations.value.avgInvestment || 0,
-        'Holding Period Yield': calculations.value.holdingPeriodYield || 0,
-        'Annualized Yield': calculations.value.annualizedYield || 0,
-        'FRED Benchmark': calculations.value.fred?.benchmark_rate || null
+      if (activeSession.value?.id) {
+        try {
+          const summaryResponse = await api.calculationsAPI.getInstrumentSummary(
+            activeSession.value.id,
+            instrumentType.value
+          )
+          if (summaryResponse?.success && summaryResponse?.data) {
+            instrumentSummary.value = summaryResponse.data
+          }
+        } catch (err) {
+          console.error('Failed to fetch instrument summary from backend:', err)
+          const summaryRow = {
+            'Instrument Name': instrumentName.value,
+            'Instrument Type': instrumentType.value,
+            'Total Value': calculations.value.totalValue || 0,
+            'Instrument Count': calculations.value.instrumentCount || 0,
+            'Avg Discount Rate': calculations.value.avgDiscountRate || 0,
+            'Weighted Avg Discount': calculations.value.weightedAvgDiscount || 0,
+            'Total Discount': calculations.value.totalDiscount || 0,
+            'Effective Yield': calculations.value.effectiveYield || 0,
+            'Bond Equivalent Yield': calculations.value.bondEquivalentYield || 0,
+            'Price per 100': calculations.value.pricePer100 || 0,
+            'Total Purchase Price': calculations.value.totalPurchasePrice || 0,
+            'Avg Investment': calculations.value.avgInvestment || 0,
+            'Holding Period Yield': calculations.value.holdingPeriodYield || 0,
+            'Annualized Yield': calculations.value.annualizedYield || 0,
+            'FRED Benchmark': calculations.value.fred?.benchmark_rate || null
+          }
+          
+          const uniqueId = `${summaryRow['Instrument Name'] || 'Instrument'}_${currentSheetName.value}`
+          const existingIndex = instrumentSummary.value.rows.findIndex(r => 
+            (r['Instrument Name'] || 'Instrument') + '_' + (r['Worksheet'] || '') === uniqueId
+          )
+          if (existingIndex !== -1) {
+            instrumentSummary.value.rows[existingIndex] = { ...summaryRow, 'Worksheet': currentSheetName.value }
+          } else {
+            instrumentSummary.value.rows.push({ ...summaryRow, 'Worksheet': currentSheetName.value })
+          }
+          const allFields = new Set()
+          instrumentSummary.value.rows.forEach(r => {
+            Object.keys(r).forEach(k => allFields.add(k))
+          })
+          instrumentSummary.value.columns = Array.from(allFields)
+        }
       }
       
-      // Remove existing row for this instrument type
-      const existingIndex = instrumentSummary.value.rows.findIndex(r => r['Instrument Type'] === instrumentType.value)
-      if (existingIndex !== -1) {
-        instrumentSummary.value.rows.splice(existingIndex, 1)
+      if (activeSession.value?.id) {
+        try {
+          const portfolioResponse = await api.calculationsAPI.getPortfolioSummary(activeSession.value.id)
+          if (portfolioResponse?.success && portfolioResponse?.data) {
+            portfolioSummary.value = portfolioResponse.data
+          }
+        } catch (err) {
+          console.error('Failed to fetch portfolio summary from backend:', err)
+          const portExisting = portfolioSummary.value.rows.findIndex(r => r['Instrument Type'] === instrumentType.value)
+          if (portExisting !== -1) {
+            portfolioSummary.value.rows.splice(portExisting, 1)
+          }
+          portfolioSummary.value.rows.push(summaryRow)
+          const portFields = new Set()
+          portfolioSummary.value.rows.forEach(r => {
+            Object.keys(r).forEach(k => portFields.add(k))
+          })
+          portfolioSummary.value.columns = Array.from(portFields)
+        }
       }
-      instrumentSummary.value.rows.push(summaryRow)
-      const allFields = new Set()
-      instrumentSummary.value.rows.forEach(r => {
-        Object.keys(r).forEach(k => allFields.add(k))
-      })
-      instrumentSummary.value.columns = Array.from(allFields)
       
-      // Also update portfolioSummary
-      const portExisting = portfolioSummary.value.rows.findIndex(r => r['Instrument Type'] === instrumentType.value)
-      if (portExisting !== -1) {
-        portfolioSummary.value.rows.splice(portExisting, 1)
-      }
-      portfolioSummary.value.rows.push(summaryRow)
-      const portFields = new Set()
-      portfolioSummary.value.rows.forEach(r => {
-        Object.keys(r).forEach(k => portFields.add(k))
-      })
-      portfolioSummary.value.columns = Array.from(portFields)
-      
-      // Save to localStorage
       const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
       if (sid) {
         const summaryKey = `${instrumentType.value}_session_${sid}_summary`
@@ -2837,7 +2759,6 @@ async function calculateMetrics() {
       
       console.log('✅ Calculations synced to instrumentSummary and portfolioSummary')
       
-      // If multiple instruments, show the popup
       if (instrumentSummary.value.rows.length >= 2 && !showAllCalculationsPopup.value) {
         setTimeout(() => {
           showAllCalculationsPopup.value = true
@@ -3098,7 +3019,6 @@ async function renderYieldCurveChart() {
   })
 }
 
-// ---- Custom filter handlers ----
 function onCustomCountryInput() {
   selectedCountryOption.value = '__custom__'
   onFredFilterChange()
@@ -3136,7 +3056,7 @@ function onMaturitySelectChange() {
   if (selectedMaturityOption.value !== '__custom__') {
     fredFilters.value.maturity = selectedMaturityOption.value
   } else {
-    fredFilters.value.maturity = customMaturityInput.value || '1Y'
+    fredFilters.value.maturity = customMaturityInput.value || '13W'
   }
   onFredFilterChange()
 }
@@ -3245,25 +3165,11 @@ function selectInstrumentFromPopup(index) {
   const instrumentName = selectedRow['Instrument Name'] || `Instrument ${index + 1}`
   currentlyViewingInstrument.value = instrumentName
   
-  // Populate calculation fields with the selected instrument's data
   calculations.value = {
     totalValue: parseFloat(selectedRow['Total Value'] || selectedRow['Calculated Value'] || 0),
     instrumentCount: 1,
-    avgRate: parseFloat(selectedRow['Avg Rate'] || 0),
-    avgCouponRate: parseFloat(selectedRow['Avg Coupon Rate'] || 0),
     avgDiscountRate: parseFloat(selectedRow['Avg Discount Rate'] || 0),
-    weightedAvgRate: parseFloat(selectedRow['Weighted Avg Rate'] || 0),
-    weightedAvgCoupon: parseFloat(selectedRow['Weighted Avg Coupon'] || 0),
     weightedAvgDiscount: parseFloat(selectedRow['Weighted Avg Discount'] || 0),
-    totalInterest: parseFloat(selectedRow['Total Interest'] || 0),
-    interestEarned: parseFloat(selectedRow['Interest Earned'] || 0),
-    annualYield: parseFloat(selectedRow['Annual Yield'] || 0),
-    effectiveAnnualRate: parseFloat(selectedRow['Effective Annual Rate'] || 0),
-    avgDaysToMaturity: parseFloat(selectedRow['Avg Days to Maturity'] || 0),
-    totalPrincipal: parseFloat(selectedRow['Total Principal'] || 0),
-    totalAnnualIncome: parseFloat(selectedRow['Total Annual Income'] || 0),
-    avgYTM: parseFloat(selectedRow['Avg YTM'] || 0),
-    duration: parseFloat(selectedRow['Duration'] || 0),
     totalDiscount: parseFloat(selectedRow['Total Discount'] || 0),
     effectiveYield: parseFloat(selectedRow['Effective Yield'] || 0),
     bondEquivalentYield: parseFloat(selectedRow['Bond Equivalent Yield'] || 0),
@@ -3271,19 +3177,35 @@ function selectInstrumentFromPopup(index) {
     totalPurchasePrice: parseFloat(selectedRow['Total Purchase Price'] || 0),
     avgInvestment: parseFloat(selectedRow['Avg Investment'] || 0),
     holdingPeriodYield: parseFloat(selectedRow['Holding Period Yield'] || 0),
-    annualizedYield: parseFloat(selectedRow['Annualized Yield'] || 0)
+    annualizedYield: parseFloat(selectedRow['Annualized Yield'] || 0),
+    ...Object.keys(selectedRow).reduce((acc, key) => {
+      if (key !== 'Instrument Name' && key !== 'Instrument Type' && typeof selectedRow[key] === 'number') {
+        acc[key] = selectedRow[key]
+      }
+      return acc
+    }, {})
   }
   
-  // Also update the fred benchmark if available
-  if (selectedRow['FRED Benchmark']) {
-    calculations.value.fred = calculations.value.fred || {}
-    calculations.value.fred.benchmark_rate = parseFloat(selectedRow['FRED Benchmark'])
-  }
-  
-  console.log(`📊 Loaded calculations for: ${instrumentName}`, calculations.value)
-  
-  // Close the popup
+  console.log('✅ Loaded instrument calculations:', instrumentName)
   closeAllCalculationsPopup()
+}
+
+function formatTableCell(value, column) {
+  if (value === null || value === undefined || value === '') return '—'
+  
+  if (column.toLowerCase().includes('value') || column.toLowerCase().includes('amount') || column.toLowerCase().includes('price')) {
+    return '$' + formatNumber(value)
+  }
+  
+  if (column.toLowerCase().includes('rate') || column.toLowerCase().includes('yield') || column.toLowerCase().includes('discount') || column.toLowerCase().includes('coupon')) {
+    return formatNumber(value) + '%'
+  }
+  
+  if (column.toLowerCase().includes('date') && typeof value === 'string') {
+    return value
+  }
+  
+  return typeof value === 'number' ? formatNumber(value) : value
 }
 
 function openAllCalculationsPopup() {
@@ -3344,6 +3266,7 @@ async function saveToSession() {
   }
 
   try {
+    console.log('📝 Creating version for session:', activeSession.value.id, 'instrument:', instrumentType.value)
     const response = await api.versionAPI.create(
       activeSession.value.id,
       instrumentType.value,
@@ -3357,18 +3280,14 @@ async function saveToSession() {
     )
     console.log('✅ Version created:', response)
 
-    const updatedSession = await sessionManager.getSession(activeSession.value.id)
-    if (updatedSession) {
-      activeSession.value = updatedSession
-      window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: activeSession.value.id } }))
-    }
-
     await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
       ...datasetSnapshot,
       uploadedFile: uploadedFile.value?.name || null,
       cleaningStats: cleaningStats.value,
       sessionSavedAt: new Date().toISOString()
     })
+
+    window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: activeSession.value.id } }))
 
     alert('✅ Saved to session. A new version has been recorded in Version History.')
   } catch (err) {
@@ -3456,17 +3375,6 @@ function showFormula(metricKey) {
     'Total Portfolio Value': 'Σ (Face Value or Amount) for all rows',
     'Average Rate': 'Σ (Rate, CouponRate, or DiscountRate) / Number of Instruments',
     'Number of Instruments': 'Count of distinct Instrument/BondName/TBillName (unique securities)',
-    'weightedAvgRate': 'Σ (Rate × Amount) / Σ Amount',
-    'totalInterest': 'Total Value × Average Rate / 100',
-    'interestEarned': 'Total Interest × (90/365)',
-    'annualYield': '((1 + AvgRate/100)^(365/90) - 1) × 100',
-    'effectiveAnnualRate': '((1 + AvgRate/100) - 1) × 100',
-    'avgDaysToMaturity': 'Average of DaysToMaturity column',
-    'totalPrincipal': 'Sum of Principal/Amount',
-    'weightedAvgCoupon': 'Σ (CouponRate × FaceValue) / Σ FaceValue',
-    'totalAnnualIncome': 'Total Face Value × Avg Coupon Rate / 100',
-    'avgYTM': 'Average of Yield column',
-    'duration': 'Approximated Macaulay duration (10 years × 0.7)',
     'weightedAvgDiscount': 'Σ (DiscountRate × FaceValue) / Σ FaceValue',
     'totalDiscount': 'Total Face Value × Avg Discount Rate / 100 × 91/360',
     'effectiveYield': '((1 + TotalDiscount/Price)^(365/91) - 1) × 100',
@@ -3496,7 +3404,7 @@ function getInstrumentData(instrumentId) {
       rows.forEach(row => {
         const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
         const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
-        const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
+        const rate = parseFloat(row['Avg Discount Rate'] || 0)
         if (!isNaN(value)) totalValue += value
         if (!isNaN(faceValue)) totalFaceValue += faceValue
         if (!isNaN(rate)) totalAvgRate += rate
@@ -3505,17 +3413,14 @@ function getInstrumentData(instrumentId) {
       return {
         totalValue,
         instrumentCount: rows.length,
-        avgRate,
-        avgCouponRate: instrumentId === 'bonds' ? avgRate : null,
-        avgDiscountRate: instrumentId === 'tbills' ? avgRate : null,
-        totalPrincipal: totalFaceValue
+        avgDiscountRate: avgRate,
+        totalFaceValue
       }
     }
   }
   return null
 }
 
-// ===== REPORT PREVIEW DATA (FIXED - reads from instrumentSummary) =====
 const reportPreviewData = computed(() => {
   const instrumentsData = []
   const instrumentTypes = [
@@ -3539,9 +3444,7 @@ const reportPreviewData = computed(() => {
     }
   }
   
-  // If no instruments have data, check if instrumentSummary has any rows
   if (instrumentsData.length === 0 && instrumentSummary.value.rows.length > 0) {
-    // Include all instruments from summary
     const summaryRows = instrumentSummary.value.rows
     const grouped = {}
     summaryRows.forEach(row => {
@@ -3556,7 +3459,7 @@ const reportPreviewData = computed(() => {
       let totalAvgRate = 0
       rows.forEach(row => {
         const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
-        const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
+        const rate = parseFloat(row['Avg Discount Rate'] || 0)
         if (!isNaN(value)) totalValue += value
         if (!isNaN(rate)) totalAvgRate += rate
       })
@@ -3567,9 +3470,7 @@ const reportPreviewData = computed(() => {
         calculations: {
           totalValue,
           instrumentCount,
-          avgRate,
-          avgCouponRate: type === 'bonds' ? avgRate : null,
-          avgDiscountRate: type === 'tbills' ? avgRate : null
+          avgDiscountRate: avgRate
         }
       })
     }
@@ -3582,19 +3483,11 @@ const reportPreviewData = computed(() => {
   }
 })
 
-// ===== REPORT GENERATION =====
 function formatMetricName(key) {
   const names = {
-    totalValue: 'Total Value', instrumentCount: 'Count', avgRate: 'Avg Interest Rate',
-    weightedAvgRate: 'Weighted Avg Rate', totalInterest: 'Total Interest',
-    interestEarned: 'Interest Earned', annualYield: 'Annual Yield',
-    effectiveAnnualRate: 'Effective Annual Rate', avgDaysToMaturity: 'Avg Days to Maturity',
-    totalPrincipal: 'Total Principal', avgCouponRate: 'Avg Coupon Rate',
-    weightedAvgCoupon: 'Weighted Avg Coupon', totalAnnualIncome: 'Total Annual Income',
-    avgYTM: 'Avg Yield to Maturity', duration: 'Duration', avgDiscountRate: 'Avg Discount Rate',
+    totalValue: 'Total Value', instrumentCount: 'Count', avgDiscountRate: 'Avg Discount Rate',
     weightedAvgDiscount: 'Weighted Avg Discount', totalDiscount: 'Total Discount',
     effectiveYield: 'Effective Yield', bondEquivalentYield: 'Bond Equivalent Yield',
-    discountYield: 'Discount Yield', moneyMarketYield: 'Money Market Yield',
     pricePer100: 'Price per $100', totalPurchasePrice: 'Total Purchase Price',
     avgInvestment: 'Avg Investment', holdingPeriodYield: 'Holding Period Yield',
     annualizedYield: 'Annualized Yield'
@@ -3604,9 +3497,9 @@ function formatMetricName(key) {
 
 function formatMetricValue(key, value) {
   if (typeof value === 'number') {
-    if (key.includes('Value') || key.includes('Price') || key.includes('Interest') || key.includes('Income') || key.includes('Discount') || key.includes('Principal') || key.includes('Investment'))
+    if (key.includes('Value') || key.includes('Price') || key.includes('Discount') || key.includes('Purchase'))
       return `$${value.toLocaleString()}`
-    if (key.includes('Rate') || key.includes('Yield') || key.includes('Coupon') || key.includes('Discount'))
+    if (key.includes('Rate') || key.includes('Yield'))
       return `${value}%`
     return value.toLocaleString()
   }
@@ -3615,23 +3508,33 @@ function formatMetricValue(key, value) {
 
 async function captureChartImage() {
   return new Promise((resolve) => {
-    const canvas = yieldCurveChart.value
-    if (canvas && canvas.toDataURL) {
-      try {
-        const dataUrl = canvas.toDataURL('image/png')
-        resolve(dataUrl)
-        return
-      } catch (e) { console.warn('Canvas capture failed', e) }
-    }
-    const canvasEl = document.querySelector('.chart-container--fred canvas')
-    if (canvasEl && canvasEl.toDataURL) {
-      try {
-        const dataUrl = canvasEl.toDataURL('image/png')
-        resolve(dataUrl)
-        return
-      } catch (e) { console.warn('DOM canvas capture failed', e) }
-    }
-    resolve('')
+    setTimeout(() => {
+      const canvas = yieldCurveChart.value
+      if (canvas && canvas.toDataURL) {
+        try {
+          const dataUrl = canvas.toDataURL('image/png', 1.0)
+          resolve(dataUrl)
+          return
+        } catch (e) { console.warn('Canvas capture failed', e) }
+      }
+      const canvasEl = document.querySelector('.chart-container--fred canvas')
+      if (canvasEl && canvasEl.toDataURL) {
+        try {
+          const dataUrl = canvasEl.toDataURL('image/png', 1.0)
+          resolve(dataUrl)
+          return
+        } catch (e) { console.warn('DOM canvas capture failed', e) }
+      }
+      const altCanvas = document.querySelector('canvas')
+      if (altCanvas && altCanvas.toDataURL) {
+        try {
+          const dataUrl = altCanvas.toDataURL('image/png', 1.0)
+          resolve(dataUrl)
+          return
+        } catch (e) { console.warn('Alternative canvas capture failed', e) }
+      }
+      resolve('')
+    }, 500)
   })
 }
 
@@ -3681,7 +3584,7 @@ async function generateReportHtml() {
     if (cleanData && cleanData.length) {
       cleanData.forEach((item, idx) => {
         const name = item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
-        const ticker = item.BBTicker || item.Ticker || item.Security || 'N/A'
+        const ticker = item.BBTicker || item.Ticker || item.Security || ''
         const faceValue = parseFloat(item.FaceValue || item.Amount || item.Principal || 0)
         const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
         const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
@@ -3710,8 +3613,6 @@ async function generateReportHtml() {
       <p class="chart-caption">FRED Yield Curve – ${report.instruments.map(i => i.name).join(', ')}</p>
     </div>
   ` : '<p>Yield curve chart not available.</p>'
-
-  const watermarkLogo = `<img src="${logoUrl}" alt="logo" style="position:absolute; top:20px; right:30px; width:80px; opacity:0.15; pointer-events:none;" />`
 
   const html = `<!DOCTYPE html>
 <html>
@@ -3757,16 +3658,13 @@ async function generateReportHtml() {
 <body>
 
 <div class="page cover-page">
-  <div class="cover-logo"><img src="${logoUrl}" alt="Dura Capital Logo" /></div>
   <div class="cover-content">
-    <div class="cover-session-name">${report.session}</div>
     <h1 class="cover-title">Valuation Assessment Report</h1>
     <p class="cover-subtitle">${report.instruments.map(i => i.name).join(' & ')}</p>
   </div>
 </div>
 
 <div class="page toc-page">
-  ${watermarkLogo}
   <h1>Table of Contents</h1>
   <div class="toc-item"><span>Introduction</span><span>1</span></div>
   <div class="toc-item"><span>Executive Summary</span><span>2</span></div>
@@ -3780,7 +3678,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Introduction</h1>
   <p>Dura Capital (Private) Limited ("Dura Capital", "us", "we") was contracted to provide a fair valuation assessment report of the following fixed income instruments as at ${valuationDate}:</p>
   <ul style="margin: 20px 0 20px 30px;">${report.instruments.map(i => `<li>${i.name}</li>`).join('')}</ul>
@@ -3788,7 +3685,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Executive Summary</h1>
   <div class="executive-summary">
     <p><strong>Valuation Assessment Summary</strong></p>
@@ -3804,7 +3700,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Methodology</h1>
   <p>The audit team provided us with data for ${report.instruments.map(i => i.name).join(', ')}. This section outlines the methodologies used to provide a fair value of the fixed income assets in terms of IFRS 13.</p>
   <br>
@@ -3815,7 +3710,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Market Inputs</h1>
   <p>Market data for Zimbabwe is not available and there have not been any Zimbabwe issued instruments trading on international markets. As such, we have used the OIS SOFR rates from Bloomberg as a risk-free yield curve and added a country risk premium sourced from country risk premiums published by Damodaran.</p>
   <br>
@@ -3831,7 +3725,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Results</h1>
   <p>Below is a summary of the key findings of the valuation for the selected instruments.</p>
   <br>
@@ -3843,8 +3736,8 @@ async function generateReportHtml() {
           <td><strong>${inst.name}</strong></td>
           <td>$${(inst.calculations.totalValue || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
           <td>${inst.calculations.instrumentCount || 0}</td>
-          <td>${inst.calculations.avgRate || inst.calculations.avgCouponRate || inst.calculations.avgDiscountRate || 0}%</td>
-          <td>${inst.calculations.weightedAvgRate || inst.calculations.weightedAvgCoupon || inst.calculations.weightedAvgDiscount || 0}%</td>
+          <td>${inst.calculations.avgDiscountRate || 0}%</td>
+          <td>${inst.calculations.weightedAvgDiscount || 0}%</td>
         </tr>
       `).join('')}
       <tr style="font-weight:700;background:#f0f2f5;">
@@ -3858,14 +3751,12 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Yield Curve</h1>
   <p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>
   ${chartHtml}
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Conclusion</h1>
   <p>The valuation assessment conducted by Dura Capital provides a comprehensive fair value assessment of the ${report.instruments.map(i => i.name).join(', ')} instruments as at ${valuationDate}.</p>
   <br>
@@ -3881,7 +3772,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Appendix: Detailed Instrument Data</h1>
   <p><strong>Valuation Date:</strong> ${valuationDate}</p>
   <p><strong>Total Instruments:</strong> ${allDataRows.length}</p>
@@ -3895,7 +3785,6 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  ${watermarkLogo}
   <h1 class="section-title">Reference</h1>
   <ul class="reference-list">
     <li>Bloomberg Financial Services – SOFR OIS Yield Curve as at ${valuationDate}</li>
@@ -3931,9 +3820,18 @@ async function previewReport() {
 async function downloadFromPreview(format) {
   if (!reportPreviewHtml.value) return
   const filename = `combined_report_${Date.now()}`
-  if (format === 'html') downloadBlob(reportPreviewHtml.value, `${filename}.html`, 'text/html')
-  else if (format === 'pdf') { const win = window.open(); win.document.write(reportPreviewHtml.value); win.print() }
-  else if (format === 'word') downloadBlob(reportPreviewHtml.value, `${filename}.doc`, 'application/msword')
+  
+  if (format === 'html') {
+    const htmlWithStyles = reportPreviewHtml.value
+    downloadBlob(htmlWithStyles, `${filename}.html`, 'text/html')
+  } else if (format === 'pdf') {
+    const win = window.open('', '_blank')
+    win.document.write(reportPreviewHtml.value)
+    win.document.close()
+    setTimeout(() => win.print(), 500)
+  } else if (format === 'word') {
+    downloadBlob(reportPreviewHtml.value, `${filename}.doc`, 'application/msword')
+  }
 }
 
 async function exportToRealExcel() {
@@ -3986,7 +3884,7 @@ async function exportToRealExcel() {
     if (instrumentData.length) {
       instrumentData.forEach((item, idx) => {
         const name = item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
-        const ticker = item.BBTicker || item.Ticker || item.Security || 'N/A'
+        const ticker = item.BBTicker || item.Ticker || item.Security || ''
         const faceValue = parseFloat(item.FaceValue || item.Amount || item.Principal || 0)
         const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
         const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
@@ -4229,7 +4127,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .mapping-row { display: flex; align-items: center; gap: 12px; }
 .required-label { width: 140px; font-weight: 600; color: #0B2044; font-size: 14px; }
 .dropdown-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; }
-.mapping-select { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.mapping-select { flex: 1; padding: 8px 36px 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
 .mapping-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.2); }
 
 .saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }
@@ -4249,7 +4147,6 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
 .btn-danger.small:hover { background: #d32f2f; }
 .empty-saved { text-align: center; color: #999; padding: 20px 0; }
 
-/* No-logo header for workbook viewer */
 .excel-dialog-title-no-logo {
   background: #f5f5f5;
   color: #0B2044;
