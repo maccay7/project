@@ -326,10 +326,13 @@
         <div v-if="activeTab === 'calculations'" class="content-card">
           <v-card>
             <v-card-title class="calc-header">
-              {{ instrumentName }} Calculations
-              <span v-if="currentlyViewingInstrument" class="viewing-badge">
-                Currently Viewing: <strong>{{ currentlyViewingInstrument }}</strong>
-              </span>
+              <div class="calc-header-left">
+                <div class="calc-title">{{ instrumentName }} Calculations</div>
+                <div v-if="currentlyViewingInstrument" class="viewing-badge-large">
+                  <span class="viewing-label">Currently Viewing:</span>
+                  <span class="viewing-name">{{ currentlyViewingInstrument }}</span>
+                </div>
+              </div>
               <v-spacer></v-spacer>
               <!-- CALCULATED INSTRUMENTS BUTTON - visible when 2+ instruments exist and multi-instrument sheet -->
               <button 
@@ -1731,10 +1734,15 @@ async function handleWorkOnSheet(sheetName) {
         sheetType: result.sheetType
       }
       
+      // Enable worksheet selection and buttons
+      worksheetSelected.value = true
+      currentSheetName.value = sheetName
+      
       // Ensure preview shows the mapped data
       if (result.sheetType === 'multi') {
-        // Auto-map columns and show preview
+        // Auto-map columns using actual uploaded dataset column names
         const headers = Object.keys(rawData.value[0] || {})
+        fileColumns.value = headers
         columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
         applyCurrentMapping()
         showPreview.value = true
@@ -2788,6 +2796,8 @@ async function continueAfterCleaning() {
     alert('Please clean your data first.')
     return
   }
+  // Save cleaned data before proceeding
+  saveSessionData()
   try {
     await calculateMetrics()
   } catch (err) {
@@ -2796,7 +2806,6 @@ async function continueAfterCleaning() {
   }
   goToCalculations()
   forceUpdate.value++
-  saveSessionData()
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
     await markStepCompleted(String(sid), 'cleaning')
@@ -2870,13 +2879,13 @@ async function calculateMetrics() {
             'FRED Benchmark': calculations.value.fred?.benchmark_rate || null
           }
           
-          // Use unique identifier (Instrument Name + Worksheet) to avoid overwriting
-          const uniqueId = `${summaryRow['Instrument Name'] || 'Instrument'}_${currentSheetName.value}`
+          // Use unique identifier (Instrument Name) to avoid duplicates
+          const uniqueId = summaryRow['Instrument Name'] || 'Instrument'
           const existingIndex = instrumentSummary.value.rows.findIndex(r => 
-            (r['Instrument Name'] || 'Instrument') + '_' + (r['Worksheet'] || '') === uniqueId
+            (r['Instrument Name'] || 'Instrument') === uniqueId
           )
           if (existingIndex !== -1) {
-            // Update existing instrument instead of overwriting
+            // Update existing instrument instead of duplicating
             instrumentSummary.value.rows[existingIndex] = { ...summaryRow, 'Worksheet': currentSheetName.value }
           } else {
             // Add new instrument with worksheet identifier
@@ -3479,6 +3488,7 @@ function saveSessionData() {
     cleanedData: cleanedData.value,
     calculations: calculations.value,
     columnMapping: columnMapping.value,
+    fileColumns: fileColumns.value,
     worksheetStatus: worksheetStatus.value,
     workbookSheets: workbookSheets.value,
     instrumentSummary: instrumentSummary.value,
@@ -3510,6 +3520,7 @@ async function loadSavedData() {
       cleanedData.value = wf.cleanedData || []
       calculations.value = wf.calculations || {}
       columnMapping.value = wf.columnMapping || {}
+      fileColumns.value = wf.fileColumns || []
       worksheetStatus.value = wf.worksheetStatus || {}
       workbookSheets.value = wf.workbookSheets || []
       instrumentSummary.value = wf.instrumentSummary || { rows: [], columns: [] }
@@ -4499,6 +4510,40 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   margin-left: 12px;
 }
 
+.calc-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calc-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #0B2044;
+}
+
+.viewing-badge-large {
+  background: linear-gradient(135deg, #0B2044 0%, #1a3a6e 100%);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(11, 32, 68, 0.2);
+}
+
+.viewing-label {
+  opacity: 0.9;
+  font-weight: 500;
+}
+
+.viewing-name {
+  font-weight: 700;
+  font-size: 15px;
+}
+
 .instrument-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -4596,7 +4641,7 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   right: 0;
   bottom: 0;
   background: rgba(0,0,0,0.6);
-  z-index: 9999;
+  z-index: 99999;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4612,6 +4657,8 @@ watch(() => route.params.type, () => checkAndReset(), { immediate: true })
   flex-direction: column;
   box-shadow: 0 25px 60px rgba(0,0,0,0.3);
   overflow: hidden;
+  position: relative;
+  z-index: 100000;
 }
 
 .filters-row { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap; }

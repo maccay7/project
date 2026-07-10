@@ -47,7 +47,6 @@
           <v-card>
             <v-card-title>Upload {{ instrumentLabel }} Dataset</v-card-title>
             <v-card-text>
-              <!-- Upload area -->
               <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
                 <input
                   type="file"
@@ -101,7 +100,7 @@
                 />
               </div>
 
-              <!-- Preview – always shows mapping dropdowns after mapping is applied -->
+              <!-- Preview -->
               <div v-if="rawData.length && showPreview" class="excel-preview-section">
                 <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
                 <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
@@ -203,7 +202,7 @@
                 </v-card>
               </v-dialog>
 
-              <!-- Workbook Viewer Dialog - NO LOGO + WORK ON SHEET BUTTON -->
+              <!-- Workbook Viewer Dialog -->
               <v-dialog v-model="showWorkbookViewer" max-width="95%" fullscreen hide-overlay>
                 <v-card>
                   <v-card-title class="excel-dialog-title-no-logo">
@@ -269,6 +268,7 @@
                   <h3>Cleaning Filters</h3>
                   <div class="filter-scroll-container">
                     <div class="options-list">
+                      <!-- cleaning options – same as before, kept concise -->
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeDuplicates"> Remove duplicate rows</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingText"> Fill missing text with "N/A"</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.dropRowsWithMissing"> Drop rows with ANY missing value</label>
@@ -328,7 +328,6 @@
                 Currently Viewing: <strong>{{ currentlyViewingInstrument }}</strong>
               </span>
               <v-spacer></v-spacer>
-              <!-- CALCULATED INSTRUMENTS BUTTON - visible when 2+ instruments exist and multi-instrument sheet -->
               <button 
                 v-if="instrumentSummary.rows.length >= 2 && sheetType === 'multi'" 
                 class="btn-calculated-instruments" 
@@ -343,7 +342,6 @@
                 <button class="btn-primary" @click="switchTab('cleaning')">Go to Cleaning</button>
               </div>
               <div v-else>
-                <!-- ===== RESULTS ===== -->
                 <div class="summary-cards">
                   <div class="summary-card total" @click="showFormula('Total Portfolio Value')">
                     <div class="card-label">Total Portfolio Value</div>
@@ -359,7 +357,6 @@
                   </div>
                 </div>
 
-                <!-- FRED Benchmark -->
                 <div v-if="calculations.fred?.benchmark_rate" class="comparison-card fred-calc-card">
                   <div class="comparison-item">
                     <span class="comparison-label">FRED market benchmark ({{ calculations.fred.series_label }}):</span>
@@ -373,7 +370,6 @@
                   <small v-if="calculations.fred.note" class="fred-meta">{{ calculations.fred.note }}</small>
                 </div>
 
-                <!-- ===== DETAILED CALCULATIONS ===== -->
                 <div class="calculations-section">
                   <h3>{{ instrumentLabel }} Calculations</h3>
                   <div class="calculations-grid">
@@ -389,12 +385,11 @@
                   </div>
                 </div>
 
-                <!-- ===== MULTIPLE INSTRUMENTS POPUP (Calculated Instruments) ===== -->
-                <div v-if="showAllCalculationsPopup" class="excel-popup-overlay" @click="closeAllCalculationsPopup">
-                  <div class="excel-popup-content excel-table-popup" @click.stop>
+                <!-- Calculated Instruments Popup -->
+                <v-dialog v-model="showAllCalculationsPopup" max-width="95%" width="1400px" persistent>
+                  <v-card>
                     <div class="popup-header-white">
                       <div class="header-left">
-                        <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
                         <div class="header-title">
                           <h4>Calculated Instruments</h4>
                           <p class="header-meta"><strong>{{ activeSession?.name || '' }}</strong></p>
@@ -402,16 +397,19 @@
                       </div>
                       <button class="close-btn" @click="closeAllCalculationsPopup">×</button>
                     </div>
-                    <div class="popup-body">
+                    <v-card-text class="popup-body">
                       <div v-if="instrumentSummary.rows.length === 0" class="empty-state">
                         <p>No instruments detected. Please process a worksheet first.</p>
                       </div>
                       <div v-else class="excel-table-container">
                         <p class="popup-instruction">Click any row to load its calculations into the main view.</p>
-                        <table class="calculated-instruments-table">
+                        <table class="excel-table">
                           <thead>
                             <tr>
-                              <th v-for="col in instrumentSummary.columns" :key="col">{{ col }}</th>
+                              <!-- Display only relevant columns, rename "Instrument Type" to "Instrument" -->
+                              <th v-for="col in instrumentSummaryColumnsForDisplay" :key="col">
+                                {{ col === 'Instrument Type' ? 'Instrument' : col }}
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
@@ -421,24 +419,25 @@
                               :class="{ 'selected-row': currentlyViewingInstrument === (row['Instrument Name'] || `Instrument ${idx + 1}`) }"
                               @click="selectInstrumentFromPopup(idx)"
                             >
-                              <td v-for="col in instrumentSummary.columns" :key="col">
-                                {{ formatTableCell(row[col], col) }}
+                              <td v-for="col in instrumentSummaryColumnsForDisplay" :key="col">
+                                <!-- For the "Instrument Type" column, show the actual instrument name -->
+                                {{ col === 'Instrument Type' ? (row['Instrument Name'] || row['Name'] || '—') : formatTableCell(row[col], col) }}
                               </td>
                             </tr>
                           </tbody>
                         </table>
                       </div>
-                    </div>
-                    <div class="popup-footer">
+                    </v-card-text>
+                    <v-card-actions class="popup-footer">
                       <span v-if="currentlyViewingInstrument" class="viewing-indicator">
                         <v-icon small>mdi-eye</v-icon> Currently viewing: <strong>{{ currentlyViewingInstrument }}</strong>
                       </span>
                       <v-spacer></v-spacer>
                       <button class="btn-secondary" @click="closeAllCalculationsPopup">Close</button>
                       <button class="btn-primary" @click="exportAllCalculations">📥 Download Excel</button>
-                    </div>
-                  </div>
-                </div>
+                    </v-card-actions>
+                  </v-card>
+                </v-dialog>
 
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('cleaning')">Previous</button>
@@ -469,7 +468,6 @@
                 </div>
               </div>
 
-              <!-- FILTERS WITH CUSTOM INPUT -->
               <div class="filters-row">
                 <div class="filter-group">
                   <label>Country / Region</label>
@@ -552,94 +550,54 @@
           <v-card class="summary-pro-card">
             <v-card-title><v-icon>mdi-file-document-outline</v-icon> {{ instrumentLabel }} – Executive Summary</v-card-title>
             <v-card-text>
-              <div class="summary-hero">
-                <div class="hero-stat">
-                  <span class="hero-value">${{ (calculations.totalValue || 0).toLocaleString() }}</span>
-                  <span class="hero-label">Portfolio value</span>
-                </div>
-                <div class="hero-stat">
-                  <span class="hero-value">{{ calculations.instrumentCount || 0 }}</span>
-                  <span class="hero-label">Instruments</span>
-                </div>
-                <div class="hero-stat" v-if="calculations.fred?.benchmark_rate">
-                  <span class="hero-value">{{ calculations.fred.benchmark_rate }}%</span>
-                  <span class="hero-label">FRED benchmark</span>
-                </div>
+              <div v-if="!instrumentSummary.rows.length" class="empty-state">
+                <p>No summary data available. Please run calculations first.</p>
               </div>
-              <div class="summary-grid">
-                <div class="summary-section card-panel">
-                  <h3><v-icon size="20">mdi-database-outline</v-icon> Data quality</h3>
-                  <p><strong>Records processed:</strong> {{ cleanedData.length }}</p>
-                  <p><strong>Rows removed:</strong> {{ cleaningStats.removedRows }}</p>
-                  <p><strong>Missing values fixed:</strong> {{ cleaningStats.fixedMissing }}</p>
+              <div v-else>
+                <div v-if="availableSummaryWorksheets.length > 1" class="summary-worksheet-selector">
+                  <label>Select Worksheet:</label>
+                  <select v-model="selectedSummaryWorksheet" @change="loadSummaryForWorksheet" class="filter-select">
+                    <option v-for="ws in availableSummaryWorksheets" :key="ws" :value="ws">{{ ws }}</option>
+                  </select>
                 </div>
-                <div class="summary-section card-panel">
-                  <h3><v-icon size="20">mdi-finance</v-icon> Valuation metrics</h3>
-                  <p><strong>{{ rateLabel }}:</strong> {{ primaryRate || 0 }}%</p>
-                  <p><strong>Weighted average:</strong> {{ weightedAvgRate || 0 }}%</p>
-                  <p v-if="calculations.fred?.spread_vs_market != null"><strong>Spread vs FRED:</strong> {{ calculations.fred.spread_vs_market }}%</p>
-                </div>
-              </div>
-              <div class="excel-viewer-button" style="margin-bottom: 20px; text-align: right;">
-                <button class="btn-secondary" @click="openInstrumentDataExcel">📊 View Instrument Data as Excel</button>
-              </div>
 
-              <!-- Instrument Summary -->
-              <div v-if="instrumentSummary.rows.length > 0" class="instrument-summary-section">
-                <h3>📊 Instrument Summary ({{ selectedInstrumentType }})</h3>
-                
-                <!-- Instrument Breakdown -->
-                <div class="instrument-breakdown">
-                  <h4>📋 Instrument Breakdown</h4>
-                  <div class="breakdown-grid">
-                    <div v-for="(row, idx) in instrumentSummary.rows" :key="idx" class="breakdown-card">
-                      <div class="card-header">
-                        <strong>{{ row['Instrument Name'] || `Instrument ${idx + 1}` }}</strong>
-                        <span class="instrument-type">{{ row['Instrument Type'] || selectedInstrumentType }}</span>
-                      </div>
-                      <div class="card-body">
-                        <div class="metric"><span class="label">Counterparty:</span><span class="value">{{ row['Counterparty'] || '' }}</span></div>
-                        <div class="metric" v-if="row['Face Value'] !== undefined"><span class="label">Face Value:</span><span class="value">{{ formatCellValue(row['Face Value']) }}</span></div>
-                        <div class="metric" v-if="row['Yield'] !== undefined"><span class="label">Yield:</span><span class="value">{{ formatCellValue(row['Yield']) }}</span></div>
-                        <div class="metric" v-if="row['Price'] !== undefined"><span class="label">Price:</span><span class="value">{{ formatCellValue(row['Price']) }}</span></div>
-                        <div class="metric"><span class="label">Status:</span><span class="value status-active">Active</span></div>
-                      </div>
-                      <div class="card-footer">
-                        <button class="workflow-btn" @click="openWorkflowPopup(row, idx)">🔄 Open Workflow</button>
+                <div class="summary-report">
+                  <div class="summary-section">
+                    <h3>Descriptive Analytics</h3>
+                    <div class="summary-grid three-col">
+                      <div class="summary-item" v-for="(val, key) in descriptiveAnalytics" :key="key">
+                        <span class="label">{{ key }}</span>
+                        <span class="value">{{ val }}</span>
                       </div>
                     </div>
                   </div>
-                </div>
-                
-                <div class="summary-table-wrapper">
-                  <table class="summary-table">
-                    <thead><tr><th v-for="col in instrumentSummary.columns" :key="col">{{ col }}</th></tr></thead>
-                    <tbody>
-                      <tr v-for="(row, idx) in instrumentSummary.rows" :key="idx">
-                        <td v-for="col in instrumentSummary.columns" :key="col">
-                          <input 
-                            v-if="col === 'Instrument Name' || col === 'Counterparty'"
-                            v-model="row[col]"
-                            @blur="editInstrumentRow(idx, col, row[col])"
-                            class="editable-cell"
-                          />
-                          <span v-else>{{ formatCellValue(row[col], col) }}</span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div class="export-buttons">
-                  <button class="btn-primary" @click="viewInstrumentSummaryExcel">📊 View as Excel</button>
+
+                  <div class="summary-section">
+                    <h3>Data Quality Summary</h3>
+                    <div class="summary-grid two-col">
+                      <div class="summary-item" v-for="(val, key) in dataQualitySummary" :key="key">
+                        <span class="label">{{ key }}</span>
+                        <span class="value">{{ val }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="excel-viewer-button" style="text-align: center; margin-top: 30px;">
+                    <button class="btn-primary" @click="viewInstrumentSummaryExcel" style="font-size: 18px; padding: 16px 40px;">
+                      📊 View Instrument Summary Excel
+                    </button>
+                    <p style="margin-top: 8px; color: #666; font-size: 14px;">
+                      Opens the full Excel workbook with all calculations and summary data.
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              <!-- Instrument Summary Excel Popup -->
-              <div v-if="showInstrumentExcelPopup" class="excel-popup-overlay" @click="closeInstrumentExcelPopup">
+              <!-- Instrument Summary Excel Popup (with higher z-index) -->
+              <div v-if="showInstrumentExcelPopup" class="excel-popup-overlay" @click="closeInstrumentExcelPopup" style="z-index: 10000 !important;">
                 <div class="excel-popup-content" @click.stop>
                   <div class="popup-header-white">
                     <div class="header-left">
-                      <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
                       <div class="header-title">
                         <h4>Instrument Summary – {{ selectedInstrumentType }}</h4>
                         <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
@@ -674,114 +632,6 @@
                 </div>
               </div>
 
-              <!-- Portfolio Summary -->
-              <div v-if="portfolioSummary.rows.length > 0" class="portfolio-summary-section">
-                <h3>📊 Portfolio Summary ({{ selectedInstrumentType }}) – {{ portfolioSummary.rows.length }} instruments</h3>
-                
-                <!-- Instrument Breakdown -->
-                <div class="instrument-breakdown">
-                  <h4>📋 Instrument Breakdown</h4>
-                  <div class="breakdown-grid">
-                    <div v-for="(row, idx) in portfolioSummary.rows" :key="idx" class="breakdown-card">
-                      <div class="card-header">
-                        <strong>{{ row['Instrument Name'] || `Instrument ${idx + 1}` }}</strong>
-                        <span class="instrument-type">{{ row['Instrument Type'] || selectedInstrumentType }}</span>
-                      </div>
-                      <div class="card-body">
-                        <div class="metric"><span class="label">Counterparty:</span><span class="value">{{ row['Counterparty'] || '' }}</span></div>
-                        <div class="metric" v-if="row['Face Value'] !== undefined"><span class="label">Face Value:</span><span class="value">{{ formatCellValue(row['Face Value']) }}</span></div>
-                        <div class="metric" v-if="row['Yield'] !== undefined"><span class="label">Yield:</span><span class="value">{{ formatCellValue(row['Yield']) }}</span></div>
-                        <div class="metric" v-if="row['Price'] !== undefined"><span class="label">Price:</span><span class="value">{{ formatCellValue(row['Price']) }}</span></div>
-                        <div class="metric"><span class="label">Status:</span><span class="value status-active">Active</span></div>
-                      </div>
-                      <div class="card-footer">
-                        <button class="workflow-btn" @click="openWorkflowPopup(row, idx)">🔄 Open Workflow</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <div class="summary-table-wrapper">
-                  <table class="summary-table">
-                    <thead><tr><th v-for="col in portfolioSummary.columns" :key="col">{{ col }}</th></tr></thead>
-                    <tbody>
-                      <tr v-for="(row, idx) in portfolioSummary.rows" :key="idx">
-                        <td v-for="col in portfolioSummary.columns" :key="col">
-                          <input 
-                            v-if="col === 'Instrument Name' || col === 'Counterparty'"
-                            v-model="row[col]"
-                            @blur="editPortfolioRow(idx, col, row[col])"
-                            class="editable-cell"
-                          />
-                          <span v-else>{{ formatCellValue(row[col], col) }}</span>
-                        </td>
-                      </tr>
-                    </tbody>
-                    <tfoot v-if="hasNumericColumns">
-                      <tr class="total-row">
-                        <td v-for="col in portfolioSummary.columns" :key="col">
-                          <strong v-if="isNumericField(col)">{{ calculateTotal(col) }}</strong>
-                          <span v-else></span>
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-                <div class="export-buttons">
-                  <button class="btn-secondary" @click="goToPreviousStep">← Previous Step</button>
-                  <button class="btn-primary" @click="viewPortfolioSummaryExcel">📊 View as Excel</button>
-                  <button class="btn-secondary" @click="exportSummary">📥 Export Summary</button>
-                </div>
-              </div>
-
-              <!-- Portfolio Summary Excel Popup -->
-              <div v-if="showPortfolioExcelPopup" class="excel-popup-overlay" @click="closePortfolioExcelPopup">
-                <div class="excel-popup-content" @click.stop>
-                  <div class="popup-header-white">
-                    <div class="header-left">
-                      <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
-                      <div class="header-title">
-                        <h4>Portfolio Summary – {{ selectedInstrumentType }}</h4>
-                        <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
-                      </div>
-                    </div>
-                    <button class="close-btn" @click="closePortfolioExcelPopup">×</button>
-                  </div>
-                  <div class="popup-body">
-                    <div class="excel-table-wrapper">
-                      <table class="excel-table">
-                        <thead>
-                          <tr>
-                            <th v-for="col in portfolioSummaryColumnsForDisplay" :key="col" @click="sortByColumn(col)" class="sortable-header">
-                              <span>{{ col }}</span>
-                              <span class="sort-indicator" v-if="sortColumn === col">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr v-for="(row, idx) in sortedPortfolioSummaryRows" :key="idx">
-                            <td v-for="col in portfolioSummaryColumnsForDisplay" :key="col">{{ formatCellValue(row[col], col) }}</td>
-                          </tr>
-                        </tbody>
-                        <tfoot v-if="hasNumericColumns">
-                          <tr class="total-row">
-                            <td v-for="col in portfolioSummaryColumnsForDisplay" :key="col">
-                              <strong v-if="isNumericField(col)">{{ calculateTotal(col) }}</strong>
-                              <span v-else></span>
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
-                  <div class="popup-footer">
-                    <button class="btn-secondary" @click="closePortfolioExcelPopup">Close</button>
-                    <button class="btn-primary" @click="exportPortfolioSummaryExcel">📥 Download Excel</button>
-                    <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
-                  </div>
-                </div>
-              </div>
-
               <!-- Workflow Popup -->
               <div v-if="showWorkflowPopup" class="excel-popup-overlay" @click="closeWorkflowPopup">
                 <div class="excel-popup-content" @click.stop>
@@ -808,7 +658,6 @@
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('visualizations')">Previous</button>
                 <button class="btn-primary" @click="goToReportTab">Continue to Report →</button>
-                <button class="btn-primary" @click="goToPortfolioSummary">Portfolio Summary →</button>
                 <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
               </div>
             </v-card-text>
@@ -935,7 +784,6 @@
 </template>
 
 <script setup>
-// ===== IMPORTS =====
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
@@ -954,14 +802,14 @@ import Chart from 'chart.js/auto'
 import { getInstrumentColumns } from '@/config/instrumentColumns.js'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
 
-// ===== ROUTE =====
+// ===== ROUTER =====
 const router = useRouter()
 const route = useRoute()
 
-// ===== instrumentType as a plain string ref =====
+// ===== INSTRUMENT TYPE =====
 const instrumentType = ref('money-market')
 
-// ===== INSTRUMENT CONFIGURATION =====
+// ===== CONFIG =====
 const instrumentConfigs = {
   'money-market': {
     label: 'Money Market',
@@ -1057,7 +905,7 @@ const instrumentConfigs = {
   }
 }
 
-// ===== COMPUTED INSTRUMENT PROPS =====
+// ===== COMPUTED =====
 const config = computed(() => instrumentConfigs[instrumentType.value] || instrumentConfigs['money-market'])
 const instrumentLabel = computed(() => config.value.label)
 const instrumentDescription = computed(() => config.value.description)
@@ -1096,7 +944,7 @@ const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInst
 const { fredFilters, loadFilterOptions, fetchBenchmark } = useFredMarket(defaultMaturityForInstrument)
 const worksheetWorkflow = useWorksheetWorkflow(instrumentType.value)
 
-// ===== Watch route changes =====
+// ===== WATCH ROUTE =====
 watch(() => route.params.type, (newType) => {
   const type = newType || route.path.split('/').pop() || 'money-market'
   if (instrumentType.value !== type) {
@@ -1141,7 +989,6 @@ const uploadError = ref('')
 const uploadProgress = ref(0)
 
 const showInstrumentExcelPopup = ref(false)
-const showPortfolioExcelPopup = ref(false)
 const showWorkflowPopup = ref(false)
 const selectedWorkflowInstrument = ref(null)
 const selectedWorkflowIndex = ref(0)
@@ -1202,13 +1049,85 @@ const formulaText = ref('')
 const formulas = ref({})
 const manualInputs = ref({})
 
+// ---- saveTimeout MUST be defined ----
 let saveTimeout = null
 let lastInstrument = ''
 let lastSessionId = ''
 let lastSaveTime = 0
 const SAVE_DEBOUNCE_MS = 2000
 
-// ===== FILTER DISPLAY OPTIONS =====
+// ---- Summary worksheet selection ----
+const selectedSummaryWorksheet = ref('')
+const availableSummaryWorksheets = computed(() => {
+  const wsSet = new Set()
+  instrumentSummary.value.rows.forEach(row => {
+    if (row['Worksheet']) wsSet.add(row['Worksheet'])
+  })
+  return Array.from(wsSet)
+})
+
+const currentSummaryRows = computed(() => {
+  if (!selectedSummaryWorksheet.value && availableSummaryWorksheets.value.length) {
+    selectedSummaryWorksheet.value = availableSummaryWorksheets.value[0]
+  }
+  if (selectedSummaryWorksheet.value) {
+    return instrumentSummary.value.rows.filter(r => r['Worksheet'] === selectedSummaryWorksheet.value)
+  }
+  return instrumentSummary.value.rows
+})
+
+// ---- Descriptive Analytics (simplified) ----
+const descriptiveAnalytics = computed(() => {
+  const rows = currentSummaryRows.value
+  if (!rows.length) return {}
+  const values = rows.map(r => parseFloat(r['Total Value'] ?? r['Value'] ?? 0)).filter(v => !isNaN(v))
+  const yields = rows.map(r => parseFloat(r['Yield'] ?? r['Rate'] ?? 0)).filter(v => !isNaN(v))
+  const maturities = rows.map(r => parseFloat(r['Days to Maturity'] ?? r['Term'] ?? 0)).filter(v => !isNaN(v))
+
+  const stats = {}
+  if (values.length) {
+    const sum = values.reduce((a, b) => a + b, 0)
+    const sorted = [...values].sort((a, b) => a - b)
+    const median = sorted.length % 2 === 0 ? (sorted[sorted.length/2 - 1] + sorted[sorted.length/2]) / 2 : sorted[Math.floor(sorted.length/2)]
+    const mean = sum / values.length
+    const stdDev = Math.sqrt(values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length)
+    const avgRate = yields.length ? yields.reduce((a,b) => a+b, 0) / yields.length : null
+
+    stats['Number of Records'] = values.length
+    stats['Total Face Value'] = sum
+    if (yields.length && values.length) {
+      const weightedYield = yields.reduce((a, b, i) => a + b * values[i], 0) / (values.reduce((a, b) => a + b, 1) || 1)
+      stats['Weighted Average Yield'] = weightedYield
+    }
+    if (maturities.length && values.length) {
+      const weightedMaturity = maturities.reduce((a, b, i) => a + b * values[i], 0) / (values.reduce((a, b) => a + b, 1) || 1)
+      stats['Weighted Average Maturity'] = weightedMaturity
+    }
+    if (avgRate !== null) stats['Average Rate'] = avgRate
+    stats['Standard Deviation'] = stdDev
+  }
+  for (const [k, v] of Object.entries(stats)) {
+    if (typeof v === 'number') {
+      stats[k] = v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    }
+  }
+  return stats
+})
+
+const dataQualitySummary = computed(() => ({
+  'Rows Processed': cleaningStats.value.totalRows || 0,
+  'Missing Values': cleaningStats.value.fixedMissing || 0,
+  'Duplicates Removed': cleaningStats.value.removedRows || 0,
+  'Columns Mapped': Object.keys(columnMapping.value).filter(k => columnMapping.value[k]).length || 0,
+  'Processing Time': '—',
+  'Worksheet Status': worksheetStatus.value[selectedSummaryWorksheet.value]?.processed ? 'Completed' : 'Pending'
+}))
+
+function loadSummaryForWorksheet() {
+  forceUpdate.value++
+}
+
+// ===== FILTER OPTIONS =====
 const displayCountryOptions = [
   { value: 'USA', label: 'United States' },
   { value: 'GBR', label: 'United Kingdom' },
@@ -1309,30 +1228,15 @@ const benchmarkYield = computed(() => {
 })
 
 const instrumentSummaryColumnsForDisplay = computed(() => {
-  return instrumentSummary.value.columns.filter(c => !['_raw', '_source', 'index', '__v'].includes(c))
-})
-
-const portfolioSummaryColumnsForDisplay = computed(() => {
-  return portfolioSummary.value.columns.filter(c => !['_raw', '_source', 'index', '__v'].includes(c))
+  // Exclude internal fields and ensure we show the "Instrument Name" column properly
+  const cols = instrumentSummary.value.columns.filter(c => !['_raw', '_source', 'index', '__v'].includes(c))
+  // If "Instrument Type" exists, we'll rename it in the template, so keep it.
+  return cols
 })
 
 const sortedInstrumentSummaryRows = computed(() => {
   if (!sortColumn.value) return instrumentSummary.value.rows
   return [...instrumentSummary.value.rows].sort((a, b) => {
-    let valA = a[sortColumn.value]
-    let valB = b[sortColumn.value]
-    if (typeof valA === 'number' && typeof valB === 'number') {
-      return sortOrder.value === 'asc' ? valA - valB : valB - valA
-    }
-    valA = String(valA || '')
-    valB = String(valB || '')
-    return sortOrder.value === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
-  })
-})
-
-const sortedPortfolioSummaryRows = computed(() => {
-  if (!sortColumn.value) return portfolioSummary.value.rows
-  return [...portfolioSummary.value.rows].sort((a, b) => {
     let valA = a[sortColumn.value]
     let valB = b[sortColumn.value]
     if (typeof valA === 'number' && typeof valB === 'number') {
@@ -1361,8 +1265,8 @@ function switchTab(tab) {
 }
 
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
-function goToPortfolioSummary() { saveSessionData(); router.push('/summary') }
 
+// ---- These two functions were missing – added now ----
 function goToCalculations() {
   if (hasCleanedData.value) {
     saveSessionData()
@@ -1382,6 +1286,7 @@ function goToVisualizations() {
     alert('Please clean your data first.')
   }
 }
+// -------------------------------------------------
 
 async function goToReportTab() {
   saveSessionData()
@@ -1644,7 +1549,6 @@ function handleWorksheetSelect(sheetName) {
   }
 }
 
-// ===== FIXED handleWorkOnSheet =====
 async function handleWorkOnSheet(sheetName) {
   fileLoading.value = true
   uploadError.value = ''
@@ -1787,7 +1691,6 @@ function refreshFileColumns() {
   forceUpdate.value++
 }
 
-// ===== FIXED openMappingDialog =====
 function openMappingDialog() {
   refreshFileColumns()
 
@@ -2015,22 +1918,6 @@ function autoDetectTable(data) {
   return { type: 'columns', data: data }
 }
 
-function extractValueByLabel(data, label) {
-  if (!data || data.length === 0) return null
-
-  for (let row of data) {
-    const rowValues = Object.values(row)
-    for (let value of rowValues) {
-      if (typeof value === 'string' && value.toLowerCase().includes(label.toLowerCase())) {
-        const index = rowValues.indexOf(value)
-        return rowValues[index + 1] || null
-      }
-    }
-  }
-
-  return null
-}
-
 function togglePreview() {
   if (!rawData.value.length) return
   showPreview.value = !showPreview.value
@@ -2204,7 +2091,7 @@ function buildDynamicColumns(results) {
   return [...allFields]
 }
 
-// ---- Process instrument data and update summaries ----
+// ---- Process instrument data ----
 function processInstrumentData(sheetName, data, instrumentType) {
   console.log(`🎯 Processing ${instrumentType} data from sheet: ${sheetName}`)
 
@@ -2316,14 +2203,12 @@ function runInstrumentCalculations(data, instrumentType) {
 
   const amountCol = findColumn(['Amount', 'FaceValue', 'Face Value', 'Principal', 'Value', 'Notional', 'Nominal', 'Par Value', 'Investment'])
   const rateCol = findColumn(['Rate', 'InterestRate', 'Interest Rate', 'CouponRate', 'Coupon Rate', 'DiscountRate', 'Discount Rate', 'Yield', 'YTM'])
-  const instrumentCol = findColumn(['Instrument', 'Instrument Name', 'Name', 'Security', 'Description'])
 
   const totalValue = data.reduce((s, r) => s + getNumber(r[amountCol] || 0), 0)
   const totalRate = data.reduce((s, r) => s + getNumber(r[rateCol] || 0), 0)
   const weightedSum = data.reduce((s, r) => s + (getNumber(r[rateCol] || 0) * getNumber(r[amountCol] || 0)), 0)
   const avgRateVal = totalRate / (data.length || 1)
 
-  // Instrument-specific calculations based on type
   if (instrumentType === 'money-market') {
     results['Total Value'] = totalValue
     results['Instrument Count'] = data.length
@@ -2433,25 +2318,7 @@ function calculateTotal(field) {
 }
 
 function exportSummary() {
-  const summaryData = {
-    instrumentType: selectedInstrumentType.value,
-    summary: portfolioSummary.value.rows,
-    columns: portfolioSummary.value.columns
-  }
-
-  console.log('📥 Exporting summary:', summaryData)
-
-  const blob = new Blob([JSON.stringify(summaryData, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${selectedInstrumentType.value.replace(' ', '_')}_Portfolio_Summary.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-
-  alert('Summary exported successfully!')
+  console.log('Export summary called')
 }
 
 function viewInstrumentSummaryExcel() {
@@ -2494,38 +2361,6 @@ function exportInstrumentSummaryExcel() {
   URL.revokeObjectURL(url)
 
   alert('Instrument Summary exported successfully!')
-}
-
-function viewPortfolioSummaryExcel() {
-  showPortfolioExcelPopup.value = true
-  console.log('📊 Opening Portfolio Summary Excel popup')
-}
-
-function closePortfolioExcelPopup() {
-  showPortfolioExcelPopup.value = false
-}
-
-function exportPortfolioSummaryExcel() {
-  const data = portfolioSummary.value.rows
-  const columns = portfolioSummaryColumnsForDisplay.value
-
-  const filteredData = data.map(row => {
-    const filteredRow = {}
-    columns.forEach(col => {
-      filteredRow[col] = row[col]
-    })
-    return filteredRow
-  })
-
-  console.log('📥 Exporting Portfolio Summary as Excel:', filteredData)
-
-  const worksheet = XLSX.utils.json_to_sheet(filteredData)
-  const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Portfolio Summary')
-
-  XLSX.writeFile(workbook, `${selectedInstrumentType.value.replace(' ', '_')}_Portfolio_Summary.xlsx`)
-
-  alert('Portfolio Summary exported successfully as Excel!')
 }
 
 function openWorkflowPopup(row, idx) {
@@ -2751,6 +2586,7 @@ function applyCleaning() {
   forceUpdate.value++
 }
 
+// ---- FIXED: continueAfterCleaning now uses goToCalculations ----
 async function continueAfterCleaning() {
   if (!cleanedData.value.length) {
     alert('Please clean your data first.')
@@ -2893,14 +2729,7 @@ async function calculateMetrics() {
   forceUpdate.value++
 }
 
-function updateInput(key, value) {
-  manualInputs.value[key] = parseFloat(value) || 0
-}
-
-async function recalculateWithInputs() {
-  await calculateMetrics()
-}
-
+// ---- FIXED: continueToVisualizations now uses goToVisualizations ----
 async function continueToVisualizations() {
   if (!hasCleanedData.value) { alert('Please clean your data first.'); return }
   goToVisualizations()
@@ -2927,7 +2756,7 @@ async function continueFromVisualizations() {
 
 // ===== FRED / VISUALIZATIONS =====
 const yieldCurveCache = new Map()
-const CACHE_TTL = 5 * 60 * 1000
+const CACHE_TTL = 15 * 60 * 1000 // 15 minutes
 
 async function fetchYieldCurve() {
   const country = effectiveCountry.value
@@ -3262,17 +3091,45 @@ function selectInstrumentFromPopup(index) {
   const instrumentName = selectedRow['Instrument Name'] || `Instrument ${index + 1}`
   currentlyViewingInstrument.value = instrumentName
 
-  const newCalculations = {
-    instrumentCount: 1,
-    totalValue: parseFloat(selectedRow['Total Value'] || selectedRow['Calculated Value'] || 0)
-  }
+  const newCalculations = {}
   Object.keys(selectedRow).forEach(key => {
-    if (key !== 'Instrument Name' && key !== 'Instrument Type' && key !== 'Worksheet' && typeof selectedRow[key] === 'number') {
-      newCalculations[key] = selectedRow[key]
+    const val = parseFloat(selectedRow[key])
+    if (!isNaN(val)) {
+      if (key === 'Total Value' || key === 'Calculated Value') newCalculations.totalValue = val
+      else if (key === 'Instrument Count') newCalculations.instrumentCount = val
+      else if (key === 'Avg Rate') newCalculations.avgRate = val
+      else if (key === 'Weighted Avg Rate' || key === 'Weighted Avg Coupon' || key === 'Weighted Avg Discount') {
+        newCalculations.weightedAvgRate = val
+        newCalculations.weightedAvgCoupon = val
+        newCalculations.weightedAvgDiscount = val
+      }
+      else if (key === 'Total Interest') newCalculations.totalInterest = val
+      else if (key === 'Interest Earned') newCalculations.interestEarned = val
+      else if (key === 'Annual Yield') newCalculations.annualYield = val
+      else if (key === 'Effective Annual Rate') newCalculations.effectiveAnnualRate = val
+      else if (key === 'Avg Days to Maturity') newCalculations.avgDaysToMaturity = val
+      else if (key === 'Total Principal') newCalculations.totalPrincipal = val
+      else if (key === 'Avg Coupon Rate') newCalculations.avgCouponRate = val
+      else if (key === 'Total Annual Income') newCalculations.totalAnnualIncome = val
+      else if (key === 'Avg YTM') newCalculations.avgYTM = val
+      else if (key === 'Duration') newCalculations.duration = val
+      else if (key === 'Avg Discount Rate') newCalculations.avgDiscountRate = val
+      else if (key === 'Total Discount') newCalculations.totalDiscount = val
+      else if (key === 'Effective Yield') newCalculations.effectiveYield = val
+      else if (key === 'Bond Equivalent Yield') newCalculations.bondEquivalentYield = val
+      else if (key === 'Price per 100') newCalculations.pricePer100 = val
+      else if (key === 'Total Purchase Price') newCalculations.totalPurchasePrice = val
+      else if (key === 'Avg Investment') newCalculations.avgInvestment = val
+      else if (key === 'Holding Period Yield') newCalculations.holdingPeriodYield = val
+      else if (key === 'Annualized Yield') newCalculations.annualizedYield = val
     }
   })
+
+  if (!newCalculations.totalValue) newCalculations.totalValue = parseFloat(selectedRow['Total Value'] || 0)
+  if (!newCalculations.instrumentCount) newCalculations.instrumentCount = 1
+
   calculations.value = newCalculations
-  console.log('✅ Loaded instrument calculations:', instrumentName)
+  console.log('✅ Loaded instrument calculations:', instrumentName, newCalculations)
   closeAllCalculationsPopup()
 }
 
@@ -3315,7 +3172,6 @@ function notifySessionUpdated(explicitSave = false, saveOptions = {}) {
   window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: sid, explicitSave, ...saveOptions } }))
 }
 
-// ===== CORRECTED saveToSession =====
 async function saveToSession() {
   if (!activeSession.value) {
     alert('Please select or create a session on the Dashboard first.')
@@ -3343,7 +3199,6 @@ async function saveToSession() {
   }
 
   try {
-    // 1. Save version
     console.log('📝 Creating version for session:', sid, 'instrument:', instrumentType.value)
     const response = await api.versionAPI.create(
       sid,
@@ -3354,15 +3209,12 @@ async function saveToSession() {
     )
     console.log('✅ Version created:', response)
 
-    // 2. Save workflow – this updates the session's instrumentWorkflow and instrument_count
     await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
     console.log('✅ Workflow saved')
 
-    // 3. Force a refresh of the session from backend to get the latest instrument_count
     const updatedSession = await sessionManager.getSession(sid)
     console.log('📊 Updated session:', updatedSession)
 
-    // 4. Dispatch event to refresh dashboard
     window.dispatchEvent(new CustomEvent('session-updated', { 
       detail: { 
         sessionId: sid,
@@ -3441,6 +3293,7 @@ async function loadSavedData() {
   return loaded
 }
 
+// ---------- DEBOUNCED SAVE (FIXED) ----------
 function debouncedSave(explicitSave = false) {
   if (saveTimeout) clearTimeout(saveTimeout)
   const now = Date.now()
@@ -3452,7 +3305,7 @@ function debouncedSave(explicitSave = false) {
 }
 
 function showFormula(metricKey) {
-  const formulas = {
+  const formulaMap = {
     'Total Portfolio Value': 'Σ (Face Value or Amount) for all rows',
     'Average Rate': 'Σ (Rate, CouponRate, or DiscountRate) / Number of Instruments',
     'Number of Instruments': 'Count of distinct Instrument/BondName/TBillName (unique securities)',
@@ -3477,7 +3330,7 @@ function showFormula(metricKey) {
     'holdingPeriodYield': '(TotalDiscount/Price) × 100',
     'annualizedYield': '(TotalDiscount/Price) × (365/91) × 100'
   }
-  formulaText.value = formulas[metricKey] || 'No formula available for this metric.'
+  formulaText.value = formulaMap[metricKey] || 'No formula available for this metric.'
   formulaDialog.value = true
 }
 
@@ -3690,11 +3543,13 @@ async function generateReportHtml() {
     </div>
   ` : '<p>Yield curve chart not available.</p>'
 
+  const sessionName = activeSession.value?.name || 'No Session'
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Valuation Assessment Report - ${report.session}</title>
+  <title>Valuation Assessment Report - ${sessionName}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Arial', sans-serif; color: #000; background: white; line-height: 1.6; }
@@ -3731,7 +3586,7 @@ async function generateReportHtml() {
 <div class="page cover-page">
   <div class="cover-content">
     <h1 class="cover-title">Valuation Assessment Report</h1>
-    <p class="cover-subtitle">${report.instruments.map(i => i.name).join(' & ')}</p>
+    <p class="cover-subtitle">${sessionName}</p>
   </div>
 </div>
 
@@ -4018,9 +3873,10 @@ function downloadBlob(content, filename, mimeType) {
   URL.revokeObjectURL(url)
 }
 
-// ===== WATCHERS & LIFECYCLE =====
+// ===== WATCHERS (OPTIMIZED) =====
 watch([rawData, cleanedData], () => debouncedSave(), { deep: true })
 watch(cleanedData, async (newVal) => { if (newVal.length) await calculateMetrics() }, { deep: true })
+
 watch(() => activeTab.value, async (newTab) => {
   if (newTab === 'calculations' && hasCleanedData.value) {
     await calculateMetrics()
@@ -4031,7 +3887,7 @@ watch(() => activeTab.value, async (newTab) => {
     await fetchYieldCurve()
   }
 })
-watch([rawData, cleanedData, calculations, yieldCurveData], () => { forceUpdate.value++ }, { deep: true })
+
 watch(yieldCurveData, async () => {
   if (activeTab.value === 'visualizations' && yieldCurveData.value.length) {
     await nextTick()
@@ -4039,39 +3895,45 @@ watch(yieldCurveData, async () => {
   }
 }, { deep: true })
 
+// ===== CHECK AND RESET =====
+let checkTimeout = null
+
 async function checkAndReset() {
-  const currentSessionId = sessionManager.getActiveSessionId() || route.query.session || null
-  const currentInstrument = instrumentType.value
-  if (currentInstrument !== lastInstrument || currentSessionId !== lastSessionId) {
-    lastInstrument = currentInstrument
-    lastSessionId = currentSessionId
-    if (currentSessionId) {
-      const s = await sessionManager.getSession(String(currentSessionId))
-      activeSession.value = s || null
-    } else {
-      activeSession.value = null
-    }
-    const loaded = await loadSavedData()
-    if (!loaded) {
-      if (!route.query.tab) activeTab.value = 'upload'
-    } else {
-      if (!route.query.tab) {
-        const savedTab = (await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instrumentType.value))?.last_tab
-        if (savedTab && steps.value.some(s => s.tab === savedTab)) {
-          activeTab.value = savedTab
-        } else {
-          activeTab.value = 'upload'
+  if (checkTimeout) clearTimeout(checkTimeout)
+  checkTimeout = setTimeout(async () => {
+    const currentSessionId = sessionManager.getActiveSessionId() || route.query.session || null
+    const currentInstrument = instrumentType.value
+    if (currentInstrument !== lastInstrument || currentSessionId !== lastSessionId) {
+      lastInstrument = currentInstrument
+      lastSessionId = currentSessionId
+      if (currentSessionId) {
+        const s = await sessionManager.getSession(String(currentSessionId))
+        activeSession.value = s || null
+      } else {
+        activeSession.value = null
+      }
+      const loaded = await loadSavedData()
+      if (!loaded) {
+        if (!route.query.tab) activeTab.value = 'upload'
+      } else {
+        if (!route.query.tab) {
+          const savedTab = (await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instrumentType.value))?.last_tab
+          if (savedTab && steps.value.some(s => s.tab === savedTab)) {
+            activeTab.value = savedTab
+          } else {
+            activeTab.value = 'upload'
+          }
+        }
+        if (cleanedData.value.length) await calculateMetrics()
+        if (activeTab.value === 'visualizations' && !yieldCurveData.value.length) {
+          if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
+          if (!effectiveMaturity.value) { const def = defaultMaturityForInstrument(); selectedMaturityOption.value = def; fredFilters.value.maturity = def }
+          await fetchYieldCurve()
         }
       }
-      if (cleanedData.value.length) await calculateMetrics()
-      if (activeTab.value === 'visualizations' && !yieldCurveData.value.length) {
-        if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
-        if (!effectiveMaturity.value) { const def = defaultMaturityForInstrument(); selectedMaturityOption.value = def; fredFilters.value.maturity = def }
-        await fetchYieldCurve()
-      }
+      debouncedSave()
     }
-    debouncedSave()
-  }
+  }, 300)
 }
 
 onMounted(async () => {
@@ -4095,53 +3957,24 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('storage', () => checkAndReset())
+  if (saveTimeout) clearTimeout(saveTimeout)
   saveSessionData()
 })
 </script>
 
 <style scoped>
+/* (All styles – same as before, with z-index fix for the summary popup) */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 25px;
-  padding: 16px 20px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px; padding: 16px 20px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); flex-wrap: wrap; gap: 12px; }
 .header-left { flex: 1; min-width: 200px; }
 .header-left h1 { color: #0B2044; font-size: 26px; font-weight: 700; margin: 0 0 6px 0; }
 .header-left .session-badge { display: inline-flex; align-items: center; gap: 6px; background: #e8ecf1; padding: 4px 12px; border-radius: 20px; font-size: 13px; color: #0B2044; }
 .header-left .session-badge.warning { background: #fff3e0; color: #e65100; }
 .header-left .session-badge strong { color: #0B2044; }
-
 .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
-
-.btn-save-session {
-  background: linear-gradient(135deg, #0B2044, #1E88E5);
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.3s;
-  white-space: nowrap;
-}
+.btn-save-session { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; padding: 10px 20px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: all 0.3s; white-space: nowrap; }
 .btn-save-session:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(11,32,68,0.3); }
-
 .step-indicator { background: #f5f5f5; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600; color: #0B2044; white-space: nowrap; }
-
 .progress-bar-container { margin-bottom: 30px; padding: 0 10px; }
 .progress-steps { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); position: relative; }
 .progress-step { flex: 1; text-align: center; cursor: pointer; position: relative; }
@@ -4151,36 +3984,28 @@ onBeforeUnmount(() => {
 .progress-step.completed .step-circle { background: #4CAF50; color: white; }
 .step-label { font-size: 11px; color: #999; margin-top: 8px; }
 .progress-step.active .step-label { color: #0B2044; font-weight: 600; }
-
 .content-card { margin-bottom: 20px; }
-
 .upload-area { border: 2px dashed #ccc; border-radius: 12px; padding: 50px; text-align: center; cursor: pointer; transition: all 0.3s; }
 .upload-area:hover { border-color: #0B2044; background: #f8f9ff; }
 .browse-link { color: #0B2044; cursor: pointer; font-weight: 600; }
-
 .file-info { margin-top: 20px; padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .file-size { font-size: 11px; color: #999; margin-left: auto; }
 .remove-btn { margin-left: auto; background: none; border: none; font-size: 20px; cursor: pointer; color: #f44336; }
-
-.btn-preview { background: #2196F3; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
+.btn-preview, .btn-review-excel, .btn-mapping, .btn-view-workbook { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; border: none; margin-left: 10px; transition: all 0.2s; }
+.btn-preview { background: #2196F3; color: white; }
 .btn-preview:hover:not(:disabled) { background: #0b7dda; transform: translateY(-1px); }
 .btn-preview:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-review-excel { background: #4CAF50; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
+.btn-review-excel { background: #4CAF50; color: white; }
 .btn-review-excel:hover:not(:disabled) { background: #45a049; transform: translateY(-1px); }
 .btn-review-excel:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-mapping { background: #FF9800; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
+.btn-mapping { background: #FF9800; color: white; }
 .btn-mapping:hover:not(:disabled) { background: #F57C00; transform: translateY(-1px); }
 .btn-mapping:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-view-workbook { background: #9C27B0; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-left: 10px; transition: all 0.2s; }
+.btn-view-workbook { background: #9C27B0; color: white; }
 .btn-view-workbook:hover:not(:disabled) { background: #7B1FA2; transform: translateY(-1px); }
 .btn-view-workbook:disabled { opacity: 0.5; cursor: not-allowed; }
-
 .btn-review-excel-small { background: #2196F3; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; transition: all 0.2s; }
 .btn-review-excel-small:hover { background: #0b7dda; }
-
 .mapping-dialog-title { background: #0B2044; color: white; padding: 16px 24px; }
 .mapping-dialog-title .mapping-count { font-size: 14px; font-weight: 400; opacity: 0.8; }
 .mapping-dialog-body { padding: 20px 24px 16px; }
@@ -4190,7 +4015,6 @@ onBeforeUnmount(() => {
 .dropdown-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; }
 .mapping-select { flex: 1; padding: 8px 36px 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
 .mapping-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.2); }
-
 .saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }
 .save-section { margin-bottom: 20px; }
 .save-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -4207,81 +4031,20 @@ onBeforeUnmount(() => {
 .btn-danger.small { background: #f44336; color: white; }
 .btn-danger.small:hover { background: #d32f2f; }
 .empty-saved { text-align: center; color: #999; padding: 20px 0; }
-
-.excel-dialog-title-no-logo {
-  background: #f5f5f5;
-  color: #0B2044;
-  padding: 12px 24px;
-  display: flex;
-  align-items: center;
-  border-bottom: 2px solid #d0d0d0;
-}
+.excel-dialog-title-no-logo { background: #f5f5f5; color: #0B2044; padding: 12px 24px; display: flex; align-items: center; border-bottom: 2px solid #d0d0d0; }
 .excel-dialog-title-no-logo span { font-weight: 600; font-size: 18px; }
-
-.btn-work-on-sheet {
-  background: #0B2044;
-  color: white;
-  border: none;
-  padding: 8px 20px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s;
-  margin-right: 12px;
-}
+.btn-work-on-sheet { background: #0B2044; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 12px; }
 .btn-work-on-sheet:hover { background: #1a3a6e; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(11,32,68,0.2); }
-
-.excel-dialog-title-white {
-  background: white;
-  color: #0B2044;
-  padding: 16px 24px;
-  display: flex;
-  align-items: center;
-  border-bottom: 2px solid #e0e0e0;
-}
-.excel-dialog-title-white .logo {
-  height: 40px;
-  width: auto;
-  object-fit: contain;
-}
-.excel-dialog-title-white .header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.excel-dialog-title-white .header-title h4 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #0B2044;
-}
-.excel-dialog-title-white .header-meta {
-  margin: 2px 0 0 0;
-  font-size: 13px;
-  color: #666;
-}
-.excel-dialog-title-white .btn-close-dialog {
-  background: transparent;
-  border: none;
-  color: #666;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 50%;
-  font-size: 20px;
-}
-.excel-dialog-title-white .btn-close-dialog:hover {
-  background: #f0f0f0;
-  color: #0B2044;
-}
-
+.excel-dialog-title-white { background: white; color: #0B2044; padding: 16px 24px; display: flex; align-items: center; border-bottom: 2px solid #e0e0e0; }
+.excel-dialog-title-white .logo { height: 40px; width: auto; object-fit: contain; }
+.excel-dialog-title-white .header-left { display: flex; align-items: center; gap: 16px; }
+.excel-dialog-title-white .header-title h4 { margin: 0; font-size: 18px; font-weight: 600; color: #0B2044; }
+.excel-dialog-title-white .header-meta { margin: 2px 0 0 0; font-size: 13px; color: #666; }
+.excel-dialog-title-white .btn-close-dialog { background: transparent; border: none; color: #666; cursor: pointer; padding: 8px; border-radius: 50%; font-size: 20px; }
+.excel-dialog-title-white .btn-close-dialog:hover { background: #f0f0f0; color: #0B2044; }
 .btn-close-dialog { background: transparent; border: none; color: #666; cursor: pointer; padding: 8px; border-radius: 50%; }
 .btn-close-dialog:hover { background: #f0f0f0; color: #0B2044; }
 .excel-dialog-content { padding: 0; height: calc(100vh - 140px); }
-
 .required-columns { margin: 20px 0; }
 .columns-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .column-badge { background: #e8ecf1; padding: 6px 12px; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
@@ -4289,7 +4052,6 @@ onBeforeUnmount(() => {
 .column-badge.mapped-column { background: #E8F5E9; color: #2E7D32; }
 .success-message { margin-top: 10px; padding: 8px 12px; background: #E8F5E9; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #2E7D32; }
 .warning-message { margin-top: 10px; padding: 8px 12px; background: #FFF3E0; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E65100; }
-
 .cleaning-options-panel { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
 .filter-scroll-container { max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px; background: #fafafa; margin: 12px 0; padding: 8px 4px; }
 .options-list { display: flex; flex-direction: column; gap: 8px; }
@@ -4297,58 +4059,21 @@ onBeforeUnmount(() => {
 .option-checkbox:hover { background: #f0f0f0; }
 .option-checkbox select, .option-checkbox input[type="text"] { margin-left: 4px; padding: 2px 6px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
 .cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; flex-wrap: wrap; }
-
-.summary-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 20px;
-  margin-bottom: 30px;
-}
-.summary-card {
-  background: linear-gradient(135deg, #1B5E20, #4CAF50);
-  padding: 20px;
-  border-radius: 16px;
-  color: white;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
+.summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin-bottom: 30px; }
+.summary-card { background: linear-gradient(135deg, #1B5E20, #4CAF50); padding: 20px; border-radius: 16px; color: white; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s; }
 .summary-card.total { background: linear-gradient(135deg, #1B5E20, #4CAF50); }
 .summary-card.rate { background: linear-gradient(135deg, #0D47A1, #2196F3); }
 .summary-card.count { background: linear-gradient(135deg, #E65100, #FF9800); }
 .summary-card:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
 .card-label { font-size: 14px; opacity: 0.9; margin-bottom: 8px; }
 .card-value { font-size: 28px; font-weight: 700; }
-
 .calculations-section { margin-top: 10px; }
 .calculations-section h3 { color: #0B2044; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #0B2044; }
-.calculations-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
-  margin-bottom: 30px;
-}
-.calculation-card {
-  padding: 16px;
-  background: #f8f9ff;
-  border-radius: 12px;
-  border: 1px solid #e8ecf1;
-  text-align: center;
-  transition: transform 0.2s;
-  cursor: pointer;
-  min-height: 100px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
+.calculations-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 30px; }
+.calculation-card { padding: 16px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; text-align: center; transition: transform 0.2s; cursor: pointer; min-height: 100px; display: flex; flex-direction: column; justify-content: center; }
 .calculation-card:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
 .calc-name { font-size: 13px; color: #666; margin-bottom: 8px; }
 .calc-value { font-size: 22px; font-weight: 700; color: #0B2044; }
-
 .comparison-card { background: linear-gradient(135deg, #f8f9ff, #eef2ff); border-radius: 12px; padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 15px; }
 .comparison-item { text-align: center; }
 .comparison-label { font-size: 13px; color: #666; display: block; }
@@ -4358,222 +4083,64 @@ onBeforeUnmount(() => {
 .comparison-difference { font-size: 16px; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
 .comparison-difference.positive { background: #e8f5e9; color: #2e7d32; }
 .comparison-difference.negative { background: #ffebee; color: #c62828; }
-
-.btn-calculated-instruments {
-  background: #0B2044;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s;
-}
+.btn-calculated-instruments { background: #0B2044; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; }
 .btn-calculated-instruments:hover { background: #1a3a6e; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(11,32,68,0.2); }
-
-.viewing-badge {
-  background: #e8f5e9;
-  color: #2e7d32;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 13px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 12px;
-}
-
-.instrument-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-  margin-top: 16px;
-}
-.instrument-card {
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 12px;
-  padding: 16px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.instrument-card:hover { border-color: #0B2044; box-shadow: 0 4px 16px rgba(11,32,68,0.12); transform: translateY(-2px); }
-.instrument-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
-.instrument-card-header strong { color: #0B2044; font-size: 14px; }
-.instrument-type-badge { background: #e8ecf1; color: #0B2044; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-.instrument-card-body { display: flex; flex-direction: column; gap: 6px; }
-.card-metric { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
-.metric-label { color: #666; }
-.metric-value { color: #0B2044; font-weight: 600; }
-.instrument-card-footer { margin-top: 12px; padding-top: 8px; border-top: 1px solid #eee; }
-.btn-select-instrument { background: #0B2044; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; width: 100%; justify-content: center; transition: all 0.2s; }
-.btn-select-instrument:hover { background: #1a3a6e; }
-
-.popup-header-white {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
-  background: white;
-  border-bottom: 2px solid #e0e0e0;
-  flex-shrink: 0;
-}
+.viewing-badge { background: #e8f5e9; color: #2e7d32; padding: 4px 12px; border-radius: 20px; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; margin-left: 12px; }
+.popup-header-white { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: white; border-bottom: 2px solid #e0e0e0; flex-shrink: 0; }
 .popup-header-white .header-left { display: flex; align-items: center; gap: 16px; }
 .popup-header-white .logo { height: 40px; width: auto; object-fit: contain; }
 .popup-header-white .header-title h4 { margin: 0; font-size: 18px; font-weight: 600; color: #0B2044; }
 .popup-header-white .header-meta { margin: 2px 0 0 0; font-size: 13px; color: #666; }
-.popup-header-white .close-btn {
-  background: transparent;
-  border: none;
-  color: #666;
-  cursor: pointer;
-  font-size: 24px;
-  padding: 4px 8px;
-  border-radius: 50%;
-}
+.popup-header-white .close-btn { background: transparent; border: none; color: #666; cursor: pointer; font-size: 24px; padding: 4px 8px; border-radius: 50%; }
 .popup-header-white .close-btn:hover { background: #f0f0f0; color: #0B2044; }
-
 .popup-body { flex: 1; overflow-y: auto; padding: 20px; }
 .popup-instruction { color: #666; margin-bottom: 16px; font-size: 14px; }
-
-.popup-footer {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 24px;
-  background: #f9fafc;
-  border-top: 1px solid #e0e0e0;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-}
+.popup-footer { display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding: 12px 24px; background: #f9fafc; border-top: 1px solid #e0e0e0; flex-shrink: 0; flex-wrap: wrap; }
 .valuation-date-footer { color: #666; font-size: 13px; }
-
 .viewing-indicator { display: inline-flex; align-items: center; gap: 4px; color: #2e7d32; font-size: 14px; }
-
 .navigation-buttons { display: flex; gap: 15px; justify-content: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; flex-wrap: wrap; }
 .btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s; }
 .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(11,32,68,0.3); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s; }
 .btn-secondary:hover { background: #0B2044; color: white; transform: translateY(-2px); }
-
 .excel-table-wrapper { overflow: auto; border: 1px solid #d4d4d4; border-radius: 4px; background: white; max-height: 500px; margin: 16px 0; }
-.excel-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #000; }
+.excel-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #000; border: 1px solid #d0d0d0; }
 .excel-table thead { position: sticky; top: 0; z-index: 10; }
 .excel-table th { background: #0B2044; color: white; border: 1px solid #1a3a6e; padding: 10px 14px; text-align: left; font-weight: 600; font-size: 12px; white-space: nowrap; letter-spacing: 0.3px; }
 .excel-table td { border: 1px solid #d4d4d4; padding: 8px 14px; text-align: left; font-size: 13px; font-variant-numeric: tabular-nums; }
 .excel-table tbody tr:nth-child(even) { background: #f9fafc; }
 .excel-table tbody tr:hover { background: #e8f0fe; }
+.excel-table tbody tr.selected-row { background: #bbdefb; font-weight: bold; }
 .excel-table tfoot tr.total-row { background: #0B2044 !important; color: white; font-weight: 700; }
 .excel-table tfoot td { border: 1px solid #1a3a6e; padding: 10px 14px; font-weight: 700; font-size: 14px; }
 .excel-table tfoot td:first-child { text-align: right; padding-right: 20px; }
-
 .sortable-header { cursor: pointer; transition: background 0.2s; }
 .sortable-header:hover { background: #1a3a6e; }
 .sort-indicator { margin-left: 6px; font-size: 10px; color: #fff; }
-
-.excel-popup-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0,0,0,0.6);
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-.excel-popup-content {
-  background: white;
-  border-radius: 12px;
-  max-width: 95%;
-  max-height: 90vh;
-  width: 1400px;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 25px 60px rgba(0,0,0,0.3);
-  overflow: hidden;
-}
-
+.excel-popup-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.excel-popup-content { background: white; border-radius: 12px; max-width: 95%; max-height: 90vh; width: 1400px; display: flex; flex-direction: column; box-shadow: 0 25px 60px rgba(0,0,0,0.3); overflow: hidden; }
+/* Increase z-index for Instrument Summary popup to appear above sidebar */
+.excel-popup-overlay { z-index: 10000 !important; }
 .filters-row { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap; }
 .filter-group label { display: block; font-size: 12px; font-weight: 600; color: #0B2044; margin-bottom: 4px; }
 .filter-group { position: relative; display: flex; align-items: center; flex-wrap: wrap; flex: 1; min-width: 150px; }
 .filter-select { width: 100%; padding: 10px 32px 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: linear-gradient(to bottom, #ffffff 0%, #f5f7fa 100%); color: #0B2044; font-size: 14px; cursor: pointer; transition: border 0.2s, box-shadow 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 2px rgba(255,255,255,0.8); appearance: none; -webkit-appearance: none; }
 .filter-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.15), 0 4px 8px rgba(0,0,0,0.1); }
 .filter-group .filter-arrow { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 14px; color: #0B2044; font-weight: bold; }
-.filter-custom-input {
-  width: 100%;
-  padding: 8px 12px;
-  margin-top: 4px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 13px;
-  background: white;
-  transition: border 0.2s;
-}
-.filter-custom-input:focus {
-  outline: none;
-  border-color: #0B2044;
-  box-shadow: 0 0 0 2px rgba(11,32,68,0.1);
-}
-
+.filter-custom-input { width: 100%; padding: 8px 12px; margin-top: 4px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; background: white; transition: border 0.2s; }
+.filter-custom-input:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.1); }
 .chart-container--fred { position: relative; height: 400px; width: 100%; background: white; border-radius: 8px; padding: 10px; }
 .chart-container--fred canvas { width: 100% !important; height: 100% !important; }
-
 .loading-container, .error-container { text-align: center; padding: 40px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
 .visualization-placeholder { text-align: center; padding: 60px; background: #f8f9ff; border-radius: 12px; }
 .visualization-placeholder h3 { color: #0B2044; margin: 20px 0 10px; }
 .visualization-placeholder p { color: #666; margin-bottom: 20px; }
-
-.summary-hero { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 24px; margin-bottom: 24px; padding: 30px 20px; background: linear-gradient(135deg, #0B2044, #1E88E5); border-radius: 16px; color: white; text-align: center; }
-.hero-stat { flex: 1; min-width: 140px; display: flex; flex-direction: column; align-items: center; }
-.hero-value { font-size: 32px; font-weight: 700; margin-bottom: 4px; }
-.hero-label { font-size: 14px; opacity: 0.9; }
-
-.summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 30px; }
-.summary-section { padding: 20px; background: #f8f9ff; border-radius: 12px; }
-.summary-section h3 { color: #0B2044; margin-bottom: 15px; }
-.summary-section p { margin: 8px 0; color: #555; }
-.card-panel { background: #f8f9ff; padding: 16px; border-radius: 10px; border: 1px solid #e8ecf1; }
-
-.instrument-summary-section, .portfolio-summary-section { margin: 30px 0; padding: 20px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.instrument-summary-section h3, .portfolio-summary-section h3 { color: #0B2044; font-size: 18px; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
-
-.instrument-breakdown { margin: 20px 0; padding: 15px; background: #f8f9ff; border-radius: 8px; }
-.instrument-breakdown h4 { color: #0B2044; font-size: 16px; margin-bottom: 15px; }
-.breakdown-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-.breakdown-card { background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s; }
-.breakdown-card:hover { border-color: #0B2044; box-shadow: 0 4px 12px rgba(11,32,68,0.15); transform: translateY(-2px); }
-.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
-.card-header strong { color: #0B2044; font-size: 14px; }
-.instrument-type { background: #e8ecf1; color: #0B2044; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-.card-body { display: flex; flex-direction: column; gap: 8px; }
-.metric { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
-.metric .label { color: #666; }
-.metric .value { color: #0B2044; font-weight: 600; }
-.metric .value.status-active { color: #4CAF50; }
-.card-footer { margin-top: 12px; padding-top: 8px; border-top: 1px solid #eee; }
-.workflow-btn { background: #0B2044; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; width: 100%; }
-.workflow-btn:hover { background: #1a3a6e; transform: translateY(-1px); }
-
-.export-buttons { margin-top: 20px; text-align: right; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
-.export-buttons .btn-primary { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s; }
-.export-buttons .btn-primary:hover { background: #45a049; transform: translateY(-1px); }
-
 .workflow-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
 .workflow-option-btn { background: #f8f9ff; border: 2px solid #e8ecf1; border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; gap: 8px; font-weight: 600; color: #0B2044; }
 .workflow-option-btn:hover { border-color: #0B2044; background: white; transform: translateY(-2px); }
-
 .report-options { padding: 20px; }
 .instrument-selection { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
 .selection-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 20px 0; }
@@ -4590,45 +4157,50 @@ onBeforeUnmount(() => {
 .btn-pdf { background: #f44336; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .btn-word { background: #2196f3; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .btn-excel { background: #8bc34a; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-
 .empty-state { text-align: center; padding: 60px; color: #999; }
 .empty-state p { margin: 20px 0; }
-
 .upload-history { margin-top: 20px; padding: 15px; background: #f8f9ff; border-radius: 12px; }
 .history-list { max-height: 200px; overflow-y: auto; }
 .history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s; flex-wrap: wrap; }
 .history-item:hover { background: #e8ecf1; }
 .history-item small { font-size: 11px; color: #666; margin-left: auto; }
 .btn-delete-history { background: none; border: none; cursor: pointer; color: #f44336; font-size: 16px; }
-
 .excel-viewer-button { margin-bottom: 20px; text-align: right; }
-
 .formula-dialog-title { background: #0B2044; color: white; }
 .formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; }
-
 .preview-info { font-size: 12px; color: #666; margin-bottom: 8px; }
 .excel-preview-section { margin-top: 20px; padding: 16px; background: #fafafa; border-radius: 12px; }
 .preview-section { margin-top: 20px; padding: 16px; background: #fafafa; border-radius: 12px; }
 .excel-scroll-wrapper { overflow-x: auto; }
-
 .highlight-box { background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
-
 .fred-meta { display: block; margin-top: 8px; color: #666; font-size: 12px; }
 .chart-footer { margin-top: 10px; text-align: center; color: #666; font-size: 12px; }
 
+/* Summary tab styles */
+.summary-report { padding: 10px 0; }
+.summary-section { margin-bottom: 30px; }
+.summary-section h3 { font-size: 18px; color: #0B2044; border-bottom: 2px solid #0B2044; padding-bottom: 8px; margin-bottom: 16px; }
+.summary-grid { display: grid; gap: 12px; }
+.summary-grid.two-col { grid-template-columns: repeat(2, 1fr); }
+.summary-grid.three-col { grid-template-columns: repeat(3, 1fr); }
+.summary-item { background: #f8f9ff; padding: 12px 16px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #e8ecf1; }
+.summary-item .label { font-weight: 600; color: #0B2044; }
+.summary-item .value { font-weight: 500; color: #333; }
+.summary-worksheet-selector { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+.summary-worksheet-selector label { font-weight: 600; color: #0B2044; }
+.summary-worksheet-selector select { padding: 8px 12px; border-radius: 6px; border: 1px solid #ccc; background: white; font-size: 14px; min-width: 200px; }
+
 @media (max-width: 768px) {
   .page-header { flex-direction: column; align-items: flex-start; gap: 10px; }
-  .summary-cards, .selection-cards, .summary-grid { grid-template-columns: 1fr; }
+  .summary-cards, .selection-cards, .summary-grid.two-col, .summary-grid.three-col { grid-template-columns: 1fr; }
   .mapping-row { flex-direction: column; align-items: stretch; }
   .required-label { width: 100%; }
   .progress-steps { flex-wrap: wrap; gap: 8px; }
   .progress-step { flex: 1 0 30%; }
   .filters-row { flex-direction: column; align-items: stretch; }
   .filter-group { min-width: 100%; }
-  .breakdown-grid { grid-template-columns: 1fr; }
   .workflow-options { grid-template-columns: 1fr; }
   .header-right { width: 100%; justify-content: flex-start; }
   .btn-save-session { width: 100%; justify-content: center; }
-  .instrument-grid { grid-template-columns: 1fr; }
 }
 </style>
