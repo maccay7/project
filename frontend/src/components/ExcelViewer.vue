@@ -182,15 +182,12 @@ export default {
     const editValue = ref('')
     const editInput = ref(null)
 
-    // Luckysheet
     const luckysheetContainer = ref(null)
     const luckysheetInitialized = ref(false)
 
-    // Formula bar
     const formulaInput = ref(null)
     const formulaBarValue = ref('')
 
-    // Column widths & row heights
     const columnWidths = ref({})
     const rowHeights = ref({})
 
@@ -203,7 +200,6 @@ export default {
 
     const scrollLeft = ref(0)
 
-    // Pagination
     const pageSize = ref(100)
     const currentPage = ref(1)
     const loadAllMode = ref(false)
@@ -248,7 +244,6 @@ export default {
       return props.columnMapping[header] || '__na__'
     }
 
-    // Raw value used by Formula Bar
     function getCellRawValue(row, col) {
       const header = displayHeaders.value[col]
       if (!header) return ''
@@ -597,7 +592,30 @@ export default {
     function selectSheet(sheetName) {
       const sheet = props.workbookSheets.find(s => s.name === sheetName)
       if (sheet) {
-        internalData.value = sheet.data || []
+        // Use fullData if available, else data
+        const sheetData = sheet.fullData || sheet.data || []
+        // Convert fullData to objects with headers if fullData is array of arrays
+        if (Array.isArray(sheetData) && sheetData.length > 0 && Array.isArray(sheetData[0])) {
+          // Use the first row as headers? No – we should use the raw data as is, but we need to convert to objects for display.
+          // However, for raw display, we want to preserve all rows and columns, even if empty.
+          // So we'll treat each row as an object with column names like "Col1", "Col2"...
+          const headers = sheet.headers || []
+          if (headers.length === 0) {
+            // Generate numeric headers
+            const maxCols = sheetData.reduce((max, row) => Math.max(max, row.length), 0)
+            for (let i = 0; i < maxCols; i++) {
+              headers.push(`Col${i+1}`)
+            }
+          }
+          const jsonData = sheetData.map(row => {
+            const obj = {}
+            headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? row[i] : '' })
+            return obj
+          })
+          internalData.value = jsonData
+        } else {
+          internalData.value = sheetData
+        }
         currentPage.value = 1
         selectedCell.value = null
         selectedRange.value = null
@@ -791,7 +809,6 @@ export default {
   max-width: 100%;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.6);
 }
-
 .sheet-tabs {
   display: flex;
   background: #f5f5f5;
@@ -808,22 +825,14 @@ export default {
   color: #555;
   transition: background 0.2s;
 }
-.sheet-tab:hover {
-  background: #e8e8e8;
-}
+.sheet-tab:hover { background: #e8e8e8; }
 .sheet-tab.active {
   background: white;
   color: #0B2044;
   font-weight: 600;
   border-bottom: 2px solid #0B2044;
 }
-
-.luckysheet-container {
-  width: 100%;
-  height: 500px;
-  background: #fff;
-}
-
+.luckysheet-container { width: 100%; height: 500px; background: #fff; }
 .formula-bar {
   display: flex;
   align-items: center;
@@ -870,10 +879,6 @@ export default {
   background: transparent;
   min-height: 28px;
 }
-.formula-input:focus {
-  background: #fff;
-}
-
 .excel-toolbar {
   display: flex;
   justify-content: space-between;
@@ -903,15 +908,8 @@ export default {
   cursor: pointer;
   font-size: 13px;
 }
-.page-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.page-info {
-  font-size: 13px;
-  color: #555;
-}
-
+.page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.page-info { font-size: 13px; color: #555; }
 .excel-table-wrapper {
   overflow: auto;
   max-height: 500px;
@@ -1014,12 +1012,8 @@ export default {
   outline: 2px solid #0B2044;
   outline-offset: -2px;
 }
-.selected-row {
-  background: #f5f8ff;
-}
-.editing-cell {
-  padding: 0 !important;
-}
+.selected-row { background: #f5f8ff; }
+.editing-cell { padding: 0 !important; }
 .cell-content {
   padding: 4px 8px;
   min-height: 24px;
@@ -1045,8 +1039,6 @@ export default {
   display: flex;
   justify-content: space-between;
 }
-
-/* Global override */
 .excel-viewer td,
 .excel-viewer td *,
 .excel-viewer .cell-content,

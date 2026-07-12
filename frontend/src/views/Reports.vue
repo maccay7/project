@@ -86,9 +86,10 @@
           </div>
         </div>
         
-        <!-- Preview Content -->
-        <div class="preview-content">
-          <pre>{{ JSON.stringify(previewData, null, 2) }}</pre>
+        <!-- Preview Content (only the report itself, no extra headers) -->
+        <div class="preview-content" v-html="reportHtml" v-if="reportHtml"></div>
+        <div v-else class="preview-empty">
+          <p>No report generated yet. Click "Refresh Report" to generate.</p>
         </div>
         
         <!-- Download Row -->
@@ -140,6 +141,7 @@ const reportError = ref('')
 const dataset = ref(null)
 const showDatasetPreview = ref(false)
 const sessionName = ref('')
+const reportHtml = ref('')
 
 // Helper: resolve active session
 async function resolveSession() {
@@ -287,6 +289,36 @@ async function generatePreview() {
 
   previewData.value = preview
   reportError.value = ''
+
+  // Generate HTML for report preview
+  if (previewData.value) {
+    const data = previewData.value
+    const instrumentName = data.instrument || 'unknown'
+    const sessionName = data.session || 'Current Session'
+    const date = data.date || new Date().toLocaleString()
+    const valuationDate = data.valuationDate || new Date().toISOString().split('T')[0]
+
+    let fullData = []
+    if (selectedType.value === 'session' && data.instruments) {
+      for (const [inst, rows] of Object.entries(data.instruments)) {
+        if (rows && rows.length) {
+          fullData = fullData.concat(rows)
+        }
+      }
+    } else {
+      if (data.allWorkedData && data.allWorkedData[instrument]) {
+        fullData = data.allWorkedData[instrument]
+      } else if (data.sample) {
+        fullData = data.sample
+      }
+    }
+
+    if (fullData.length) {
+      reportHtml.value = generateReportHtml(fullData, instrumentName, sessionName, date, valuationDate)
+    } else {
+      reportHtml.value = '<p>No data available for report.</p>'
+    }
+  }
 }
 
 function downloadFullReport() {

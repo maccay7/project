@@ -168,6 +168,16 @@ export const visualizationAPI = {
   clearCache: () => callAPI('/api/visualization/cache/clear', 'DELETE')
 }
 
+// Mapping templates
+export const mappingTemplatesAPI = {
+  getAll: () => callAPI('/api/mapping-templates', 'GET'),
+  getByInstrument: (instrumentType) => callAPI(`/api/mapping-templates?instrument_type=${instrumentType}`, 'GET'),
+  get: (id) => callAPI(`/api/mapping-templates/${id}`, 'GET'),
+  create: (template) => callAPI('/api/mapping-templates', 'POST', template),
+  update: (id, updates) => callAPI(`/api/mapping-templates/${id}`, 'PUT', updates),
+  delete: (id) => callAPI(`/api/mapping-templates/${id}`, 'DELETE')
+}
+
 export default {
   authAPI,
   dashboardAPI,
@@ -180,5 +190,6 @@ export default {
   instrumentConfigAPI,
   sessionsAPI,
   versionAPI,
-  visualizationAPI  
+  visualizationAPI,
+  mappingTemplatesAPI
 }

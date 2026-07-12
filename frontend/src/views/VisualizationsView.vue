@@ -291,10 +291,8 @@ function chartDatasets(payload) {
       // Handle both data formats: array of objects with x/y or array of values
       let chartData
       if (d.data && d.data.length > 0 && typeof d.data[0] === 'object' && 'x' in d.data[0]) {
-        // Data is already in {x, y} format
         chartData = d.data
       } else {
-        // Convert array of values to {x, y} format using maturities
         const maturities = d.maturities || payload.labels || []
         chartData = d.data.map((val, idx) => ({ 
           x: maturities[idx] || idx, 
@@ -326,6 +324,7 @@ function chartDatasets(payload) {
   }]
 }
 
+// ----- FIXED: loadYieldCurve with proper maturity mapping -----
 async function loadYieldCurve() {
   yieldError.value = ''
   yieldLoading.value = true
@@ -378,6 +377,7 @@ async function loadYieldCurve() {
   }
 }
 
+// ----- FIXED: renderYieldChart with meaningful x‑axis -----
 function renderYieldChart() {
   if (!yieldCanvas.value || !yieldData.value) return
   if (yieldChart) yieldChart.destroy()
@@ -387,61 +387,64 @@ function renderYieldChart() {
   const maxMaturity = maturities.length ? Math.max(...maturities) : 10
   const selectedMaturityStr = fredFilters.value.maturity || '1Y'
   
-  // Parse maturity to determine label format
+  // Parse maturity to determine label format and scale
   let effectiveMax = maxMaturity
-  let isYearBased = true
-  let isMonthBased = false
-  let isWeekBased = false
-  
-  if (selectedMaturityStr.includes('Y')) {
-    effectiveMax = Math.min(maxMaturity, parseFloat(selectedMaturityStr))
-    isYearBased = true
-  } else if (selectedMaturityStr.includes('M')) {
-    effectiveMax = Math.min(maxMaturity, parseFloat(selectedMaturityStr))
-    isMonthBased = true
-    isYearBased = false
-  } else if (selectedMaturityStr.includes('W')) {
-    effectiveMax = Math.min(maxMaturity, parseFloat(selectedMaturityStr) * 7)
-    isWeekBased = true
-    isYearBased = false
+  let xAxisTitle = 'Maturity'
+  let stepSize = 1
+  let tickCallback = (val) => Number.isInteger(val) ? val : ''
+  let minX = 0
+
+  // Determine unit and max based on selected maturity
+  const match = selectedMaturityStr.match(/^(\d+)([YMW])$/)
+  if (match) {
+    const num = parseInt(match[1], 10)
+    const unit = match[2]
+    if (unit === 'Y') {
+      xAxisTitle = 'Years'
+      stepSize = num > 5 ? 5 : 1
+      effectiveMax = Math.min(maxMaturity, num)
+    } else if (unit === 'M') {
+      xAxisTitle = 'Months'
+      stepSize = 1
+      effectiveMax = Math.min(maxMaturity, num)
+      minX = 0
+    } else if (unit === 'W') {
+      xAxisTitle = 'Weeks'
+      stepSize = 1
+      effectiveMax = Math.min(maxMaturity, num)
+      minX = 0
+    }
+  } else {
+    // fallback to years
+    xAxisTitle = 'Years'
+    const num = parseFloat(selectedMaturityStr) || 10
+    effectiveMax = Math.min(maxMaturity, num)
+    stepSize = num > 5 ? 5 : 1
   }
 
-  const datasets = chartDatasets(yieldData.value).map(ds => ({
-    ...ds,
-    data: ds.data.filter(pt => pt.x <= effectiveMax)
-  }))
+  // Filter data points up to effectiveMax
+  const filteredData = yieldData.value.datasets.map(ds => {
+    const data = ds.data.filter(pt => pt.x <= effectiveMax)
+    return { ...ds, data }
+  })
 
-  // If no data points after filtering, show error
-  if (datasets.every(ds => ds.data.length === 0)) {
+  if (filteredData.every(ds => ds.data.length === 0)) {
     yieldError.value = 'No yield curve data available for selected maturity'
     return
   }
 
-  // Generate appropriate tick labels based on maturity type
-  let tickCallback
-  let xAxisTitle
-  let stepSize
-  
-  if (isMonthBased) {
-    // Show months (0, 1, 2, 3, ..., 12)
-    tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= 12 ? `${val}M` : ''
-    xAxisTitle = 'Maturity (Months)'
-    stepSize = 1
-  } else if (isWeekBased) {
-    // Show days (1, 2, 3, ..., 14 for 2 weeks)
-    tickCallback = (val) => Number.isInteger(val) && val >= 1 && val <= 14 ? val : ''
-    xAxisTitle = 'Maturity (Days)'
-    stepSize = 1
+  // Determine tick values based on unit
+  if (xAxisTitle === 'Months') {
+    tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= effectiveMax ? val : ''
+  } else if (xAxisTitle === 'Weeks') {
+    tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= effectiveMax ? val : ''
   } else {
-    // Show years (0, 1, 2, 3, ...)
-    tickCallback = (val) => Number.isInteger(val) ? val : ''
-    xAxisTitle = 'Maturity (Years)'
-    stepSize = 1
+    tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= effectiveMax ? val : ''
   }
 
   yieldChart = new Chart(ctx, {
     type: 'line',
-    data: { datasets },
+    data: { datasets: filteredData },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -451,12 +454,7 @@ function renderYieldChart() {
           callbacks: {
             label: (ctx) => {
               const pt = ctx.raw
-              if (isMonthBased) {
-                return `${pt.x.toFixed(0)}M: ${pt.y.toFixed(2)}%`
-              } else if (isWeekBased) {
-                return `Day ${pt.x.toFixed(0)}: ${pt.y.toFixed(2)}%`
-              }
-              return `${pt.x.toFixed(0)}Y: ${pt.y.toFixed(2)}%`
+              return `${pt.x.toFixed(0)}${xAxisTitle === 'Months' ? 'M' : xAxisTitle === 'Weeks' ? 'W' : 'Y'}: ${pt.y.toFixed(2)}%`
             }
           }
         }
@@ -466,7 +464,7 @@ function renderYieldChart() {
         x: {
           type: 'linear',
           title: { display: true, text: xAxisTitle },
-          min: isWeekBased ? 1 : 0,
+          min: minX,
           max: effectiveMax,
           ticks: {
             callback: tickCallback,
@@ -478,6 +476,7 @@ function renderYieldChart() {
   })
 }
 
+// ---- loadComparisonChart ----
 async function loadComparisonChart() {
   try {
     const res = await api.fredAPI.getYieldCurve('all', fredFilters.value.country, fredFilters.value.currency)
@@ -528,7 +527,7 @@ async function loadComparisonChart() {
   }
 }
 
-// Navigate to reports
+// ---- Navigation ----
 async function goToReports() {
   const datasetId = route.query.dataset_id
   if (!datasetId) {
@@ -543,6 +542,17 @@ async function goToReports() {
   router.push({ name: 'reports', query: { dataset_id: datasetId } })
 }
 
+// ---- Save FRED settings (optional) ----
+async function saveFredSettings() {
+  // could be implemented to store in localStorage or backend
+}
+
+// ---- Load FRED settings ----
+async function loadFredSettings() {
+  // could be implemented
+}
+
+// ---- Lifecycle ----
 onMounted(async () => {
   await loadFilterOptions()
   await loadFredSettings()
@@ -555,21 +565,15 @@ onMounted(async () => {
 .page-header { margin-bottom: 30px; }
 .page-header h1 { color: #0B2A44; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
 .page-header p { color: #666; font-size: 16px; }
-
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 30px; }
-
 .stats-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
 .stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); border-radius: 12px 12px 0 0; }
-
 .chart-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
 .chart-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); }
-
 .card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
 .title-icon { margin-right: 8px; }
-
 .fred-note { font-size: 13px; color: #666; }
 .chart-container { height: 400px; position: relative; padding: 16px; }
-
 .kpi-card { height: 120px; border-radius: 12px; transition: 0.2s; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
 .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50); }
 .kpi-card:hover { transform: translateY(-2px); }
@@ -577,13 +581,10 @@ onMounted(async () => {
 .kpi-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; flex-shrink: 0; }
 .kpi-value { font-size: 24px; font-weight: 700; color: #0B2A44; }
 .kpi-title { font-size: 12px; color: #666; }
-
 .action-card { border-radius: 12px; background: white; border: 1px solid rgba(11,42,68,0.08); text-align: center; padding: 16px; }
-
 .analytics-card { border-radius: 8px; background: #f8f9ff; border: 1px solid #e0e0e0; }
 .analytics-label { font-size: 12px; color: #666; margin-bottom: 4px; }
 .analytics-value { font-size: 18px; font-weight: 700; color: #0B2044; }
-
 @media (max-width: 600px) {
   .visualizations-view { padding: 0 16px; }
   .action-buttons { flex-direction: column; }

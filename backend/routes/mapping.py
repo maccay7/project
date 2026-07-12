@@ -143,6 +143,7 @@ def mapping_routes(app):
         file_columns = payload.get('file_columns', [])
         required_columns = payload.get('required_columns', [])
         mapping_type = payload.get('mapping_type', 'manual')
+        session_id = payload.get('session_id')
         
         if not dataset_id or not instrument_type:
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
@@ -152,13 +153,23 @@ def mapping_routes(app):
         if mapping_id:
             try:
                 from routes.data_processing import get_dataset_data
-                from routes.calculations import calculate_data, normalize_instrument_type
+                from routes.calculations import calculate_data, normalize_instrument_type, save_calculation
                 
                 dataset_data = get_dataset_data(dataset_id)
                 if dataset_data and dataset_data.get('data'):
                     mapped_data = apply_column_mapping(dataset_data['data'], column_mapping)
                     inst_type = normalize_instrument_type(instrument_type)
                     calc_result = calculate_data(mapped_data, inst_type)
+                    
+                    # Save calculation with session_id for tracking
+                    if session_id:
+                        save_calculation(
+                            inst_type, 
+                            {'data': mapped_data, 'column_mapping': column_mapping}, 
+                            calc_result, 
+                            dataset_id=dataset_id, 
+                            session_id=session_id
+                        )
                     
                     return jsonify({
                         'success': True,

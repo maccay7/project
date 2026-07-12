@@ -44,7 +44,9 @@
                     <div class="session-row-name">{{ session.name }}</div>
                     <div class="session-row-meta">{{ formatDate(session.date) }}</div>
                   </div>
-                  <div class="session-row-stats" @click.stop="openInstrumentModal(session.id)" style="cursor: pointer;"><span>{{ getInstrumentCount(session) }}/3 instruments</span></div>
+                  <div class="session-row-stats" @click.stop="openInstrumentModal(session.id)" style="cursor: pointer;">
+                    <span>{{ getInstrumentCount(session) }}/3 instruments</span>
+                  </div>
                   <div class="session-row-status" :class="session.status">{{ session.status === 'completed' ? '✓' : '⟳' }}</div>
                   <button class="version-btn" @click.stop="openVersionModal(session.id)">
                     <v-icon size="12">mdi-history</v-icon>
@@ -276,7 +278,6 @@ const totalSessions = computed(() => sessions.value.length)
 const completedSessions = computed(() => sessions.value.filter(s => s.status === 'completed').length)
 const inProgressSessions = computed(() => sessions.value.filter(s => s.status === 'in-progress').length)
 
-// KPI stats – consume from backend API as single source of truth
 const backendKpiData = ref(null)
 const kpiStats = computed(() => {
   if (backendKpiData.value) {
@@ -286,7 +287,6 @@ const kpiStats = computed(() => {
       { title: 'Portfolio Total', value: formatCurrency(backendKpiData.value.portfolio_total || 0), icon: 'mdi-cash', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
     ]
   }
-  // Fallback to local computation if backend data not available
   const totalInstruments = sessions.value.reduce((sum, s) => sum + (s.instrument_count || 0), 0)
   const portfolioTotal = sessions.value.reduce((sum, s) => sum + (s.total_value || 0), 0)
   return [
@@ -301,7 +301,6 @@ const activeInstrumentCount = computed(() => {
   return activeSession.value.instrument_count || 0
 })
 
-// Filtered versions for the modal
 const filteredVersions = computed(() => {
   const versions = selectedSessionForVersions.value?.versions || []
   const q = versionSearchQuery.value.toLowerCase()
@@ -348,7 +347,6 @@ async function refreshDashboard() {
   }
 }
 
-// ===== FIX: Force refresh of a specific session =====
 async function refreshSession(sessionId) {
   try {
     const session = await sessionManager.getSession(sessionId)
@@ -440,6 +438,7 @@ async function openVersionModal(sessionId) {
       if (!session.versions || session.versions.length === 0) {
         const res = await api.versionAPI.getVersions(sessionId)
         session.versions = res || []
+        await sessionManager.updateSession(sessionId, { versions: session.versions })
       }
       selectedSessionForVersions.value = session
       versionSearchQuery.value = ''
@@ -463,38 +462,37 @@ async function openInstrumentModal(sessionId) {
     if (session) {
       selectedSessionForInstruments.value = session
       const instruments = []
-      const workflows = session.instrument_workflows || session.instrumentWorkflow || {}
-      console.log('Instrument workflows for session:', workflows)
-      if (workflows && typeof workflows === 'object') {
-        Object.keys(workflows).forEach(key => {
-          const workflow = workflows[key]
-          if (workflow && (workflow.cleanedData?.length > 0 || workflow.data?.length > 0 || workflow.calculations)) {
-            let instrumentName = workflow.instrumentName || workflow.uploadedFile || key
-            if (instrumentName && instrumentName.includes('.')) {
-              instrumentName = instrumentName.split('.')[0]
-            }
-            instruments.push({
-              instrument_type: key,
-              instrument_name: instrumentName || 'Unnamed',
-              status: 'Saved',
-              saved_at: workflow.sessionSavedAt || session.updated_at || Date.now(),
-              version_count: session.version_count || 0,
-              has_data: true
-            })
-          }
-        })
-      }
-      if (session.instrument_count > 0 && instruments.length === 0) {
-        const instrumentTypes = ['money-market', 'bonds', 'tbills']
-        for (let i = 0; i < Math.min(session.instrument_count, 3); i++) {
+      const workflows = session.instrumentWorkflow || {}
+      const instrumentKeys = ['money-market', 'bonds', 'tbills']
+      for (const key of instrumentKeys) {
+        const wf = workflows[key]
+        if (wf && (wf.cleanedData?.length > 0 || wf.rawData?.length > 0 || wf.data?.length > 0 || wf.calculations)) {
+          let instrumentName = wf.instrumentName || key
+          if (instrumentName.includes('.')) instrumentName = instrumentName.split('.')[0]
           instruments.push({
-            instrument_type: instrumentTypes[i] || 'unknown',
-            instrument_name: `Instrument ${i + 1}`,
+            instrument_type: key,
+            instrument_name: instrumentName || 'Unnamed',
             status: 'Saved',
-            saved_at: session.updated_at || Date.now(),
+            saved_at: wf.sessionSavedAt || session.updated_at || Date.now(),
             version_count: session.version_count || 0,
             has_data: true
           })
+        }
+      }
+      if (instruments.length === 0 && session.instrument_count > 0) {
+        const existingVersions = session.versions || []
+        const seen = new Set()
+        for (const v of existingVersions) {
+          if (v.instrument && !seen.has(v.instrument)) {
+            seen.add(v.instrument)
+            instruments.push({
+              instrument_type: v.instrument,
+              instrument_name: v.instrument,
+              status: 'Saved',
+              saved_at: v.timestamp,
+              version_count: 1
+            })
+          }
         }
       }
       sessionInstruments.value = instruments
@@ -592,18 +590,20 @@ onMounted(async () => {
     localStorage.setItem(ACTIVE_KEY, activeSession.value.id)
   }
 
-  // Listen for external updates (from instrument pages)
-  window.addEventListener('session-updated', async (event) => {
+  const handleSessionUpdate = async (event) => {
     const { sessionId } = event.detail || {}
     if (sessionId) {
       await refreshSession(sessionId)
       await refreshDashboard()
+    } else {
+      await refreshDashboard()
     }
-  })
-})
+  }
+  window.addEventListener('session-updated', handleSessionUpdate)
 
-onBeforeUnmount(() => {
-  window.removeEventListener('session-updated', () => {})
+  onBeforeUnmount(() => {
+    window.removeEventListener('session-updated', handleSessionUpdate)
+  })
 })
 </script>
 

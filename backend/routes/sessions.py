@@ -57,7 +57,7 @@ def sessions_routes(app):
         instrument_count = payload.get('instrument_count', 0)
         version_count = payload.get('version_count', 0)
         
-        # ===== FIX: Compute instrument_count if not provided or zero =====
+        # Compute instrument_count if not provided or zero
         if not instrument_count and instrument_workflows and isinstance(instrument_workflows, dict):
             instrument_count = 0
             for key in ['money-market', 'bonds', 'tbills']:
@@ -68,7 +68,6 @@ def sessions_routes(app):
                     (wf.get('calculations') and wf.get('calculations', {}).get('totalValue', 0) > 0)
                 ):
                     instrument_count += 1
-            # If still zero, check legacy payload
             if instrument_count == 0 and legacy_payload:
                 for key in ['money-market', 'bonds', 'tbills']:
                     if legacy_payload.get(key):
@@ -107,13 +106,13 @@ def sessions_routes(app):
             ))
             conn.commit()
             
-            # ===== FIX: Create version entry if requested =====
+            # Create version if requested
             if payload.get('create_version', False) and payload.get('instrument_type'):
                 from routes.version_history import create_version, get_next_version_number
                 next_version = get_next_version_number(session_id)
                 version_id = create_version(
                     session_id, next_version, payload['instrument_type'], 
-                    payload.get('change_summary'),
+                    payload.get('change_summary', 'Saved from instrument page'),
                     payload.get('dataset_snapshot'), 
                     payload.get('mapping_snapshot'),
                     payload.get('calculation_snapshot'),
@@ -123,7 +122,6 @@ def sessions_routes(app):
                 )
                 if version_id:
                     print(f"✅ Created version {next_version} for session {session_id}")
-                    # version_count already updated in create_version, but we update again to be safe
                     cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (next_version, session_id))
                     conn.commit()
             
@@ -160,7 +158,6 @@ def sessions_routes(app):
             conn.close()
             if not row:
                 return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
-            # Parse JSON fields
             versions = []
             if row.get('versions'):
                 try:
@@ -230,10 +227,8 @@ def sessions_routes(app):
                         instrument_workflows = json.loads(row['instrument_workflows']) if isinstance(row['instrument_workflows'], str) else row['instrument_workflows']
                     except:
                         pass
-                # Use instrument_count from column if available, else calculate
                 instrument_count = row.get('instrument_count', 0)
                 if instrument_count == 0 and instrument_workflows:
-                    # Calculate from workflows
                     for key in ['money-market', 'bonds', 'tbills']:
                         wf = instrument_workflows.get(key)
                         if wf and (

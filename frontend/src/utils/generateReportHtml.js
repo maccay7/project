@@ -1,5 +1,5 @@
 /** Shared IFRS-style report HTML generator used by Reports pages. */
-export function generateReportHtml(data, instrument, session, date, valuationDate) {
+export function generateReportHtml(data, instrument, session, date, valuationDate, chartImageData = '') {
   const valDate = valuationDate || new Date().toISOString().split('T')[0]
   const totalValue = data.reduce((s, r) => s + (parseFloat(r.FaceValue || r.Amount || r.Principal || 0)), 0)
   const totalInterest = data.reduce((s, r) => s + (parseFloat(r.InterestEarned || r.Interest || 0)), 0)
@@ -7,9 +7,9 @@ export function generateReportHtml(data, instrument, session, date, valuationDat
   const avgRate = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0
 
   const instType = instrument.toLowerCase()
-  let methodology = ''
-  let formulas = ''
-  let assumptions = ''
+  let methodology = '',
+    formulas = '',
+    assumptions = ''
   if (instType.includes('money') || instType === 'money-market') {
     methodology = 'Money Market Instruments: Short-term debt instruments valued using discounted cash flow methodology.'
     formulas = 'Fair value = F / (1 + r·t/365) where F = Face value, r = annualized interest rate, t = days to maturity.'
@@ -35,18 +35,14 @@ export function generateReportHtml(data, instrument, session, date, valuationDat
     const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
     const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
     const ticker = item.BBTicker || item.Ticker || item.Security || 'N/A'
-    instrumentRows += `<tr>
-      <td>${name}</td>
-      <td>${ticker}</td>
-      <td>${faceValue.toFixed(2)}</td>
-      <td>${rate.toFixed(4)}%</td>
-      <td>${term.toFixed(2)}</td>
-      <td>${valDate}</td>
-    </tr>`
+    instrumentRows += `<tr><td>${name}</td><td>${ticker}</td><td>${faceValue.toFixed(2)}</td><td>${rate.toFixed(4)}%</td><td>${term.toFixed(2)}</td><td>${valDate}</td></tr>`
   })
 
   const logoUrl = '/DuraCapital logo.png'
   const backgroundCoverUrl = '/reportbackground.png'
+  const chartHtml = chartImageData ?
+    `<div class="chart-container"><img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" /><p class="chart-caption">FRED Yield Curve – ${instrument}</p></div>` :
+    '<p>Yield curve chart not available.</p>'
 
   return `<!DOCTYPE html>
 <html>
@@ -82,6 +78,9 @@ export function generateReportHtml(data, instrument, session, date, valuationDat
     .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999; text-align: center; }
     .reference-list { list-style: none; padding: 0; }
     .reference-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
+    .chart-container { margin: 20px 0; text-align: center; }
+    .chart-container img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid #e0e0e0; }
+    .chart-caption { font-size: 12px; color: #666; margin-top: 5px; }
     @media print { .page { padding: 40px 50px; width: 210mm; } .cover-page { padding: 40px 50px; width: 210mm; } }
   </style>
 </head>
@@ -101,49 +100,19 @@ export function generateReportHtml(data, instrument, session, date, valuationDat
   <div class="toc-item"><span>Methodology</span><span>3</span></div>
   <div class="toc-item"><span>Market Inputs</span><span>4</span></div>
   <div class="toc-item"><span>Results</span><span>5</span></div>
-  <div class="toc-item"><span>Conclusion</span><span>6</span></div>
-  <div class="toc-item"><span>Appendix</span><span>7</span></div>
-  <div class="toc-item"><span>Reference</span><span>8</span></div>
+  <div class="toc-item"><span>Yield Curve</span><span>6</span></div>
+  <div class="toc-item"><span>Conclusion</span><span>7</span></div>
+  <div class="toc-item"><span>Appendix</span><span>8</span></div>
+  <div class="toc-item"><span>Reference</span><span>9</span></div>
 </div>
 <div class="page"><h1 class="section-title">Introduction</h1><p>Dura Capital (Private) Limited was contracted to provide a fair valuation assessment report of the following ${instrument} instruments as at ${valDate}.</p><ul style="margin:20px 0 20px 30px;"><li>${instrument} instruments</li><li>Valuation as at ${valDate}</li><li>${data.length} individual instruments assessed</li></ul></div>
 <div class="page"><h1 class="section-title">Executive Summary</h1><div class="executive-summary"><p><strong>Key Findings:</strong></p><ul style="margin-left:20px;"><li>Total Portfolio Value: <span class="highlight">$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li><li>Number of Instruments: <span class="highlight">${data.length}</span></li><li>Average Rate: <span class="highlight">${avgRate.toFixed(2)}%</span></li><li>Valuation Date: <span class="highlight">${valDate}</span></li></ul><p><strong>Valuation Approach:</strong> ${methodology}</p></div></div>
 <div class="page"><h1 class="section-title">Methodology</h1><div class="methodology-box"><p>${methodology}</p><div class="formula">${formulas}</div><p><strong>Assumptions:</strong> ${assumptions}</p></div></div>
 <div class="page"><h1 class="section-title">Market Inputs</h1><p>Rates sourced from FRED for ${valDate}.</p></div>
 <div class="page"><h1 class="section-title">Results</h1><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Total Portfolio Value</td><td>$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Number of Instruments</td><td>${data.length}</td></tr><tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr><tr><td>Total Interest Earned</td><td>$${totalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Valuation Date</td><td>${valDate}</td></tr></tbody></table></div>
+<div class="page"><h1 class="section-title">Yield Curve</h1><p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>${chartHtml}</div>
 <div class="page"><h1 class="section-title">Conclusion</h1><p>The valuation assessment is in accordance with IFRS 13 fair value measurement principles as at ${valDate}.</p></div>
 <div class="page"><h1 class="section-title">Appendix: Detailed Instrument Data</h1><table class="appendix-table"><thead><tr><th>Instrument Name</th><th>BB Ticker</th><th>Face Value ($)</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead><tbody>${instrumentRows}</tbody></table></div>
 <div class="page"><h1 class="section-title">Reference</h1><ul class="reference-list"><li>FRED – Federal Reserve Economic Data</li><li>IFRS 13: Fair Value Measurement</li><li>IFRS 9: Financial Instruments</li></ul><div class="footer"><p>© ${new Date().getFullYear()} Dura Capital (Private) Limited. Report generated ${date || valDate}.</p></div></div>
-</body>
-</html>`
-}
-
-/** Resolve active session from sessionManager + localStorage fallbacks. */
-export function resolveActiveSession(sessionManager) {
-  let session = sessionManager.getActiveSession()
-  if (!session) {
-    const sid = sessionManager.getActiveSessionId()
-    if (sid) session = sessionManager.getSession(sid)
-  }
-  if (!session) {
-    const all = sessionManager.getAllSessions()
-    session = all[0] || null
-  }
-  return session
-}
-
-/** Load instrument cleaned data from workflow or localStorage keys. */
-export function loadInstrumentData(sessionManager, sessionId, instrument) {
-  const wf = sessionManager.getInstrumentWorkflow(sessionId, instrument)
-  if (wf?.cleanedData?.length) return wf.cleanedData
-  const cleanKey = `${instrument}_session_${sessionId}_clean`
-  const savedClean = localStorage.getItem(cleanKey)
-  if (savedClean) {
-    try { return JSON.parse(savedClean) } catch { /* ignore */ }
-  }
-  const rawKey = `${instrument}_session_${sessionId}_raw`
-  const savedRaw = localStorage.getItem(rawKey)
-  if (savedRaw) {
-    try { return JSON.parse(savedRaw) } catch { /* ignore */ }
-  }
-  return []
+</body></html>`
 }

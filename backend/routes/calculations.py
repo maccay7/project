@@ -52,7 +52,7 @@ def save_calculation(instrument_type, input_data, result_data, dataset_id=None, 
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
         
-        # Also ensure a versions table for version tracking
+        # Ensure version_history table exists
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS version_history (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -83,10 +83,10 @@ def save_calculation(instrument_type, input_data, result_data, dataset_id=None, 
         calculation_id = cursor.lastrowid
         print(f"✅ Calculation saved with ID: {calculation_id}")
         
-        # ===== FIX: Update session instrument_count =====
+        # Update session instrument_count and create version
         if session_id:
             try:
-                # Get current session from ui_sessions
+                # Get current session
                 cursor.execute(
                     "SELECT instrument_workflows, version_count FROM ui_sessions WHERE session_id = %s",
                     (session_id,)
@@ -99,7 +99,6 @@ def save_calculation(instrument_type, input_data, result_data, dataset_id=None, 
                     except:
                         instrument_workflows = {}
                     
-                    # Update the instrument_workflows with calculation data
                     if instrument_type not in instrument_workflows:
                         instrument_workflows[instrument_type] = {}
                     instrument_workflows[instrument_type]['calculations'] = result_data
@@ -123,7 +122,31 @@ def save_calculation(instrument_type, input_data, result_data, dataset_id=None, 
                         (json.dumps(instrument_workflows), instrument_count, session_id)
                     )
                     conn.commit()
-                    print(f"✅ Session {session_id} updated: instrument_count={instrument_count}")
+                    
+                    # ===== FIX: Create version record =====
+                    try:
+                        from routes.version_history import create_version, get_next_version_number
+                        next_version = get_next_version_number(session_id)
+                        version_id = create_version(
+                            session_id,
+                            next_version,
+                            instrument_type,
+                            f"Calculated {instrument_type}",
+                            None,  # dataset_snapshot
+                            None,  # mapping_snapshot
+                            result_data,  # calculation_snapshot
+                            None,  # portfolio_snapshot
+                            None,  # report_snapshot
+                            None   # user_id
+                        )
+                        if version_id:
+                            print(f"✅ Created version {next_version} for session {session_id}")
+                            cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (next_version, session_id))
+                            conn.commit()
+                    except Exception as e:
+                        print(f"⚠️ Failed to create version: {e}")
+                    
+                    print(f"✅ Session {session_id} updated: instrument_count={instrument_count}, version_count={session_row.get('version_count', 0) + 1}")
             except Exception as e:
                 print(f"⚠️ Failed to update session: {e}")
         
@@ -273,17 +296,23 @@ def generate_instrument_summary(session_id, instrument_type=None):
         summary_rows = []
         for row in rows:
             result_data = row.get('result_data')
+            input_data = row.get('input_data')
             try:
                 result_data = json.loads(result_data) if isinstance(result_data, str) else result_data
+                input_data = json.loads(input_data) if isinstance(input_data, str) else input_data
             except Exception:
                 result_data = {}
+                input_data = {}
             
             inst_type = row.get('instrument_type')
             calculations = result_data.get('calculations', [])
             
+            instrument_name = input_data.get('instrument_name') or input_data.get('Instrument Name') or 'Instrument'
+            
             if calculations:
                 for calc in calculations:
                     summary_row = {
+                        'Instrument Name': calc.get('instrument_name') or instrument_name,
                         'Instrument Type': inst_type,
                         'Calculation ID': row.get('id'),
                         'Created At': row.get('created_at').isoformat() if row.get('created_at') else None,
@@ -292,6 +321,7 @@ def generate_instrument_summary(session_id, instrument_type=None):
                     summary_rows.append(summary_row)
             else:
                 summary_row = {
+                    'Instrument Name': instrument_name,
                     'Instrument Type': inst_type,
                     'Calculation ID': row.get('id'),
                     'Created At': row.get('created_at').isoformat() if row.get('created_at') else None,
@@ -305,6 +335,7 @@ def generate_instrument_summary(session_id, instrument_type=None):
                     'Effective Annual Rate': result_data.get('effectiveAnnualRate', 0),
                     'Avg Days to Maturity': result_data.get('avgDaysToMaturity', 0),
                     'Total Principal': result_data.get('totalPrincipal', 0),
+                    'FRED Benchmark': result_data.get('fred', {}).get('benchmark_rate') if result_data.get('fred') else None
                 }
                 if inst_type == 'bonds':
                     summary_row.update({
@@ -364,15 +395,20 @@ def generate_portfolio_summary(session_id):
         
         for row in rows:
             result_data = row.get('result_data')
+            input_data = row.get('input_data')
             try:
                 result_data = json.loads(result_data) if isinstance(result_data, str) else result_data
+                input_data = json.loads(input_data) if isinstance(input_data, str) else input_data
             except Exception:
                 result_data = {}
+                input_data = {}
             
             inst_type = row.get('instrument_type')
             total_value = result_data.get('totalValue', 0)
             instrument_count = result_data.get('instrumentCount', 0)
             avg_rate = result_data.get('avgRate', 0)
+            
+            instrument_name = input_data.get('instrument_name') or input_data.get('Instrument Name') or 'Instrument'
             
             portfolio_total += total_value
             instrument_counts[inst_type] = instrument_counts.get(inst_type, 0) + instrument_count
@@ -381,6 +417,7 @@ def generate_portfolio_summary(session_id):
             if calculations:
                 for calc in calculations:
                     portfolio_row = {
+                        'Instrument Name': calc.get('instrument_name') or instrument_name,
                         'Instrument Type': inst_type,
                         'Session ID': session_id,
                         'Calculation ID': row.get('id'),
@@ -390,6 +427,7 @@ def generate_portfolio_summary(session_id):
                     portfolio_rows.append(portfolio_row)
             else:
                 portfolio_row = {
+                    'Instrument Name': instrument_name,
                     'Instrument Type': inst_type,
                     'Session ID': session_id,
                     'Calculation ID': row.get('id'),
@@ -400,6 +438,7 @@ def generate_portfolio_summary(session_id):
                     'Weighted Avg Rate': result_data.get('weightedAvgRate', 0),
                     'Total Interest': result_data.get('totalInterest', 0),
                     'Total Principal': result_data.get('totalPrincipal', 0),
+                    'FRED Benchmark': result_data.get('fred', {}).get('benchmark_rate') if result_data.get('fred') else None
                 }
                 if inst_type == 'bonds':
                     portfolio_row['Avg Coupon Rate'] = result_data.get('avgCouponRate', 0)
@@ -475,7 +514,7 @@ def calculations_routes(app):
             result = calculate_data(data, inst_type)
             attach_fred_to_calculation(result, inst_type, maturity, country, currency)
             
-            # Save calculation with session_id for retrieval – this updates instrument_count
+            # Save calculation with session_id for retrieval – this updates instrument_count and creates version
             save_calculation(inst_type, data, result, dataset_id, session_id)
             
             # Get updated instrument summary from backend

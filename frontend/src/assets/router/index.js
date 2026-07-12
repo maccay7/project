@@ -60,23 +60,11 @@ const routes = [
     component: () => import('@/views/SettingsView.vue'),
     meta: { requiresAuth: true }
   },
-  // NEW INSTRUMENT ROUTES
   {
-    path: '/instrument/money-market',
-    name: 'money-market',
-    component: () => import('@/views/MoneyMarket.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/instrument/bonds',
-    name: 'bonds',
-    component: () => import('@/views/BondsInstrument.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/instrument/tbills',
-    name: 'tbills',
-    component: () => import('@/views/TreasuryBills.vue'),
+    // SINGLE UNIFIED INSTRUMENT PAGE – handles all three instruments
+    path: '/instrument/:type',
+    name: 'instrument',
+    component: () => import('@/views/InstrumentView.vue'),
     meta: { requiresAuth: true }
   },
   {

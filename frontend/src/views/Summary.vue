@@ -469,7 +469,7 @@ async function loadSummary() {
 
     const sid = activeSession.value.id
     
-    // 2. Try to get portfolio summary from backend first
+    // 2. Try to get portfolio summary from backend
     let portfolioData = null
     try {
       const portfolioResponse = await api.calculationsAPI.getPortfolioSummary(sid)
@@ -778,29 +778,22 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* ===== SUMMARY PAGE STYLES ===== */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
-
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
 .subtitle { color: #666; margin: 0; }
-
 .session-chip { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 6px 12px; background: #e8ecf1; border-radius: 20px; font-size: 13px; }
 .session-chip.warn { background: #fff3e0; color: #e65100; }
-
 .grand-pill { text-align: right; padding: 20px 28px; background: linear-gradient(135deg, #0B2044, #1E88E5); border-radius: 14px; color: white; box-shadow: 0 8px 24px rgba(11,32,68,0.2); }
 .pill-label { display: block; font-size: 12px; opacity: 0.9; }
 .pill-amount { font-size: 30px; font-weight: 700; display: block; }
 .pill-sub { font-size: 12px; opacity: 0.85; }
-
 .kpi-strip { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }
 .kpi-mini { display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); flex: 1; min-width: 160px; }
 .kpi-mini-val { display: block; font-weight: 700; color: #0B2044; font-size: 16px; }
 .kpi-mini-lbl { font-size: 12px; color: #666; }
-
 .section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
 .section-header h2 { color: #0B2044; margin: 0; font-size: 20px; }
-
 .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
 .summary-card { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(11,32,68,0.1); background: white; }
 .card-top { padding: 20px; color: white; display: flex; align-items: center; gap: 12px; }
@@ -808,36 +801,29 @@ onMounted(async () => {
 .card-body { padding: 16px; }
 .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 14px; }
 .stat-row.highlight strong { color: #0B2044; font-size: 16px; }
-
 .status-badge { margin-top: 12px; padding: 8px 12px; border-radius: 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .status-badge.completed { background: #e8f5e9; color: #2e7d32; }
 .status-badge.in-progress { background: #e3f2fd; color: #1565c0; }
 .status-badge.pending { background: #f5f5f5; color: #757575; }
 .status-badge.small { padding: 4px 10px; font-size: 11px; }
-
 .btn-open-inst { margin-top: 12px; width: 100%; padding: 10px; background: #0B2044; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .btn-open-inst:hover { background: #1a3a6e; }
-
 .action-buttons { display: flex; gap: 16px; justify-content: center; margin-top: 32px; }
 .btn-primary, .btn-secondary { padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; }
 .btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; }
 .btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; }
-
 .detail-section { margin-top: 32px; background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
 .detail-header h3 { color: #0B2044; margin: 0; }
 .detail-actions { display: flex; gap: 8px; }
-
 .btn-view-details { background: #0B2044; color: white; border: none; padding: 4px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .btn-view-details:hover { background: #1a3a6e; }
-
 .export-all-section { display: flex; justify-content: center; gap: 16px; margin: 32px 0 20px; flex-wrap: wrap; }
 .btn-export-all, .btn-view-portfolio { border: none; padding: 10px 24px; border-radius: 40px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: all 0.3s; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
 .btn-export-all { background: #4CAF50; color: white; }
 .btn-export-all:hover { background: #45a049; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
 .btn-view-portfolio { background: #0B2044; color: white; }
 .btn-view-portfolio:hover { background: #1a3a6e; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
-
 .excel-dialog-title-white {
   background: white;
   color: #0B2044;
@@ -880,16 +866,13 @@ onMounted(async () => {
   background: #f0f0f0;
   color: #0B2044;
 }
-
 .btn-close-dialog { background: transparent; border: none; color: #666; cursor: pointer; padding: 8px; border-radius: 50%; }
 .btn-close-dialog:hover { background: #f0f0f0; color: #0B2044; }
-
 .combined-excel-body { padding: 16px 24px; max-height: calc(100vh - 140px); overflow-y: auto; background: #f9fafc; }
 .combined-section { background: white; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
 .combined-section-title { color: #0B2044; font-size: 16px; font-weight: 600; margin: 0 0 12px 0; display: flex; align-items: center; gap: 10px; }
 .empty-note { font-weight: normal; color: #999; font-size: 14px; }
 .empty-placeholder { color: #999; padding: 12px 0; font-style: italic; text-align: center; }
-
 .excel-table-wrapper { overflow: auto; border: 1px solid #d4d4d4; border-radius: 4px; background: white; max-height: 500px; margin: 16px 0; }
 .excel-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #000; }
 .excel-table thead { position: sticky; top: 0; z-index: 10; }
@@ -897,15 +880,12 @@ onMounted(async () => {
 .excel-table td { border: 1px solid #d4d4d4; padding: 8px 14px; text-align: left; font-size: 13px; font-variant-numeric: tabular-nums; }
 .excel-table tbody tr:nth-child(even) { background: #f9fafc; }
 .excel-table tbody tr:hover { background: #e8f0fe; }
-
 .sortable-header { cursor: pointer; transition: background 0.2s; }
 .sortable-header:hover { background: #1a3a6e; }
 .sort-indicator { margin-left: 6px; font-size: 10px; color: #fff; }
-
 .export-instrument-select { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .export-checkbox { display: flex; align-items: center; gap: 10px; font-size: 16px; cursor: pointer; }
 .warning-badge { background: #ffebee; color: #c62828; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: 8px; }
-
 .distribution-section { background: white; border-radius: 12px; padding: 20px; margin: 30px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 .distribution-section h3 { color: #0B2044; margin-bottom: 16px; }
 .distribution-bars { display: flex; flex-direction: column; gap: 12px; }
@@ -914,7 +894,6 @@ onMounted(async () => {
 .dist-track { flex: 1; height: 20px; background: #e8ecf1; border-radius: 10px; overflow: hidden; }
 .dist-fill { height: 100%; border-radius: 10px; transition: width 0.5s ease; }
 .dist-percent { width: 50px; text-align: right; font-weight: 600; color: #0B2044; }
-
 .popup-footer {
   display: flex;
   justify-content: flex-end;
@@ -927,7 +906,6 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 .valuation-date-footer { color: #666; font-size: 13px; }
-
 @media (max-width: 768px) {
   .summary-page { padding: 16px; }
   .hero-header { flex-direction: column; }

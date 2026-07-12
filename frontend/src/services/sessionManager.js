@@ -13,7 +13,6 @@ class SessionManager {
     this.loadCache()
   }
 
-  // ---- Local cache ----
   loadCache() {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
@@ -194,6 +193,7 @@ class SessionManager {
         payload: this.sessions[idx],
         instrument_workflows: this.sessions[idx].instrumentWorkflow || {},
         versions: this.sessions[idx].versions || [],
+        instrument_count: this.sessions[idx].instrument_count || 0,
       })
     } catch (err) {
       console.error('Failed to update session on backend:', err)
@@ -222,22 +222,18 @@ class SessionManager {
   // ---- Workflow management ----
 
   async saveInstrumentWorkflow(sessionId, instrumentKey, workflow) {
-    // First, ensure we have the latest session
     const session = await this.getSession(sessionId)
     if (!session) return
 
-    // Update the workflow
     const iw = { ...(session.instrumentWorkflow || {}), [instrumentKey]: workflow }
-    // Compute the instrument count from the workflows
     const instrumentCount = this.countSessionInstrumentsFromWorkflows(iw)
 
-    // Update the session with new workflow and count
     await this.updateSession(sessionId, {
       instrumentWorkflow: iw,
       instrument_count: instrumentCount,
     })
 
-    // Also ensure the backend gets the updated instrument_count
+    // Also ensure backend gets updated
     try {
       await api.sessionsAPI.save({
         id: sessionId,
@@ -253,7 +249,6 @@ class SessionManager {
       console.error('Failed to sync workflow to backend:', err)
     }
 
-    // After saving, refresh the session from backend to ensure consistency
     await this.getSession(sessionId)
   }
 
@@ -276,7 +271,7 @@ class SessionManager {
       ...version,
     }
     versions.unshift(record)
-    await this.updateSession(sessionId, { versions })
+    await this.updateSession(sessionId, { versions, version_count: versions.length })
 
     try {
       await api.versionAPI.create(
