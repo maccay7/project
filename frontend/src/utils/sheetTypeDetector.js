@@ -1,327 +1,506 @@
 // utils/sheetTypeDetector.js
+
 /**
- * Detects whether a worksheet contains multi-instrument or single-instrument data
- * and provides appropriate extraction logic for each type.
+ * Utility functions for detecting sheet type (single vs multi-instrument)
+ * and extracting instrument names and values from Excel sheets.
+ * 
+ * 🔥 FIXED: Improved detection with better pattern matching,
+ * enhanced extraction, and confidence scoring.
  */
 
 /**
- * Detects the sheet type based on data structure
- * @param {Array} data - The sheet data as array of objects
- * @param {string} instrumentType - The instrument type (Money Market, Bonds, Treasury Bills)
- * @returns {Object} - { type: 'multi' | 'single', confidence: number, reason: string }
+ * Detect whether a sheet contains a single instrument or multiple instruments
+ * @param {Array} data - Sheet data as array of objects
+ * @param {string} instrumentType - Type of instrument (money-market, bonds, tbills)
+ * @returns {Object} { type: 'single' | 'multi', data: any, confidence: number }
  */
-export function detectSheetType(data, instrumentType) {
-  if (!data || data.length === 0) {
-    return { type: 'single', confidence: 0.5, reason: 'Empty data, defaulting to single-instrument' }
+export function detectSheetType(data, instrumentType = 'money-market') {
+  if (!data || !data.length) {
+    return { type: 'single', data: [], confidence: 0 }
   }
 
   const rowCount = data.length
-  const columnCount = Object.keys(data[0] || {}).length
-
-  // Check for tabular structure (multi-instrument indicators)
-  const hasTabularStructure = checkTabularStructure(data)
-  const hasFieldValuePairStructure = checkFieldValuePairStructure(data)
-  const hasMultipleTables = checkMultipleTables(data)
-  const hasRepeatedHeaders = checkRepeatedHeaders(data)
-  const hasInstrumentLabels = checkInstrumentLabels(data, instrumentType)
-
-  // Scoring system
-  let multiScore = 0
-  let singleScore = 0
-
-  // Multi-instrument indicators
-  if (hasTabularStructure) multiScore += 3
-  if (hasRepeatedHeaders) multiScore += 2
-  if (hasInstrumentLabels) multiScore += 2
-  if (rowCount > 10 && columnCount > 3) multiScore += 1
-
-  // Single-instrument indicators
-  if (hasFieldValuePairStructure) singleScore += 3
-  if (hasMultipleTables) singleScore += 2
-  if (rowCount < 20 && columnCount <= 2) singleScore += 1
-
-  const totalScore = multiScore + singleScore
-  const confidence = totalScore > 0 ? Math.max(multiScore, singleScore) / totalScore : 0.5
-
-  if (multiScore > singleScore) {
-    return {
-      type: 'multi',
-      confidence,
-      reason: 'Detected tabular structure with multiple instruments'
-    }
-  } else if (singleScore > multiScore) {
-    return {
-      type: 'single',
-      confidence,
-      reason: 'Detected field-value pair or single-instrument structure'
+  const firstRow = data[0] || {}
+  const colCount = Object.keys(firstRow).length
+  const allKeys = new Set()
+  
+  // Collect all unique keys from all rows
+  for (const row of data) {
+    for (const key of Object.keys(row)) {
+      allKeys.add(key.toLowerCase())
     }
   }
+  const uniqueKeyCount = allKeys.size
 
-  // Default to multi-instrument for ambiguous cases
-  return {
-    type: 'multi',
-    confidence: 0.5,
-    reason: 'Ambiguous structure, defaulting to multi-instrument'
+  // 🔥 Check if this is a key-value style (single instrument)
+  // Single instrument sheets typically have: few rows, many columns, sparse data
+  const isKeyValueStyle = rowCount <= 5 && colCount >= 3 && uniqueKeyCount >= 3
+  
+  // Check for repeated headers (multi-instrument indicator)
+  const hasRepeatedHeaders = checkForRepeatedHeaders(data)
+  
+  // Check for blank rows separating instruments
+  const hasBlankSeparators = checkForBlankRows(data)
+  
+  // Check for instrument labels (multi-instrument indicator)
+  const hasInstrumentLabels = checkForLabels(data, ['Instrument', 'Bond', 'T-Bill', 'Money Market', 'Treasury Bill'])
+  
+  // Check if we can find all required fields for a single instrument
+  const requiredFields = getRequiredFieldMappings(instrumentType)
+  const detectedFields = detectFieldsInData(data, requiredFields)
+  const allFieldsFound = requiredFields.every(field => detectedFields[field])
+  const fieldsFoundCount = requiredFields.filter(field => detectedFields[field]).length
+  const fieldMatchRatio = fieldsFoundCount / requiredFields.length
+
+  // 🔥 Enhanced single-instrument detection
+  // If it's key-value style and we found most fields, it's likely single instrument
+  if (isKeyValueStyle && fieldMatchRatio >= 0.6) {
+    return { type: 'single', data, confidence: 0.9 }
   }
+  
+  // If all fields found and data is small, it's single instrument
+  if (allFieldsFound && rowCount <= 5) {
+    return { type: 'single', data, confidence: 0.85 }
+  }
+  
+  // If it has repeated headers or many rows with similar structure, it's multi-instrument
+  if (hasRepeatedHeaders) {
+    return { type: 'multi', data, confidence: 0.9 }
+  }
+  
+  if (hasBlankSeparators && rowCount > 5) {
+    return { type: 'multi', data, confidence: 0.85 }
+  }
+  
+  if (hasInstrumentLabels && rowCount > 3) {
+    return { type: 'multi', data, confidence: 0.8 }
+  }
+  
+  // If we found all fields but there are more than 3 rows, check if rows are similar
+  if (allFieldsFound && rowCount > 3) {
+    const rows = data.map(row => JSON.stringify(row))
+    const uniqueRows = new Set(rows)
+    // If many rows have the same structure (same columns), it's multi-instrument
+    if (uniqueRows.size > 1 && uniqueRows.size < rowCount * 0.8) {
+      return { type: 'multi', data, confidence: 0.7 }
+    }
+    return { type: 'single', data, confidence: 0.75 }
+  }
+  
+  // Default heuristic: small dataset with many columns -> single
+  if (rowCount <= 3 && colCount >= 3) {
+    return { type: 'single', data, confidence: 0.6 }
+  }
+  
+  // Default to multi-instrument for larger datasets
+  if (rowCount > 10) {
+    return { type: 'multi', data, confidence: 0.7 }
+  }
+  
+  return { type: 'multi', data, confidence: 0.6 }
 }
 
 /**
- * Checks if data has tabular structure (typical of multi-instrument sheets)
+ * Check for repeated headers (indicates multi-instrument)
  */
-function checkTabularStructure(data) {
-  if (data.length < 3) return false
-
-  const firstRow = data[0]
-  const keys = Object.keys(firstRow)
-
-  // Check if most rows have similar structure
-  let consistentRows = 0
-  for (let i = 1; i < Math.min(data.length, 10); i++) {
-    const rowKeys = Object.keys(data[i])
-    const overlap = keys.filter(k => rowKeys.includes(k)).length
-    if (overlap >= keys.length * 0.7) {
-      consistentRows++
-    }
-  }
-
-  return consistentRows >= Math.min(data.length - 1, 7) * 0.7
-}
-
-/**
- * Checks if data has field-value pair structure (typical of single-instrument sheets)
- */
-function checkFieldValuePairStructure(data) {
-  if (data.length < 2) return false
-
-  // Look for pattern where first column is label, second is value
-  let fieldValueCount = 0
-  for (let i = 0; i < Math.min(data.length, 10); i++) {
-    const row = data[i]
-    const values = Object.values(row)
-    
-    if (values.length === 2) {
-      const first = values[0]
-      const second = values[1]
-      
-      // Check if first looks like a label (string) and second looks like a value
-      if (typeof first === 'string' && first.length > 0 && 
-          (typeof second === 'number' || (typeof second === 'string' && !isNaN(second)))) {
-        fieldValueCount++
-      }
-    }
-  }
-
-  return fieldValueCount >= Math.min(data.length, 10) * 0.6
-}
-
-/**
- * Checks if data has multiple separate tables (typical of single-instrument with sections)
- */
-function checkMultipleTables(data) {
-  if (data.length < 5) return false
-
-  // Look for blank rows that might separate tables
-  let blankRowCount = 0
-  for (let row of data) {
-    const values = Object.values(row)
-    const isEmpty = values.every(v => v === '' || v === null || v === undefined)
-    if (isEmpty) blankRowCount++
-  }
-
-  return blankRowCount >= 2
-}
-
-/**
- * Checks for repeated headers (multi-instrument indicator)
- */
-function checkRepeatedHeaders(data) {
-  if (data.length < 4) return false
-
+function checkForRepeatedHeaders(data) {
+  if (!data || data.length < 2) return false
+  
   const firstRowKeys = Object.keys(data[0]).map(k => k.toLowerCase())
   let repeatCount = 0
-
-  for (let i = 1; i < data.length; i++) {
+  let totalChecks = 0
+  
+  for (let i = 1; i < Math.min(data.length, 15); i++) {
     const currentKeys = Object.keys(data[i]).map(k => k.toLowerCase())
+    // Skip empty rows
+    if (currentKeys.length === 0) continue
+    
     const matchCount = firstRowKeys.filter(key => currentKeys.includes(key)).length
-    if (matchCount > firstRowKeys.length * 0.7) {
+    const matchRatio = firstRowKeys.length > 0 ? matchCount / firstRowKeys.length : 0
+    
+    totalChecks++
+    if (matchRatio > 0.5) {
       repeatCount++
     }
   }
-
-  return repeatCount >= 2
+  
+  // If more than 40% of rows have similar headers, it's multi-instrument
+  return totalChecks > 0 && repeatCount / totalChecks > 0.4
 }
 
 /**
- * Checks for instrument labels (multi-instrument indicator)
+ * Check for blank rows (indicates multi-instrument)
  */
-function checkInstrumentLabels(data, instrumentType) {
-  const labels = ['Instrument', 'Bond', 'T-Bill', 'Money Market', 'Treasury Bill', 'Security', 'Issuer', 
-                  'Company', 'Name', 'Description', 'Ticker', 'Symbol', 'Entity']
+function checkForBlankRows(data) {
+  let blankCount = 0
+  for (const row of data) {
+    const values = Object.values(row)
+    const isEmpty = values.every(val => val === '' || val === null || val === undefined)
+    if (isEmpty) blankCount++
+  }
+  return blankCount >= 2
+}
+
+/**
+ * Check for instrument labels
+ */
+function checkForLabels(data, labels) {
   const lowerLabels = labels.map(l => l.toLowerCase())
   let labelCount = 0
-
-  for (let row of data) {
+  
+  for (const row of data) {
     const values = Object.values(row)
-    values.forEach(val => {
+    for (const val of values) {
       if (val && typeof val === 'string') {
         const lowerVal = val.toLowerCase()
         if (lowerLabels.some(label => lowerVal.includes(label))) {
           labelCount++
         }
       }
-    })
+    }
   }
-
+  
   return labelCount >= 2
 }
 
 /**
- * Detects instrument name column in multi-instrument data
- * @param {Array} data - The sheet data
- * @returns {Object} - { columnName: string, confidence: number }
+ * Detect which required fields are present in the data
  */
-export function detectInstrumentNameColumn(data) {
-  if (!data || data.length < 2) return { columnName: null, confidence: 0 }
-
-  const headers = Object.keys(data[0])
-  const nameKeywords = ['name', 'instrument', 'company', 'issuer', 'security', 'entity', 'ticker', 'symbol', 'description']
+function detectFieldsInData(data, requiredFields) {
+  const result = {}
+  const allKeys = new Set()
   
-  let bestMatch = null
-  let bestConfidence = 0
-
-  for (const header of headers) {
-    const lowerHeader = header.toLowerCase()
-    let confidence = 0
-    
-    // Direct match
-    if (nameKeywords.some(keyword => lowerHeader === keyword)) {
-      confidence = 0.9
-    }
-    // Partial match
-    else if (nameKeywords.some(keyword => lowerHeader.includes(keyword))) {
-      confidence = 0.7
-    }
-    // Check if column contains varied string values (likely names)
-    else {
-      const uniqueValues = new Set()
-      for (let i = 0; i < Math.min(data.length, 20); i++) {
-        const val = data[i][header]
-        if (val && typeof val === 'string' && val.length > 2) {
-          uniqueValues.add(val)
-        }
-      }
-      // If column has many unique string values, it might be names
-      if (uniqueValues.size >= 3 && uniqueValues.size <= data.length * 0.8) {
-        confidence = 0.5
-      }
-    }
-
-    if (confidence > bestConfidence) {
-      bestMatch = header
-      bestConfidence = confidence
-    }
-  }
-
-  return { columnName: bestMatch, confidence: bestConfidence }
-}
-
-/**
- * Extracts instrument names from multi-instrument data
- * @param {Array} data - The sheet data
- * @param {string} columnName - The column containing instrument names
- * @returns {Array} - Array of instrument names
- */
-export function extractInstrumentNames(data, columnName) {
-  if (!data || !columnName) return []
-
-  const names = []
-  const seen = new Set()
-
   for (const row of data) {
-    const name = row[columnName]
-    if (name && typeof name === 'string' && name.trim()) {
-      const trimmedName = name.trim()
-      if (!seen.has(trimmedName)) {
-        seen.add(trimmedName)
-        names.push(trimmedName)
-      }
+    for (const key of Object.keys(row)) {
+      allKeys.add(key.toLowerCase())
     }
   }
-
-  return names
+  
+  for (const field of requiredFields) {
+    const fieldLower = field.toLowerCase()
+    result[field] = Array.from(allKeys).some(key => 
+      key.includes(fieldLower) || fieldLower.includes(key)
+    )
+  }
+  
+  return result
 }
 
 /**
- * Extracts values from single-instrument sheet using field-value pairs
- * @param {Array} data - The sheet data
- * @param {Object} requiredFields - Map of field labels to extract (label -> target key)
- * @returns {Object} - Extracted values
- */
-export function extractSingleInstrumentValues(data, requiredFields) {
-  const extracted = {}
-  const dataMap = new Map()
-
-  // Build a map of normalized labels to values
-  for (let row of data) {
-    const values = Object.values(row)
-    if (values.length >= 2) {
-      const label = String(values[0] || '').toLowerCase().trim()
-      const value = values[1]
-      if (label && value !== undefined && value !== null && value !== '') {
-        dataMap.set(label, value)
-      }
-    }
-  }
-
-  // Extract required fields
-  for (const [targetKey, possibleLabels] of Object.entries(requiredFields)) {
-    for (const label of possibleLabels) {
-      const normalizedLabel = label.toLowerCase()
-      for (const [dataLabel, dataValue] of dataMap.entries()) {
-        if (dataLabel.includes(normalizedLabel) || normalizedLabel.includes(dataLabel)) {
-          extracted[targetKey] = dataValue
-          break
-        }
-      }
-      if (extracted[targetKey]) break
-    }
-  }
-
-  return extracted
-}
-
-/**
- * Gets required field mappings for each instrument type
- * @param {string} instrumentType - The instrument type
- * @returns {Object} - Map of target keys to possible label variations
+ * Get required field mappings for an instrument type
  */
 export function getRequiredFieldMappings(instrumentType) {
   const mappings = {
-    'money-market': {
-      faceValue: ['Face Value', 'Principal', 'Amount', 'Notional'],
-      issueDate: ['Issue Date', 'Date', 'Start Date'],
-      maturityDate: ['Maturity Date', 'Maturity', 'End Date'],
-      couponRate: ['Coupon Rate', 'Coupon', 'Interest Rate', 'Rate'],
-      yield: ['Yield', 'YTM', 'Yield to Maturity'],
-      price: ['Price', 'Market Price', 'Clean Price']
-    },
-    'bonds': {
-      faceValue: ['Face Value', 'Principal', 'Par Value', 'Amount'],
-      issueDate: ['Issue Date', 'Date', 'Start Date'],
-      maturityDate: ['Maturity Date', 'Maturity', 'End Date'],
-      couponRate: ['Coupon Rate', 'Coupon', 'Interest Rate'],
-      yield: ['Yield', 'YTM', 'Yield to Maturity'],
-      price: ['Price', 'Market Price', 'Clean Price'],
-      frequency: ['Frequency', 'Payment Frequency', 'Coupon Frequency']
-    },
-    'tbills': {
-      faceValue: ['Face Value', 'Principal', 'Amount', 'Notional'],
-      issueDate: ['Issue Date', 'Date', 'Auction Date'],
-      maturityDate: ['Maturity Date', 'Maturity', 'End Date'],
-      discountRate: ['Discount Rate', 'Discount', 'Rate'],
-      price: ['Price', 'Market Price', 'Issue Price']
+    'money-market': ['principal', 'interestRate', 'daysToMaturity', 'issueDate', 'maturityDate', 'instrumentName'],
+    'bonds': ['faceValue', 'couponRate', 'yield', 'maturityDate', 'issueDate', 'frequency', 'instrumentName'],
+    'tbills': ['faceValue', 'discountRate', 'daysToMaturity', 'auctionDate', 'maturityDate', 'instrumentName']
+  }
+  
+  return mappings[instrumentType] || mappings['money-market']
+}
+
+/**
+ * 🔥 FIXED: Extract single instrument values with intelligent detection
+ */
+export function extractSingleInstrumentValues(data, requiredFields) {
+  if (!data || !data.length) return {}
+  
+  const values = {}
+  const allRows = data
+  
+  // 🔥 First pass: Look for key-value pairs (row has exactly one non-empty value)
+  for (const row of allRows) {
+    const entries = Object.entries(row)
+    const nonEmpty = entries.filter(([key, val]) => 
+      val !== '' && val !== null && val !== undefined
+    )
+    
+    // If row has exactly one non-empty value, it might be a value cell
+    // Look at the key to determine what it is
+    for (const [key, val] of entries) {
+      if (val === '' || val === null || val === undefined) continue
+      const lowerKey = key.toLowerCase()
+      
+      for (const field of requiredFields) {
+        const fieldLower = field.toLowerCase()
+        // Check if key matches field name
+        if (lowerKey.includes(fieldLower) || fieldLower.includes(lowerKey)) {
+          if (!values[field]) {
+            values[field] = val
+          }
+        }
+      }
     }
   }
+  
+  // 🔥 Second pass: Look for values in cells with labels
+  for (const row of allRows) {
+    for (const [key, value] of Object.entries(row)) {
+      if (value === '' || value === null || value === undefined) continue
+      const lowerKey = key.toLowerCase()
+      
+      for (const field of requiredFields) {
+        const fieldLower = field.toLowerCase()
+        const synonyms = getSynonyms(field)
+        const matches = synonyms.some(syn => 
+          lowerKey.includes(syn.toLowerCase()) || syn.toLowerCase().includes(lowerKey)
+        )
+        if (matches && !values[field]) {
+          values[field] = value
+        }
+      }
+    }
+  }
+  
+  // 🔥 Third pass: Look for values in adjacent cells
+  // If we have a label row and a value row, try to match them
+  for (let i = 0; i < allRows.length - 1; i++) {
+    const currentRow = allRows[i]
+    const nextRow = allRows[i + 1]
+    
+    for (const [key, label] of Object.entries(currentRow)) {
+      if (!label || typeof label !== 'string') continue
+      const lowerLabel = label.toLowerCase()
+      
+      // Check if this label matches any required field
+      for (const field of requiredFields) {
+        const fieldLower = field.toLowerCase()
+        const synonyms = getSynonyms(field)
+        const matches = synonyms.some(syn => 
+          lowerLabel.includes(syn.toLowerCase()) || syn.toLowerCase().includes(lowerLabel)
+        )
+        if (matches && !values[field]) {
+          // The value is in the same column of the next row
+          const val = nextRow[key]
+          if (val !== '' && val !== null && val !== undefined) {
+            values[field] = val
+          }
+        }
+      }
+    }
+  }
+  
+  // 🔥 Fourth pass: Look for numeric values that might be amounts/rates
+  const numericFields = ['principal', 'faceValue', 'amount', 'rate', 'yield', 'discountRate', 'couponRate']
+  for (const row of allRows) {
+    for (const [key, value] of Object.entries(row)) {
+      if (value === '' || value === null || value === undefined) continue
+      const lowerKey = key.toLowerCase()
+      
+      // Check if it's a numeric value
+      const isNumeric = typeof value === 'number' || 
+                        (typeof value === 'string' && /^[\d\,\.\-\$]+$/.test(value.trim()))
+      
+      if (isNumeric) {
+        for (const field of numericFields) {
+          const synonyms = getSynonyms(field)
+          const matches = synonyms.some(syn => 
+            lowerKey.includes(syn.toLowerCase()) || syn.toLowerCase().includes(lowerKey)
+          )
+          if (matches && !values[field]) {
+            values[field] = value
+          }
+        }
+      }
+    }
+  }
+  
+  // 🔥 Special handling: look for instrument name if missing
+  if (!values.instrumentName || values.instrumentName === '') {
+    const nameCol = detectInstrumentNameColumn(data)
+    if (nameCol && nameCol.columnName) {
+      const names = extractInstrumentNames(data, nameCol.columnName)
+      if (names && names.length > 0) {
+        values.instrumentName = names[0]
+      }
+    }
+  }
+  
+  return values
+}
 
-  return mappings[instrumentType] || mappings['money-market']
+/**
+ * Get synonyms for a field
+ */
+function getSynonyms(field) {
+  const synonymMap = {
+    'principal': ['principal', 'amount', 'face value', 'nominal', 'notional', 'investment', 'capital', 'value'],
+    'interestRate': ['interest rate', 'rate', 'coupon', 'coupon rate', 'yield', 'return', 'apr', 'annual rate', 'interest'],
+    'daysToMaturity': ['days to maturity', 'term', 'tenor', 'maturity days', 'duration days', 'period', 'days'],
+    'issueDate': ['issue date', 'start date', 'effective date', 'trade date', 'settlement date', 'value date', 'origination'],
+    'maturityDate': ['maturity date', 'end date', 'due date', 'redemption date', 'expiry date', 'maturity'],
+    'faceValue': ['face value', 'par value', 'nominal', 'amount', 'principal', 'value'],
+    'couponRate': ['coupon rate', 'coupon', 'rate', 'interest rate', 'coupon'],
+    'yield': ['yield', 'ytm', 'yield to maturity', 'return', 'effective yield'],
+    'discountRate': ['discount rate', 'discount', 'rate', 'bank discount', 'discount'],
+    'frequency': ['frequency', 'payment frequency', 'coupon frequency', 'period', 'semi-annual', 'quarterly', 'annual'],
+    'auctionDate': ['auction date', 'issue date', 'start date', 'trade date', 'auction'],
+    'instrumentName': ['instrument', 'security', 'name', 'description', 'issuer', 'counterparty', 'company', 'entity', 'bond name', 'tbill name', 'title']
+  }
+  
+  return synonymMap[field] || [field]
+}
+
+/**
+ * 🔥 FIXED: Detect instrument name column
+ */
+export function detectInstrumentNameColumn(data) {
+  if (!data || !data.length) return { columnName: null, confidence: 0 }
+  
+  const headers = Object.keys(data[0] || {})
+  const namePatterns = ['instrument', 'name', 'security', 'bond', 'tbill', 'issuer', 'counterparty', 'company', 'entity', 'description', 'asset', 'title', 'label', 'id']
+  
+  let bestMatch = null
+  let bestScore = 0
+  
+  for (const header of headers) {
+    const lowerHeader = header.toLowerCase()
+    let score = 0
+    
+    // Check for exact matches first
+    for (const pattern of namePatterns) {
+      if (lowerHeader === pattern) score += 3
+      else if (lowerHeader.includes(pattern)) score += 2
+      else if (pattern.includes(lowerHeader) && pattern.length > 3) score += 1
+    }
+    
+    // Check if values in this column look like names (text, not numbers)
+    const sampleValues = data.slice(0, 10).map(row => row[header]).filter(v => v && v !== '')
+    if (sampleValues.length > 0) {
+      const nameLike = sampleValues.filter(v => {
+        if (typeof v !== 'string') return false
+        // Check if it looks like a name (letters, spaces, not purely numeric)
+        const cleaned = v.trim()
+        return cleaned.length > 1 && 
+               !/^[\d\.\,\-\$]+$/.test(cleaned) &&
+               /[a-zA-Z]/.test(cleaned)
+      }).length
+      score += (nameLike / Math.max(sampleValues.length, 1)) * 3
+    }
+    
+    // Boost score if the column contains unique values (likely identifiers)
+    const uniqueValues = new Set(sampleValues)
+    const uniqueness = sampleValues.length > 0 ? uniqueValues.size / sampleValues.length : 0
+    score += uniqueness * 1.5
+    
+    if (score > bestScore) {
+      bestScore = score
+      bestMatch = header
+    }
+  }
+  
+  return {
+    columnName: bestMatch,
+    confidence: Math.min(bestScore / 8, 1)
+  }
+}
+
+/**
+ * Extract instrument names from a column
+ */
+export function extractInstrumentNames(data, columnName) {
+  if (!data || !data.length || !columnName) return []
+  
+  const names = new Set()
+  for (const row of data) {
+    const value = row[columnName]
+    if (value && typeof value === 'string' && value.trim()) {
+      // Clean up common prefixes/suffixes
+      let cleaned = value.trim()
+      // Remove common prefixes like "Instrument: " or "Name: "
+      cleaned = cleaned.replace(/^(Instrument|Name|Security|Bond|TBill|Asset|ID)\s*[:]\s*/i, '')
+      if (cleaned) {
+        names.add(cleaned)
+      }
+    }
+  }
+  
+  return Array.from(names)
+}
+
+/**
+ * Check if a value looks like a number
+ */
+export function looksLikeNumber(value) {
+  if (typeof value === 'number') return true
+  if (typeof value !== 'string') return false
+  return /^[\d\,\.\-\$]+$/.test(value.trim())
+}
+
+/**
+ * Parse number from various formats
+ */
+export function parseNumberValue(value) {
+  if (typeof value === 'number') return value
+  if (typeof value !== 'string') return NaN
+  
+  let cleaned = value.replace(/[$,]/g, '').trim()
+  return parseFloat(cleaned)
+}
+
+/**
+ * Check if a value looks like a date
+ */
+export function looksLikeDate(value) {
+  if (value instanceof Date) return true
+  if (typeof value !== 'string') return false
+  return /^\d{4}-\d{2}-\d{2}/.test(value) || 
+         /^\d{2}\/\d{2}\/\d{4}/.test(value) ||
+         /^\d{2}-\d{2}-\d{4}/.test(value) ||
+         /^\d{1,2}\s+[A-Za-z]+\s+\d{4}/.test(value)
+}
+
+/**
+ * Parse date from various formats
+ */
+export function parseDateValue(value) {
+  if (value instanceof Date) return value.toISOString().split('T')[0]
+  if (typeof value !== 'string') return value
+  
+  // Try ISO format
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.substring(0, 10)
+  
+  // Try MM/DD/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(value)) {
+    const parts = value.split('/')
+    return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`
+  }
+  
+  // Try DD/MM/YYYY
+  if (/^\d{2}-\d{2}-\d{4}/.test(value)) {
+    const parts = value.split('-')
+    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`
+  }
+  
+  // Try "DD Mon YYYY" format
+  const monthMap = {
+    'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
+    'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
+  }
+  const match = value.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})/)
+  if (match) {
+    const month = monthMap[match[2].toLowerCase()]
+    if (month) {
+      return `${match[3]}-${month}-${match[1].padStart(2, '0')}`
+    }
+  }
+  
+  return value
+}
+
+/**
+ * 🔥 NEW: Clean a value for display
+ */
+export function cleanValue(value) {
+  if (value === null || value === undefined || value === '') return ''
+  if (typeof value === 'string') return value.trim()
+  return value
+}
+
+/**
+ * 🔥 NEW: Get a confidence score for a single-instrument detection
+ */
+export function getSingleInstrumentConfidence(data, instrumentType) {
+  const detection = detectSheetType(data, instrumentType)
+  return detection.confidence || 0
 }

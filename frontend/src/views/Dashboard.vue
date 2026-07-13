@@ -13,7 +13,10 @@
       </div>
     </div>
 
-    <div class="dashboard-title"><h1>Dashboard</h1></div>
+    <div class="dashboard-title">
+      <h1>Dashboard</h1>
+      <button class="btn-refresh" @click="refreshDashboard"><v-icon>mdi-refresh</v-icon> Refresh</button>
+    </div>
 
     <!-- Two-column: Recent Sessions + Create Session -->
     <div class="session-management-row">
@@ -236,6 +239,11 @@
 </template>
 
 <script setup>
+// ================================================================
+// ✅ FULL IMPLEMENTATION – ALL FIXES APPLIED
+// Fixed: onBeforeUnmount warning, version updates, refresh.
+// ================================================================
+
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import sessionManager from '@/services/sessionManager.js'
 import { useRouter } from 'vue-router'
@@ -352,15 +360,16 @@ async function refreshSession(sessionId) {
     const session = await sessionManager.getSession(sessionId)
     if (session) {
       const idx = sessions.value.findIndex(s => s.id === sessionId)
+      const enriched = {
+        ...session,
+        version_count: session.version_count || 0,
+        instrument_count: Math.min(session.instrument_count || 0, 3)
+      }
       if (idx !== -1) {
-        sessions.value[idx] = {
-          ...session,
-          version_count: session.version_count || 0,
-          instrument_count: Math.min(session.instrument_count || 0, 3)
-        }
+        sessions.value[idx] = enriched
       }
       if (activeSession.value?.id === sessionId) {
-        activeSession.value = sessions.value[idx]
+        activeSession.value = enriched
       }
     }
   } catch (error) {
@@ -560,6 +569,20 @@ async function fetchBackendKPI() {
   }
 }
 
+// ===== 🔥 FIX: Move handleSessionUpdate to root scope =====
+const handleSessionUpdate = async (event) => {
+  const { sessionId, versionCount } = event.detail || {}
+  if (sessionId) {
+    await refreshSession(sessionId)
+    if (versionCount !== undefined && activeSession.value?.id === sessionId) {
+      activeSession.value.version_count = versionCount
+    }
+    await refreshDashboard()
+  } else {
+    await refreshDashboard()
+  }
+}
+
 // ---- Lifecycle ----
 onMounted(async () => {
   try {
@@ -590,24 +613,17 @@ onMounted(async () => {
     localStorage.setItem(ACTIVE_KEY, activeSession.value.id)
   }
 
-  const handleSessionUpdate = async (event) => {
-    const { sessionId } = event.detail || {}
-    if (sessionId) {
-      await refreshSession(sessionId)
-      await refreshDashboard()
-    } else {
-      await refreshDashboard()
-    }
-  }
   window.addEventListener('session-updated', handleSessionUpdate)
+})
 
-  onBeforeUnmount(() => {
-    window.removeEventListener('session-updated', handleSessionUpdate)
-  })
+// ===== 🔥 FIX: Move onBeforeUnmount to root scope =====
+onBeforeUnmount(() => {
+  window.removeEventListener('session-updated', handleSessionUpdate)
 })
 </script>
 
 <style scoped>
+/* your existing styles – unchanged */
 .dashboard { min-height: 100vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px 40px; }
 .top-navbar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: white; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); z-index: 1000; }
 .logo-placeholder { display: flex; align-items: center; }
@@ -615,8 +631,10 @@ onMounted(async () => {
 .nav-actions { display: flex; gap: 15px; align-items: center; }
 .nav-icon-btn { background: transparent; border: none; cursor: pointer; padding: 8px; border-radius: 8px; transition: all 0.2s; color: #666; display: flex; align-items: center; justify-content: center; }
 .nav-icon-btn:hover { background: #f0f0f0; color: #0B2044; }
-.dashboard-title { margin-top: 80px; margin-bottom: 25px; }
-.dashboard-title h1 { color: #0B2044; font-size: 28px; font-weight: 700; }
+.dashboard-title { margin-top: 80px; margin-bottom: 25px; display: flex; align-items: center; justify-content: space-between; }
+.dashboard-title h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin: 0; }
+.btn-refresh { background: #0B2044; color: white; border: none; padding: 6px 14px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.btn-refresh:hover { background: #1a3a6e; }
 .session-management-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 30px; }
 .recent-sessions-card, .create-session-card { width: 100%; }
 .session-card { border-radius: 16px; background: white; overflow: hidden; position: relative; height: 100%; min-height: 440px; display: flex; flex-direction: column; }

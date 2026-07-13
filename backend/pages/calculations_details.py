@@ -33,6 +33,7 @@ def parse_date(value: Any) -> date:
 def days_between(date1: date, date2: date) -> int:
     return abs((date2 - date1).days)
 
+# ===== 🔥 FIXED: Better normalization with more aliases =====
 def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(row, dict):
         return {}
@@ -121,6 +122,8 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
         normalized['_confidence_scores'] = confidence_scores
 
     return normalized
+
+# ===== INSTRUMENT-SPECIFIC CALCULATION FUNCTIONS =====
 
 def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
     face = safe_float(item.get('face_value', 1000))
@@ -255,6 +258,7 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
         'yield_curve_rate': round(effective_yield, 2)
     }
 
+# ===== 🔥 FIXED: Main calculation function with proper grouping =====
 def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[str, Any]:
     if not isinstance(data, list) or len(data) == 0:
         return {
@@ -282,13 +286,15 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             'avgInvestment': 0,
             'holdingPeriodYield': 0,
             'annualizedYield': 0,
-            'pricePer100': 0
+            'pricePer100': 0,
+            'calculations': []
         }
 
     # ===== GROUP BY INSTRUMENT NAME =====
     instrument_name_col = None
     name_variants = ['instrument', 'name', 'bond_name', 'tbill_name', 'issuer', 'security', 'description', 'counterparty',
-                     'company', 'entity']
+                     'company', 'entity', 'instrument name']
+    
     if data and len(data) > 0:
         first_row = data[0]
         for variant in name_variants:
@@ -301,6 +307,18 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
                     break
             if instrument_name_col:
                 break
+    
+    # If still no column, try to find any column with 'name' or 'instrument'
+    if not instrument_name_col and data:
+        for col in first_row.keys():
+            lower = col.lower()
+            if 'name' in lower or 'instrument' in lower or 'security' in lower or 'bond' in lower or 'tbill' in lower:
+                instrument_name_col = col
+                break
+    
+    # If still none, use first column
+    if not instrument_name_col and data:
+        instrument_name_col = list(first_row.keys())[0]
 
     grouped = {}
     for row in data:
@@ -313,7 +331,7 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             name = str(row['BondName']).strip()
         elif row.get('TBillName'):
             name = str(row['TBillName']).strip()
-        if not name:
+        if not name or name == '':
             name = 'Instrument'
         if name not in grouped:
             grouped[name] = []
@@ -322,6 +340,7 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
     unique_names = list(grouped.keys())
     instrument_count = len(unique_names)
 
+    # ===== PROCESS EACH INSTRUMENT GROUP =====
     processed = []
     total_value = 0.0
     total_principal = 0.0
@@ -334,8 +353,10 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
         group_total_rate = 0.0
         group_total_days = 0
 
+        # Process each row in the group (should be one row per instrument)
         for row in rows:
             norm = normalize_row(row)
+            # Normalize percentage fields
             if 'coupon_rate' in norm:
                 norm['coupon_rate'] = parse_percentage(norm['coupon_rate'])
             if 'interest_rate' in norm:
@@ -351,13 +372,15 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
                 calc = calculate_money_market(norm)
                 rate = calc.get('effective_yield', 0)
                 value = calc.get('principal', 0)
-            else:
+            else:  # tbills
                 calc = calculate_treasury_bill(norm)
                 rate = calc.get('money_market_yield', 0)
                 value = calc.get('face_value', 0)
 
+            # Add instrument name to the calculation result
             calc['instrument_name'] = name
             processed.append(calc)
+
             group_total_value += value
             group_total_principal += value
             group_total_rate += rate * value
@@ -375,6 +398,7 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
     total_interest = total_value * (avg_rate / 100) * (avg_days / 360) if avg_rate != 0 else 0
     interest_earned = total_interest
 
+    # Build result with per-instrument calculations
     result = {
         'totalValue': round(total_value, 2),
         'instrumentCount': instrument_count,
@@ -385,9 +409,12 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
         'annualYield': round(avg_rate, 2),
         'effectiveAnnualRate': round(avg_rate, 2),
         'avgDaysToMaturity': round(avg_days, 0),
-        'totalPrincipal': round(total_principal, 2)
+        'totalPrincipal': round(total_principal, 2),
+        # 🔥 Include per-instrument calculations
+        'calculations': processed
     }
 
+    # Add instrument-specific aggregated fields
     if instrument_type == 'bonds':
         total_annual_income = total_value * (avg_rate / 100)
         total_duration_weighted = 0.0
@@ -422,5 +449,4 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             'effectiveYield': round(avg_rate, 2)
         })
 
-    result['calculations'] = processed
     return result

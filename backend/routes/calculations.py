@@ -123,7 +123,7 @@ def save_calculation(instrument_type, input_data, result_data, dataset_id=None, 
                     )
                     conn.commit()
                     
-                    # ===== FIX: Create version record =====
+                    # Create version record
                     try:
                         from routes.version_history import create_version, get_next_version_number
                         next_version = get_next_version_number(session_id)
@@ -268,10 +268,12 @@ def get_calculations_by_session(session_id):
         return []
 
 
+# ===== 🔥 FIXED: generate_instrument_summary =====
 def generate_instrument_summary(session_id, instrument_type=None):
     """
     Generate instrument summary from saved calculations.
     Returns: { columns: [], rows: [] }
+    Fixed: Properly handles rows as list of dicts, avoids 'list' object has no attribute 'get' error.
     """
     conn = get_db()
     if not conn:
@@ -292,41 +294,59 @@ def generate_instrument_summary(session_id, instrument_type=None):
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        
+
+        # If no calculations, return empty
+        if not rows:
+            return {'columns': [], 'rows': []}
+
+        # Build summary rows from each calculation's result_data
         summary_rows = []
         for row in rows:
             result_data = row.get('result_data')
-            input_data = row.get('input_data')
-            try:
-                result_data = json.loads(result_data) if isinstance(result_data, str) else result_data
-                input_data = json.loads(input_data) if isinstance(input_data, str) else input_data
-            except Exception:
+            if isinstance(result_data, str):
+                try:
+                    result_data = json.loads(result_data)
+                except:
+                    result_data = {}
+            elif not isinstance(result_data, dict):
                 result_data = {}
-                input_data = {}
-            
-            inst_type = row.get('instrument_type')
-            calculations = result_data.get('calculations', [])
-            
+
+            # Get the instrument name from input_data or fallback
+            input_data = row.get('input_data')
+            if isinstance(input_data, str):
+                try:
+                    input_data = json.loads(input_data)
+                except:
+                    input_data = {}
+
             instrument_name = input_data.get('instrument_name') or input_data.get('Instrument Name') or 'Instrument'
-            
-            if calculations:
+
+            # 🔥 CRITICAL FIX: Check if result_data has per-instrument calculations
+            calculations = result_data.get('calculations', [])
+            if calculations and isinstance(calculations, list):
+                # Each item in calculations is a dict for one instrument
                 for calc in calculations:
-                    summary_row = {
-                        'Instrument Name': calc.get('instrument_name') or instrument_name,
-                        'Instrument Type': inst_type,
-                        'Calculation ID': row.get('id'),
-                        'Created At': row.get('created_at').isoformat() if row.get('created_at') else None,
-                        **calc
-                    }
-                    summary_rows.append(summary_row)
+                    if isinstance(calc, dict):
+                        summary_row = {
+                            'Instrument Name': calc.get('instrument_name', instrument_name),
+                            'Instrument Type': row.get('instrument_type'),
+                            'Calculation ID': row.get('id'),
+                            'Created At': row.get('created_at').isoformat() if row.get('created_at') else None,
+                        }
+                        # Merge all calc fields
+                        for key, value in calc.items():
+                            if key not in summary_row and key not in ['_raw', '_source', 'index', '__v']:
+                                summary_row[key] = value
+                        summary_rows.append(summary_row)
             else:
+                # No per-instrument calculations – create one row with aggregated data
                 summary_row = {
                     'Instrument Name': instrument_name,
-                    'Instrument Type': inst_type,
+                    'Instrument Type': row.get('instrument_type'),
                     'Calculation ID': row.get('id'),
                     'Created At': row.get('created_at').isoformat() if row.get('created_at') else None,
                     'Total Value': result_data.get('totalValue', 0),
-                    'Instrument Count': result_data.get('instrumentCount', 0),
+                    'Instrument Count': result_data.get('instrumentCount', 1),
                     'Avg Rate': result_data.get('avgRate', 0),
                     'Weighted Avg Rate': result_data.get('weightedAvgRate', 0),
                     'Total Interest': result_data.get('totalInterest', 0),
@@ -337,6 +357,8 @@ def generate_instrument_summary(session_id, instrument_type=None):
                     'Total Principal': result_data.get('totalPrincipal', 0),
                     'FRED Benchmark': result_data.get('fred', {}).get('benchmark_rate') if result_data.get('fred') else None
                 }
+                # Add instrument-specific fields
+                inst_type = row.get('instrument_type')
                 if inst_type == 'bonds':
                     summary_row.update({
                         'Avg Coupon Rate': result_data.get('avgCouponRate', 0),
@@ -359,17 +381,26 @@ def generate_instrument_summary(session_id, instrument_type=None):
                         'Annualized Yield': result_data.get('annualizedYield', 0)
                     })
                 summary_rows.append(summary_row)
-        
+
+        # Determine columns dynamically from all rows
         columns = []
         if summary_rows:
-            columns = list(summary_rows[0].keys())
-        
+            # Get all unique keys across all rows
+            all_keys = set()
+            for row in summary_rows:
+                all_keys.update(row.keys())
+            columns = sorted(list(all_keys))
+
         return {'columns': columns, 'rows': summary_rows}
+
     except Exception as e:
         print(f"❌ Generate instrument summary error: {e}")
+        import traceback
+        traceback.print_exc()
         return {'columns': [], 'rows': []}
 
 
+# ===== 🔥 FIXED: generate_portfolio_summary =====
 def generate_portfolio_summary(session_id):
     """
     Generate portfolio summary from all instrument calculations in a session.
@@ -413,18 +444,22 @@ def generate_portfolio_summary(session_id):
             portfolio_total += total_value
             instrument_counts[inst_type] = instrument_counts.get(inst_type, 0) + instrument_count
             
+            # Check for per-instrument calculations
             calculations = result_data.get('calculations', [])
-            if calculations:
+            if calculations and isinstance(calculations, list):
                 for calc in calculations:
-                    portfolio_row = {
-                        'Instrument Name': calc.get('instrument_name') or instrument_name,
-                        'Instrument Type': inst_type,
-                        'Session ID': session_id,
-                        'Calculation ID': row.get('id'),
-                        'Created At': row.get('created_at').isoformat() if row.get('created_at') else None,
-                        **calc
-                    }
-                    portfolio_rows.append(portfolio_row)
+                    if isinstance(calc, dict):
+                        portfolio_row = {
+                            'Instrument Name': calc.get('instrument_name', instrument_name),
+                            'Instrument Type': inst_type,
+                            'Session ID': session_id,
+                            'Calculation ID': row.get('id'),
+                            'Created At': row.get('created_at').isoformat() if row.get('created_at') else None,
+                        }
+                        for key, value in calc.items():
+                            if key not in portfolio_row:
+                                portfolio_row[key] = value
+                        portfolio_rows.append(portfolio_row)
             else:
                 portfolio_row = {
                     'Instrument Name': instrument_name,
@@ -452,7 +487,10 @@ def generate_portfolio_summary(session_id):
         
         columns = []
         if portfolio_rows:
-            columns = list(portfolio_rows[0].keys())
+            all_keys = set()
+            for row in portfolio_rows:
+                all_keys.update(row.keys())
+            columns = sorted(list(all_keys))
         
         return {
             'columns': columns,
@@ -462,6 +500,8 @@ def generate_portfolio_summary(session_id):
         }
     except Exception as e:
         print(f"❌ Generate portfolio summary error: {e}")
+        import traceback
+        traceback.print_exc()
         return {'columns': [], 'rows': [], 'portfolio_total': 0, 'instrument_counts': {}}
 
 

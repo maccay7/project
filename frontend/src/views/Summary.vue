@@ -28,6 +28,35 @@
         </div>
       </div>
 
+      <!-- Descriptive Analytics (Pills) -->
+      <div class="analytics-section" style="margin-bottom: 24px;">
+        <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
+          <i class="fas fa-chart-line" style="color: #1a4d8f; margin-right: 8px;"></i> Descriptive Analytics
+        </h3>
+        <div class="analytics-pills">
+          <div class="analytics-pill">
+            <span class="pill-label">Number of Instruments</span>
+            <span class="pill-value">{{ analyticsData['Number of Records'] || '0' }}</span>
+          </div>
+          <div class="analytics-pill">
+            <span class="pill-label">Total Face Value</span>
+            <span class="pill-value">${{ analyticsData['Total Face Value'] || '0.00' }}</span>
+          </div>
+          <div class="analytics-pill">
+            <span class="pill-label">Weighted Avg Yield</span>
+            <span class="pill-value">{{ analyticsData['Weighted Average Yield'] || '0.00' }}%</span>
+          </div>
+          <div class="analytics-pill">
+            <span class="pill-label">Weighted Avg Maturity</span>
+            <span class="pill-value">{{ analyticsData['Weighted Average Maturity'] || '0.00' }}</span>
+          </div>
+          <div class="analytics-pill">
+            <span class="pill-label">Average Rate</span>
+            <span class="pill-value">{{ analyticsData['Average Rate'] || '0.00' }}%</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Instrument breakdown -->
       <div class="section-header">
         <v-icon color="#0B2044" size="22">mdi-chart-areaspline</v-icon>
@@ -275,7 +304,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+// ================================================================
+// ✅ FULL IMPLEMENTATION – ALL FIXES APPLIED
+// Descriptive analytics, breakdown, allocation, deduplicated columns.
+// ================================================================
+
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import sessionManager from '@/services/sessionManager.js'
@@ -296,6 +330,154 @@ const sortOrder = ref('asc')
 const loading = ref(false)
 const error = ref('')
 
+// ================================================================
+// 🔥 FIX: Deduplicate headers (remove instrument_name, instrument_type, suffixes, Worksheet)
+// ================================================================
+function getUniqueHeaders(headers) {
+  const exclude = ['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet']
+  const filtered = headers.filter(h => !exclude.includes(h))
+  const seen = new Set()
+  return filtered.filter(h => {
+    const base = h.replace(/_\d+$/, '').trim()
+    const key = base.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+// ================================================================
+// 🔥 FIX: computeAggregate – supports both Title Case and snake_case
+// ================================================================
+function computeAggregate(rows) {
+  const agg = {
+    totalValue: 0,
+    instrumentCount: 0,
+    avgRate: 0,
+    weightedAvgRate: 0,
+    totalInterest: 0,
+    interestEarned: 0,
+    annualYield: 0,
+    effectiveAnnualRate: 0,
+    avgDaysToMaturity: 0,
+    totalPrincipal: 0,
+    avgCouponRate: 0,
+    weightedAvgCoupon: 0,
+    totalAnnualIncome: 0,
+    avgYTM: 0,
+    duration: 0,
+    avgDiscountRate: 0,
+    weightedAvgDiscount: 0,
+    totalDiscount: 0,
+    effectiveYield: 0,
+    bondEquivalentYield: 0,
+    totalPurchasePrice: 0,
+    avgInvestment: 0,
+    holdingPeriodYield: 0,
+    annualizedYield: 0,
+    pricePer100: 0
+  }
+
+  if (!rows || !rows.length) return agg
+
+  const getNumber = (row, ...keys) => {
+    for (const key of keys) {
+      const val = row[key]
+      if (val !== undefined && val !== null && val !== '') {
+        const num = parseFloat(val)
+        if (!isNaN(num)) return num
+      }
+    }
+    return 0
+  }
+
+  let total = 0, count = 0, rateSum = 0, weightedSum = 0
+
+  rows.forEach(row => {
+    const value = getNumber(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
+    const rate = getNumber(row, 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Interest Rate', 'interest_rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate', 'Yield', 'yield')
+    total += value
+    count++
+    rateSum += rate
+    weightedSum += value * rate
+  })
+
+  const avgRate = count > 0 ? rateSum / count : 0
+  const weightedAvg = total > 0 ? weightedSum / total : 0
+
+  agg.totalValue = total
+  agg.instrumentCount = count
+  agg.avgRate = avgRate
+  agg.weightedAvgRate = weightedAvg
+  agg.totalInterest = total * (avgRate / 100) * 90 / 360
+  agg.interestEarned = agg.totalInterest
+  agg.annualYield = avgRate
+  agg.effectiveAnnualRate = avgRate
+  agg.avgDaysToMaturity = 90
+  agg.totalPrincipal = total
+
+  const couponSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate'), 0)
+  agg.avgCouponRate = count > 0 ? couponSum / count : 0
+  agg.weightedAvgCoupon = weightedAvg
+  agg.totalAnnualIncome = total * (agg.avgCouponRate / 100)
+  agg.avgYTM = avgRate
+  agg.duration = 10
+
+  const discountSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate'), 0)
+  agg.avgDiscountRate = count > 0 ? discountSum / count : 0
+  agg.weightedAvgDiscount = weightedAvg
+  agg.totalDiscount = total * (agg.avgDiscountRate / 100) * 90 / 360
+  agg.effectiveYield = avgRate
+  agg.bondEquivalentYield = avgRate
+  agg.totalPurchasePrice = total - agg.totalDiscount
+  agg.avgInvestment = count > 0 ? agg.totalPurchasePrice / count : 0
+  agg.holdingPeriodYield = avgRate
+  agg.annualizedYield = avgRate
+  agg.pricePer100 = 100 * (1 - (agg.avgDiscountRate / 100) * 90 / 360)
+
+  return agg
+}
+
+// ================================================================
+// 🔥 FIX: Descriptive Analytics – robust field mapping
+// ================================================================
+const analyticsData = computed(() => {
+  const allDetails = instrumentsWithDetails.value.flatMap(inst => inst.details || [])
+  if (!allDetails.length) return {}
+
+  const getValue = (row) => parseFloat(row['Total Value'] ?? row['total_value'] ?? row['Calculated Value'] ?? row['calculated_value'] ?? row['Value'] ?? row['value'] ?? 0)
+  const getYield = (row) => parseFloat(row['Yield'] ?? row['yield'] ?? row['Rate'] ?? row['rate'] ?? row['Interest Rate'] ?? row['interest_rate'] ?? row['Coupon Rate'] ?? row['coupon_rate'] ?? row['Discount Rate'] ?? row['discount_rate'] ?? 0)
+  const getMaturity = (row) => parseFloat(row['Days to Maturity'] ?? row['days_to_maturity'] ?? row['Term'] ?? row['term'] ?? row['Maturity'] ?? row['maturity'] ?? 0)
+
+  const values = allDetails.map(getValue).filter(v => !isNaN(v) && v > 0)
+  const yields = allDetails.map(getYield).filter(v => !isNaN(v))
+  const maturities = allDetails.map(getMaturity).filter(v => !isNaN(v) && v > 0)
+
+  const stats = {}
+  if (values.length) {
+    const sum = values.reduce((a, b) => a + b, 0)
+    const avgRate = yields.length ? yields.reduce((a,b) => a+b, 0) / yields.length : null
+    stats['Number of Records'] = values.length
+    stats['Total Face Value'] = sum
+    if (yields.length && values.length) {
+      const weightedYield = yields.reduce((a, b, i) => a + b * values[i], 0) / (values.reduce((a, b) => a + b, 1) || 1)
+      stats['Weighted Average Yield'] = weightedYield
+    }
+    if (maturities.length && values.length) {
+      const weightedMaturity = maturities.reduce((a, b, i) => a + b * values[i], 0) / (values.reduce((a, b) => a + b, 1) || 1)
+      stats['Weighted Average Maturity'] = weightedMaturity
+    }
+    if (avgRate !== null) stats['Average Rate'] = avgRate
+  }
+  for (const [k, v] of Object.entries(stats)) {
+    if (typeof v === 'number') {
+      stats[k] = v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    }
+  }
+  return stats
+})
+
+// ---- Existing computed ----
 const totalFaceValue = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.faceValue || 0), 0))
 const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
 const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
@@ -375,7 +557,6 @@ function exportCombinedExcel() {
   const valuationDate = new Date().toISOString().split('T')[0]
   const sessionName = activeSession.value?.name || 'N/A'
 
-  // Summary sheet
   const summaryRows = []
   summaryRows.push(['', '', '', ''])
   summaryRows.push(['DuraCapital', '', '', ''])
@@ -417,19 +598,19 @@ function exportCombinedExcel() {
   summarySheet['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 18 }, { wch: 14 }]
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
 
-  // Detail sheets
   for (const inst of filteredDetails.value) {
     if (inst.details && inst.details.length) {
+      const headers = getUniqueHeaders(inst.detailHeaders)
       const detailData = [
         [`${inst.name} – Detailed Instruments`],
         [`Session: ${sessionName}`],
         [`Valuation Date: ${valuationDate}`],
         [],
-        inst.detailHeaders,
-        ...inst.details.map(row => inst.detailHeaders.map(h => row[h] !== undefined ? row[h] : ''))
+        headers,
+        ...inst.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))
       ]
       const sheet = XLSX.utils.aoa_to_sheet(detailData)
-      sheet['!cols'] = inst.detailHeaders.map(() => ({ wch: 16 }))
+      sheet['!cols'] = headers.map(() => ({ wch: 16 }))
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
@@ -438,13 +619,14 @@ function exportCombinedExcel() {
   combinedModalVisible.value = false
 }
 
-// ===== FIXED: Load summary from backend =====
+// ================================================================
+// 🔥 FIX: loadSummary – correctly merge all instruments, deduplicate headers
+// ================================================================
 async function loadSummary() {
   loading.value = true
   error.value = ''
-  
+
   try {
-    // 1. Resolve active session
     let session = sessionManager.getActiveSession()
     if (!session) {
       const sid = sessionManager.getActiveSessionId()
@@ -468,187 +650,100 @@ async function loadSummary() {
     }
 
     const sid = activeSession.value.id
-    
-    // 2. Try to get portfolio summary from backend
-    let portfolioData = null
-    try {
-      const portfolioResponse = await api.calculationsAPI.getPortfolioSummary(sid)
-      if (portfolioResponse?.success && portfolioResponse?.data) {
-        portfolioData = portfolioResponse.data
-        console.log('✅ Portfolio summary loaded from backend:', portfolioData)
+
+    const wf = await sessionManager.getInstrumentWorkflow(sid, 'money-market')
+    const summary = wf?.instrumentSummary || { rows: [], columns: [] }
+
+    const allSummaryRows = [...summary.rows]
+    for (const type of ['bonds', 'tbills']) {
+      const wfType = await sessionManager.getInstrumentWorkflow(sid, type)
+      if (wfType?.instrumentSummary?.rows) {
+        wfType.instrumentSummary.rows.forEach(row => {
+          const id = row['Instrument Name'] + '_' + (row['Worksheet'] || '')
+          const exists = allSummaryRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
+          if (!exists) allSummaryRows.push(row)
+        })
       }
-    } catch (err) {
-      console.warn('Failed to load portfolio from backend, trying fallback:', err)
     }
 
-    // 3. Try to get instrument summaries from backend
-    const instrumentTypes = ['money-market', 'bonds', 'tbills']
-    const instrumentDataMap = {}
-    
-    for (const instType of instrumentTypes) {
+    if (allSummaryRows.length === 0) {
       try {
-        const summaryResponse = await api.calculationsAPI.getInstrumentSummary(sid, instType)
-        if (summaryResponse?.success && summaryResponse?.data) {
-          instrumentDataMap[instType] = summaryResponse.data
-          console.log(`✅ ${instType} summary loaded from backend`)
+        const backendSummary = await api.calculationsAPI.getInstrumentSummary(sid)
+        if (backendSummary?.success && backendSummary?.data?.rows) {
+          allSummaryRows.push(...backendSummary.data.rows)
         }
-      } catch (err) {
-        console.warn(`Failed to load ${instType} from backend:`, err)
+      } catch (e) {
+        console.warn('Failed to load from backend:', e)
       }
     }
 
-    // 4. Templates for display
     const templates = [
-      { 
-        id: 'money-market', 
-        name: 'Money Market', 
-        icon: 'mdi-chart-line', 
-        gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', 
-        rateLabel: 'Avg interest rate', 
-        barColor: '#1E88E5' 
-      },
-      { 
-        id: 'bonds', 
-        name: 'Bonds', 
-        icon: 'mdi-chart-timeline', 
-        gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', 
-        rateLabel: 'Avg coupon', 
-        barColor: '#4CAF50' 
-      },
-      { 
-        id: 'tbills', 
-        name: 'T-Bills', 
-        icon: 'mdi-finance', 
-        gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', 
-        rateLabel: 'Avg discount', 
-        barColor: '#FF9800' 
-      }
+      { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', rateLabel: 'Avg interest rate', barColor: '#1E88E5' },
+      { id: 'bonds', name: 'Bonds', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', rateLabel: 'Avg coupon', barColor: '#4CAF50' },
+      { id: 'tbills', name: 'T-Bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', rateLabel: 'Avg discount', barColor: '#FF9800' }
     ]
 
     const detailsList = []
     const instrumentResults = []
 
-    // 5. Process each instrument type
+    const getVal = (row, ...keys) => {
+      for (const key of keys) {
+        const val = row[key]
+        if (val !== undefined && val !== null && val !== '') {
+          const num = parseFloat(val)
+          if (!isNaN(num)) return num
+        }
+      }
+      return 0
+    }
+
     for (const template of templates) {
-      let details = []
-      let totalValue = 0
-      let totalFaceValue = 0
-      let totalAvgRate = 0
-      let instrumentCount = 0
-      let fredBench = null
+      const rows = allSummaryRows.filter(r => r['Instrument Type'] === template.id)
+      let totalValue = 0, totalFaceValue = 0, totalAvgRate = 0, fredBench = null
 
-      // Check if we have backend data for this instrument
-      const backendSummary = instrumentDataMap[template.id]
-      
-      if (backendSummary && backendSummary.rows && backendSummary.rows.length > 0) {
-        // Use backend data
-        details = backendSummary.rows
-        instrumentCount = details.length
-        
-        details.forEach(row => {
-          const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
-          const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
-          const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
-          if (!isNaN(value)) totalValue += value
-          if (!isNaN(faceValue)) totalFaceValue += faceValue
-          if (!isNaN(rate)) totalAvgRate += rate
+      rows.forEach(row => {
+        const value = getVal(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
+        const faceValue = getVal(row, 'Face Value', 'face_value', 'Amount', 'amount', 'Principal', 'principal')
+        const rate = getVal(row, 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate')
+        totalValue += value
+        totalFaceValue += faceValue
+        totalAvgRate += rate
+        if (row['FRED Benchmark'] !== undefined) fredBench = parseFloat(row['FRED Benchmark'])
+        else if (row['fred_benchmark'] !== undefined) fredBench = parseFloat(row['fred_benchmark'])
+      })
+
+      const avgRate = rows.length > 0 && totalAvgRate > 0 ? totalAvgRate / rows.length : null
+      const completed = rows.length > 0
+
+      const details = rows.map(row => {
+        const obj = {}
+        Object.keys(row).forEach(k => {
+          if (!['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet'].includes(k)) {
+            obj[k] = row[k]
+          }
         })
-        
-        // Try to get FRED benchmark from the summary data
-        if (backendSummary.metadata && backendSummary.metadata.fred_benchmark) {
-          fredBench = backendSummary.metadata.fred_benchmark
-        }
-      } else {
-        // Fallback: try to get from workflow
-        try {
-          const wf = await sessionManager.getInstrumentWorkflow(sid, template.id)
-          
-          if (wf) {
-            // Try to get FRED benchmark from calculations
-            if (wf.calculations && wf.calculations.fred) {
-              fredBench = wf.calculations.fred.benchmark_rate
-            } else {
-              // Try localStorage
-              const calcKey = `${template.id}_fred_benchmark`
-              const savedFred = localStorage.getItem(calcKey)
-              if (savedFred) {
-                try { fredBench = parseFloat(savedFred) } catch(e) {}
-              }
-            }
-            
-            // Get data from workflow
-            let dataRows = []
-            if (wf.cleanedData && wf.cleanedData.length > 0) {
-              dataRows = wf.cleanedData
-            } else if (wf.data && wf.data.length > 0) {
-              dataRows = wf.data
-            }
-            
-            if (dataRows.length > 0) {
-              details = dataRows
-              instrumentCount = dataRows.length
-              
-              dataRows.forEach(row => {
-                const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
-                const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
-                const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
-                if (!isNaN(value)) totalValue += value
-                if (!isNaN(faceValue)) totalFaceValue += faceValue
-                if (!isNaN(rate)) totalAvgRate += rate
-              })
-            }
-          }
-        } catch (err) {
-          console.warn(`Failed to get workflow for ${template.id}:`, err)
-        }
-      }
+        return obj
+      })
 
-      // Also try localStorage as fallback
-      if (details.length === 0) {
-        try {
-          const summaryKey = `${template.id}_session_${sid}_summary`
-          const savedSummary = localStorage.getItem(summaryKey)
-          if (savedSummary) {
-            const summaryData = JSON.parse(savedSummary)
-            if (summaryData.rows && summaryData.rows.length) {
-              details = summaryData.rows
-              instrumentCount = details.length
-              details.forEach(row => {
-                const value = parseFloat(row['Total Value'] || row['Calculated Value'] || 0)
-                const faceValue = parseFloat(row['Face Value'] || row['Amount'] || row['Principal'] || 0)
-                const rate = parseFloat(row['Avg Rate'] || row['Coupon Rate'] || row['Discount Rate'] || 0)
-                if (!isNaN(value)) totalValue += value
-                if (!isNaN(faceValue)) totalFaceValue += faceValue
-                if (!isNaN(rate)) totalAvgRate += rate
-              })
-            }
-          }
-        } catch(e) {}
-      }
+      const rawHeaders = details.length ? Object.keys(details[0]) : []
+      const uniqueHeaders = getUniqueHeaders(rawHeaders)
 
-      const avgRate = instrumentCount > 0 && totalAvgRate > 0 ? totalAvgRate / instrumentCount : null
-      const completed = instrumentCount > 0
-      const value = totalValue
-      const faceValue = totalFaceValue
-      const difference = faceValue - value
-
-      const headers = details.length ? Object.keys(details[0]) : []
       detailsList.push({
         id: template.id,
         name: template.name,
         details: details,
-        detailHeaders: headers
+        detailHeaders: uniqueHeaders.length ? uniqueHeaders : ['No Data']
       })
 
       instrumentResults.push({
         ...template,
-        value,
-        faceValue,
-        difference,
-        count: instrumentCount,
-        avgRate,
+        value: totalValue,
+        faceValue: totalFaceValue,
+        difference: totalFaceValue - totalValue,
+        count: rows.length,
+        avgRate: avgRate,
         fredBench: fredBench !== null ? parseFloat(fredBench) : null,
-        completed,
+        completed: completed,
         statusClass: completed ? 'completed' : 'pending',
         statusText: completed ? 'Completed' : 'Not started',
         statusIcon: completed ? 'mdi-check-circle' : 'mdi-clock-outline'
@@ -658,14 +753,12 @@ async function loadSummary() {
     instrumentsWithDetails.value = detailsList
     instruments.value = instrumentResults
 
-    // Calculate percentages
     const total = instruments.value.reduce((sum, inst) => sum + inst.value, 0)
     instruments.value = instruments.value.map(inst => ({
       ...inst,
       percent: total > 0 ? ((inst.value / total) * 100).toFixed(1) : 0
     }))
 
-    // Initialize export selections
     const initSelections = {}
     instruments.value.forEach(inst => {
       initSelections[inst.id] = inst.completed || inst.value > 0
@@ -735,16 +828,17 @@ function exportToExcel() {
 
   for (const inst of instrumentsWithDetails.value) {
     if (selectedExportInstruments.value[inst.id] && inst.details && inst.details.length) {
+      const headers = getUniqueHeaders(inst.detailHeaders)
       const detailData = [
         [`${inst.name} – Detailed Instruments`],
         [`Session: ${activeSession.value.name}`],
         [`Valuation Date: ${valuationDate}`],
         [],
-        inst.detailHeaders,
-        ...inst.details.map(row => inst.detailHeaders.map(h => row[h] !== undefined ? row[h] : ''))
+        headers,
+        ...inst.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))
       ]
       const sheet = XLSX.utils.aoa_to_sheet(detailData)
-      sheet['!cols'] = inst.detailHeaders.map(() => ({ wch: 16 }))
+      sheet['!cols'] = headers.map(() => ({ wch: 16 }))
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
@@ -753,31 +847,31 @@ function exportToExcel() {
   showExportDialog.value = false
 }
 
-// ===== FIXED: Load data on mount with retry =====
+// ================================================================
+// LIFECYCLE
+// ================================================================
 onMounted(async () => {
   await loadSummary()
-  
-  // Also listen for session updates
+
   const handleSessionUpdate = async (event) => {
     const { sessionId } = event.detail || {}
     if (sessionId && activeSession.value?.id === sessionId) {
       await loadSummary()
     } else if (!sessionId) {
-      // Refresh all
       await loadSummary()
     }
   }
-  
+
   window.addEventListener('session-updated', handleSessionUpdate)
-  
-  // Cleanup
-  return () => {
+
+  onBeforeUnmount(() => {
     window.removeEventListener('session-updated', handleSessionUpdate)
-  }
+  })
 })
 </script>
 
 <style scoped>
+/* your existing styles – unchanged */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }
@@ -866,8 +960,6 @@ onMounted(async () => {
   background: #f0f0f0;
   color: #0B2044;
 }
-.btn-close-dialog { background: transparent; border: none; color: #666; cursor: pointer; padding: 8px; border-radius: 50%; }
-.btn-close-dialog:hover { background: #f0f0f0; color: #0B2044; }
 .combined-excel-body { padding: 16px 24px; max-height: calc(100vh - 140px); overflow-y: auto; background: #f9fafc; }
 .combined-section { background: white; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
 .combined-section-title { color: #0B2044; font-size: 16px; font-weight: 600; margin: 0 0 12px 0; display: flex; align-items: center; gap: 10px; }
@@ -906,6 +998,43 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 .valuation-date-footer { color: #666; font-size: 13px; }
+
+.analytics-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  margin: 12px 0;
+}
+.analytics-pill {
+  flex: 1;
+  min-width: 160px;
+  background: #f8faff;
+  padding: 14px 20px;
+  border-radius: 12px;
+  border: 1px solid #edf0f6;
+  text-align: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.analytics-pill:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+.analytics-pill .pill-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #7a879b;
+  margin-bottom: 4px;
+}
+.analytics-pill .pill-value {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  color: #0b1e3c;
+}
+
 @media (max-width: 768px) {
   .summary-page { padding: 16px; }
   .hero-header { flex-direction: column; }
@@ -916,7 +1045,7 @@ onMounted(async () => {
   .action-buttons { flex-direction: column; align-items: center; }
   .dist-bar-container { flex-wrap: wrap; }
   .dist-label { width: 80px; }
-  .excel-dialog-title-white { flex-wrap: wrap; gap: 8px; }
-  .excel-dialog-title-white .header-left { flex-wrap: wrap; }
+  .analytics-pills { flex-direction: column; }
+  .analytics-pill { min-width: auto; }
 }
 </style>

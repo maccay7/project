@@ -35,19 +35,14 @@ const FINANCIAL_SYNONYMS = {
   purchasePrice: ['purchase price', 'buy price', 'price paid', 'acquisition price'],
   redemptionValue: ['redemption value', 'call value', 'maturity value'],
   // Generic
-  instrumentName: ['instrument', 'security', 'name', 'description', 'issuer', 'counterparty', 'company', 'entity'],
+  instrumentName: ['instrument', 'security', 'name', 'description', 'issuer', 'counterparty', 'company', 'entity', 'bond name', 'tbill name'],
   currency: ['currency', 'ccy', 'curr', 'denomination'],
-  country: ['country', 'nation', 'jurisdiction']
+  country: ['country', 'nation', 'jurisdiction', 'region', 'market']
 }
 
-/**
- * Enhanced extraction for single‑instrument sheets – uses both the detector and the synonym fallback.
- * @param {Array} data - Array of row objects
- * @param {string} instrumentType
- * @returns {Object} extracted values
- */
+// ===== 🔥 FIXED: Enhanced extraction for single-instrument sheets =====
 function extractValuesIntelligently(data, instrumentType) {
-  // First, use the detector's built‑in extraction
+  // First, use the detector's built-in extraction
   const requiredFields = getRequiredFieldMappings(instrumentType)
   let extracted = extractSingleInstrumentValues(data, requiredFields)
 
@@ -58,19 +53,34 @@ function extractValuesIntelligently(data, instrumentType) {
       const synonyms = FINANCIAL_SYNONYMS[field] || [field]
       // Search through all cells for any synonym
       for (const row of data) {
+        if (!row || typeof row !== 'object') continue
         for (const [key, value] of Object.entries(row)) {
+          if (value === undefined || value === null || value === '') continue
           const keyLower = key.toLowerCase()
-          if (synonyms.some(syn => keyLower.includes(syn))) {
-            if (value !== '' && value !== null && value !== undefined) {
-              extracted[field] = value
-              break
-            }
+          const matched = synonyms.some(syn => 
+            keyLower.includes(syn.toLowerCase()) || syn.toLowerCase().includes(keyLower)
+          )
+          if (matched) {
+            extracted[field] = value
+            break
           }
         }
         if (extracted[field]) break
       }
     }
   }
+
+  // 🔥 Special handling: look for instrument name if missing
+  if (!extracted.instrumentName || extracted.instrumentName === '') {
+    const nameCol = detectInstrumentNameColumn(data)
+    if (nameCol && nameCol.columnName) {
+      const names = extractInstrumentNames(data, nameCol.columnName)
+      if (names && names.length > 0) {
+        extracted.instrumentName = names[0]
+      }
+    }
+  }
+
   return extracted
 }
 
@@ -210,7 +220,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     return { success: true, sheet, type: detection.type }
   }
 
-  // ===== WORKSHEET PROCESSING =====
+  // ===== 🔥 FIXED: WORKSHEET PROCESSING with better name detection =====
   async function processWorksheet(sheetName, requiredColumns, columnVariations) {
     const sheet = workbookSheets.value.find(s => s.name === sheetName)
     if (!sheet) {
@@ -240,19 +250,61 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           extractedValues: values
         }
       } else {
-        // Multi-instrument: use column mapping
+        // ===== MULTI-INSTRUMENT: Better column detection =====
         tabularData.value = sheet.data
 
-        const nameDetection = detectInstrumentNameColumn(sheet.data)
-        instrumentNameColumn.value = nameDetection.columnName
-        if (nameDetection.columnName) {
+        // 🔥 First try to detect instrument name column
+        let nameDetection = detectInstrumentNameColumn(sheet.data)
+        
+        // If no name column found, try harder
+        if (!nameDetection || !nameDetection.columnName) {
+          // Search through all column names for common patterns
+          const namePatterns = ['instrument', 'name', 'security', 'bond', 'tbill', 'issuer', 'counterparty', 'company', 'entity']
+          let foundCol = null
+          for (const header of sheet.headers) {
+            const lowerHeader = header.toLowerCase()
+            if (namePatterns.some(p => lowerHeader.includes(p))) {
+              foundCol = header
+              break
+            }
+          }
+          if (foundCol) {
+            nameDetection = { columnName: foundCol, confidence: 0.8 }
+          } else if (sheet.headers.length > 0) {
+            // Fallback: use first column as name
+            nameDetection = { columnName: sheet.headers[0], confidence: 0.5 }
+          }
+        }
+        
+        instrumentNameColumn.value = nameDetection?.columnName || null
+        if (nameDetection?.columnName) {
           detectedInstrumentNames.value = extractInstrumentNames(sheet.data, nameDetection.columnName)
           console.log('📋 Detected instrument names:', detectedInstrumentNames.value)
         }
 
+        // 🔥 Build column mapping with Instrument Name prioritized
         let columnMapping = null
         if (requiredColumns && columnVariations) {
           columnMapping = autoMatchColumns(sheet.headers, requiredColumns, columnVariations)
+          
+          // Ensure Instrument Name is properly mapped
+          if (nameDetection?.columnName && columnMapping['Instrument Name'] !== nameDetection.columnName) {
+            // Check if the detected column is in the file columns
+            if (sheet.headers.includes(nameDetection.columnName)) {
+              columnMapping['Instrument Name'] = nameDetection.columnName
+              console.log(`✅ Mapped Instrument Name to: ${nameDetection.columnName}`)
+            }
+          }
+          
+          // If still no mapping for Instrument Name, try to find any column with 'name'
+          if (!columnMapping['Instrument Name']) {
+            const nameCol = sheet.headers.find(h => 
+              /name|instrument|security|bond|tbill|issuer|entity/i.test(h)
+            )
+            if (nameCol) {
+              columnMapping['Instrument Name'] = nameCol
+            }
+          }
         }
 
         console.log('📊 Multi-instrument sheet processed, ready for mapping')
@@ -263,7 +315,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           data: sheet.data,
           headers: sheet.headers,
           columnMapping,
-          instrumentNameColumn: nameDetection.columnName,
+          instrumentNameColumn: nameDetection?.columnName || null,
           instrumentNames: detectedInstrumentNames.value
         }
       }
@@ -286,7 +338,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       yield: 'Yield',
       price: 'Price',
       discountRate: 'Discount Rate',
-      frequency: 'Frequency'
+      frequency: 'Frequency',
+      instrumentName: 'Instrument'
     }
 
     for (const [key, value] of Object.entries(extractedValues)) {
@@ -327,6 +380,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     loading.value = false
     error.value = ''
     uploadProgress.value = 0
+    instrumentNameColumn.value = null
+    detectedInstrumentNames.value = []
   }
 
   // ===== STATE SNAPSHOT =====
@@ -338,7 +393,9 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       currentSheetName: currentSheetName.value,
       sheetType: sheetType.value,
       extractedValues: extractedValues.value,
-      tabularData: tabularData.value
+      tabularData: tabularData.value,
+      instrumentNameColumn: instrumentNameColumn.value,
+      detectedInstrumentNames: detectedInstrumentNames.value
     }
   }
 
@@ -351,6 +408,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     sheetType.value = snapshot.sheetType || 'multi'
     extractedValues.value = snapshot.extractedValues || {}
     tabularData.value = snapshot.tabularData || []
+    instrumentNameColumn.value = snapshot.instrumentNameColumn || null
+    detectedInstrumentNames.value = snapshot.detectedInstrumentNames || []
 
     if (snapshot.uploadedFileName) {
       uploadedFile.value = { name: snapshot.uploadedFileName, size: 0 }
@@ -380,6 +439,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     completedSheets,
     totalSheets,
     progress,
+    instrumentNameColumn,
+    detectedInstrumentNames,
     handleFileUpload,
     selectWorksheet,
     processWorksheet,

@@ -39,7 +39,7 @@
 
       <!-- Toolbar -->
       <div class="excel-toolbar">
-        <span>{{ displayData.length }} rows × {{ displayHeaders.length }} columns</span>
+        <span>{{ displayData.length }} rows × {{ uniqueHeaders.length }} columns</span>
         <div class="toolbar-right">
           <div class="pagination-controls">
             <button class="page-btn" @click="prevPage" :disabled="currentPage === 1">←</button>
@@ -56,7 +56,7 @@
             <tr>
               <th class="row-number-col" style="width:50px; min-width:50px; max-width:50px; color: #000000 !important; background: #f5f5f5 !important;">#</th>
               <th
-                v-for="(header, colIndex) in displayHeaders"
+                v-for="(header, colIndex) in uniqueHeaders"
                 :key="header"
                 :style="headerStyle(header, colIndex)"
                 class="header-cell"
@@ -99,7 +99,7 @@
                   {{ (currentPage - 1) * pageSize + rowIndex + 1 }}
                 </td>
                 <td
-                  v-for="(header, colIndex) in displayHeaders"
+                  v-for="(header, colIndex) in uniqueHeaders"
                   :key="header"
                   :class="{
                     'selected-cell': isCellSelected(rowIndex, colIndex),
@@ -112,7 +112,7 @@
                   style="color: #000000 !important; background: #ffffff !important;"
                 >
                   <div v-if="!isEditingCell(rowIndex, colIndex)" class="cell-content" style="color: #000000 !important; background: #ffffff !important;">
-                    {{ row[header] !== undefined ? row[header] : '' }}
+                    {{ getCellValue(row, header) }}
                   </div>
                   <input
                     v-else
@@ -143,7 +143,7 @@
 
       <!-- Footer -->
       <div class="excel-footer" v-if="displayData.length">
-        <span style="color: #000000 !important;">{{ displayData.length }} rows · {{ displayHeaders.length }} columns</span>
+        <span style="color: #000000 !important;">{{ displayData.length }} rows · {{ uniqueHeaders.length }} columns</span>
         <span v-if="selectedCell" style="color: #000000 !important;">Cell: {{ selectedCellRef }}</span>
       </div>
     </div>
@@ -204,19 +204,44 @@ export default {
     const currentPage = ref(1)
     const loadAllMode = ref(false)
 
+    // ─── 🔥 NEW: Deduplicate headers ────────────────────
+    function getUniqueHeaders(headers) {
+      if (!headers || !headers.length) return []
+      const seen = new Set()
+      const result = []
+      for (const h of headers) {
+        const key = h.trim().toLowerCase()
+        if (!seen.has(key)) {
+          seen.add(key)
+          result.push(h)
+        }
+      }
+      return result
+    }
+
     // ─── Computed ─────────────────────────────────────────
     const displayData = computed(() => internalData.value)
 
-    const displayHeaders = computed(() => {
+    // 🔥 Use deduplicated headers
+    const uniqueHeaders = computed(() => {
+      let rawHeaders = []
       if (displayData.value.length) {
-        const keys = Object.keys(displayData.value[0])
-        if (keys.length) return keys
+        rawHeaders = Object.keys(displayData.value[0])
       }
-      if (props.headers && props.headers.length) return props.headers
-      if (props.originalHeaders && props.originalHeaders.length) return props.originalHeaders
-      if (props.availableFileColumns && props.availableFileColumns.length) return props.availableFileColumns
-      return []
+      if (!rawHeaders.length && props.headers && props.headers.length) {
+        rawHeaders = props.headers
+      }
+      if (!rawHeaders.length && props.originalHeaders && props.originalHeaders.length) {
+        rawHeaders = props.originalHeaders
+      }
+      if (!rawHeaders.length && props.availableFileColumns && props.availableFileColumns.length) {
+        rawHeaders = props.availableFileColumns
+      }
+      // Remove duplicates and empty strings
+      return getUniqueHeaders(rawHeaders.filter(h => h && h.trim()))
     })
+
+    const displayHeaders = computed(() => uniqueHeaders.value)
 
     const totalPages = computed(() => Math.max(1, Math.ceil(displayData.value.length / pageSize.value)))
     const paginatedData = computed(() => {
@@ -235,29 +260,22 @@ export default {
       return colLetter + rowNum
     })
 
-    // ─── Helpers for mapping dropdown ────────────────────
+    // ─── Helpers ──────────────────────────────────────────
+    function getCellValue(row, header) {
+      return row[header] !== undefined ? row[header] : ''
+    }
+
+    function setCellValue(rowObj, header, newValue) {
+      rowObj[header] = newValue
+      emit('data-update', internalData.value, props.originalData)
+    }
+
     function isRequiredColumn(header) {
       return props.requiredColumns.includes(header)
     }
 
     function getMappingForHeader(header) {
       return props.columnMapping[header] || '__na__'
-    }
-
-    function getCellRawValue(row, col) {
-      const header = displayHeaders.value[col]
-      if (!header) return ''
-      return row[header] !== undefined ? row[header] : ''
-    }
-
-    function setCellValue(row, col, newValue) {
-      const header = displayHeaders.value[col]
-      if (!header) return
-      const rowData = displayData.value[row]
-      if (rowData) {
-        rowData[header] = newValue
-        emit('data-update', internalData.value, props.originalData)
-      }
     }
 
     // ─── Selection ─────────────────────────────────────────
@@ -312,7 +330,8 @@ export default {
         return
       }
       const { row, col } = selectedCell.value
-      const val = getCellRawValue(paginatedData.value[row], col)
+      const header = displayHeaders.value[col]
+      const val = header ? getCellValue(paginatedData.value[row], header) : ''
       formulaBarValue.value = val !== undefined ? val : ''
     }
 
@@ -323,8 +342,13 @@ export default {
     function applyFormulaBarEdit() {
       if (!selectedCell.value) return
       const { row, col } = selectedCell.value
-      const newVal = formulaBarValue.value
-      setCellValue(row, col, newVal)
+      const header = displayHeaders.value[col]
+      if (header) {
+        const rowData = paginatedData.value[row]
+        if (rowData) {
+          setCellValue(rowData, header, formulaBarValue.value)
+        }
+      }
     }
 
     // ─── Click / Dblclick ──────────────────────────────────
@@ -376,7 +400,9 @@ export default {
     function startEditing(row, col) {
       if (row < 0 || row >= paginatedData.value.length) return
       if (col < 0 || col >= displayHeaders.value.length) return
-      const val = getCellRawValue(paginatedData.value[row], col)
+      const header = displayHeaders.value[col]
+      if (!header) return
+      const val = getCellValue(paginatedData.value[row], header)
       editingCell.value = { row, col }
       editValue.value = val !== undefined ? val : ''
       nextTick(() => {
@@ -391,8 +417,13 @@ export default {
       if (!editingCell.value) return
       const { row, col } = editingCell.value
       if (save) {
-        const newVal = editValue.value
-        setCellValue(row, col, newVal)
+        const header = displayHeaders.value[col]
+        if (header) {
+          const rowData = paginatedData.value[row]
+          if (rowData) {
+            setCellValue(rowData, header, editValue.value)
+          }
+        }
         updateFormulaBarFromSelection()
       }
       editingCell.value = null
@@ -583,33 +614,21 @@ export default {
     // ─── Pagination ──────────────────────────────────────
     function prevPage() { if (currentPage.value > 1) currentPage.value-- }
     function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
-    function loadAllRows() {
-      loadAllMode.value = true
-      currentPage.value = 1
-    }
 
     // ─── Sheet Selection ──────────────────────────────────
     function selectSheet(sheetName) {
       const sheet = props.workbookSheets.find(s => s.name === sheetName)
       if (sheet) {
-        // Use fullData if available, else data
         const sheetData = sheet.fullData || sheet.data || []
-        // Convert fullData to objects with headers if fullData is array of arrays
         if (Array.isArray(sheetData) && sheetData.length > 0 && Array.isArray(sheetData[0])) {
-          // Use the first row as headers? No – we should use the raw data as is, but we need to convert to objects for display.
-          // However, for raw display, we want to preserve all rows and columns, even if empty.
-          // So we'll treat each row as an object with column names like "Col1", "Col2"...
           const headers = sheet.headers || []
-          if (headers.length === 0) {
-            // Generate numeric headers
-            const maxCols = sheetData.reduce((max, row) => Math.max(max, row.length), 0)
-            for (let i = 0; i < maxCols; i++) {
-              headers.push(`Col${i+1}`)
-            }
-          }
+          const maxCols = sheetData.reduce((max, row) => Math.max(max, row.length), 0)
           const jsonData = sheetData.map(row => {
             const obj = {}
-            headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? row[i] : '' })
+            for (let i = 0; i < maxCols; i++) {
+              const colName = headers[i] || `Col${i+1}`
+              obj[colName] = row[i] !== undefined ? row[i] : ''
+            }
             return obj
           })
           internalData.value = jsonData
@@ -636,7 +655,7 @@ export default {
       if (!props.useLuckysheet || !luckysheetContainer.value || luckysheetInitialized.value) return
       
       const sheetData = internalData.value.map(row => Object.values(row))
-      const headers = displayHeaders.value
+      const headers = uniqueHeaders.value
       
       sheetData.unshift(headers)
       
@@ -739,6 +758,7 @@ export default {
       internalData,
       displayData,
       displayHeaders,
+      uniqueHeaders,
       paginatedData,
       totalPages,
       currentPage,
@@ -759,9 +779,10 @@ export default {
       defaultRowHeight,
       tableStyle,
       selectedCellRef,
+      getCellValue,
+      setCellValue,
       isRequiredColumn,
       getMappingForHeader,
-      setCellValue,
       isCellSelected,
       isRowSelected,
       isEditingCell,
