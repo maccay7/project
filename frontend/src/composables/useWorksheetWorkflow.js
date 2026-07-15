@@ -1,10 +1,3 @@
-// composables/useWorksheetWorkflow.js
-/**
- * Shared worksheet workflow composable for all instrument types
- * Handles Excel upload, worksheet selection, type detection, and processing
- * Enhanced with intelligent single-instrument value extraction and synonym matching.
- */
-
 import { ref, computed, toValue } from 'vue'
 import * as XLSX from 'xlsx'
 import {
@@ -14,44 +7,34 @@ import {
   detectInstrumentNameColumn,
   extractInstrumentNames
 } from '@/utils/sheetTypeDetector'
-import { autoMatchColumns } from '@/utils/instrumentMapping'
+import { autoMatchColumns, getDisplayColumns } from '@/utils/instrumentMapping'
 
-// Financial synonym dictionary for intelligent value extraction
-// This is used as a fallback when the detector doesn't find exact matches
 const FINANCIAL_SYNONYMS = {
-  // Money Market
   principal: ['principal', 'face value', 'nominal value', 'investment amount', 'capital', 'deposit amount', 'initial investment', 'amount invested', 'notional', 'amount'],
   interestRate: ['interest rate', 'rate', 'coupon', 'coupon rate', 'annual rate', 'fixed rate', 'lending rate', 'investment rate', 'yield rate', 'return', 'yield'],
   daysToMaturity: ['days to maturity', 'term', 'tenor', 'maturity days', 'duration days', 'period', 'days'],
   issueDate: ['issue date', 'start date', 'effective date', 'trade date', 'settlement date', 'value date', 'origination date'],
   maturityDate: ['maturity date', 'end date', 'due date', 'redemption date', 'expiry date'],
-  // Bonds
   faceValue: ['face value', 'par value', 'nominal', 'amount', 'principal'],
   couponRate: ['coupon rate', 'coupon', 'rate', 'interest rate'],
   yield: ['yield', 'ytm', 'yield to maturity', 'return', 'effective yield'],
   frequency: ['frequency', 'payment frequency', 'coupon frequency', 'period', 'semi-annual', 'quarterly', 'annual'],
-  // T-Bills
   discountRate: ['discount rate', 'discount', 'rate', 'bank discount'],
   purchasePrice: ['purchase price', 'buy price', 'price paid', 'acquisition price'],
   redemptionValue: ['redemption value', 'call value', 'maturity value'],
-  // Generic
   instrumentName: ['instrument', 'security', 'name', 'description', 'issuer', 'counterparty', 'company', 'entity', 'bond name', 'tbill name'],
   currency: ['currency', 'ccy', 'curr', 'denomination'],
   country: ['country', 'nation', 'jurisdiction', 'region', 'market']
 }
 
-// ===== 🔥 FIXED: Enhanced extraction for single-instrument sheets =====
 function extractValuesIntelligently(data, instrumentType) {
-  // First, use the detector's built-in extraction
   const requiredFields = getRequiredFieldMappings(instrumentType)
   let extracted = extractSingleInstrumentValues(data, requiredFields)
 
-  // Then, fill any missing values using the synonym fallback
   const fieldKeys = Object.keys(requiredFields)
   for (const field of fieldKeys) {
     if (!extracted[field] || extracted[field] === '') {
       const synonyms = FINANCIAL_SYNONYMS[field] || [field]
-      // Search through all cells for any synonym
       for (const row of data) {
         if (!row || typeof row !== 'object') continue
         for (const [key, value] of Object.entries(row)) {
@@ -70,7 +53,6 @@ function extractValuesIntelligently(data, instrumentType) {
     }
   }
 
-  // 🔥 Special handling: look for instrument name if missing
   if (!extracted.instrumentName || extracted.instrumentName === '') {
     const nameCol = detectInstrumentNameColumn(data)
     if (nameCol && nameCol.columnName) {
@@ -85,9 +67,8 @@ function extractValuesIntelligently(data, instrumentType) {
 }
 
 export function useWorksheetWorkflow(instrumentTypeRef) {
-  // ===== STATE =====
   const uploadedFile = ref(null)
-  const originalFileBuffer = ref(null)
+  const originalFileBuffer = ref(null)      // full ArrayBuffer for later full parsing
   const workbookSheets = ref([])
   const currentSheetName = ref('')
   const worksheetStatus = ref({})
@@ -103,7 +84,6 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
   const error = ref('')
   const uploadProgress = ref(0)
 
-  // ===== COMPUTED =====
   const hasWorkbook = computed(() => workbookSheets.value.length > 0)
   const completedSheets = computed(() => 
     Object.values(worksheetStatus.value).filter(s => s === 'completed').length
@@ -115,7 +95,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
 
   const currentInstrumentType = computed(() => toValue(instrumentTypeRef))
 
-  // ===== UPLOAD FUNCTIONS =====
+  // ========== UPLOAD ==========
+  // Parse only first 1000 rows per sheet for speed – enough for preview & detection
   async function handleFileUpload(file) {
     if (!file) {
       error.value = 'No file provided'
@@ -140,32 +121,18 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       originalFileBuffer.value = arrayBuffer
       uploadedFile.value = new File([file], file.name, { type: file.type })
 
+      // Parse only first 1000 rows per sheet for initial detection
       const workbook = XLSX.read(arrayBuffer, { 
         type: 'array', 
         cellDates: true,
-        cellStyles: true,
-        cellNF: true,
-        sheetStubs: true
+        cellStyles: false,
+        cellNF: false,
+        sheetRows: 1000            // ⬅️ limit rows for speed
       })
 
       const sheets = []
       for (const sheetName of workbook.SheetNames) {
         const worksheet = workbook.Sheets[sheetName]
-        
-        const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1')
-        
-        // Keep full data for tables
-        const fullData = []
-        for (let row = range.s.r; row <= range.e.r; row++) {
-          const rowData = []
-          for (let col = range.s.c; col <= range.e.c; col++) {
-            const cellAddress = XLSX.utils.encode_cell({ r: row, c: col })
-            const cell = worksheet[cellAddress]
-            rowData.push(cell ? (cell.v !== undefined ? cell.v : '') : '')
-          }
-          fullData.push(rowData)
-        }
-        
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
         const sheetHeaders = jsonData.length > 0 ? Object.keys(jsonData[0]) : []
 
@@ -173,12 +140,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           name: sheetName,
           data: jsonData,
           headers: sheetHeaders,
-          fullData: fullData,
           row_count: jsonData.length,
           column_count: sheetHeaders.length,
-          full_row_count: range.e.r - range.s.r + 1,
-          full_column_count: range.e.c - range.s.c + 1,
-          range: worksheet['!ref']
         })
       }
 
@@ -190,7 +153,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       })
 
       uploadProgress.value = 100
-      console.log(`✅ Workbook loaded: ${sheets.length} sheets`)
+      console.log(`Workbook loaded (limited preview): ${sheets.length} sheets`)
       return { success: true, sheets }
     } catch (err) {
       error.value = `Failed to parse workbook: ${err.message}`
@@ -202,7 +165,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     }
   }
 
-  // ===== WORKSHEET SELECTION =====
+  // ========== SHEET SELECTION ==========
   function selectWorksheet(sheetName) {
     const sheet = workbookSheets.value.find(s => s.name === sheetName)
     if (!sheet) {
@@ -216,32 +179,64 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     const detection = detectSheetType(sheet.data, currentInstrumentType.value)
     sheetType.value = detection.type
 
-    console.log(`📋 Selected sheet: ${sheetName}, type: ${detection.type}`)
+    console.log(`Selected sheet: ${sheetName}, type: ${detection.type}`)
     return { success: true, sheet, type: detection.type }
   }
 
-  // ===== 🔥 FIXED: WORKSHEET PROCESSING with better name detection =====
+  // ========== FULL SHEET PARSING (on demand) ==========
+  function parseFullSheet(sheetName) {
+    if (!originalFileBuffer.value) {
+      throw new Error('No file buffer available')
+    }
+    const workbook = XLSX.read(originalFileBuffer.value, {
+      type: 'array',
+      cellDates: true,
+      cellStyles: false,
+      cellNF: false,
+      // no row limit
+    })
+    const worksheet = workbook.Sheets[sheetName]
+    if (!worksheet) {
+      throw new Error(`Sheet "${sheetName}" not found in full workbook`)
+    }
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
+    return jsonData
+  }
+
+  // ========== PROCESS WORKSHEET (re‑parse full sheet) ==========
   async function processWorksheet(sheetName, requiredColumns, columnVariations) {
-    const sheet = workbookSheets.value.find(s => s.name === sheetName)
-    if (!sheet) {
-      error.value = `Sheet "${sheetName}" not found`
+    // Force full re‑parse of the selected sheet from the buffer
+    let sheetData = []
+    try {
+      sheetData = parseFullSheet(sheetName)
+    } catch (err) {
+      error.value = `Failed to parse full sheet: ${err.message}`
+      return { success: false, error: error.value }
+    }
+
+    if (!sheetData || sheetData.length === 0) {
+      error.value = `No data found in sheet "${sheetName}"`
       return { success: false, error: error.value }
     }
 
     worksheetStatus.value[sheetName] = 'in_progress'
 
     try {
-      // First, use the intelligent detector to get type and extracted values
-      const detection = detectSheetType(sheet.data, currentInstrumentType.value)
+      const detection = detectSheetType(sheetData, currentInstrumentType.value)
       sheetType.value = detection.type
 
       if (detection.type === 'single') {
-        // Use the enhanced extraction that combines detector + synonym fallback
-        const values = extractValuesIntelligently(sheet.data, currentInstrumentType.value)
+        const values = extractValuesIntelligently(sheetData, currentInstrumentType.value)
         extractedValues.value = values
         tabularData.value = convertExtractedToTabular(values)
 
-        console.log('📋 Single-instrument sheet processed with intelligent extraction:', values)
+        // Update the workbookSheets entry with full data
+        const sheetIndex = workbookSheets.value.findIndex(s => s.name === sheetName)
+        if (sheetIndex !== -1) {
+          workbookSheets.value[sheetIndex].data = sheetData
+          workbookSheets.value[sheetIndex].row_count = sheetData.length
+        }
+
         worksheetStatus.value[sheetName] = 'completed'
         return {
           success: true,
@@ -250,18 +245,15 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           extractedValues: values
         }
       } else {
-        // ===== MULTI-INSTRUMENT: Better column detection =====
-        tabularData.value = sheet.data
+        // Multi-instrument: use full sheet data
+        tabularData.value = sheetData
 
-        // 🔥 First try to detect instrument name column
-        let nameDetection = detectInstrumentNameColumn(sheet.data)
-        
-        // If no name column found, try harder
+        // Detect instrument name column
+        let nameDetection = detectInstrumentNameColumn(sheetData)
         if (!nameDetection || !nameDetection.columnName) {
-          // Search through all column names for common patterns
           const namePatterns = ['instrument', 'name', 'security', 'bond', 'tbill', 'issuer', 'counterparty', 'company', 'entity']
           let foundCol = null
-          for (const header of sheet.headers) {
+          for (const header of Object.keys(sheetData[0] || {})) {
             const lowerHeader = header.toLowerCase()
             if (namePatterns.some(p => lowerHeader.includes(p))) {
               foundCol = header
@@ -270,35 +262,28 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           }
           if (foundCol) {
             nameDetection = { columnName: foundCol, confidence: 0.8 }
-          } else if (sheet.headers.length > 0) {
-            // Fallback: use first column as name
-            nameDetection = { columnName: sheet.headers[0], confidence: 0.5 }
+          } else if (Object.keys(sheetData[0] || {}).length > 0) {
+            nameDetection = { columnName: Object.keys(sheetData[0])[0], confidence: 0.5 }
           }
         }
-        
         instrumentNameColumn.value = nameDetection?.columnName || null
         if (nameDetection?.columnName) {
-          detectedInstrumentNames.value = extractInstrumentNames(sheet.data, nameDetection.columnName)
-          console.log('📋 Detected instrument names:', detectedInstrumentNames.value)
+          detectedInstrumentNames.value = extractInstrumentNames(sheetData, nameDetection.columnName)
+          console.log('Detected instrument names:', detectedInstrumentNames.value)
         }
 
-        // 🔥 Build column mapping with Instrument Name prioritized
+        // Build column mapping
         let columnMapping = null
         if (requiredColumns && columnVariations) {
-          columnMapping = autoMatchColumns(sheet.headers, requiredColumns, columnVariations)
-          
-          // Ensure Instrument Name is properly mapped
+          const fileHeaders = Object.keys(sheetData[0] || {})
+          columnMapping = autoMatchColumns(fileHeaders, requiredColumns, columnVariations)
           if (nameDetection?.columnName && columnMapping['Instrument Name'] !== nameDetection.columnName) {
-            // Check if the detected column is in the file columns
-            if (sheet.headers.includes(nameDetection.columnName)) {
+            if (fileHeaders.includes(nameDetection.columnName)) {
               columnMapping['Instrument Name'] = nameDetection.columnName
-              console.log(`✅ Mapped Instrument Name to: ${nameDetection.columnName}`)
             }
           }
-          
-          // If still no mapping for Instrument Name, try to find any column with 'name'
           if (!columnMapping['Instrument Name']) {
-            const nameCol = sheet.headers.find(h => 
+            const nameCol = fileHeaders.find(h => 
               /name|instrument|security|bond|tbill|issuer|entity/i.test(h)
             )
             if (nameCol) {
@@ -307,13 +292,29 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           }
         }
 
-        console.log('📊 Multi-instrument sheet processed, ready for mapping')
+        // Filter display columns
+        const displayCols = getDisplayColumns(Object.keys(sheetData[0] || {}))
+        const filteredData = sheetData.map(row => {
+          const newRow = {}
+          displayCols.forEach(col => {
+            newRow[col] = row[col] !== undefined ? row[col] : ''
+          })
+          return newRow
+        })
+
+        // Update the workbookSheets entry with full data
+        const sheetIndex = workbookSheets.value.findIndex(s => s.name === sheetName)
+        if (sheetIndex !== -1) {
+          workbookSheets.value[sheetIndex].data = sheetData
+          workbookSheets.value[sheetIndex].row_count = sheetData.length
+        }
+
         worksheetStatus.value[sheetName] = 'completed'
         return {
           success: true,
           type: 'multi',
-          data: sheet.data,
-          headers: sheet.headers,
+          data: filteredData,
+          headers: displayCols,
           columnMapping,
           instrumentNameColumn: nameDetection?.columnName || null,
           instrumentNames: detectedInstrumentNames.value
@@ -327,7 +328,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     }
   }
 
-  // ===== HELPER FUNCTIONS =====
+  // ========== HELPERS ==========
   function convertExtractedToTabular(extractedValues) {
     const row = {}
     const columnMapping = {
@@ -341,7 +342,6 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       frequency: 'Frequency',
       instrumentName: 'Instrument'
     }
-
     for (const [key, value] of Object.entries(extractedValues)) {
       const columnName = columnMapping[key] || key
       row[columnName] = value
@@ -366,7 +366,6 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     }
   }
 
-  // ===== RESET =====
   function reset() {
     uploadedFile.value = null
     originalFileBuffer.value = null
@@ -384,7 +383,6 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     detectedInstrumentNames.value = []
   }
 
-  // ===== STATE SNAPSHOT =====
   function getStateSnapshot() {
     return {
       uploadedFileName: uploadedFile.value?.name || null,
@@ -401,7 +399,6 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
 
   function restoreState(snapshot) {
     if (!snapshot) return
-
     workbookSheets.value = snapshot.workbookSheets || []
     worksheetStatus.value = snapshot.worksheetStatus || {}
     currentSheetName.value = snapshot.currentSheetName || ''
@@ -410,18 +407,15 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     tabularData.value = snapshot.tabularData || []
     instrumentNameColumn.value = snapshot.instrumentNameColumn || null
     detectedInstrumentNames.value = snapshot.detectedInstrumentNames || []
-
     if (snapshot.uploadedFileName) {
       uploadedFile.value = { name: snapshot.uploadedFileName, size: 0 }
     }
-
     if (currentSheetName.value) {
       const sheet = workbookSheets.value.find(s => s.name === currentSheetName.value)
       if (sheet) selectedWorksheet.value = sheet
     }
   }
 
-  // ===== EXPOSE =====
   return {
     uploadedFile,
     originalFileBuffer,

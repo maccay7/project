@@ -1,6 +1,3 @@
-// src/services/sessionManager.js
-// Full integration with MySQL via sessionsAPI and versionAPI
-
 import api from './api.js'
 
 const STORAGE_KEY = 'dura_sessions'
@@ -61,8 +58,6 @@ class SessionManager {
     }
   }
 
-  // ---- API calls ----
-
   async getAllSessions() {
     try {
       const data = await api.sessionsAPI.list()
@@ -85,10 +80,11 @@ class SessionManager {
     }
   }
 
-  async getSession(id) {
-    let session = this.sessions.find(s => s.id === id)
-    if (session) return session
-
+  async getSession(id, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.sessions.find(s => s.id === id)
+      if (cached) return cached
+    }
     try {
       const data = await api.sessionsAPI.get(id)
       if (data) {
@@ -119,7 +115,6 @@ class SessionManager {
     return null
   }
 
-  // ---- Active session ----
   setActiveSession(session) {
     if (!session) {
       this.activeSessionId = null
@@ -138,8 +133,6 @@ class SessionManager {
   getActiveSessionId() {
     return this.activeSessionId
   }
-
-  // ---- CRUD operations ----
 
   async createSession(nameOverride = '') {
     const newSession = {
@@ -178,9 +171,14 @@ class SessionManager {
     if (idx === -1) return null
 
     const existingVersions = this.sessions[idx].versions || []
+    const existingWorkflows = this.sessions[idx].instrumentWorkflow || {}
     this.sessions[idx] = { ...this.sessions[idx], ...updates, timestamp: Date.now() }
+    
     if (!updates.versions) {
       this.sessions[idx].versions = existingVersions
+    }
+    if (!updates.instrumentWorkflow) {
+      this.sessions[idx].instrumentWorkflow = existingWorkflows
     }
     this.saveCache()
 
@@ -194,6 +192,7 @@ class SessionManager {
         instrument_workflows: this.sessions[idx].instrumentWorkflow || {},
         versions: this.sessions[idx].versions || [],
         instrument_count: this.sessions[idx].instrument_count || 0,
+        version_count: this.sessions[idx].version_count || 0,
       })
     } catch (err) {
       console.error('Failed to update session on backend:', err)
@@ -219,8 +218,6 @@ class SessionManager {
     }
   }
 
-  // ---- Workflow management ----
-
   async saveInstrumentWorkflow(sessionId, instrumentKey, workflow) {
     const session = await this.getSession(sessionId)
     if (!session) return
@@ -233,7 +230,6 @@ class SessionManager {
       instrument_count: instrumentCount,
     })
 
-    // Also ensure backend gets updated
     try {
       await api.sessionsAPI.save({
         id: sessionId,
@@ -244,6 +240,7 @@ class SessionManager {
         instrument_workflows: iw,
         versions: session.versions || [],
         instrument_count: instrumentCount,
+        version_count: session.version_count || 0,
       })
     } catch (err) {
       console.error('Failed to sync workflow to backend:', err)
@@ -257,8 +254,6 @@ class SessionManager {
     return session?.instrumentWorkflow?.[instrumentKey] || null
   }
 
-  // ---- Version management ----
-
   async addVersion(sessionId, version) {
     const session = await this.getSession(sessionId)
     if (!session) return null
@@ -271,7 +266,12 @@ class SessionManager {
       ...version,
     }
     versions.unshift(record)
-    await this.updateSession(sessionId, { versions, version_count: versions.length })
+    const newVersionCount = versions.length
+    
+    await this.updateSession(sessionId, { 
+      versions, 
+      version_count: newVersionCount 
+    })
 
     try {
       await api.versionAPI.create(
@@ -285,14 +285,13 @@ class SessionManager {
         version.reportSnapshot || null,
         null
       )
-      await this.getSession(sessionId)
+      // Force refresh to get the latest version count from backend
+      await this.getSession(sessionId, true)
     } catch (err) {
       console.error('Failed to save version to backend:', err)
     }
     return record
   }
-
-  // ---- Helpers ----
 
   countSessionInstrumentsFromWorkflows(workflows) {
     if (!workflows || typeof workflows !== 'object') return 0
@@ -305,7 +304,7 @@ class SessionManager {
         (wf.rawData && wf.rawData.length > 0) ||
         (wf.data && wf.data.length > 0) ||
         (wf.calculations && parseFloat(wf.calculations.totalValue) > 0) ||
-        (wf.calculations && Object.keys(wf.calculations).length > 0)
+        (wf.instrumentSummary && wf.instrumentSummary.rows && wf.instrumentSummary.rows.length > 0)
       )) {
         count++
       }

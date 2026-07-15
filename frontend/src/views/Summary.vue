@@ -331,7 +331,7 @@ const loading = ref(false)
 const error = ref('')
 
 // ================================================================
-// 🔥 FIX: Deduplicate headers (remove instrument_name, instrument_type, suffixes, Worksheet)
+// Deduplicate headers (remove instrument_name, instrument_type, suffixes, Worksheet)
 // ================================================================
 function getUniqueHeaders(headers) {
   const exclude = ['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet']
@@ -347,7 +347,7 @@ function getUniqueHeaders(headers) {
 }
 
 // ================================================================
-// 🔥 FIX: computeAggregate – supports both Title Case and snake_case
+// computeAggregate – supports both Title Case and snake_case
 // ================================================================
 function computeAggregate(rows) {
   const agg = {
@@ -439,7 +439,7 @@ function computeAggregate(rows) {
 }
 
 // ================================================================
-// 🔥 FIX: Descriptive Analytics – robust field mapping
+// Descriptive Analytics – robust field mapping
 // ================================================================
 const analyticsData = computed(() => {
   const allDetails = instrumentsWithDetails.value.flatMap(inst => inst.details || [])
@@ -575,20 +575,20 @@ function exportCombinedExcel() {
   filteredInstruments.value.forEach(inst => {
     summaryRows.push([
       inst.name,
-      inst.faceValue || 0,
-      inst.value,
-      (inst.faceValue || 0) - inst.value,
+      formatForExcel(inst.faceValue, 'money'),
+      formatForExcel(inst.value, 'money'),
+      formatForExcel((inst.faceValue || 0) - inst.value, 'money'),
       inst.count,
-      inst.avgRate !== null ? inst.avgRate : '—',
-      inst.fredBench !== null ? inst.fredBench : '—',
+      inst.avgRate !== null ? formatForExcel(inst.avgRate, 'percentage') : '—',
+      inst.fredBench !== null ? formatForExcel(inst.fredBench, 'percentage') : '—',
       inst.statusText
     ])
   })
   summaryRows.push([
     'TOTAL',
-    totalFaceValue.value,
-    grandTotal.value,
-    totalFaceValue.value - grandTotal.value,
+    formatForExcel(totalFaceValue.value, 'money'),
+    formatForExcel(grandTotal.value, 'money'),
+    formatForExcel(totalFaceValue.value - grandTotal.value, 'money'),
     totalInstruments.value,
     '',
     '',
@@ -620,7 +620,31 @@ function exportCombinedExcel() {
 }
 
 // ================================================================
-// 🔥 FIX: loadSummary – correctly merge all instruments, deduplicate headers
+// isPercentageField helper
+// ================================================================
+function isPercentageField(col) {
+  const lowerCol = col.toLowerCase()
+  return lowerCol.includes('rate') || lowerCol.includes('yield') || lowerCol.includes('discount') || lowerCol.includes('coupon')
+}
+
+// ================================================================
+// formatForExcel – prevents 500% errors
+// ================================================================
+function formatForExcel(value, type = 'number') {
+  if (value === null || value === undefined || value === '') return ''
+  const num = parseFloat(value)
+  if (isNaN(num)) return value
+  
+  if (type === 'percentage') {
+    return Math.round(num * 100) / 100
+  } else if (type === 'money') {
+    return Math.round(num * 100) / 100
+  }
+  return num
+}
+
+// ================================================================
+// loadSummary – correctly merge all instruments, deduplicate headers
 // ================================================================
 async function loadSummary() {
   loading.value = true
@@ -803,20 +827,20 @@ function exportToExcel() {
   toExport.forEach(inst => {
     summaryRows.push([
       inst.name,
-      inst.faceValue || 0,
-      inst.value,
-      (inst.faceValue || 0) - inst.value,
+      formatForExcel(inst.faceValue, 'money'),
+      formatForExcel(inst.value, 'money'),
+      formatForExcel((inst.faceValue || 0) - inst.value, 'money'),
       inst.count,
-      inst.avgRate !== null ? inst.avgRate : '—',
-      inst.fredBench !== null ? inst.fredBench : '—',
+      inst.avgRate !== null ? formatForExcel(inst.avgRate, 'percentage') : '—',
+      inst.fredBench !== null ? formatForExcel(inst.fredBench, 'percentage') : '—',
       inst.statusText
     ])
   })
   summaryRows.push([
     'TOTAL',
-    totalFaceValue.value,
-    grandTotal.value,
-    totalFaceValue.value - grandTotal.value,
+    formatForExcel(totalFaceValue.value, 'money'),
+    formatForExcel(grandTotal.value, 'money'),
+    formatForExcel(totalFaceValue.value - grandTotal.value, 'money'),
     totalInstruments.value,
     '',
     '',

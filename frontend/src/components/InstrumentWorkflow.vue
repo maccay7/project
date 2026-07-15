@@ -150,10 +150,9 @@ async function uploadFile(event) {
 }
 
 function loadSample() {
-  data.value = [
-    { principal: 100000, interest_rate: 0.045, term_days: 90 },
-    { principal: 50000, interest_rate: 0.052, term_days: 180 }
-  ]
+  // Sample data removed - should be loaded from backend/database
+  console.warn('Sample data loading is disabled. Please upload a file or load from session.')
+  data.value = []
 }
 
 // Clean

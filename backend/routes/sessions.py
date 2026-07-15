@@ -84,27 +84,6 @@ def sessions_routes(app):
         try:
             cursor = conn.cursor()
             
-            # 🔥 FIX: Check if session exists to increment version_count properly
-            cursor.execute('SELECT version_count FROM ui_sessions WHERE session_id = %s', (session_id,))
-            existing = cursor.fetchone()
-            
-            if existing:
-                # Session exists - increment version_count
-                new_version_count = existing.get('version_count', 0) + 1
-                # Also increment if version_count is passed and is greater
-                if version_count > new_version_count:
-                    new_version_count = version_count
-                # If this save is explicitly creating a version, increment
-                if payload.get('create_version', False):
-                    new_version_count += 1
-            else:
-                # New session - start at 1 if creating version, else 0
-                new_version_count = 1 if payload.get('create_version', False) else version_count
-            
-            # Ensure version_count is at least 1 if there are versions
-            if versions and len(versions) > 0 and new_version_count < len(versions):
-                new_version_count = len(versions)
-            
             cursor.execute('''
                 INSERT INTO ui_sessions (session_id, user_id, name, status, versions, instrument_workflows, payload, instrument_count, version_count)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -115,7 +94,7 @@ def sessions_routes(app):
                     instrument_workflows = VALUES(instrument_workflows),
                     payload = VALUES(payload),
                     instrument_count = VALUES(instrument_count),
-                    version_count = %s,
+                    version_count = VALUES(version_count),
                     updated_at = CURRENT_TIMESTAMP
             ''', (
                 session_id,
@@ -126,8 +105,7 @@ def sessions_routes(app):
                 json.dumps(instrument_workflows) if instrument_workflows else None,
                 json.dumps(legacy_payload) if legacy_payload else None,
                 instrument_count,
-                new_version_count,
-                new_version_count
+                version_count
             ))
             conn.commit()
             
@@ -147,14 +125,20 @@ def sessions_routes(app):
                 )
                 if version_id:
                     print(f"✅ Created version {next_version} for session {session_id}")
-                    # Update version_count again to match
-                    cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (next_version, session_id))
-                    conn.commit()
+                    # version_count is already updated by create_version function
+                    # Fetch the updated version count to return
+                    cursor.execute('SELECT version_count FROM ui_sessions WHERE session_id = %s', (session_id,))
+                    result = cursor.fetchone()
+                    final_version_count = result.get('version_count', 0) if result else next_version
+                else:
+                    final_version_count = version_count
+            else:
+                final_version_count = version_count
             
             cursor.close()
             conn.close()
             
-            return jsonify({'success': True, 'session_id': session_id, 'version_count': new_version_count})
+            return jsonify({'success': True, 'session_id': session_id, 'version_count': final_version_count})
         except Exception as e:
             print(f"❌ Save session error: {e}")
             import traceback

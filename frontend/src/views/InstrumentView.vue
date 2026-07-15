@@ -9,6 +9,9 @@
           <div v-if="activeSession" class="session-badge">
             <v-icon small>mdi-folder-outline</v-icon>
             Session: <strong>{{ activeSession.name }}</strong>
+            <span class="version-badge" v-if="activeSession.version_count !== undefined">
+              (v{{ activeSession.version_count }})
+            </span>
           </div>
           <div v-else class="session-badge warning">
             <v-icon small>mdi-alert-outline</v-icon>
@@ -47,7 +50,6 @@
           <v-card>
             <v-card-title>Upload {{ instrumentLabel }} Dataset</v-card-title>
             <v-card-text>
-              <!-- Upload area -->
               <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
                 <input
                   type="file"
@@ -60,7 +62,6 @@
                 <small>Supported: CSV, Excel (including .xlsm, .xlsb, .ods), and many other spreadsheet formats</small>
               </div>
 
-              <!-- Upload History -->
               <div v-if="uploadHistory.length" class="upload-history">
                 <h4>Upload History ({{ uploadHistory.length }} files)</h4>
                 <div class="history-list">
@@ -84,10 +85,9 @@
                 <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
                 <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
                 <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!worksheetSelected">Review Excel</button>
-                <button class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
+                <button v-if="sheetType === 'multi'" class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
               </div>
 
-              <!-- Worksheet Selector -->
               <div v-if="worksheetWorkflow.workbookSheets.length > 0" class="worksheet-selector-section">
                 <WorksheetSelector
                   :workbook-sheets="worksheetWorkflow.workbookSheets"
@@ -101,7 +101,6 @@
                 />
               </div>
 
-              <!-- Preview -->
               <div v-if="rawData.length && showPreview" class="excel-preview-section">
                 <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
                 <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
@@ -110,7 +109,7 @@
                   :headers="uploadPreviewHeaders"
                   :original-data="originalRawData.slice(0, 500)"
                   :original-headers="originalFileColumns"
-                  :show-mapping-controls="true"
+                  :show-mapping-controls="sheetType === 'multi'"
                   :column-mapping="columnMapping"
                   :available-file-columns="fileColumns"
                   :required-columns="requiredColumns"
@@ -119,14 +118,14 @@
                   @data-update="onRawExcelUpdate"
                   @mapping-update="updateColumnMapping"
                   @sheet-selected="handleSheetSelected"
-                />
+                ></ExcelViewer>
                 <div class="preview-actions">
                   <button class="btn-primary" @click="saveFinalMapping">Save Mapping</button>
                   <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
                 </div>
               </div>
 
-              <!-- ===== MAPPING DIALOG ===== -->
+              <!-- ===== MAPPING DIALOG (only shown for multi) ===== -->
               <v-dialog v-model="showMappingDialog" max-width="650px">
                 <v-card>
                   <v-card-title class="mapping-dialog-title">
@@ -216,6 +215,7 @@
                   </v-card-title>
                   <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
                     <ExcelViewer
+                      :key="'wb-' + currentSheetName + workbookSheets.length"
                       :data="workbookSheets.find(s => s.name === currentSheetName)?.data || []"
                       :headers="workbookSheets.find(s => s.name === currentSheetName)?.headers || []"
                       :workbook-sheets="workbookSheets"
@@ -232,7 +232,7 @@
                 </v-card>
               </v-dialog>
 
-              <div class="required-columns">
+              <div class="required-columns" v-if="sheetType === 'multi'">
                 <h4>Required Columns:</h4>
                 <div class="columns-list">
                   <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
@@ -385,7 +385,6 @@
                   </div>
                 </div>
 
-                <!-- Calculated Instruments Popup -->
                 <v-dialog v-model="showAllCalculationsPopup" max-width="95%" width="1400px" persistent>
                   <v-card>
                     <div class="popup-header-white">
@@ -557,7 +556,6 @@
                 <p>No summary data available. Please run calculations first.</p>
               </div>
               <div v-else>
-                <!-- ===== DESCRIPTIVE ANALYTICS (Pills only – NO CHART) ===== -->
                 <div class="analytics-section" style="margin-bottom: 24px;">
                   <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
                     <i class="fas fa-chart-line" style="color: #1a4d8f; margin-right: 8px;"></i> Descriptive Analytics
@@ -586,7 +584,6 @@
                   </div>
                 </div>
 
-                <!-- ===== QUALITY CONTROL ===== -->
                 <div class="quality-control-section" style="margin-bottom: 24px;">
                   <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
                     <i class="fas fa-check-circle" style="color: #1a4d8f; margin-right: 8px;"></i> Quality Control
@@ -622,9 +619,6 @@
                   </div>
                 </div>
 
-                <!-- 🔥 REMOVED: Worksheet selector dropdown (hidden) -->
-
-                <!-- Excel View Button -->
                 <div class="summary-report">
                   <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
                     <button class="btn-primary" @click="viewInstrumentSummaryExcel" style="font-size: 18px; padding: 16px 40px;">
@@ -634,7 +628,6 @@
                 </div>
               </div>
 
-              <!-- Instrument Summary Excel Popup – Teleported to body -->
               <Teleport to="body">
                 <div v-if="showInstrumentExcelPopup" class="excel-popup-overlay" @click="closeInstrumentExcelPopup">
                   <div class="excel-popup-content" @click.stop>
@@ -676,7 +669,6 @@
                 </div>
               </Teleport>
 
-              <!-- Workflow Popup -->
               <div v-if="showWorkflowPopup" class="excel-popup-overlay" @click="closeWorkflowPopup">
                 <div class="excel-popup-content" @click.stop>
                   <div class="popup-header-white">
@@ -699,7 +691,6 @@
                 </div>
               </div>
 
-              <!-- Navigation Buttons – Footer: Continue buttons side‑by‑side -->
               <div class="navigation-buttons">
                 <button class="btn-secondary" @click="switchTab('visualizations')">Previous</button>
                 <button class="btn-primary" @click="goToReportTab">Continue to Report →</button>
@@ -830,10 +821,6 @@
 </template>
 
 <script setup>
-// ================================================================
-// ✅ FULL IMPLEMENTATION – ALL FIXES APPLIED
-// ================================================================
-
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
@@ -852,15 +839,43 @@ import Chart from 'chart.js/auto'
 import { getInstrumentColumns } from '@/config/instrumentColumns.js'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
 
-// ===== ROUTER =====
+// ========================
+// autoDetectTable – used in cleaning
+// ========================
+function autoDetectTable(data) {
+  if (!data || data.length === 0) return { type: 'empty', data: [] }
+
+  const firstRow = data[0]
+  let hasHeaders = false
+  if (firstRow && typeof firstRow === 'object') {
+    const values = Object.values(firstRow)
+    hasHeaders = values.some(v => typeof v === 'string' && v.length > 0 && isNaN(v) && !v.match(/^[\d\.,\-]+$/))
+  }
+
+  if (!hasHeaders) {
+    const columnCount = Math.max(...data.map(row => Object.keys(row).length))
+    const headers = Array.from({ length: columnCount }, (_, i) => `Column ${i + 1}`)
+    const tableData = data.map(row => {
+      const obj = {}
+      const values = Object.values(row)
+      headers.forEach((h, idx) => {
+        obj[h] = values[idx] !== undefined ? values[idx] : ''
+      })
+      return obj
+    })
+    return { type: 'table', headers, data: tableData }
+  }
+
+  return { type: 'columns', data }
+}
+
+// ----- Rest of script -----
 const router = useRouter()
 const route = useRoute()
 
-// ===== INSTRUMENT TYPE =====
 const instrumentType = ref('money-market')
 
-// ===== CONFIG =====
-const instrumentConfigs = {
+const instrumentConfigs = ref({
   'money-market': {
     label: 'Money Market',
     description: 'Short-term debt instruments including treasury bills, commercial paper',
@@ -953,21 +968,18 @@ const instrumentConfigs = {
       { key: 'effectiveYield', label: 'Effective Yield', suffix: '%' }
     ]
   }
-}
+})
 
-// ===== COMPUTED =====
-const config = computed(() => instrumentConfigs[instrumentType.value] || instrumentConfigs['money-market'])
+const config = computed(() => instrumentConfigs.value[instrumentType.value] || instrumentConfigs.value['money-market'])
 const instrumentLabel = computed(() => config.value.label)
 const instrumentDescription = computed(() => config.value.description)
 const maturityOptions = computed(() => config.value.maturityOptions)
 const rateLabel = computed(() => config.value.rateLabel)
 
-// ===== COMPOSABLES =====
 const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInstrumentConfig(instrumentType.value)
-const { fredFilters, loadFilterOptions, fetchBenchmark } = useFredMarket(defaultMaturityForInstrument)
+const { fredFilters, loadFilterOptions, fetchBenchmark } = useFredMarket(() => config.value.defaultMaturity)
 const worksheetWorkflow = useWorksheetWorkflow(instrumentType.value)
 
-// ===== WATCH ROUTE =====
 watch(() => route.params.type, (newType) => {
   const type = newType || route.path.split('/').pop() || 'money-market'
   if (instrumentType.value !== type) {
@@ -977,7 +989,6 @@ watch(() => route.params.type, (newType) => {
   }
 }, { immediate: true })
 
-// ===== REFS =====
 const activeSession = ref(null)
 const yieldCurveLoading = ref(false)
 const yieldCurveError = ref('')
@@ -1088,7 +1099,6 @@ const currentSummaryRows = computed(() => {
   return instrumentSummary.value.rows
 })
 
-// ===== 🔥 FIXED: Descriptive Analytics with robust field mapping =====
 const descriptiveAnalytics = computed(() => {
   const rows = currentSummaryRows.value
   if (!rows.length) return {}
@@ -1125,7 +1135,6 @@ const descriptiveAnalytics = computed(() => {
   return stats
 })
 
-// ===== 🔥 FIXED: dataQualitySummary – count only required columns that are mapped =====
 const dataQualitySummary = computed(() => {
   const rows = currentSummaryRows.value
   const totalCols = requiredColumns.value.length || 1
@@ -1145,7 +1154,6 @@ const dataQualitySummary = computed(() => {
 
 function loadSummaryForWorksheet() { forceUpdate.value++ }
 
-// ===== FILTER OPTIONS =====
 const displayCountryOptions = [
   { value: 'USA', label: 'United States' },
   { value: 'GBR', label: 'United Kingdom' },
@@ -1161,7 +1169,6 @@ const displayCurrencyOptions = [
   { value: 'CAD', label: 'CAD' }
 ]
 
-// ===== COMPUTED =====
 const activeTab = computed({
   get: () => route.query.tab || 'upload',
   set: (val) => router.push({ query: { ...route.query, tab: val } })
@@ -1222,7 +1229,7 @@ const cleanPreviewHeaders = computed(() => Object.keys((cleanedData.value[0]) ||
 const portfolioAvgRate = computed(() => allCalculations.value.avgRate || 0)
 
 const effectiveMaturity = computed(() => {
-  if (selectedMaturityOption.value === '__custom__') return customMaturityInput.value || defaultMaturityForInstrument()
+  if (selectedMaturityOption.value === '__custom__') return customMaturityInput.value || config.value.defaultMaturity
   return selectedMaturityOption.value
 })
 const effectiveCountry = computed(() => {
@@ -1245,7 +1252,6 @@ const benchmarkYield = computed(() => {
   return getRateForMaturity(effectiveMaturity.value)
 })
 
-// ===== 🔥 FIXED: getDisplayColumns – exclude Worksheet and deduplicate =====
 function getDisplayColumns() {
   const exclude = ['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet']
   const cols = instrumentSummary.value.columns.filter(c => !exclude.includes(c))
@@ -1283,8 +1289,6 @@ const calculationFields = computed(() => {
   }))
 })
 
-function defaultMaturityForInstrument() { return config.value.defaultMaturity }
-
 function formatCalcValue(key, value) {
   if (value === null || value === undefined) return '—'
   const field = config.value.calculationFields.find(f => f.key === key)
@@ -1294,7 +1298,6 @@ function formatCalcValue(key, value) {
   return value
 }
 
-// ===== FUNCTIONS =====
 function isStepComplete(tab) {
   return isStepPersistedCompleted(activeSession.value?.id, tab)
 }
@@ -1412,7 +1415,6 @@ function formatNumber(num) {
   return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-// ---- compute analytics for export ----
 function computeAnalytics(rows) {
   if (!rows || !rows.length) return {}
   const getValue = (row) => parseFloat(row['Total Value'] ?? row['total_value'] ?? row['Calculated Value'] ?? row['calculated_value'] ?? row['Value'] ?? row['value'] ?? 0)
@@ -1441,7 +1443,6 @@ function computeAnalytics(rows) {
   return stats
 }
 
-// ===== 🔥 FIXED: computeAggregate – supports both Title Case and snake_case =====
 function computeAggregate(rows) {
   const agg = {
     totalValue: 0,
@@ -1531,7 +1532,6 @@ function computeAggregate(rows) {
   return agg
 }
 
-// ===== runInstrumentCalculations per row =====
 function runInstrumentCalculations(row, instrumentType) {
   const results = {}
   const getNumber = (val) => { const num = parseFloat(val); return isNaN(num) ? 0 : num }
@@ -1617,7 +1617,6 @@ function runInstrumentCalculations(row, instrumentType) {
   return results
 }
 
-// ===== processInstrumentData =====
 function processInstrumentData(sheetName, data, instrumentType) {
   if (!data || !data.length) return
 
@@ -1658,7 +1657,6 @@ function processInstrumentData(sheetName, data, instrumentType) {
   return { success: true, rows, aggregate: agg }
 }
 
-// ===== UPLOAD FUNCTIONS =====
 const fileInput = ref(null)
 
 function loadUploadHistory() {
@@ -1754,11 +1752,12 @@ async function readFileData(file) {
       worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
       originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
 
-      console.log('✅ Workbook loaded via worksheet workflow:', result.sheets.length, 'sheets')
+      console.log('Workbook loaded (preview):', result.sheets.length, 'sheets')
 
       worksheetSelected.value = false
       currentSheetName.value = ''
       showPreview.value = false
+      sheetType.value = 'multi'
 
       addToHistory(file.name, result.sheets[0]?.data || [])
       debouncedSave()
@@ -1813,7 +1812,11 @@ function handleWorksheetSelect(sheetName) {
       originalRawData.value = JSON.parse(JSON.stringify(sheet.data || []))
       fileColumns.value = sheet.headers || []
       originalFileColumns.value = [...fileColumns.value]
-      columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+      if (sheetType.value === 'multi') {
+        columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+      } else {
+        columnMapping.value = {}
+      }
       applyCurrentMapping()
       showPreview.value = true
       forceUpdate.value++
@@ -1843,13 +1846,13 @@ async function handleWorkOnSheet(sheetName) {
         originalRawData.value = JSON.parse(JSON.stringify(sheetData))
         fileColumns.value = headers
         originalFileColumns.value = [...headers]
-        console.log('✅ File columns set from sheet data:', fileColumns.value)
+        console.log('File columns set from sheet data:', fileColumns.value)
       } else {
         const sheet = workbookSheets.value.find(s => s.name === sheetName)
         if (sheet && sheet.headers && sheet.headers.length) {
           fileColumns.value = sheet.headers
           originalFileColumns.value = [...sheet.headers]
-          console.log('✅ File columns set from workbook sheet:', fileColumns.value)
+          console.log('File columns set from workbook sheet:', fileColumns.value)
         }
         originalRawData.value = []
       }
@@ -1876,13 +1879,16 @@ async function handleWorkOnSheet(sheetName) {
           }
         }
         applyCurrentMapping()
-        showPreview.value = true
+        if (missingColumns.value.length) {
+          showMappingDialog.value = true
+        }
+      } else {
+        columnMapping.value = {}
+        mappingApplied.value = true
+        showMappingDialog.value = false
       }
 
-      if (result.type === 'single') {
-        showPreview.value = true
-      }
-
+      showPreview.value = true
       debouncedSave()
       forceUpdate.value++
     } else {
@@ -1910,6 +1916,11 @@ function handleViewResults(sheetName) {
 function applyCurrentMapping() {
   if (!originalRawData.value.length) {
     console.warn('applyCurrentMapping: originalRawData is empty')
+    return
+  }
+  if (sheetType.value === 'single') {
+    rawData.value = originalRawData.value
+    mappingApplied.value = true
     return
   }
   const hasAnyMapping = requiredColumns.value.some(col => columnMapping.value[col])
@@ -1951,7 +1962,7 @@ function saveFinalMapping() {
   }
   localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates.value))
 
-  alert('✅ Mapping saved successfully')
+  alert('Mapping saved successfully')
   debouncedSave()
 }
 
@@ -1965,13 +1976,19 @@ function refreshFileColumns() {
   } else {
     fileColumns.value = []
   }
-  const newMapping = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-  columnMapping.value = { ...columnMapping.value, ...newMapping }
+  if (sheetType.value === 'multi') {
+    const newMapping = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+    columnMapping.value = { ...columnMapping.value, ...newMapping }
+  }
   applyCurrentMapping()
   forceUpdate.value++
 }
 
 function openMappingDialog() {
+  if (sheetType.value === 'single') {
+    alert('This is a single-instrument sheet. No column mapping needed.')
+    return
+  }
   refreshFileColumns()
 
   if (!fileColumns.value.length && rawData.value.length) {
@@ -2003,9 +2020,9 @@ function openMappingDialog() {
     if (savedMapping) {
       try {
         columnMapping.value = JSON.parse(savedMapping)
-        console.log('✅ Loaded saved mapping for file:', uploadedFile.value.name)
+        console.log('Loaded saved mapping for file:', uploadedFile.value.name)
       } catch (e) {
-        console.warn('⚠️ Failed to load saved mapping:', e)
+        console.warn('Failed to load saved mapping:', e)
       }
     }
   }
@@ -2023,7 +2040,7 @@ function applyColumnMappingAndClose() {
   if (uploadedFile.value && columnMapping.value) {
     const mappingKey = `mapping_${uploadedFile.value.name}_${uploadedFile.value.size}`
     localStorage.setItem(mappingKey, JSON.stringify(columnMapping.value))
-    console.log('✅ Mapping saved for file:', uploadedFile.value.name)
+    console.log('Mapping saved for file:', uploadedFile.value.name)
   }
 
   showMappingDialog.value = false
@@ -2040,15 +2057,32 @@ function resetMapping() {
   forceUpdate.value++
 }
 
-// ----- VIEWER HANDLERS -----
+// ========== WORKBOOK VIEWER – use existing preview data ==========
+function openWorkbookViewer() {
+  if (!uploadedFile.value) {
+    alert('Please upload a file first.')
+    return
+  }
+  // Ensure we have sheet data
+  if (!workbookSheets.value.length) {
+    alert('No workbook data available. Please upload a valid Excel file.')
+    return
+  }
+  // Set current sheet if not set
+  if (!currentSheetName.value && workbookSheets.value.length) {
+    currentSheetName.value = workbookSheets.value[0].name
+  }
+  showWorkbookViewer.value = true
+}
+
 function handleSheetSelectedFromViewer(sheetName, sheetData, sheetHeaders) {
-  console.log('📋 Sheet selected from viewer:', sheetName)
+  console.log('Sheet selected from viewer:', sheetName)
   currentSheetName.value = sheetName
   handleWorkOnSheet(sheetName)
 }
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
-  console.log('📊 Processing sheet from viewer:', sheetName)
+  console.log('Processing sheet from viewer:', sheetName)
   rawData.value = sheetData || []
   originalRawData.value = JSON.parse(JSON.stringify(sheetData || []))
   fileColumns.value = sheetHeaders || []
@@ -2056,7 +2090,14 @@ function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
   currentSheetName.value = sheetName
   worksheetSelected.value = true
   showPreview.value = true
-  columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+  const detection = detectSheetType(sheetData, instrumentType.value)
+  sheetType.value = detection.type
+  if (detection.type === 'multi') {
+    columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+  } else {
+    columnMapping.value = {}
+    mappingApplied.value = true
+  }
   applyCurrentMapping()
   showWorkbookViewer.value = false
   activeTab.value = 'upload'
@@ -2075,165 +2116,6 @@ function handleProcessSheet(sheetName, sheetData, sheetHeaders) {
   showWorkbookViewer.value = false
   rawData.value = sheetData
   applyCurrentMapping()
-}
-
-async function detectInstruments(sheetData) {
-  if (!sheetData || sheetData.length === 0) return [sheetData]
-
-  const hasSectionHeaders = checkForRepeatedHeaders(sheetData)
-  const hasBlankSeparators = checkForBlankRows(sheetData)
-  const hasInstrumentLabels = checkForLabels(sheetData, ['Instrument', 'Bond', 'T-Bill', 'Money Market', 'Treasury Bill'])
-
-  if (hasSectionHeaders || hasBlankSeparators || hasInstrumentLabels) {
-    console.log('🔍 Multiple instruments detected in sheet')
-    return splitIntoInstruments(sheetData)
-  }
-
-  return [sheetData]
-}
-
-function checkForRepeatedHeaders(data) {
-  if (data.length < 2) return false
-  const firstRowKeys = Object.keys(data[0]).map(k => k.toLowerCase())
-  let repeatCount = 0
-
-  for (let i = 1; i < data.length; i++) {
-    const currentKeys = Object.keys(data[i]).map(k => k.toLowerCase())
-    const matchCount = firstRowKeys.filter(key => currentKeys.includes(key)).length
-    if (matchCount > firstRowKeys.length * 0.7) {
-      repeatCount++
-    }
-  }
-
-  return repeatCount >= 2
-}
-
-function checkForBlankRows(data) {
-  let blankCount = 0
-  data.forEach(row => {
-    const values = Object.values(row)
-    const isEmpty = values.every(val => val === '' || val === null || val === undefined)
-    if (isEmpty) blankCount++
-  })
-  return blankCount >= 2
-}
-
-function checkForLabels(data, labels) {
-  const lowerLabels = labels.map(l => l.toLowerCase())
-  let labelCount = 0
-
-  data.forEach(row => {
-    const values = Object.values(row)
-    values.forEach(val => {
-      if (val && typeof val === 'string') {
-        const lowerVal = val.toLowerCase()
-        if (lowerLabels.some(label => lowerVal.includes(label))) {
-          labelCount++
-        }
-      }
-    })
-  })
-
-  return labelCount >= 2
-}
-
-function splitIntoInstruments(data) {
-  const instruments = []
-  let currentInstrument = []
-  let inInstrument = false
-  const instrumentLabels = ['Instrument:', 'Bond:', 'T-Bill:', 'Money Market:', 'Treasury Bill:']
-
-  data.forEach(row => {
-    const rowValues = Object.values(row)
-
-    const hasInstrumentStart = rowValues.some(val =>
-      val && typeof val === 'string' && instrumentLabels.some(label => val.includes(label))
-    )
-
-    const isEmpty = rowValues.every(val => val === '' || val === null || val === undefined)
-
-    if (hasInstrumentStart) {
-      if (currentInstrument.length > 0) {
-        instruments.push(currentInstrument)
-      }
-      currentInstrument = [row]
-      inInstrument = true
-    } else if (isEmpty && inInstrument) {
-      if (currentInstrument.length > 0) {
-        instruments.push(currentInstrument)
-        currentInstrument = []
-        inInstrument = false
-      }
-    } else if (inInstrument) {
-      currentInstrument.push(row)
-    }
-  })
-
-  if (currentInstrument.length > 0) {
-    instruments.push(currentInstrument)
-  }
-
-  console.log(`📊 Split into ${instruments.length} instruments`)
-  return instruments
-}
-
-function autoDetectTable(data) {
-  if (!data || data.length === 0) return { type: 'empty', data: [] }
-
-  const firstRow = Object.values(data[0] || {})
-  const hasHeaders = firstRow.some(v => typeof v === 'string' && v.length > 0 && isNaN(v))
-
-  if (!hasHeaders) {
-    console.log('🔍 No headers detected - treating as raw table')
-    const columnCount = Math.max(...data.map(row => Object.keys(row).length))
-    const headers = Array.from({ length: columnCount }, (_, i) => `Column ${i + 1}`)
-
-    return {
-      type: 'table',
-      headers: headers,
-      data: data.map(row => Object.values(row))
-    }
-  }
-
-  return { type: 'columns', data: data }
-}
-
-function togglePreview() {
-  if (!rawData.value.length) return
-  showPreview.value = !showPreview.value
-}
-
-// ----- WORKBOOK VIEWER FUNCTIONS -----
-function openWorkbookViewer() {
-  console.log('=== Opening Workbook Viewer ===')
-
-  if (workbookSheets.value && workbookSheets.value.length > 0) {
-    showWorkbookViewer.value = true
-    if (!currentSheetName.value && workbookSheets.value.length) {
-      currentSheetName.value = workbookSheets.value[0].name
-    }
-    return
-  }
-
-  if (rawData.value && rawData.value.length > 0) {
-    console.log('⚠️ No workbook sheets, creating from current data')
-    const headers = Object.keys(rawData.value[0] || {})
-    workbookSheets.value = [{
-      name: currentSheetName.value || 'Sheet1',
-      data: rawData.value,
-      headers: headers,
-      row_count: rawData.value.length,
-      column_count: headers.length
-    }]
-    showWorkbookViewer.value = true
-    return
-  }
-
-  alert('No workbook data available. Please upload a file first.')
-}
-
-function closeWorkbookViewer() {
-  showWorkbookViewer.value = false
 }
 
 function workOnSelectedSheet() {
@@ -2255,7 +2137,7 @@ function workOnSelectedSheet() {
 }
 
 function handleProcessSheetFromModal(payload) {
-  console.log('📊 Processing from modal viewer:', payload.sheetName)
+  console.log('Processing from modal viewer:', payload.sheetName)
   worksheetStatus.value[payload.sheetName] = 'in_progress'
 
   rawData.value = payload.data
@@ -2278,7 +2160,7 @@ function handleMultiInstrumentSheet(data, headers) {
   columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
   applyCurrentMapping()
   showMappingDialog.value = true
-  console.log('✅ Multi-instrument sheet processed, mapping dialog shown')
+  console.log('Multi-instrument sheet processed, mapping dialog shown')
 }
 
 function handleSingleInstrumentSheet(data, sheetName) {
@@ -2290,15 +2172,10 @@ function handleSingleInstrumentSheet(data, sheetName) {
   fileColumns.value = Object.keys(tabularData[0] || {})
   originalFileColumns.value = [...fileColumns.value]
   columnMapping.value = {}
-  fileColumns.value.forEach(col => {
-    const requiredCol = findMatchingRequiredColumn(col, requiredColumns.value)
-    if (requiredCol) {
-      columnMapping.value[requiredCol] = col
-    }
-  })
+  mappingApplied.value = true
   applyCurrentMapping()
   activeTab.value = 'preview'
-  console.log('✅ Single-instrument sheet processed, skipping to preview')
+  console.log('Single-instrument sheet processed, skipping to preview')
 }
 
 function convertExtractedToTabular(extractedValues) {
@@ -2351,7 +2228,7 @@ function autoDetectColumns(data, instrumentType) {
   })
 
   const matchRatio = matchCount / systemColumns.length
-  console.log(`🔍 Auto-detection: ${matchCount}/${systemColumns.length} matches (${(matchRatio * 100).toFixed(1)}%)`)
+  console.log(`Auto-detection: ${matchCount}/${systemColumns.length} matches (${(matchRatio * 100).toFixed(1)}%)`)
 
   return { success: matchRatio > 0.4, data: data }
 }
@@ -2373,12 +2250,12 @@ function buildDynamicColumns(results) {
 
 function editInstrumentRow(index, field, value) {
   instrumentSummary.value.rows[index][field] = value
-  console.log(`✅ Edited instrument row ${index}, field ${field}: ${value}`)
+  console.log(`Edited instrument row ${index}, field ${field}: ${value}`)
 }
 
 function editPortfolioRow(index, field, value) {
   portfolioSummary.value.rows[index][field] = value
-  console.log(`✅ Edited portfolio row ${index}, field ${field}: ${value}`)
+  console.log(`Edited portfolio row ${index}, field ${field}: ${value}`)
 }
 
 function formatCellValue(value, col) {
@@ -2386,7 +2263,7 @@ function formatCellValue(value, col) {
 
   if (typeof value === 'number' && !isNaN(value)) {
     if (isPercentageField(col)) {
-      return (value * 100).toFixed(2) + '%'
+      return value.toFixed(2) + '%'
     }
     return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
@@ -2439,7 +2316,7 @@ function viewInstrumentSummaryExcel() {
   showInstrumentExcelPopup.value = true
   sortColumn.value = ''
   sortOrder.value = 'asc'
-  console.log('📊 Opening Instrument Summary Excel popup')
+  console.log('Opening Instrument Summary Excel popup')
 }
 
 function closeInstrumentExcelPopup() {
@@ -2455,7 +2332,18 @@ function sortByColumn(col) {
   }
 }
 
-// ===== 🔥 FIXED: Export Excel with deduplicated columns =====
+function formatForExcel(value, type = 'number') {
+  if (value === null || value === undefined || value === '') return ''
+  const num = parseFloat(value)
+  if (isNaN(num)) return value
+  if (type === 'percentage') {
+    return Math.round(num * 100) / 100
+  } else if (type === 'money') {
+    return Math.round(num * 100) / 100
+  }
+  return num
+}
+
 function exportInstrumentSummaryExcel() {
   const rows = instrumentSummary.value.rows
   if (!rows.length) {
@@ -2470,7 +2358,13 @@ function exportInstrumentSummaryExcel() {
     const data = rows.map(row => {
       const obj = {}
       displayCols.forEach(col => {
-        obj[col] = row[col] !== undefined ? row[col] : ''
+        let val = row[col] !== undefined ? row[col] : ''
+        if (isPercentageField(col)) {
+          val = formatForExcel(val, 'percentage')
+        } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
+          val = formatForExcel(val, 'money')
+        }
+        obj[col] = val
       })
       return obj
     })
@@ -2478,12 +2372,20 @@ function exportInstrumentSummaryExcel() {
     XLSX.utils.book_append_sheet(wb, ws1, 'Instruments')
 
     const analytics = computeAnalytics(rows)
-    const analyticsRows = Object.entries(analytics).map(([key, value]) => ({ Metric: key, Value: value }))
+    const analyticsRows = Object.entries(analytics).map(([key, value]) => {
+      let formattedValue = value
+      if (isPercentageField(key)) {
+        formattedValue = formatForExcel(value, 'percentage')
+      } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('interest')) {
+        formattedValue = formatForExcel(value, 'money')
+      }
+      return { Metric: key, Value: formattedValue }
+    })
     const ws2 = XLSX.utils.json_to_sheet(analyticsRows)
     XLSX.utils.book_append_sheet(wb, ws2, 'Analytics')
 
     XLSX.writeFile(wb, `instrument_summary_${Date.now()}.xlsx`)
-    alert('✅ Excel exported successfully')
+    alert('Excel exported successfully')
   } catch (e) {
     console.error(e)
     alert('Failed to export Excel: ' + e.message)
@@ -2494,7 +2396,7 @@ function openWorkflowPopup(row, idx) {
   selectedWorkflowInstrument.value = row
   selectedWorkflowIndex.value = idx
   showWorkflowPopup.value = true
-  console.log('🔄 Opening workflow popup for instrument:', row['Instrument Name'] || `Instrument ${idx + 1}`)
+  console.log('Opening workflow popup for instrument:', row['Instrument Name'] || `Instrument ${idx + 1}`)
 }
 
 function closeWorkflowPopup() {
@@ -2641,7 +2543,6 @@ async function continueAfterUpload() {
   }
 }
 
-// ===== CLEANING =====
 function applyCleaning() {
   if (!rawData.value.length) return
 
@@ -2649,16 +2550,11 @@ function applyCleaning() {
   let data = JSON.parse(JSON.stringify(rawData.value))
 
   if (tableDetection.type === 'table') {
-    console.log('🧹 Cleaning raw table data')
-    data = tableDetection.data.map((row, idx) => {
-      const obj = {}
-      tableDetection.headers.forEach((header, i) => {
-        obj[header] = row[i] !== undefined ? row[i] : ''
-      })
-      return obj
-    })
+    console.log('Cleaning raw table data')
+    data = tableDetection.data
   }
 
+  // Apply cleaning options...
   if (cleaningOptions.value.removeDuplicates) {
     const seen = new Set()
     data = data.filter(row => { const key = JSON.stringify(row); if (seen.has(key)) return false; seen.add(key); return true })
@@ -2734,7 +2630,6 @@ async function continueAfterCleaning() {
   }
 }
 
-// ===== 🔥 FIXED: CALCULATIONS (BACKEND) – force save after update =====
 async function calculateMetrics() {
   if (!cleanedData.value.length) {
     console.warn('No cleaned data to calculate')
@@ -2832,7 +2727,7 @@ async function calculateMetrics() {
         selectedCalculations.value = agg
       }
 
-      console.log('✅ Calculations synced to instrumentSummary')
+      console.log('Calculations synced to instrumentSummary')
       saveSessionData()
     } else {
       console.error('Backend calculation failed:', response?.message)
@@ -2875,29 +2770,6 @@ async function continueFromVisualizations() {
   }
 }
 
-// ===== FRED / VISUALIZATIONS =====
-function generateRealisticYieldCurve(country, maturity) {
-  const baseRates = {
-    'USA': { level: 4.2, slope: 0.08, curvature: 0.02 },
-    'GBR': { level: 4.0, slope: 0.07, curvature: 0.01 },
-    'EUR': { level: 3.5, slope: 0.06, curvature: 0.01 },
-    'JPN': { level: 2.0, slope: 0.04, curvature: 0.005 },
-    'CAN': { level: 4.0, slope: 0.07, curvature: 0.015 },
-    'AUS': { level: 4.3, slope: 0.09, curvature: 0.02 },
-    'ZAF': { level: 8.0, slope: 0.15, curvature: 0.03 }
-  }
-  const params = baseRates[country] || baseRates['USA']
-  const maturities = [0.25, 0.5, 0.75, 1, 2, 3, 5, 7, 10, 20, 30]
-  const points = []
-  for (const m of maturities) {
-    let rate = params.level + params.slope * m + params.curvature * Math.pow(m, 1.2)
-    rate += (Math.random() - 0.5) * 0.05
-    rate = Math.max(0.1, rate)
-    points.push({ maturity: m, rate })
-  }
-  return points
-}
-
 const yieldCurveCache = new Map()
 const CACHE_TTL = 15 * 60 * 1000
 
@@ -2906,16 +2778,34 @@ async function fetchYieldCurve() {
   const maturity = effectiveMaturity.value
   const currency = effectiveCurrency.value || 'USD'
 
-  const supportedCountries = ['USA', 'GBR', 'EUR', 'JPN', 'CAN', 'AUS', 'CHE', 'NZL', 'NOR', 'SWE', 'DNK', 'BRA', 'MEX', 'IND', 'CHN', 'KOR', 'SGP', 'HKG', 'RUS', 'TUR', 'SAU', 'ARE', 'ISR', 'ZAF']
-  if (!country || !supportedCountries.includes(country) && country !== '__custom__') {
-    const fallbackData = generateRealisticYieldCurve(country || 'USA', maturity || '1Y')
-    yieldCurveData.value = fallbackData
-    chartSeriesLabel.value = 'Yield Curve (fallback)'
-    await nextTick()
-    await renderYieldCurveChart()
-    updateFredBenchmark()
-    debouncedSave()
-    forceUpdate.value++
+  const normalizedCountry = country === 'USA' ? 'US' : 
+                            country === 'GBR' ? 'GB' :
+                            country === 'JPN' ? 'JP' :
+                            country === 'CAN' ? 'CA' :
+                            country === 'AUS' ? 'AU' :
+                            country === 'CHE' ? 'CH' :
+                            country === 'NZL' ? 'NZ' :
+                            country === 'NOR' ? 'NO' :
+                            country === 'SWE' ? 'SE' :
+                            country === 'DNK' ? 'DK' :
+                            country === 'BRA' ? 'BR' :
+                            country === 'MEX' ? 'MX' :
+                            country === 'IND' ? 'IN' :
+                            country === 'CHN' ? 'CN' :
+                            country === 'KOR' ? 'KR' :
+                            country === 'SGP' ? 'SG' :
+                            country === 'HKG' ? 'HK' :
+                            country === 'RUS' ? 'RU' :
+                            country === 'TUR' ? 'TR' :
+                            country === 'SAU' ? 'SA' :
+                            country === 'ARE' ? 'AE' :
+                            country === 'ISR' ? 'IL' :
+                            country === 'ZAF' ? 'ZA' : country
+
+  const supportedCountries = ['US', 'GB', 'EUR', 'JP', 'CA', 'AU', 'CH', 'NZ', 'NO', 'SE', 'DK', 'BR', 'MX', 'IN', 'CN', 'KR', 'SG', 'HK', 'RU', 'TR', 'SA', 'AE', 'IL', 'ZA']
+  if (!country || !supportedCountries.includes(normalizedCountry) && country !== '__custom__') {
+    yieldCurveError.value = `Unsupported country: ${country}. Please select a supported country.`
+    yieldCurveData.value = []
     return
   }
   if (!maturity) {
@@ -2923,7 +2813,7 @@ async function fetchYieldCurve() {
     return
   }
 
-  const cacheKey = `${instrumentType.value}_${country}_${currency}_${maturity}`
+  const cacheKey = `${instrumentType.value}_${normalizedCountry}_${currency}_${maturity}`
   const cached = yieldCurveCache.get(cacheKey)
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     yieldCurveData.value = cached.data
@@ -2940,44 +2830,36 @@ async function fetchYieldCurve() {
   yieldCurveError.value = ''
 
   try {
-    const payload = { instrument_type: instrumentType.value, country, currency, maturity }
-    let response = null
-    try {
-      response = await api.visualizationAPI.getYieldCurve(payload)
-    } catch (e) {
-      console.warn('Backend yield curve not available, using fallback', e)
-    }
+    console.log('Fetching yield curve with payload:', { instrument_type: instrumentType.value, country: normalizedCountry, currency, maturity })
+    const payload = { instrument_type: instrumentType.value, country: normalizedCountry, currency, maturity }
+    const response = await api.visualizationAPI.getYieldCurve(payload)
+    console.log('Yield curve response:', response)
 
-    let points = []
     if (response && response.success && response.data && response.data.maturities && response.data.maturities.length) {
       const data = response.data
-      points = data.maturities.map((m, idx) => ({
+      const points = data.maturities.map((m, idx) => ({
         maturity: parseFloat(m),
         maturityLabel: data.labels?.[idx] || m,
         rate: data.rates[idx]
       }))
-    } else {
-      points = generateRealisticYieldCurve(country, maturity)
-    }
 
-    yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() })
-    yieldCurveData.value = points
-    chartSeriesLabel.value = 'Yield Curve'
-    await nextTick()
-    await renderYieldCurveChart()
-    updateFredBenchmark()
-    debouncedSave()
-    forceUpdate.value++
+      yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() })
+      yieldCurveData.value = points
+      chartSeriesLabel.value = 'Yield Curve'
+      await nextTick()
+      await renderYieldCurveChart()
+      updateFredBenchmark()
+      debouncedSave()
+      forceUpdate.value++
+    } else {
+      console.error('Yield curve response invalid:', response)
+      yieldCurveError.value = response?.message || 'No yield curve data received from FRED API'
+      yieldCurveData.value = []
+    }
   } catch (err) {
     console.error('Yield curve fetch error:', err)
-    const fallbackData = generateRealisticYieldCurve(country, maturity)
-    yieldCurveData.value = fallbackData
-    chartSeriesLabel.value = 'Yield Curve (fallback)'
-    yieldCurveError.value = ''
-    await renderYieldCurveChart()
-    updateFredBenchmark()
-    debouncedSave()
-    forceUpdate.value++
+    yieldCurveError.value = err.message || 'Failed to fetch yield curve from FRED API'
+    yieldCurveData.value = []
   } finally {
     yieldCurveLoading.value = false
   }
@@ -3040,7 +2922,16 @@ async function renderYieldCurveChart() {
     maxX = num + 0.5
   }
 
-  const transformed = yieldCurveData.value.map(d => {
+  const filterYears = parseMaturityToYears(period)
+  const filteredData = yieldCurveData.value.filter(d => d.maturity <= filterYears)
+
+  if (!filteredData.length) {
+    console.warn('No yield curve data points for selected maturity:', period)
+    yieldCurveError.value = `No yield curve data available for maturity ${period}`
+    return
+  }
+
+  const transformed = filteredData.map(d => {
     let xVal = d.maturity
     if (unitLabel === 'Months') xVal = d.maturity * 12
     else if (unitLabel === 'Weeks') xVal = d.maturity * 52
@@ -3146,7 +3037,7 @@ function onMaturitySelectChange() {
   if (selectedMaturityOption.value !== '__custom__') {
     fredFilters.value.maturity = selectedMaturityOption.value
   } else {
-    fredFilters.value.maturity = customMaturityInput.value || defaultMaturityForInstrument()
+    fredFilters.value.maturity = customMaturityInput.value || config.value.defaultMaturity
   }
   onFredFilterChange()
 }
@@ -3180,7 +3071,6 @@ async function enrichCalculationsWithFred() {
   }
 }
 
-// ===== SAVED MAPPINGS TEMPLATES =====
 function loadSavedTemplates() {
   const key = `${instrumentType.value}_mapping_templates`
   const saved = localStorage.getItem(key)
@@ -3244,7 +3134,6 @@ function deleteTemplateFromPopup(name) {
   }
 }
 
-// ===== 🔥 FIXED: selectInstrumentFromPopup – copy all numeric fields =====
 function selectInstrumentFromPopup(index) {
   if (index < 0 || index >= instrumentSummary.value.rows.length) {
     selectedCalculationInstrument.value = -1
@@ -3269,11 +3158,10 @@ function selectInstrumentFromPopup(index) {
 
   selectedCalculations.value = newCalculations
   calculations.value = newCalculations
-  console.log('✅ Loaded instrument calculations:', instrumentName, newCalculations)
+  console.log('Loaded instrument calculations:', instrumentName, newCalculations)
   closeAllCalculationsPopup()
 }
 
-// ===== 🔥 FIXED: loadAllInstruments – check data and force save =====
 function loadAllInstruments() {
   if (!instrumentSummary.value.rows.length) {
     alert('No instrument data found. Please run calculations first.')
@@ -3286,16 +3174,16 @@ function loadAllInstruments() {
   currentlyViewingInstrument.value = null
   closeAllCalculationsPopup()
   saveSessionData()
-  showToast('✅ Loaded aggregate of all instruments')
+  showToast('Loaded aggregate of all instruments')
 }
 
 function formatTableCell(value, column) {
   if (value === null || value === undefined || value === '') return '—'
+  if (isPercentageField(column)) {
+    return formatNumber(value) + '%'
+  }
   if (column.toLowerCase().includes('value') || column.toLowerCase().includes('amount') || column.toLowerCase().includes('price')) {
     return '$' + formatNumber(value)
-  }
-  if (column.toLowerCase().includes('rate') || column.toLowerCase().includes('yield') || column.toLowerCase().includes('coupon') || column.toLowerCase().includes('discount')) {
-    return formatNumber(value) + '%'
   }
   if (column.toLowerCase().includes('date') && typeof value === 'string') {
     return value
@@ -3311,7 +3199,6 @@ function closeAllCalculationsPopup() {
   showAllCalculationsPopup.value = false
 }
 
-// ===== 🔥 FIXED: exportAllCalculations – use deduplicated columns =====
 function exportAllCalculations() {
   const allData = instrumentSummary.value.rows
   if (!allData.length) { alert('No data to export'); return }
@@ -3320,7 +3207,13 @@ function exportAllCalculations() {
   const data = allData.map(row => {
     const obj = {}
     displayCols.forEach(col => {
-      obj[col] = row[col] !== undefined ? row[col] : ''
+      let val = row[col] !== undefined ? row[col] : ''
+      if (isPercentageField(col)) {
+        val = formatForExcel(val, 'percentage')
+      } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
+        val = formatForExcel(val, 'money')
+      }
+      obj[col] = val
     })
     return obj
   })
@@ -3332,18 +3225,17 @@ function exportAllCalculations() {
   const summaryRows = [
     ['Instrument Summary'],
     ['Total Instruments', allData.length],
-    ['Total Value', allCalculations.value.totalValue || 0],
-    ['Average Rate', allCalculations.value.avgRate || 0],
-    ['Weighted Average Rate', allCalculations.value.weightedAvgRate || 0]
+    ['Total Value', formatForExcel(allCalculations.value.totalValue, 'money')],
+    ['Average Rate', formatForExcel(allCalculations.value.avgRate, 'percentage')],
+    ['Weighted Average Rate', formatForExcel(allCalculations.value.weightedAvgRate, 'percentage')]
   ]
   const summaryWs = XLSX.utils.aoa_to_sheet(summaryRows)
   XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary')
 
   XLSX.writeFile(wb, 'all_instruments_calculations.xlsx')
-  alert('✅ All calculations exported successfully!')
+  alert('All calculations exported successfully!')
 }
 
-// ===== SESSION MANAGEMENT =====
 function notifySessionUpdated(explicitSave = false, saveOptions = {}) {
   if (!activeSession.value) return
   const sid = activeSession.value.id
@@ -3393,7 +3285,7 @@ async function saveToSession() {
   }
 
   try {
-    console.log('📝 Creating version for session:', sid, 'instrument:', instrumentType.value)
+    console.log('Creating version for session:', sid, 'instrument:', instrumentType.value)
     const response = await api.versionAPI.create(
       sid,
       instrumentType.value,
@@ -3401,15 +3293,20 @@ async function saveToSession() {
       datasetSnapshot,
       null, null, null, null, null
     )
-    console.log('✅ Version created:', response)
+    console.log('Version created:', response)
 
     await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
-    console.log('✅ Workflow saved')
+    console.log('Workflow saved')
 
     instrumentSummary.value = mergedSummary
 
-    const updatedSession = await sessionManager.getSession(sid)
-    console.log('📊 Updated session:', updatedSession)
+    const updatedSession = await sessionManager.getSession(sid, true)
+    console.log('Updated session (force refresh):', updatedSession)
+
+    if (activeSession.value?.id === sid && updatedSession) {
+      activeSession.value.version_count = updatedSession.version_count
+      activeSession.value.instrument_count = updatedSession.instrument_count
+    }
 
     window.dispatchEvent(new CustomEvent('session-updated', {
       detail: {
@@ -3419,10 +3316,10 @@ async function saveToSession() {
       }
     }))
 
-    alert(`✅ Saved to session. Instruments: ${updatedSession?.instrument_count || 0}/3. A new version has been recorded.`)
+    alert(`Saved to session. Instruments: ${updatedSession?.instrument_count || 0}/3. Version: ${updatedSession?.version_count || 0}`)
   } catch (err) {
     console.error('Failed to save version:', err)
-    alert('❌ Failed to save to session: ' + err.message)
+    alert('Failed to save to session: ' + err.message)
   }
 }
 
@@ -3479,7 +3376,7 @@ async function loadSavedData() {
       if (wf.fredFilters) {
         selectedCountryOption.value = wf.fredFilters.country || 'USA'
         selectedCurrencyOption.value = wf.fredFilters.currency || 'USD'
-        selectedMaturityOption.value = wf.fredFilters.maturity || defaultMaturityForInstrument()
+        selectedMaturityOption.value = wf.fredFilters.maturity || config.value.defaultMaturity
       }
       if (wf.uploadedFile) {
         uploadedFile.value = { name: wf.uploadedFile, size: 0 }
@@ -3572,7 +3469,6 @@ function getInstrumentData(instrumentId) {
   return null
 }
 
-// ===== REPORT PREVIEW =====
 const reportPreviewData = computed(() => {
   const instrumentsData = []
   const instrumentTypes = [
@@ -3685,7 +3581,6 @@ function buildMethodologySection(selectedInstrumentNames) {
 
 const backgroundCoverUrl = '/reportbackground.png'
 
-// ===== 🔥 FIXED: generateReportHtml – remove instrument names from cover =====
 async function generateReportHtml() {
   await loadSavedData()
   const report = reportPreviewData.value
@@ -3705,41 +3600,14 @@ async function generateReportHtml() {
   const totalPortfolioValue = report.instruments.reduce((sum, inst) => sum + (parseFloat(inst.calculations.totalValue) || 0), 0)
   const totalInstrumentCount = report.instruments.reduce((sum, inst) => sum + (parseInt(inst.calculations.instrumentCount) || 0), 0)
 
-  let allDataRows = []
-  for (const inst of report.instruments) {
-    const instKey = inst.id || (inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills')
-    let cleanData = []
-    const wf = await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
-    if (wf && wf.cleanedData && wf.cleanedData.length) cleanData = wf.cleanedData
-    else {
-      const sid = activeSession.value?.id
-      if (sid) {
-        const saved = localStorage.getItem(`${instKey}_session_${sid}_clean`)
-        if (saved) cleanData = JSON.parse(saved)
-      }
-    }
-    if (cleanData && cleanData.length) {
-      cleanData.forEach((item, idx) => {
-        const name = item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
-        const ticker = item.BBTicker || item.Ticker || item.Security || ''
-        const faceValue = parseFloat(item.FaceValue || item.Amount || item.Principal || 0)
-        const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
-        const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
-        allDataRows.push({ instrument: inst.name, name, ticker, faceValue, rate, term, valuationDate })
-      })
-    }
-  }
+  const yieldPoints = yieldCurveData.value || []
   let appendixRows = ''
-  if (allDataRows.length) {
-    appendixRows = allDataRows.map(r => `
+  if (yieldPoints.length) {
+    appendixRows = yieldPoints.map(point => `
       <tr>
-        <td>${r.instrument}</td>
-        <td>${r.name}</td>
-        <td>${r.ticker}</td>
-        <td>${r.faceValue.toFixed(2)}</td>
-        <td>${r.rate.toFixed(4)}%</td>
-        <td>${r.term.toFixed(2)}</td>
-        <td>${r.valuationDate}</td>
+        <td>${point.maturityLabel || ''}</td>
+        <td>${point.maturity || 0}</td>
+        <td>${point.rate || 0}%</td>
       </tr>
     `).join('')
   }
@@ -3754,7 +3622,6 @@ async function generateReportHtml() {
 
   const sessionName = activeSession.value?.name || 'Valuation Report'
 
-  // ===== 🔥 REMOVE instrument names from cover page =====
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -3797,7 +3664,6 @@ async function generateReportHtml() {
   <div class="cover-content">
     <h1 class="cover-title">Valuation Assessment Report</h1>
     <p class="cover-subtitle">${sessionName}</p>
-    <!-- 🔥 Instrument names removed from cover -->
   </div>
 </div>
 
@@ -3909,16 +3775,17 @@ async function generateReportHtml() {
 </div>
 
 <div class="page">
-  <h1 class="section-title">Appendix: Detailed Instrument Data</h1>
+  <h1 class="section-title">Appendix: FRED API Yield Curve Data</h1>
   <p><strong>Valuation Date:</strong> ${valuationDate}</p>
-  <p><strong>Total Instruments:</strong> ${allDataRows.length}</p>
+  <p><strong>Country:</strong> ${effectiveCountry.value || 'USA'}</p>
+  <p><strong>Instrument Type:</strong> ${instrumentType.value}</p>
   <br>
-  ${allDataRows.length ? `
+  ${yieldPoints.length ? `
   <table class="appendix-table">
-    <thead><tr><th>Asset Class</th><th>Instrument Name</th><th>BB Ticker</th><th>Face Value ($)</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead>
+    <thead><tr><th>BB Ticker (Maturity Label)</th><th>Term (Yr)</th><th>Rate (Actual) %</th></tr></thead>
     <tbody>${appendixRows}</tbody>
   </table>
-  ` : '<p>No detailed instrument data available.</p>'}
+  ` : '<p>No yield curve data available. FRED API may have failed or returned no data.</p>'}
 </div>
 
 <div class="page">
@@ -4018,8 +3885,8 @@ async function exportToRealExcel() {
       instrumentData.forEach((item, idx) => {
         const name = item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
         const ticker = item.BBTicker || item.Ticker || item.Security || ''
-        const faceValue = parseFloat(item.FaceValue || item.Amount || item.Principal || 0)
-        const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
+        const faceValue = formatForExcel(parseFloat(item.FaceValue || item.Amount || item.Principal || 0), 'money')
+        const rate = formatForExcel(parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0), 'percentage')
         const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
         appendixData.push([inst.name, name, ticker, faceValue, rate, term, valuationDate])
       })
@@ -4042,11 +3909,26 @@ async function exportToRealExcel() {
       }
     }
     if (instrumentData.length) {
-      const sheet = XLSX.utils.json_to_sheet(instrumentData)
+      const formattedData = instrumentData.map(row => formatRowForExcel(row))
+      const sheet = XLSX.utils.json_to_sheet(formattedData)
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
   XLSX.writeFile(workbook, `portfolio_report_${Date.now()}.xlsx`)
+}
+
+function formatRowForExcel(row) {
+  const formatted = {}
+  for (const [key, value] of Object.entries(row)) {
+    if (isPercentageField(key)) {
+      formatted[key] = formatForExcel(value, 'percentage')
+    } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('price') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('principal') || key.toLowerCase().includes('interest')) {
+      formatted[key] = formatForExcel(value, 'money')
+    } else {
+      formatted[key] = value
+    }
+  }
+  return formatted
 }
 
 async function downloadCombinedReport(format) {
@@ -4088,7 +3970,6 @@ function showToast(msg, type = 'success') {
   alert(msg)
 }
 
-// ===== WATCHERS =====
 watch([rawData, cleanedData], () => debouncedSave(), { deep: true })
 watch(cleanedData, async (newVal) => { if (newVal.length) await calculateMetrics() }, { deep: true })
 
@@ -4098,7 +3979,7 @@ watch(() => activeTab.value, async (newTab) => {
   }
   if (newTab === 'visualizations' && hasCleanedData.value && !yieldCurveData.value.length && !yieldCurveLoading.value) {
     if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
-    if (!effectiveMaturity.value) { const def = defaultMaturityForInstrument(); selectedMaturityOption.value = def; fredFilters.value.maturity = def }
+    if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
     await fetchYieldCurve()
   }
 })
@@ -4110,7 +3991,6 @@ watch(yieldCurveData, async () => {
   }
 }, { deep: true })
 
-// ===== CHECK AND RESET =====
 let checkTimeout = null
 
 async function checkAndReset() {
@@ -4142,7 +4022,7 @@ async function checkAndReset() {
         if (cleanedData.value.length) await calculateMetrics()
         if (activeTab.value === 'visualizations' && !yieldCurveData.value.length) {
           if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
-          if (!effectiveMaturity.value) { const def = defaultMaturityForInstrument(); selectedMaturityOption.value = def; fredFilters.value.maturity = def }
+          if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
           await fetchYieldCurve()
         }
       }
@@ -4151,7 +4031,6 @@ async function checkAndReset() {
   }, 300)
 }
 
-// ===== LIFECYCLE =====
 onMounted(async () => {
   const qSid = route.query.session
   if (qSid) {
@@ -4164,7 +4043,7 @@ onMounted(async () => {
   loadSavedTemplates()
   window.addEventListener('storage', () => checkAndReset())
   await loadFilterOptions()
-  if (!effectiveMaturity.value) { const def = defaultMaturityForInstrument(); selectedMaturityOption.value = def; fredFilters.value.maturity = def }
+  if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
   if (Object.keys(allCalculations.value).length) enrichCalculationsWithFred()
   if (!allCalculations.value.totalValue && activeSession.value) await loadSavedData()
   if (cleanedData.value.length) await calculateMetrics()
@@ -4185,13 +4064,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* ----- Your existing styles (keep everything) ----- */
 .instrument-page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px; padding: 16px 20px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); flex-wrap: wrap; gap: 12px; }
 .header-left { flex: 1; min-width: 200px; }
 .header-left h1 { color: #0B2044; font-size: 26px; font-weight: 700; margin: 0 0 6px 0; }
 .header-left .session-badge { display: inline-flex; align-items: center; gap: 6px; background: #e8ecf1; padding: 4px 12px; border-radius: 20px; font-size: 13px; color: #0B2044; }
 .header-left .session-badge.warning { background: #fff3e0; color: #e65100; }
+.header-left .version-badge { background: #1e88e5; color: white; padding: 0 8px; border-radius: 10px; font-size: 11px; margin-left: 6px; }
 .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
 .btn-save-session { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; padding: 10px 20px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: all 0.3s; white-space: nowrap; }
 .btn-save-session:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(11,32,68,0.3); }
@@ -4407,83 +4286,18 @@ onBeforeUnmount(() => {
 .summary-worksheet-selector label { font-weight: 600; color: #0B2044; }
 .summary-worksheet-selector select { padding: 8px 12px; border-radius: 6px; border: 1px solid #ccc; background: white; font-size: 14px; min-width: 200px; }
 
-.analytics-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  justify-content: space-between;
-  margin: 12px 0;
-}
-.analytics-pill {
-  flex: 1;
-  min-width: 160px;
-  background: #f8faff;
-  padding: 14px 20px;
-  border-radius: 12px;
-  border: 1px solid #edf0f6;
-  text-align: center;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-.analytics-pill:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-}
-.analytics-pill .pill-label {
-  display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #7a879b;
-  margin-bottom: 4px;
-}
-.analytics-pill .pill-value {
-  display: block;
-  font-size: 22px;
-  font-weight: 700;
-  color: #0b1e3c;
-}
+.analytics-pills { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; margin: 12px 0; }
+.analytics-pill { flex: 1; min-width: 160px; background: #f8faff; padding: 14px 20px; border-radius: 12px; border: 1px solid #edf0f6; text-align: center; transition: transform 0.2s, box-shadow 0.2s; }
+.analytics-pill:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06); }
+.analytics-pill .pill-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #7a879b; margin-bottom: 4px; }
+.analytics-pill .pill-value { display: block; font-size: 22px; font-weight: 700; color: #0b1e3c; }
 
-.quality-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  justify-content: space-between;
-  margin: 12px 0;
-}
-.quality-pill {
-  flex: 1;
-  min-width: 150px;
-  background: #f8faff;
-  padding: 14px 18px;
-  border-radius: 12px;
-  border: 1px solid #edf0f6;
-  text-align: center;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-.quality-pill:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-}
-.quality-pill .pill-label {
-  display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #7a879b;
-  margin-bottom: 4px;
-}
-.quality-pill .pill-value {
-  display: block;
-  font-size: 20px;
-  font-weight: 700;
-  color: #0b1e3c;
-}
-.quality-pill .pill-sub {
-  display: block;
-  font-size: 12px;
-  margin-top: 3px;
-  font-weight: 500;
-}
+.quality-pills { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; margin: 12px 0; }
+.quality-pill { flex: 1; min-width: 150px; background: #f8faff; padding: 14px 18px; border-radius: 12px; border: 1px solid #edf0f6; text-align: center; transition: transform 0.2s, box-shadow 0.2s; }
+.quality-pill:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06); }
+.quality-pill .pill-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #7a879b; margin-bottom: 4px; }
+.quality-pill .pill-value { display: block; font-size: 20px; font-weight: 700; color: #0b1e3c; }
+.quality-pill .pill-sub { display: block; font-size: 12px; margin-top: 3px; font-weight: 500; }
 .text-success { color: #0f7b4a; }
 .text-warning { color: #b0720a; }
 

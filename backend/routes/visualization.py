@@ -1,14 +1,17 @@
 import json
 import math
-import random
 from flask import request, jsonify
-from datetime import datetime, timedelta
+from datetime import datetime
 from utils.db import get_db
-from utils.fred_config import generate_synthetic_yield_curve, generate_synthetic_benchmark
+from utils.fred_config import get_market_benchmark, series_for_country
+import requests
 
 # Simple in-memory cache for yield curve data
 _cache = {}
 CACHE_TTL = 15 * 60  # 15 minutes
+
+FRED_API_KEY = 'b40141a5119f30bc2388d63f59d8847e'
+FRED_BASE_URL = 'https://api.stlouisfed.org/fred'
 
 
 def get_cached_data(key):
@@ -27,57 +30,114 @@ def set_cached_data(key, data):
     _cache[key] = (data, datetime.now())
 
 
-def generate_yield_curve_data(instrument_type='all', country='US', currency='USD'):
+def generate_yield_curve_data(instrument_type='all', country='US', currency='USD', maturity='10Y'):
     """
-    Generate yield curve data, either from FRED or synthetic fallback.
+    Generate yield curve data from FRED API.
     Returns a dict with maturities, labels, rates, and metadata.
     """
+    print(f"📊 Generating yield curve: instrument_type={instrument_type}, country={country}, currency={currency}, maturity={maturity}")
+    
     # Try to get from cache first
-    cache_key = f"yield_curve_{instrument_type}_{country}_{currency}"
+    cache_key = f"yield_curve_{instrument_type}_{country}_{currency}_{maturity}"
     cached = get_cached_data(cache_key)
     if cached:
+        print(f"📊 Using cached yield curve data")
         return cached
     
-    # Try to fetch from FRED API (via fred_config or direct call)
+    # Fetch from FRED API for multiple maturities
     try:
-        from utils.fred_config import get_market_benchmark
-        # For yield curve, we might want to fetch multiple maturities
-        # For simplicity, we generate synthetic curve as fallback
-        # In a real implementation, you would call a FRED endpoint for the curve
-        # Since we don't have a specific FRED endpoint for the whole curve,
-        # we generate synthetic data.
-        points = generate_synthetic_yield_curve(country)
-        maturities = [p['maturity'] for p in points]
-        labels = [p['maturityLabel'] for p in points]
-        rates = [p['rate'] for p in points]
+        # Standard maturities to fetch
+        maturities_to_fetch = ['DGS1MO', 'DGS3MO', 'DGS6MO', 'DGS1', 'DGS2', 'DGS3', 'DGS5', 'DGS7', 'DGS10', 'DGS20', 'DGS30']
+        
+        # Map series IDs to maturity labels and years
+        maturity_map = {
+            'DGS1MO': {'label': '1M', 'years': 0.083},
+            'DGS3MO': {'label': '3M', 'years': 0.25},
+            'DGS6MO': {'label': '6M', 'years': 0.5},
+            'DGS1': {'label': '1Y', 'years': 1.0},
+            'DGS2': {'label': '2Y', 'years': 2.0},
+            'DGS3': {'label': '3Y', 'years': 3.0},
+            'DGS5': {'label': '5Y', 'years': 5.0},
+            'DGS7': {'label': '7Y', 'years': 7.0},
+            'DGS10': {'label': '10Y', 'years': 10.0},
+            'DGS20': {'label': '20Y', 'years': 20.0},
+            'DGS30': {'label': '30Y', 'years': 30.0}
+        }
+        
+        maturities = []
+        labels = []
+        rates = []
+        
+        for series_id in maturities_to_fetch:
+            try:
+                params = {
+                    'series_id': series_id,
+                    'api_key': FRED_API_KEY,
+                    'file_type': 'json',
+                    'sort_order': 'desc',
+                    'limit': 1
+                }
+                print(f"📊 Fetching {series_id} from FRED API")
+                response = requests.get(f'{FRED_BASE_URL}/series/observations', params=params, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    observations = data.get('observations', [])
+                    if observations:
+                        for obs in observations:
+                            if obs.get('value') and obs.get('value') != '.':
+                                rate = float(obs['value'])
+                                mat_info = maturity_map.get(series_id, {'label': series_id, 'years': 0})
+                                maturities.append(mat_info['years'])
+                                labels.append(mat_info['label'])
+                                rates.append(round(rate, 2))
+                                print(f"✅ {series_id}: {rate}%")
+                                break
+                    else:
+                        print(f"⚠️ No observations for {series_id}")
+                else:
+                    print(f"⚠️ Failed to fetch {series_id}: status {response.status_code}")
+            except Exception as e:
+                print(f"⚠️ Failed to fetch {series_id}: {e}")
+                continue
+        
+        if not maturities:
+            print(f"❌ No yield curve data fetched from FRED API")
+            return {
+                'success': False,
+                'message': 'Failed to fetch any yield curve data from FRED API',
+                'maturities': [],
+                'labels': [],
+                'rates': []
+            }
+        
         data = {
+            'success': True,
             'maturities': maturities,
             'labels': labels,
             'rates': rates,
             'country': country,
             'currency': currency,
             'instrument_type': instrument_type,
-            'note': 'Synthetic yield curve (FRED API fallback)'
+            'note': 'Real FRED API yield curve data'
         }
+        
+        print(f"✅ Yield curve generated: {len(maturities)} points")
+        
+        # Cache the result
+        set_cached_data(cache_key, data)
+        return data
+        
     except Exception as e:
-        # If any error, fallback to synthetic
-        points = generate_synthetic_yield_curve(country)
-        maturities = [p['maturity'] for p in points]
-        labels = [p['maturityLabel'] for p in points]
-        rates = [p['rate'] for p in points]
-        data = {
-            'maturities': maturities,
-            'labels': labels,
-            'rates': rates,
-            'country': country,
-            'currency': currency,
-            'instrument_type': instrument_type,
-            'note': f'Error: {str(e)} – using fallback'
+        print(f"❌ Yield curve generation error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'success': False,
+            'message': str(e),
+            'maturities': [],
+            'labels': [],
+            'rates': []
         }
-    
-    # Cache the result
-    set_cached_data(cache_key, data)
-    return data
 
 
 def prepare_chart_data(data, instrument_type='money-market'):
@@ -171,19 +231,10 @@ def visualization_routes(app):
         currency = payload.get('currency', 'USD')
         maturity = payload.get('maturity', '10Y')
         
-        # Generate yield curve data
-        data = generate_yield_curve_data(instrument_type, country, currency)
+        # Generate yield curve data from FRED API
+        data = generate_yield_curve_data(instrument_type, country, currency, maturity)
         
-        # Also get benchmark for the specific maturity if needed
-        try:
-            from utils.fred_config import get_market_benchmark
-            benchmark = get_market_benchmark(instrument_type, maturity, country, currency)
-            if benchmark and not benchmark.get('error'):
-                data['benchmark'] = benchmark
-        except:
-            pass
-        
-        return jsonify({'success': True, 'data': data})
+        return jsonify(data)
 
     @app.route('/api/visualization/chart-data', methods=['POST', 'OPTIONS'])
     def chart_data_endpoint():

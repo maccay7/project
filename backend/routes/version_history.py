@@ -112,13 +112,13 @@ def create_version(
             if update_conn:
                 up_cursor = update_conn.cursor()
                 up_cursor.execute(
-                    "UPDATE ui_sessions SET version_count = version_count + 1 WHERE session_id = %s",
-                    (session_id,)
+                    "UPDATE ui_sessions SET version_count = %s WHERE session_id = %s",
+                    (version_number, session_id)
                 )
                 update_conn.commit()
                 up_cursor.close()
                 update_conn.close()
-                print(f"✅ Updated session {session_id} version_count")
+                print(f"✅ Updated session {session_id} version_count to {version_number}")
         except Exception as e:
             print(f"⚠️ Failed to update session version_count: {e}")
         

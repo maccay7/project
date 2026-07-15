@@ -4,6 +4,34 @@ from utils.db import get_db
 
 DEFAULT_CONFIGS = {
     'money-market': {
+        'label': 'Money Market',
+        'description': 'Short-term debt instruments including treasury bills, commercial paper',
+        'defaultMaturity': '1Y',
+        'maturityOptions': [
+            { 'value': '1M', 'label': '1 Month' },
+            { 'value': '3M', 'label': '3 Months' },
+            { 'value': '6M', 'label': '6 Months' },
+            { 'value': '1Y', 'label': '1 Year' }
+        ],
+        'rateLabel': 'Avg Interest Rate',
+        'primaryRateKey': 'avgRate',
+        'weightedRateKey': 'weightedAvgRate',
+        'fredDefault': '1Y',
+        'calculationFields': [
+            { 'key': 'weightedAvgRate', 'label': 'Weighted Average Rate', 'suffix': '%' },
+            { 'key': 'totalInterest', 'label': 'Total Interest (Annualized)', 'prefix': '$' },
+            { 'key': 'interestEarned', 'label': 'Interest Earned', 'prefix': '$' },
+            { 'key': 'annualYield', 'label': 'Annual Yield', 'suffix': '%' },
+            { 'key': 'effectiveAnnualRate', 'label': 'Effective Annual Rate', 'suffix': '%' },
+            { 'key': 'avgDaysToMaturity', 'label': 'Average Days to Maturity', 'suffix': ' days' },
+            { 'key': 'totalPrincipal', 'label': 'Total Principal', 'prefix': '$' }
+        ],
+        'summaryMetrics': [
+            { 'key': 'totalValue', 'label': 'Total Portfolio Value', 'prefix': '$' },
+            { 'key': 'instrumentCount', 'label': 'Number of Instruments' },
+            { 'key': 'avgRate', 'label': 'Average Interest Rate', 'suffix': '%' },
+            { 'key': 'weightedAvgRate', 'label': 'Weighted Average Rate', 'suffix': '%' }
+        ],
         'required_columns': [
             'Date', 'Instrument', 'Rate', 'Amount', 'MaturityDate',
             'Principal', 'InterestRate', 'DiscountRate', 'Price', 'FaceValue'
@@ -31,6 +59,33 @@ DEFAULT_CONFIGS = {
         ]
     },
     'bonds': {
+        'label': 'Bonds',
+        'description': 'Fixed income securities including government and corporate bonds',
+        'defaultMaturity': '10Y',
+        'maturityOptions': [
+            { 'value': '2Y', 'label': '2 Years' },
+            { 'value': '5Y', 'label': '5 Years' },
+            { 'value': '10Y', 'label': '10 Years' },
+            { 'value': '30Y', 'label': '30 Years' }
+        ],
+        'rateLabel': 'Avg Coupon Rate',
+        'primaryRateKey': 'avgCouponRate',
+        'weightedRateKey': 'weightedAvgCoupon',
+        'fredDefault': '10Y',
+        'calculationFields': [
+            { 'key': 'weightedAvgCoupon', 'label': 'Weighted Average Coupon', 'suffix': '%' },
+            { 'key': 'totalAnnualIncome', 'label': 'Total Annual Income', 'prefix': '$' },
+            { 'key': 'avgYTM', 'label': 'Average Yield to Maturity', 'suffix': '%' },
+            { 'key': 'duration', 'label': 'Duration (years)' }
+        ],
+        'summaryMetrics': [
+            { 'key': 'totalValue', 'label': 'Total Portfolio Value', 'prefix': '$' },
+            { 'key': 'instrumentCount', 'label': 'Number of Instruments' },
+            { 'key': 'avgCouponRate', 'label': 'Average Coupon Rate', 'suffix': '%' },
+            { 'key': 'weightedAvgCoupon', 'label': 'Weighted Average Coupon', 'suffix': '%' },
+            { 'key': 'avgYTM', 'label': 'Average YTM', 'suffix': '%' },
+            { 'key': 'duration', 'label': 'Duration (years)' }
+        ],
         'required_columns': [
             'Date', 'BondName', 'CouponRate', 'FaceValue', 'Yield', 'MaturityDate',
             'IssueDate', 'Frequency', 'Price', 'AccruedInterest', 'RedemptionValue'
@@ -59,6 +114,38 @@ DEFAULT_CONFIGS = {
         ]
     },
     'tbills': {
+        'label': 'T-Bills',
+        'description': 'Treasury bills - short-term government securities',
+        'defaultMaturity': '13W',
+        'maturityOptions': [
+            { 'value': '4W', 'label': '4 Weeks' },
+            { 'value': '13W', 'label': '13 Weeks' },
+            { 'value': '26W', 'label': '26 Weeks' },
+            { 'value': '52W', 'label': '52 Weeks' }
+        ],
+        'rateLabel': 'Avg Discount Rate',
+        'primaryRateKey': 'avgDiscountRate',
+        'weightedRateKey': 'weightedAvgDiscount',
+        'fredDefault': '13W',
+        'calculationFields': [
+            { 'key': 'weightedAvgDiscount', 'label': 'Weighted Average Discount', 'suffix': '%' },
+            { 'key': 'totalDiscount', 'label': 'Total Discount', 'prefix': '$' },
+            { 'key': 'effectiveYield', 'label': 'Effective Yield', 'suffix': '%' },
+            { 'key': 'bondEquivalentYield', 'label': 'Bond Equivalent Yield', 'suffix': '%' },
+            { 'key': 'totalPurchasePrice', 'label': 'Total Purchase Price', 'prefix': '$' },
+            { 'key': 'avgInvestment', 'label': 'Average Investment', 'prefix': '$' },
+            { 'key': 'holdingPeriodYield', 'label': 'Holding Period Yield', 'suffix': '%' },
+            { 'key': 'annualizedYield', 'label': 'Annualized Yield', 'suffix': '%' },
+            { 'key': 'pricePer100', 'label': 'Price per 100', 'prefix': '$' }
+        ],
+        'summaryMetrics': [
+            { 'key': 'totalValue', 'label': 'Total Portfolio Value', 'prefix': '$' },
+            { 'key': 'instrumentCount', 'label': 'Number of Instruments' },
+            { 'key': 'avgDiscountRate', 'label': 'Average Discount Rate', 'suffix': '%' },
+            { 'key': 'weightedAvgDiscount', 'label': 'Weighted Average Discount', 'suffix': '%' },
+            { 'key': 'effectiveYield', 'label': 'Effective Yield', 'suffix': '%' },
+            { 'key': 'bondEquivalentYield', 'label': 'Bond Equivalent Yield', 'suffix': '%' }
+        ],
         'required_columns': [
             'Date', 'TBillName', 'DiscountRate', 'FaceValue', 'MaturityDate',
             'IssueDate', 'Price', 'Yield'

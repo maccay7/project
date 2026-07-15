@@ -1,6 +1,5 @@
 <template>
   <div class="excel-viewer" :class="{ 'has-mapping': showMappingControls }">
-    <!-- Sheet Tabs (only if multiple sheets) -->
     <div class="sheet-tabs" v-if="workbookSheets.length > 1">
       <div
         v-for="sheet in workbookSheets"
@@ -13,12 +12,9 @@
       </div>
     </div>
 
-    <!-- Luckysheet Container (if enabled) -->
     <div v-if="useLuckysheet" ref="luckysheetContainer" class="luckysheet-container"></div>
 
-    <!-- Traditional Excel Table (fallback) -->
     <div v-else>
-      <!-- Formula Bar -->
       <div class="formula-bar" v-if="displayData.length">
         <div class="formula-cell-ref">{{ selectedCellRef }}</div>
         <div class="formula-input-wrapper">
@@ -31,13 +27,10 @@
             @blur="applyFormulaBarEdit"
             @keydown.enter.prevent="applyFormulaBarEdit"
             class="formula-input"
-            :placeholder="selectedCell ? 'Enter value or formula' : ''"
-            style="color: #000000 !important; background: #ffffff !important;"
           />
         </div>
       </div>
 
-      <!-- Toolbar -->
       <div class="excel-toolbar">
         <span>{{ displayData.length }} rows × {{ uniqueHeaders.length }} columns</span>
         <div class="toolbar-right">
@@ -49,12 +42,11 @@
         </div>
       </div>
 
-      <!-- Excel table -->
       <div class="excel-table-wrapper" @scroll="handleScroll">
-        <table class="excel-edit-table" :style="tableStyle" style="color: #000000 !important; background: #ffffff !important;">
+        <table class="excel-edit-table">
           <thead>
             <tr>
-              <th class="row-number-col" style="width:50px; min-width:50px; max-width:50px; color: #000000 !important; background: #f5f5f5 !important;">#</th>
+              <th class="row-number-col">#</th>
               <th
                 v-for="(header, colIndex) in uniqueHeaders"
                 :key="header"
@@ -62,25 +54,21 @@
                 class="header-cell"
                 :class="{ 'resizing': resizingColumn === header }"
               >
-                <!-- Header dropdown: show for required columns only -->
                 <div v-if="showMappingControls && isRequiredColumn(header)" class="header-dropdown">
                   <select
                     :value="getMappingForHeader(header)"
                     @change="onMappingChange(header, $event.target.value)"
                     class="mapping-dropdown"
                     @click.stop
-                    style="color: #000000 !important; background: #ffffff !important;"
                   >
                     <option value="__na__">— Select source —</option>
                     <option v-for="fileCol in availableFileColumns" :key="fileCol" :value="fileCol">
                       {{ fileCol }}
                     </option>
                   </select>
-                  <span class="header-label" style="color: #000000 !important;">{{ header }}</span>
+                  <span class="header-label">{{ header }}</span>
                 </div>
-                <span v-else class="header-text" style="color: #000000 !important;">{{ header }}</span>
-
-                <!-- Column resizer -->
+                <span v-else class="header-text">{{ header }}</span>
                 <div
                   class="column-resizer"
                   @mousedown.stop="startColumnResize($event, header, colIndex)"
@@ -95,9 +83,7 @@
                 :class="{ 'selected-row': isRowSelected(rowIndex) }"
                 @mousedown="handleRowMouseDown($event, rowIndex)"
               >
-                <td class="row-number" style="color: #000000 !important; background: #f8f9ff !important;">
-                  {{ (currentPage - 1) * pageSize + rowIndex + 1 }}
-                </td>
+                <td class="row-number">{{ (currentPage - 1) * pageSize + rowIndex + 1 }}</td>
                 <td
                   v-for="(header, colIndex) in uniqueHeaders"
                   :key="header"
@@ -109,9 +95,8 @@
                   @click="handleCellClick($event, rowIndex, colIndex)"
                   @dblclick="handleCellDblClick($event, rowIndex, colIndex)"
                   @mousedown="handleCellMouseDown($event, rowIndex, colIndex)"
-                  style="color: #000000 !important; background: #ffffff !important;"
                 >
-                  <div v-if="!isEditingCell(rowIndex, colIndex)" class="cell-content" style="color: #000000 !important; background: #ffffff !important;">
+                  <div v-if="!isEditingCell(rowIndex, colIndex)" class="cell-content">
                     {{ getCellValue(row, header) }}
                   </div>
                   <input
@@ -124,11 +109,9 @@
                     class="cell-input"
                     type="text"
                     autofocus
-                    style="color: #000000 !important; background: #ffffff !important;"
                   />
                 </td>
               </tr>
-              <!-- Row resizer handle -->
               <tr
                 v-if="rowIndex < paginatedData.length - 1"
                 class="row-resizer-row"
@@ -141,10 +124,9 @@
         </table>
       </div>
 
-      <!-- Footer -->
       <div class="excel-footer" v-if="displayData.length">
-        <span style="color: #000000 !important;">{{ displayData.length }} rows · {{ uniqueHeaders.length }} columns</span>
-        <span v-if="selectedCell" style="color: #000000 !important;">Cell: {{ selectedCellRef }}</span>
+        <span>{{ displayData.length }} rows · {{ uniqueHeaders.length }} columns</span>
+        <span v-if="selectedCell">Cell: {{ selectedCellRef }}</span>
       </div>
     </div>
   </div>
@@ -174,7 +156,6 @@ export default {
   },
   emits: ['data-update', 'mapping-update', 'sheet-selected'],
   setup(props, { emit }) {
-    // ─── Internal state ──────────────────────────────────
     const internalData = ref([])
     const selectedCell = ref(null)
     const selectedRange = ref(null)
@@ -204,25 +185,26 @@ export default {
     const currentPage = ref(1)
     const loadAllMode = ref(false)
 
-    // ─── 🔥 NEW: Deduplicate headers ────────────────────
     function getUniqueHeaders(headers) {
       if (!headers || !headers.length) return []
+      const exclude = ['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet']
       const seen = new Set()
       const result = []
       for (const h of headers) {
+        if (exclude.includes(h)) continue
+        if (exclude.includes(h.toLowerCase())) continue
         const key = h.trim().toLowerCase()
-        if (!seen.has(key)) {
-          seen.add(key)
+        const baseKey = key.replace(/_\d+$/, '').trim()
+        if (!seen.has(baseKey)) {
+          seen.add(baseKey)
           result.push(h)
         }
       }
       return result
     }
 
-    // ─── Computed ─────────────────────────────────────────
     const displayData = computed(() => internalData.value)
 
-    // 🔥 Use deduplicated headers
     const uniqueHeaders = computed(() => {
       let rawHeaders = []
       if (displayData.value.length) {
@@ -237,7 +219,6 @@ export default {
       if (!rawHeaders.length && props.availableFileColumns && props.availableFileColumns.length) {
         rawHeaders = props.availableFileColumns
       }
-      // Remove duplicates and empty strings
       return getUniqueHeaders(rawHeaders.filter(h => h && h.trim()))
     })
 
@@ -260,7 +241,6 @@ export default {
       return colLetter + rowNum
     })
 
-    // ─── Helpers ──────────────────────────────────────────
     function getCellValue(row, header) {
       return row[header] !== undefined ? row[header] : ''
     }
@@ -278,7 +258,6 @@ export default {
       return props.columnMapping[header] || '__na__'
     }
 
-    // ─── Selection ─────────────────────────────────────────
     function isCellSelected(rowIndex, colIndex) {
       if (!selectedCell.value) return false
       if (selectedRange.value) {
@@ -323,7 +302,6 @@ export default {
       if (editingCell.value) cancelEditing()
     }
 
-    // ─── Formula Bar ──────────────────────────────────────
     function updateFormulaBarFromSelection() {
       if (!selectedCell.value) {
         formulaBarValue.value = ''
@@ -351,7 +329,6 @@ export default {
       }
     }
 
-    // ─── Click / Dblclick ──────────────────────────────────
     let clickTimer = null
     const CLICK_DELAY = 200
 
@@ -391,7 +368,6 @@ export default {
     function handleCellMouseDown(event, rowIndex, colIndex) {}
     function handleRowMouseDown(event, rowIndex) {}
 
-    // ─── Editing ──────────────────────────────────────────
     function isEditingCell(rowIndex, colIndex) {
       if (!editingCell.value) return false
       return editingCell.value.row === rowIndex && editingCell.value.col === colIndex
@@ -462,7 +438,6 @@ export default {
       }
     }
 
-    // ─── Keyboard Navigation ─────────────────────────────
     function handleKeyDown(event) {
       if (editingCell.value) return
       if (!selectedCell.value) return
@@ -497,7 +472,6 @@ export default {
       }
     }
 
-    // ─── Column Resizing ──────────────────────────────────
     function startColumnResize(event, header, colIndex) {
       resizingColumn.value = header
       resizeStartX.value = event.clientX
@@ -540,11 +514,9 @@ export default {
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         boxSizing: 'border-box',
-        color: '#000000 !important',
       }
     }
 
-    // ─── Row Resizing ─────────────────────────────────────
     function startRowResize(event, rowIndex) {
       const globalIndex = (currentPage.value - 1) * pageSize + rowIndex
       resizingRow.value = globalIndex
@@ -593,12 +565,9 @@ export default {
         position: 'relative',
         height: height + 'px',
         maxHeight: height + 'px',
-        color: '#000000 !important',
-        background: '#ffffff !important',
       }
     }
 
-    // ─── Scroll ────────────────────────────────────────────
     function handleScroll(event) {
       scrollLeft.value = event.target.scrollLeft
     }
@@ -607,15 +576,11 @@ export default {
       width: '100%',
       borderCollapse: 'collapse',
       tableLayout: 'fixed',
-      color: '#000000 !important',
-      background: '#ffffff !important',
     }))
 
-    // ─── Pagination ──────────────────────────────────────
     function prevPage() { if (currentPage.value > 1) currentPage.value-- }
     function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
 
-    // ─── Sheet Selection ──────────────────────────────────
     function selectSheet(sheetName) {
       const sheet = props.workbookSheets.find(s => s.name === sheetName)
       if (sheet) {
@@ -643,22 +608,17 @@ export default {
       }
     }
 
-    // ─── Mapping change from header dropdown ──────────────
     function onMappingChange(header, newSrcCol) {
       const newMapping = { ...props.columnMapping }
       newMapping[header] = newSrcCol === '__na__' ? null : newSrcCol
       emit('mapping-update', newMapping)
     }
 
-    // ─── Luckysheet Initialization ─────────────────────────
     function initializeLuckysheet() {
       if (!props.useLuckysheet || !luckysheetContainer.value || luckysheetInitialized.value) return
-      
       const sheetData = internalData.value.map(row => Object.values(row))
       const headers = uniqueHeaders.value
-      
       sheetData.unshift(headers)
-      
       const options = {
         container: luckysheetContainer.value,
         data: [sheetData],
@@ -680,7 +640,6 @@ export default {
         showToolbar: true,
         showFormulaBar: true,
       }
-      
       try {
         luckysheet.create(options)
         luckysheetInitialized.value = true
@@ -700,18 +659,15 @@ export default {
       }
     }
 
-    // ─── Watchers ──────────────────────────────────────────
     watch(
       () => props.data,
       (newData) => {
         internalData.value = newData.map(row => ({ ...row }))
-        
         if (props.useLuckysheet) {
           nextTick(() => {
             initializeLuckysheet()
           })
         }
-        
         selectedCell.value = null
         selectedRange.value = null
         editingCell.value = null
@@ -732,10 +688,8 @@ export default {
       updateFormulaBarFromSelection()
     })
 
-    // ─── Lifecycle ─────────────────────────────────────────
     onMounted(() => {
       document.addEventListener('keydown', handleKeyDown)
-      
       if (props.useLuckysheet) {
         nextTick(() => {
           initializeLuckysheet()
@@ -749,11 +703,9 @@ export default {
       document.removeEventListener('mouseup', stopColumnResize)
       document.removeEventListener('mousemove', onRowResize)
       document.removeEventListener('mouseup', stopRowResize)
-      
       destroyLuckysheet()
     })
 
-    // ─── Expose ────────────────────────────────────────────
     return {
       internalData,
       displayData,
@@ -1059,12 +1011,5 @@ export default {
   color: #666;
   display: flex;
   justify-content: space-between;
-}
-.excel-viewer td,
-.excel-viewer td *,
-.excel-viewer .cell-content,
-.excel-viewer .cell-content * {
-  color: #000000 !important;
-  background: #ffffff !important;
 }
 </style>

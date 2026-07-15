@@ -569,14 +569,20 @@ async function fetchBackendKPI() {
   }
 }
 
-// ===== 🔥 FIX: Move handleSessionUpdate to root scope =====
+// ===== 🔥 FIX: handleSessionUpdate at root scope =====
 const handleSessionUpdate = async (event) => {
-  const { sessionId, versionCount } = event.detail || {}
+  const { sessionId, versionCount, instrumentCount } = event.detail || {}
   if (sessionId) {
+    // Update the specific session
     await refreshSession(sessionId)
+    // If we have a versionCount, update the active session immediately
     if (versionCount !== undefined && activeSession.value?.id === sessionId) {
       activeSession.value.version_count = versionCount
     }
+    if (instrumentCount !== undefined && activeSession.value?.id === sessionId) {
+      activeSession.value.instrument_count = instrumentCount
+    }
+    // Refresh the dashboard to ensure everything is consistent
     await refreshDashboard()
   } else {
     await refreshDashboard()
@@ -616,7 +622,7 @@ onMounted(async () => {
   window.addEventListener('session-updated', handleSessionUpdate)
 })
 
-// ===== 🔥 FIX: Move onBeforeUnmount to root scope =====
+// ===== 🔥 FIX: onBeforeUnmount at root scope =====
 onBeforeUnmount(() => {
   window.removeEventListener('session-updated', handleSessionUpdate)
 })

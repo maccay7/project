@@ -334,6 +334,33 @@ function downloadFullReport() {
   URL.revokeObjectURL(url)
 }
 
+function formatForExcel(value, type = 'number') {
+  if (value === null || value === undefined || value === '') return ''
+  const num = parseFloat(value)
+  if (isNaN(num)) return value
+  
+  if (type === 'percentage') {
+    return Math.round(num * 10) / 10  // Round to 1 decimal place
+  } else if (type === 'money') {
+    return Math.round(num * 100) / 100  // Round to 2 decimal places
+  }
+  return num
+}
+
+function formatRowForExcel(row) {
+  const formatted = {}
+  for (const [key, value] of Object.entries(row)) {
+    if (key.toLowerCase().includes('rate') || key.toLowerCase().includes('yield') || key.toLowerCase().includes('coupon') || key.toLowerCase().includes('discount')) {
+      formatted[key] = formatForExcel(value, 'percentage')
+    } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('price') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('principal') || key.toLowerCase().includes('interest')) {
+      formatted[key] = formatForExcel(value, 'money')
+    } else {
+      formatted[key] = value
+    }
+  }
+  return formatted
+}
+
 function downloadReport(format = 'json') {
   if (!previewData.value) {
     alert('No report data available.')
@@ -358,7 +385,8 @@ function downloadReport(format = 'json') {
     const allData = data.allWorkedData || {}
     for (const [key, rows] of Object.entries(allData)) {
       if (rows.length) {
-        const sheet = XLSX.utils.json_to_sheet(rows)
+        const formattedRows = rows.map(row => formatRowForExcel(row))
+        const sheet = XLSX.utils.json_to_sheet(formattedRows)
         XLSX.utils.book_append_sheet(workbook, sheet, key.substring(0, 31))
       }
     }
@@ -367,7 +395,7 @@ function downloadReport(format = 'json') {
       ['Session', data.session],
       ['Date', data.date],
       ['Valuation Date', data.valuationDate],
-      ['Total Value', data.totalValue],
+      ['Total Value', formatForExcel(data.totalValue, 'money')],
       ['Instruments', data.instrument],
       ['Rows', data.rows]
     ]

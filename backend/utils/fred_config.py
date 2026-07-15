@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-FRED_API_KEY = os.environ.get('FRED_API_KEY')
+FRED_API_KEY = os.environ.get('FRED_API_KEY', 'b40141a5119f30bc2388d63f59d8847e')
 FRED_BASE_URL = 'https://api.stlouisfed.org/fred'
 
 # ===== SYNTHETIC DATA GENERATORS (FALLBACK) =====

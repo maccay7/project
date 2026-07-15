@@ -2,12 +2,12 @@
 import { ref, shallowRef } from 'vue'
 import api from '@/services/api.js'
 
-// ===== STATIC FALLBACK CONFIGS =====
+// ===== STATIC CONFIGS =====
 const STATIC_CONFIGS = {
   'money-market': {
     required_columns: [
       'Instrument', 'Amount', 'Rate', 'Principal',
-      'Trade Date', 'Maturity Date'
+      'Trade Date', 'Maturity Date', 'Days to Maturity'
     ],
     column_variations: {
       'Instrument': ['Instrument', 'Security', 'Name', 'Description', 'Issuer', 'Bank', 'Counterparty'],
@@ -27,7 +27,7 @@ const STATIC_CONFIGS = {
       { tab: 'reports', name: 'Report', order: 6 }
     ]
   },
-  bonds: {
+  'bonds': {
     required_columns: [
       'BondName', 'FaceValue', 'CouponRate', 'Yield',
       'Maturity Date', 'Issue Date', 'Coupon Frequency'
@@ -50,10 +50,10 @@ const STATIC_CONFIGS = {
       { tab: 'reports', name: 'Report', order: 6 }
     ]
   },
-  tbills: {
+  'tbills': {
     required_columns: [
       'TBillName', 'FaceValue', 'DiscountRate',
-      'Auction Date', 'Maturity Date'
+      'Auction Date', 'Maturity Date', 'Days to Maturity'
     ],
     column_variations: {
       'TBillName': ['TBillName', 'T-Bill', 'Security', 'Name', 'Description', 'Issuer'],
