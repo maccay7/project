@@ -121,18 +121,45 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       originalFileBuffer.value = arrayBuffer
       uploadedFile.value = new File([file], file.name, { type: file.type })
 
-      // Parse only first 1000 rows per sheet for initial detection
+      // Parse full workbook with styles and merged cells for proper display
       const workbook = XLSX.read(arrayBuffer, { 
         type: 'array', 
         cellDates: true,
-        cellStyles: false,
-        cellNF: false,
-        sheetRows: 1000            // ⬅️ limit rows for speed
+        cellStyles: true,
+        cellNF: true,
       })
 
       const sheets = []
       for (const sheetName of workbook.SheetNames) {
         const worksheet = workbook.Sheets[sheetName]
+        
+        // Get full 2D array data
+        const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1')
+        const fullData = []
+        for (let R = range.s.r; R <= range.e.r; R++) {
+          const row = []
+          for (let C = range.s.c; C <= range.e.c; C++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
+            const cell = worksheet[cellAddress]
+            row.push(cell ? cell.v : '')
+          }
+          fullData.push(row)
+        }
+        
+        // Get merged ranges
+        const mergedRanges = []
+        if (worksheet['!merges']) {
+          for (const merge of worksheet['!merges']) {
+            mergedRanges.push({
+              min_row: merge.s.r,
+              max_row: merge.e.r,
+              min_col: merge.s.c,
+              max_col: merge.e.c
+            })
+          }
+        }
+        
+        // Also get JSON data for compatibility
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
         const sheetHeaders = jsonData.length > 0 ? Object.keys(jsonData[0]) : []
 
@@ -140,8 +167,10 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           name: sheetName,
           data: jsonData,
           headers: sheetHeaders,
-          row_count: jsonData.length,
-          column_count: sheetHeaders.length,
+          fullData: fullData,
+          merged_ranges: mergedRanges,
+          row_count: fullData.length,
+          column_count: fullData.length > 0 ? fullData[0].length : 0,
         })
       }
 
@@ -191,28 +220,60 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     const workbook = XLSX.read(originalFileBuffer.value, {
       type: 'array',
       cellDates: true,
-      cellStyles: false,
-      cellNF: false,
-      // no row limit
+      cellStyles: true,
+      cellNF: true,
     })
     const worksheet = workbook.Sheets[sheetName]
     if (!worksheet) {
       throw new Error(`Sheet "${sheetName}" not found in full workbook`)
     }
+    
+    // Get full 2D array data
+    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1')
+    const fullData = []
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      const row = []
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
+        const cell = worksheet[cellAddress]
+        row.push(cell ? cell.v : '')
+      }
+      fullData.push(row)
+    }
+    
+    // Get merged ranges
+    const mergedRanges = []
+    if (worksheet['!merges']) {
+      for (const merge of worksheet['!merges']) {
+        mergedRanges.push({
+          min_row: merge.s.r,
+          max_row: merge.e.r,
+          min_col: merge.s.c,
+          max_col: merge.e.c
+        })
+      }
+    }
+    
+    // Also get JSON data for compatibility
     const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
-    return jsonData
+    
+    return { jsonData, fullData, mergedRanges }
   }
 
   // ========== PROCESS WORKSHEET (re‑parse full sheet) ==========
   async function processWorksheet(sheetName, requiredColumns, columnVariations) {
     // Force full re‑parse of the selected sheet from the buffer
-    let sheetData = []
+    let parseResult = null
     try {
-      sheetData = parseFullSheet(sheetName)
+      parseResult = parseFullSheet(sheetName)
     } catch (err) {
       error.value = `Failed to parse full sheet: ${err.message}`
       return { success: false, error: error.value }
     }
+
+    const sheetData = parseResult?.jsonData || []
+    const fullData = parseResult?.fullData || []
+    const mergedRanges = parseResult?.mergedRanges || []
 
     if (!sheetData || sheetData.length === 0) {
       error.value = `No data found in sheet "${sheetName}"`
@@ -225,17 +286,20 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       const detection = detectSheetType(sheetData, currentInstrumentType.value)
       sheetType.value = detection.type
 
+      // Update the workbookSheets entry with full data andmerged ranges
+      const sheetIndex = workbookSheets.value.findIndex(s => s.name === sheetName)
+      if (sheetIndex !== -1) {
+        workbookSheets.value[sheetIndex].data = sheetData
+        workbookSheets.value[sheetIndex].fullData = fullData
+        workbookSheets.value[sheetIndex].merged_ranges = mergedRanges
+        workbookSheets.value[sheetIndex].row_count = fullData.length
+        workbookSheets.value[sheetIndex].column_count = fullData.length > 0 ? fullData[0].length : 0
+      }
+
       if (detection.type === 'single') {
         const values = extractValuesIntelligently(sheetData, currentInstrumentType.value)
         extractedValues.value = values
         tabularData.value = convertExtractedToTabular(values)
-
-        // Update the workbookSheets entry with full data
-        const sheetIndex = workbookSheets.value.findIndex(s => s.name === sheetName)
-        if (sheetIndex !== -1) {
-          workbookSheets.value[sheetIndex].data = sheetData
-          workbookSheets.value[sheetIndex].row_count = sheetData.length
-        }
 
         worksheetStatus.value[sheetName] = 'completed'
         return {

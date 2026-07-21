@@ -102,14 +102,29 @@
               </div>
 
               <div v-if="rawData.length && showPreview" class="excel-preview-section">
-                <h4>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
-                <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
+                <h4 v-if="sheetType === 'single'">Required Values (Single Instrument)</h4>
+                <h4 v-else>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
+                <p v-if="sheetType === 'single'" class="preview-info">
+                  Automatically extracted required values — verify before calculations
+                </p>
+                <p v-else class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
+                
+                <!-- Single Instrument: Show extracted values in key-value format -->
+                <div v-if="sheetType === 'single' && Object.keys(extractedValues).length > 0" class="extracted-values-display">
+                  <div v-for="(value, key) in extractedValues" :key="key" class="extracted-field-row">
+                    <div class="field-label">{{ formatFieldName(key) }}</div>
+                    <div class="field-value">{{ value || '—' }}</div>
+                  </div>
+                </div>
+                
+                <!-- Multiple Instruments: Show mapped dataset in Excel viewer -->
                 <ExcelViewer
+                  v-else-if="sheetType === 'multi' && rawData.length"
                   :data="rawData.slice(0, 500)"
                   :headers="uploadPreviewHeaders"
                   :original-data="originalRawData.slice(0, 500)"
                   :original-headers="originalFileColumns"
-                  :show-mapping-controls="sheetType === 'multi'"
+                  :show-mapping-controls="true"
                   :column-mapping="columnMapping"
                   :available-file-columns="fileColumns"
                   :required-columns="requiredColumns"
@@ -119,7 +134,8 @@
                   @mapping-update="updateColumnMapping"
                   @sheet-selected="handleSheetSelected"
                 ></ExcelViewer>
-                <div class="preview-actions">
+                
+                <div v-if="sheetType === 'multi'" class="preview-actions">
                   <button class="btn-primary" @click="saveFinalMapping">Save Mapping</button>
                   <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
                 </div>
@@ -214,14 +230,14 @@
                     <button class="btn-close-dialog" @click="showWorkbookViewer = false">×</button>
                   </v-card-title>
                   <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
-                    <ExcelViewer
-                      :key="'wb-' + currentSheetName + workbookSheets.length"
-                      :data="workbookSheets.find(s => s.name === currentSheetName)?.data || []"
-                      :headers="workbookSheets.find(s => s.name === currentSheetName)?.headers || []"
-                      :workbook-sheets="workbookSheets"
-                      :current-sheet-name="currentSheetName"
+                    <ExcelWorkbookViewer
+                      :workbook-data="{ sheets: workbookSheets, fileBuffer: originalFileBuffer }"
+                      :file-name="uploadedFile?.name || 'Workbook'"
+                      :instrument-type="instrumentType"
+                      @close="showWorkbookViewer = false"
                       @sheet-selected="handleSheetSelectedFromViewer"
-                      @process-sheet="handleProcessSheetFromViewer"
+                      @single-instrument-extracted="handleSingleInstrumentExtracted"
+                      @table-isolated="handleTableIsolated"
                     />
                   </v-card-text>
                   <div class="popup-footer">
@@ -232,17 +248,25 @@
                 </v-card>
               </v-dialog>
 
-              <div class="required-columns" v-if="sheetType === 'multi'">
-                <h4>Required Columns:</h4>
-                <div class="columns-list">
+              <!-- ===== Required Columns / Extracted Values ===== -->
+              <div class="required-columns">
+                <h4 v-if="sheetType === 'multi'">Required Columns:</h4>
+                <h4 v-else>Extracted Values:</h4>
+                <div v-if="sheetType === 'multi'" class="columns-list">
                   <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
                     {{ col }}
                   </span>
                 </div>
-                <div v-if="rawData.length && missingColumns.length" class="warning-message">
+                <div v-else class="extracted-values-list">
+                  <div v-for="(value, key) in extractedValues" :key="key" class="extracted-item">
+                    <span class="extracted-label">{{ key }}</span>
+                    <span class="extracted-value">{{ value }}</span>
+                  </div>
+                </div>
+                <div v-if="rawData.length && sheetType === 'multi' && missingColumns.length" class="warning-message">
                   <span>Missing required columns. Use the dropdowns on the column headers or click "Map Columns" to assign them.</span>
                 </div>
-                <div v-if="rawData.length && missingColumns.length === 0 && mappingApplied" class="success-message">
+                <div v-if="rawData.length && sheetType === 'multi' && missingColumns.length === 0 && mappingApplied" class="success-message">
                   <span>All columns mapped. Ready to continue.</span>
                 </div>
               </div>
@@ -835,6 +859,7 @@ import { useFredMarket } from '@/composables/useFredMarket'
 import { useWorksheetWorkflow } from '@/composables/useWorksheetWorkflow.js'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import ExcelModalViewer from '@/components/ExcelModalViewer.vue'
+import ExcelWorkbookViewer from '@/components/ExcelWorkbookViewer.vue'
 import WorksheetSelector from '@/components/WorksheetSelector.vue'
 import { markStepCompleted, isStepPersistedCompleted } from '@/utils/workflowProgress.js'
 import { autoMatchColumns, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping'
@@ -1083,6 +1108,8 @@ const excelDialogTitle = ref('')
 const showWorkbookViewer = ref(false)
 const workbookSheets = ref([])
 const currentSheetName = ref('')
+const singleInstrumentExtractedValues = ref({})
+const isolatedTableData = ref(null)
 
 const showModalViewer = ref(false)
 const viewerFileData = ref(null)
@@ -1100,6 +1127,9 @@ const SAVE_DEBOUNCE_MS = 2000
 
 const selectedSummaryWorksheet = ref('')
 const availableSummaryWorksheets = computed(() => [])
+
+// Track which sheets have already had mapping dialog shown
+const mappingShownForSheet = ref({})
 
 const currentSummaryRows = computed(() => {
   return instrumentSummary.value.rows
@@ -1818,18 +1848,74 @@ function handleWorksheetSelect(sheetName) {
       originalRawData.value = JSON.parse(JSON.stringify(sheet.data || []))
       fileColumns.value = sheet.headers || []
       originalFileColumns.value = [...fileColumns.value]
-      if (sheetType.value === 'multi') {
-        columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-      } else {
-        columnMapping.value = {}
-      }
-      applyCurrentMapping()
-      showPreview.value = true
-      forceUpdate.value++
+      // Don't auto-apply mapping or show preview - user must click "Work on This Sheet"
+      // sheetType will be set by worksheetWorkflow.selectWorksheet
+      sheetType.value = result.type || 'multi'
     }
   }
 }
 
+// ================================================================
+// CORRECTED: handleSheetSelectedFromViewer – only selects sheet
+// ================================================================
+function handleSheetSelectedFromViewer(sheetName) {
+  console.log('Sheet selected from viewer:', sheetName)
+  currentSheetName.value = sheetName
+  // Don't show preview automatically - user must click "Preview" button
+  // Just update the current selected sheet
+  worksheetSelected.value = true
+}
+
+// ================================================================
+// Handle single instrument extracted from workbook viewer
+// ================================================================
+function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
+  console.log('Single instrument extracted from sheet:', sheetName, extractedValues)
+  currentSheetName.value = sheetName
+  singleInstrumentExtractedValues.value = extractedValues
+}
+
+// ================================================================
+// Handle table isolated from workbook viewer for mapping
+// ================================================================
+function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }) {
+  console.log('Table isolated for mapping:', sheetName, tableName, tableRange)
+  
+  // Store the isolated table data
+  isolatedTableData.value = {
+    sheetName,
+    tableName,
+    data,
+    headers,
+    tableRange
+  }
+  
+  // Update current sheet name
+  currentSheetName.value = sheetName
+  
+  // Close the workbook viewer
+  showWorkbookViewer.value = false
+  
+  // Use the isolated table data for mapping
+  rawData.value = data
+  originalRawData.value = JSON.parse(JSON.stringify(data))
+  fileColumns.value = headers
+  originalFileColumns.value = [...headers]
+  
+  // Show mapping dialog
+  showMappingDialog.value = true
+  mappingApplied.value = false
+  
+  // Auto-match columns
+  columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
+  applyCurrentMapping()
+  
+  console.log('Isolated table data loaded for mapping:', data.length, 'rows')
+}
+
+// ================================================================
+// CORRECTED: handleWorkOnSheet – shows mapping only once per sheet
+// ================================================================
 async function handleWorkOnSheet(sheetName) {
   fileLoading.value = true
   uploadError.value = ''
@@ -1885,13 +1971,25 @@ async function handleWorkOnSheet(sheetName) {
           }
         }
         applyCurrentMapping()
-        if (missingColumns.value.length) {
+        // Show mapping dialog only for multi-instrument on first "Work This Workbook" click
+        if (result.type === 'multi' && !mappingShownForSheet.value[sheetName]) {
+          mappingShownForSheet.value[sheetName] = true
           showMappingDialog.value = true
         }
       } else {
+        // Single instrument – no mapping dialog, show extracted values in preview
         columnMapping.value = {}
         mappingApplied.value = true
         showMappingDialog.value = false
+        // Store extracted values for display
+        const fieldMappings = getRequiredFieldMappings(instrumentType.value)
+        extractedValues.value = extractSingleInstrumentValues(rawData.value, fieldMappings) || {}
+        // Convert to a displayable row for preview
+        const tabularData = convertExtractedToTabular(extractedValues.value)
+        rawData.value = tabularData
+        originalRawData.value = JSON.parse(JSON.stringify(tabularData))
+        fileColumns.value = Object.keys(tabularData[0] || {})
+        originalFileColumns.value = [...fileColumns.value]
       }
 
       showPreview.value = true
@@ -2063,28 +2161,38 @@ function resetMapping() {
   forceUpdate.value++
 }
 
-// ========== WORKBOOK VIEWER – use existing preview data ==========
+// ========== WORKBOOK VIEWER ==========
 function openWorkbookViewer() {
   if (!uploadedFile.value) {
     alert('Please upload a file first.')
     return
   }
-  // Ensure we have sheet data
   if (!workbookSheets.value.length) {
     alert('No workbook data available. Please upload a valid Excel file.')
     return
   }
-  // Set current sheet if not set
   if (!currentSheetName.value && workbookSheets.value.length) {
     currentSheetName.value = workbookSheets.value[0].name
   }
   showWorkbookViewer.value = true
 }
 
-function handleSheetSelectedFromViewer(sheetName, sheetData, sheetHeaders) {
-  console.log('Sheet selected from viewer:', sheetName)
-  currentSheetName.value = sheetName
-  handleWorkOnSheet(sheetName)
+// ================================================================
+// CORRECTED: workOnSelectedSheet – user clicks "Work on This Sheet" button
+// ================================================================
+function workOnSelectedSheet() {
+  if (!currentSheetName.value) {
+    alert('Please select a sheet first.')
+    return
+  }
+  const sheet = workbookSheets.value.find(s => s.name === currentSheetName.value)
+  if (!sheet || !sheet.data || !sheet.data.length) {
+    alert('No data found in the selected sheet.')
+    return
+  }
+  // Process the sheet (this will detect single/multi and show mapping if needed)
+  handleWorkOnSheet(currentSheetName.value)
+  showWorkbookViewer.value = false // close viewer after work
 }
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
@@ -2122,24 +2230,6 @@ function handleProcessSheet(sheetName, sheetData, sheetHeaders) {
   showWorkbookViewer.value = false
   rawData.value = sheetData
   applyCurrentMapping()
-}
-
-function workOnSelectedSheet() {
-  if (!currentSheetName.value) {
-    alert('Please select a sheet first.')
-    return
-  }
-  const sheet = workbookSheets.value.find(s => s.name === currentSheetName.value)
-  if (!sheet || !sheet.data || !sheet.data.length) {
-    alert('No data found in the selected sheet.')
-    return
-  }
-  handleWorkOnSheet(currentSheetName.value)
-  showWorkbookViewer.value = false
-  activeTab.value = 'upload'
-  worksheetSelected.value = true
-  showPreview.value = true
-  forceUpdate.value++
 }
 
 function handleProcessSheetFromModal(payload) {
@@ -2780,7 +2870,7 @@ const yieldCurveCache = new Map()
 const CACHE_TTL = 15 * 60 * 1000
 
 // ================================================================
-// 🔥 CORRECTED fetchYieldCurve – uses real FRED data only (no mock)
+// fetchYieldCurve – uses real FRED data only (no mock)
 // ================================================================
 async function fetchYieldCurve() {
   const country = effectiveCountry.value
@@ -2846,7 +2936,6 @@ async function fetchYieldCurve() {
 
   try {
     console.log('Fetching yield curve from FRED endpoint:', { instrument_type: instrumentType.value, country: normalizedCountry, currency, maturity })
-    // 🔥 Use fredAPI (not visualizationAPI) – returns only real FRED data
     const response = await api.fredAPI.getYieldCurve({
       instrument_type: instrumentType.value,
       country: normalizedCountry,
@@ -2909,7 +2998,6 @@ function updateFredBenchmark() {
 
 async function renderYieldCurveChart() {
   if (!yieldCurveChart.value || !yieldCurveData.value.length) {
-    // If no data, clear any existing chart and return (placeholder will show)
     if (chartInstanceRef.current) {
       chartInstanceRef.current.destroy()
       chartInstanceRef.current = null
@@ -3281,7 +3369,7 @@ function notifySessionUpdated(explicitSave = false, saveOptions = {}) {
 }
 
 // ================================================================
-// 🔧 saveToSession – with version creation and refresh
+// saveToSession – with version creation and refresh
 // ================================================================
 async function saveToSession() {
   if (!activeSession.value) {
@@ -3330,7 +3418,12 @@ async function saveToSession() {
     // 3. Force refresh session to get updated version_count from backend
     await refreshSessionVersionCount(sid)
 
-    // 4. Dispatch event for dashboard
+    // 4. Ensure version count is at least 1 (first version should be v1, not v0)
+    if (!activeSession.value.version_count || activeSession.value.version_count === 0) {
+      activeSession.value.version_count = 1
+    }
+
+    // 5. Dispatch event for dashboard
     window.dispatchEvent(new CustomEvent('session-updated', {
       detail: {
         sessionId: sid,
@@ -3603,8 +3696,17 @@ async function captureChartImage() {
           return
         } catch (e) { console.warn('DOM canvas capture failed', e) }
       }
+      // Try to find any canvas in the document
+      const anyCanvas = document.querySelector('canvas')
+      if (anyCanvas && anyCanvas.toDataURL) {
+        try {
+          resolve(anyCanvas.toDataURL('image/png', 1.0))
+          return
+        } catch (e) { console.warn('Any canvas capture failed', e) }
+      }
+      console.warn('No canvas found for chart capture')
       resolve('')
-    }, 500)
+    }, 1000) // Increased delay to ensure chart is rendered
   })
 }
 
@@ -3626,11 +3728,21 @@ async function generateReportHtml() {
     return null
   }
 
+  console.log('Generating report with yield curve data:', yieldCurveData.value.length, 'points')
+  console.log('Chart series label:', chartSeriesLabel.value)
+
   let imageData = chartImageData.value
   if (!imageData) {
     try {
+      console.log('Attempting to capture chart image...')
       imageData = await captureChartImage()
-    } catch (e) { console.warn('Chart capture failed', e) }
+      console.log('Chart capture result:', imageData ? 'success' : 'failed')
+      if (imageData) {
+        chartImageData.value = imageData
+      }
+    } catch (e) { 
+      console.warn('Chart capture failed:', e)
+    }
   }
 
   const valuationDate = new Date().toISOString().split('T')[0]
@@ -3638,6 +3750,8 @@ async function generateReportHtml() {
   const totalInstrumentCount = report.instruments.reduce((sum, inst) => sum + (parseInt(inst.calculations.instrumentCount) || 0), 0)
 
   const yieldPoints = yieldCurveData.value || []
+  console.log('Yield points for report:', yieldPoints.length)
+  
   let appendixRows = ''
   if (yieldPoints.length) {
     appendixRows = yieldPoints.map(point => `
@@ -3653,9 +3767,15 @@ async function generateReportHtml() {
   const chartHtml = imageData ? `
     <div class="chart-container">
       <img src="${imageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" />
-      <p class="chart-caption">FRED Yield Curve – ${report.instruments.map(i => i.name).join(', ')}</p>
+      <p class="chart-caption">FRED Yield Curve – ${chartSeriesLabel.value || report.instruments.map(i => i.name).join(', ')} (${effectiveCountry.value || 'USA'} / ${effectiveCurrency.value || 'USD'})</p>
     </div>
-  ` : '<p>Yield curve chart not available.</p>'
+  ` : (yieldPoints.length ? `
+    <div class="chart-container">
+      <p><strong>Yield Curve Data:</strong> ${chartSeriesLabel.value || 'FRED Yield Curve'}</p>
+      <p><strong>Country:</strong> ${effectiveCountry.value || 'USA'} | <strong>Currency:</strong> ${effectiveCurrency.value || 'USD'} | <strong>Maturity:</strong> ${effectiveMaturity.value || 'N/A'}</p>
+      <p><em>Chart image could not be captured, but yield curve data is included in the appendix.</em></p>
+    </div>
+  ` : '<p>Yield curve chart not available. Please load a yield curve in the visualizations section.</p>')
 
   const sessionName = activeSession.value?.name || 'Valuation Report'
 
@@ -4068,19 +4188,47 @@ async function checkAndReset() {
   }, 300)
 }
 
+// ================================================================
+// CORRECTED: onMounted – loads session from route
+// ================================================================
 onMounted(async () => {
+  // Try multiple ways to get the active session
   const qSid = route.query.session
   if (qSid) {
-    await sessionManager.getSession(String(qSid))
     const s = await sessionManager.getSession(String(qSid))
-    if (s) { activeSession.value = s; sessionManager.setActiveSession(s) }
+    if (s) {
+      activeSession.value = s
+      sessionManager.setActiveSession(s)
+    }
+  }
+  // If still no active session, try to get from sessionManager
+  if (!activeSession.value) {
+    const current = sessionManager.getActiveSession()
+    if (current) activeSession.value = current
+  }
+  // If still no session, try localStorage
+  if (!activeSession.value) {
+    const storedSession = localStorage.getItem('activeSession')
+    if (storedSession) {
+      try {
+        const parsed = JSON.parse(storedSession)
+        activeSession.value = parsed
+        sessionManager.setActiveSession(parsed)
+      } catch (e) {
+        console.error('Failed to parse stored session:', e)
+      }
+    }
   }
   await checkAndReset()
   loadUploadHistory()
   loadSavedTemplates()
   window.addEventListener('storage', () => checkAndReset())
   await loadFilterOptions()
-  if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
+  if (!effectiveMaturity.value) {
+    const def = config.value.defaultMaturity
+    selectedMaturityOption.value = def
+    fredFilters.value.maturity = def
+  }
   if (Object.keys(allCalculations.value).length) enrichCalculationsWithFred()
   if (!allCalculations.value.totalValue && activeSession.value) await loadSavedData()
   if (cleanedData.value.length) await calculateMetrics()
@@ -4337,6 +4485,30 @@ onBeforeUnmount(() => {
 .quality-pill .pill-sub { display: block; font-size: 12px; margin-top: 3px; font-weight: 500; }
 .text-success { color: #0f7b4a; }
 .text-warning { color: #b0720a; }
+
+/* Extracted values styles for single-instrument sheets */
+.extracted-values-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.extracted-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #f8f9ff;
+  border-radius: 6px;
+  border-left: 3px solid #0B2044;
+}
+.extracted-label {
+  font-weight: 600;
+  color: #0B2044;
+}
+.extracted-value {
+  font-weight: 500;
+  color: #333;
+}
 
 @media (max-width: 768px) {
   .analytics-pills { flex-direction: column; }

@@ -111,6 +111,21 @@ export default {
           this.fileName = fileData.name;
         }
 
+        // --- NEW: Check if we already have parsed sheets with fullData ---
+        if (fileData.sheets && Array.isArray(fileData.sheets)) {
+          console.log('📄 Using pre-parsed workbook sheets with fullData...');
+          this.sheetNames = fileData.sheets.map(s => s.name);
+          // Store the sheets for later use
+          this.workbook = {
+            sheets: fileData.sheets,
+            SheetNames: this.sheetNames
+          };
+          if (this.sheetNames.length > 0) {
+            this.switchSheet(this.sheetNames[0]);
+          }
+          return;
+        }
+
         // 1) If we have an arrayBuffer (original file buffer)
         if (fileData.arrayBuffer) {
           console.log('📄 Parsing original file arrayBuffer...');
@@ -139,16 +154,7 @@ export default {
           reader.readAsArrayBuffer(fileData);
           return;
         }
-        // 4) If we already have parsed workbook data (sheets array)
-        else if (fileData.sheets && Array.isArray(fileData.sheets)) {
-          console.log('📄 Using pre-parsed workbook sheets...');
-          // Convert to a structure that afterLoad understands
-          this.workbook = {
-            sheets: fileData.sheets,
-            SheetNames: fileData.sheets.map(s => s.name)
-          };
-        }
-        // 5) If we have a data URL
+        // 4) If we have a data URL
         else if (typeof fileData === 'string' && fileData.startsWith('data:')) {
           console.log('📄 Parsing data URL...');
           const binary = atob(fileData.split(',')[1]);
@@ -199,33 +205,63 @@ export default {
     loadSheetData(sheetName) {
       let data = [];
       
-      // Handle XLSX workbook format
+      // --- NEW: Try to use fullData from pre-parsed sheets ---
+      if (this.workbook.sheets && Array.isArray(this.workbook.sheets)) {
+        const sheet = this.workbook.sheets.find(s => s.name === sheetName);
+        if (sheet && sheet.fullData && sheet.fullData.length > 0) {
+          // Use fullData as the primary source
+          this.fullData = sheet.fullData;
+          if (this.fullData.length > 0) {
+            // Determine columns from the first row
+            const firstRow = this.fullData[0] || [];
+            this.columns = firstRow.map((_, idx) => `Column ${idx + 1}`);
+          } else {
+            this.columns = [];
+          }
+          this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
+          this.currentPage = 0;
+          this.updateDisplayGrid();
+          console.log(`📊 Sheet "${sheetName}" loaded from fullData. Total rows: ${this.fullData.length}`);
+          return;
+        }
+        // If no fullData, fallback to data (list of dict)
+        if (sheet && sheet.data && sheet.data.length > 0) {
+          this.fullData = sheet.data;
+          if (this.fullData.length > 0) {
+            this.columns = Object.keys(this.fullData[0]);
+          } else {
+            this.columns = [];
+          }
+          this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
+          this.currentPage = 0;
+          this.updateDisplayGrid();
+          console.log(`📊 Sheet "${sheetName}" loaded from data (dict). Total rows: ${this.fullData.length}`);
+          return;
+        }
+      }
+
+      // Fallback: Use XLSX parsing
       if (this.workbook.Sheets && this.workbook.Sheets[sheetName]) {
         const worksheet = this.workbook.Sheets[sheetName];
         // Use sheet_to_json with raw: false to preserve formatting
         data = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
-      }
-      // Handle our custom sheets format
-      else if (this.workbook.sheets && Array.isArray(this.workbook.sheets)) {
-        const sheet = this.workbook.sheets.find(s => s.name === sheetName);
-        if (sheet) {
-          data = sheet.data || [];
+        this.fullData = data;
+        if (this.fullData.length > 0) {
+          this.columns = Object.keys(this.fullData[0]);
+        } else {
+          this.columns = [];
         }
-      }
-      
-      this.fullData = data;
-      
-      if (this.fullData.length > 0) {
-        this.columns = Object.keys(this.fullData[0]);
+        this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
+        this.currentPage = 0;
+        this.updateDisplayGrid();
+        console.log(`📊 Sheet "${sheetName}" loaded via XLSX. Total rows: ${this.fullData.length}`);
       } else {
+        // No data
+        this.fullData = [];
         this.columns = [];
+        this.totalPages = 0;
+        this.displayedData = [];
       }
-
-      this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
-      this.currentPage = 0;
-      this.updateDisplayGrid();
-
-      console.log(`📊 Sheet "${sheetName}" loaded. Total rows: ${this.fullData.length}`);
     },
 
     updateDisplayGrid() {
@@ -280,6 +316,7 @@ export default {
 </script>
 
 <style scoped>
+/* (Styles unchanged – they are already in the original file) */
 .excel-viewer-overlay {
   position: fixed;
   top: 0;
