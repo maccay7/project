@@ -1,5 +1,25 @@
-/** Shared IFRS-style report HTML generator used by Reports pages. */
-export function generateReportHtml(data, instrument, session, date, valuationDate, chartImageData = '') {
+/**
+ * Generate IFRS‑style report HTML with yield curve appendix from session filters.
+ * @param {Array} data - The instrument data rows.
+ * @param {string} instrument - Instrument type (e.g., 'money-market').
+ * @param {string} session - Session name.
+ * @param {string} date - Report generation date.
+ * @param {string} valuationDate - Valuation date (YYYY-MM-DD).
+ * @param {string} chartImageData - Base64 PNG of yield curve chart.
+ * @param {Object} fredFilters - { country, currency, maturity } from session.
+ * @param {Array} yieldCurveData - Array of { maturity, maturityLabel, rate }.
+ * @returns {string} Full HTML report.
+ */
+export function generateReportHtml(
+  data,
+  instrument,
+  session,
+  date,
+  valuationDate,
+  chartImageData = '',
+  fredFilters = { country: 'US', currency: 'USD', maturity: '1Y' },
+  yieldCurveData = []
+) {
   const valDate = valuationDate || new Date().toISOString().split('T')[0]
   const totalValue = data.reduce((s, r) => s + (parseFloat(r.FaceValue || r.Amount || r.Principal || 0)), 0)
   const totalInterest = data.reduce((s, r) => s + (parseFloat(r.InterestEarned || r.Interest || 0)), 0)
@@ -38,10 +58,22 @@ export function generateReportHtml(data, instrument, session, date, valuationDat
     instrumentRows += `<tr><td>${name}</td><td>${ticker}</td><td>${faceValue.toFixed(2)}</td><td>${rate.toFixed(4)}%</td><td>${term.toFixed(2)}</td><td>${valDate}</td></tr>`
   })
 
+  // Build appendix rows from yieldCurveData
+  let appendixRows = ''
+  if (yieldCurveData && yieldCurveData.length) {
+    appendixRows = yieldCurveData.map(point => `
+      <tr>
+        <td>${point.maturityLabel || point.maturity || ''}</td>
+        <td>${point.maturity || 0}</td>
+        <td>${point.rate || 0}%</td>
+      </tr>
+    `).join('')
+  }
+
   const logoUrl = '/DuraCapital logo.png'
   const backgroundCoverUrl = '/reportbackground.png'
   const chartHtml = chartImageData ?
-    `<div class="chart-container"><img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" /><p class="chart-caption">FRED Yield Curve – ${instrument}</p></div>` :
+    `<div class="chart-container"><img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" /><p class="chart-caption">FRED Yield Curve – ${instrument} (${fredFilters.country} / ${fredFilters.currency})</p></div>` :
     '<p>Yield curve chart not available.</p>'
 
   return `<!DOCTYPE html>
@@ -108,11 +140,21 @@ export function generateReportHtml(data, instrument, session, date, valuationDat
 <div class="page"><h1 class="section-title">Introduction</h1><p>Dura Capital (Private) Limited was contracted to provide a fair valuation assessment report of the following ${instrument} instruments as at ${valDate}.</p><ul style="margin:20px 0 20px 30px;"><li>${instrument} instruments</li><li>Valuation as at ${valDate}</li><li>${data.length} individual instruments assessed</li></ul></div>
 <div class="page"><h1 class="section-title">Executive Summary</h1><div class="executive-summary"><p><strong>Key Findings:</strong></p><ul style="margin-left:20px;"><li>Total Portfolio Value: <span class="highlight">$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li><li>Number of Instruments: <span class="highlight">${data.length}</span></li><li>Average Rate: <span class="highlight">${avgRate.toFixed(2)}%</span></li><li>Valuation Date: <span class="highlight">${valDate}</span></li></ul><p><strong>Valuation Approach:</strong> ${methodology}</p></div></div>
 <div class="page"><h1 class="section-title">Methodology</h1><div class="methodology-box"><p>${methodology}</p><div class="formula">${formulas}</div><p><strong>Assumptions:</strong> ${assumptions}</p></div></div>
-<div class="page"><h1 class="section-title">Market Inputs</h1><p>Rates sourced from FRED for ${valDate}.</p></div>
+<div class="page"><h1 class="section-title">Market Inputs</h1><p>Rates sourced from FRED for ${valDate}. Filters used: Country = ${fredFilters.country}, Currency = ${fredFilters.currency}, Maturity = ${fredFilters.maturity}.</p></div>
 <div class="page"><h1 class="section-title">Results</h1><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Total Portfolio Value</td><td>$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Number of Instruments</td><td>${data.length}</td></tr><tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr><tr><td>Total Interest Earned</td><td>$${totalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Valuation Date</td><td>${valDate}</td></tr></tbody></table></div>
 <div class="page"><h1 class="section-title">Yield Curve</h1><p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>${chartHtml}</div>
 <div class="page"><h1 class="section-title">Conclusion</h1><p>The valuation assessment is in accordance with IFRS 13 fair value measurement principles as at ${valDate}.</p></div>
-<div class="page"><h1 class="section-title">Appendix: Detailed Instrument Data</h1><table class="appendix-table"><thead><tr><th>Instrument Name</th><th>BB Ticker</th><th>Face Value ($)</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead><tbody>${instrumentRows}</tbody></table></div>
+<div class="page"><h1 class="section-title">Appendix: Detailed Instrument Data</h1><table class="appendix-table"><thead><tr><th>Instrument Name</th><th>BB Ticker</th><th>Face Value ($)</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead><tbody>${instrumentRows}</tbody></table>
+${appendixRows ? `
+<br>
+<h2 style="font-size:18px; color:#0B2044; margin-top:20px;">FRED Yield Curve Data</h2>
+<p><strong>Country:</strong> ${fredFilters.country} &nbsp;|&nbsp; <strong>Currency:</strong> ${fredFilters.currency} &nbsp;|&nbsp; <strong>Maturity:</strong> ${fredFilters.maturity}</p>
+<table class="appendix-table">
+  <thead><tr><th>Maturity Label</th><th>Term (Yr)</th><th>Rate (%)</th></tr></thead>
+  <tbody>${appendixRows}</tbody>
+</table>
+` : ''}
+</div>
 <div class="page"><h1 class="section-title">Reference</h1><ul class="reference-list"><li>FRED – Federal Reserve Economic Data</li><li>IFRS 13: Fair Value Measurement</li><li>IFRS 9: Financial Instruments</li></ul><div class="footer"><p>© ${new Date().getFullYear()} Dura Capital (Private) Limited. Report generated ${date || valDate}.</p></div></div>
 </body></html>`
 }

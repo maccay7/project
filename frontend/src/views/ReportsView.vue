@@ -121,10 +121,15 @@ import jsPDF from 'jspdf'
 import { Document, Packer, Paragraph, TextRun } from 'docx'
 import { saveAs } from 'file-saver'
 import api from '@/services/api.js'
+import { useFredMarket } from '@/composables/useFredMarket'
 
 const router = useRouter()
 const route = useRoute()
 
+// ===== Composables =====
+const { fredFilters, fetchYieldCurve } = useFredMarket()
+
+// ===== State =====
 const selectedType = ref('current')
 const previewData = ref(null)
 const reportError = ref('')
@@ -133,6 +138,7 @@ const showDatasetPreview = ref(false)
 const sessionName = ref('')
 const reportHtml = ref('')
 
+// ===== Helper Functions =====
 async function resolveSession() {
   let session = sessionManager.getActiveSession()
   if (!session) {
@@ -174,6 +180,7 @@ async function loadSummaryData(sessionId, instrumentType) {
   return null
 }
 
+// ===== Load Dataset Preview =====
 async function loadDatasetPreview() {
   showDatasetPreview.value = true
   try {
@@ -215,6 +222,7 @@ function selectReportType(type) {
   generatePreview()
 }
 
+// ===== Generate Preview =====
 async function generatePreview() {
   const session = await resolveSession()
   if (!session) {
@@ -237,6 +245,40 @@ async function generatePreview() {
   if (currentSummary && currentSummary.rows && currentSummary.rows.length) {
     currentData = currentSummary.rows
   }
+
+  // 🔥 Load FRED filters from session workflow
+  let fredFiltersFromSession = null
+  try {
+    const wf = await sessionManager.getInstrumentWorkflow(session.id, instrument)
+    if (wf && wf.fredFilters) {
+      fredFiltersFromSession = wf.fredFilters
+    }
+  } catch (e) {
+    console.warn('Could not load fredFilters from session:', e)
+  }
+
+  // 🔥 Fetch yield curve data using the session filters
+  let yieldCurveData = []
+  if (fredFiltersFromSession) {
+    try {
+      // Temporarily set fredFilters to session values, fetch curve, then restore (or keep them)
+      const originalCountry = fredFilters.value.country
+      const originalMaturity = fredFilters.value.maturity
+      const originalCurrency = fredFilters.value.currency
+
+      fredFilters.value.country = fredFiltersFromSession.country || 'US'
+      fredFilters.value.maturity = fredFiltersFromSession.maturity || '1Y'
+      fredFilters.value.currency = fredFiltersFromSession.currency || 'USD'
+
+      yieldCurveData = await fetchYieldCurve(instrument)
+
+      // Optionally keep the session filters (they are now set)
+    } catch (e) {
+      console.warn('Failed to fetch yield curve for report:', e)
+      // Fallback: keep using the session filters even if fetch fails
+    }
+  }
+
   const preview = {
     type: selectedType.value === 'current' ? 'Current Instrument Report' : 'Full Session Report',
     date: new Date().toLocaleString(),
@@ -247,7 +289,9 @@ async function generatePreview() {
     sample: currentData.slice(0, 3),
     valuationDate: new Date().toISOString().split('T')[0],
     totalValue: currentData.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['Calculated Value'] || 0)), 0),
-    allWorkedData: allWorkedData
+    allWorkedData: allWorkedData,
+    fredFilters: fredFiltersFromSession || { country: 'US', currency: 'USD', maturity: '1Y' },
+    yieldCurveData: yieldCurveData
   }
   if (selectedType.value === 'session') {
     const allData = {}
@@ -262,7 +306,7 @@ async function generatePreview() {
   previewData.value = preview
   reportError.value = ''
 
-  // Generate HTML
+  // Generate HTML with fredFilters and yieldCurveData
   if (previewData.value) {
     const data = previewData.value
     const instrumentName = data.instrument || 'unknown'
@@ -291,13 +335,23 @@ async function generatePreview() {
       } catch (e) {
         console.warn('Could not capture chart:', e)
       }
-      reportHtml.value = generateReportHtml(fullData, instrumentName, sessionName, date, valuationDate, chartImage)
+      reportHtml.value = generateReportHtml(
+        fullData,
+        instrumentName,
+        sessionName,
+        date,
+        valuationDate,
+        chartImage,
+        data.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
+        data.yieldCurveData || []
+      )
     } else {
       reportHtml.value = '<p>No data available for report. Please run calculations first.</p>'
     }
   }
 }
 
+// ===== Download Full Report =====
 function downloadFullReport() {
   if (!previewData.value) {
     alert('No report data. Please refresh the report first.')
@@ -324,7 +378,16 @@ function downloadFullReport() {
     alert('No data available for the report.')
     return
   }
-  const html = generateReportHtml(fullData, instrument, session, date, valuationDate)
+  const html = generateReportHtml(
+    fullData,
+    instrument,
+    session,
+    date,
+    valuationDate,
+    '',
+    data.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
+    data.yieldCurveData || []
+  )
   const blob = new Blob([html], { type: 'text/html' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -334,15 +397,16 @@ function downloadFullReport() {
   URL.revokeObjectURL(url)
 }
 
+// ===== Other helper functions =====
 function formatForExcel(value, type = 'number') {
   if (value === null || value === undefined || value === '') return ''
   const num = parseFloat(value)
   if (isNaN(num)) return value
   
   if (type === 'percentage') {
-    return Math.round(num * 10) / 10  // Round to 1 decimal place
+    return Math.round(num * 10) / 10
   } else if (type === 'money') {
-    return Math.round(num * 100) / 100  // Round to 2 decimal places
+    return Math.round(num * 100) / 100
   }
   return num
 }

@@ -111,13 +111,13 @@ export const datasetAPI = {
   markDone: (id) => callAPI('/api/dataset/done', 'POST', { dataset_id: id, done: true })
 }
 
-// ===== FRED API – NO FALLBACK =====
+// ===== FRED API – NO FALLBACK FOR YIELD CURVE =====
 export const fredAPI = {
   getSeries: (seriesId, limit = 365, sortOrder = 'desc') =>
     callAPI(`/api/fred/series/${seriesId}?limit=${limit}&sort_order=${sortOrder}`),
   getCategories: () => callAPI('/api/fred/categories'),
-  getYieldCurve: (instrumentType = 'all', country = 'US', currency = 'USD') =>
-    callAPI(`/api/fred-yield-curve?instrument_type=${encodeURIComponent(instrumentType)}&country=${country}&currency=${currency}`),
+  // 🔥 Uses POST to /api/fred/yield-curve with payload – returns only real data
+  getYieldCurve: (params) => callAPI('/api/fred/yield-curve', 'POST', params),
   getFilters: () => callAPI('/api/fred/filters'),
   getBenchmark: (instrumentType, maturity = '1Y', country = 'US', currency = 'USD') =>
     callAPI(`/api/fred/benchmark?instrument_type=${encodeURIComponent(instrumentType)}&maturity=${maturity}&country=${country}&currency=${currency}`),
@@ -160,7 +160,7 @@ export const versionAPI = {
   getTotalCount: () => callAPI('/api/version/count', 'GET')
 }
 
-// ===== VISUALIZATION API – NO FALLBACK =====
+// ===== VISUALIZATION API =====
 export const visualizationAPI = {
   getYieldCurve: (payload, fetchOptions = {}) =>
     callAPI('/api/visualization/yield-curve', 'POST', payload, false, fetchOptions),

@@ -2,6 +2,57 @@
 import { ref, computed, watch } from 'vue'
 import { fredAPI } from '@/services/api'
 
+// Country mapping – keep in sync with backend/utils/fred_config.py
+const COUNTRY_MAP = {
+  'USA': 'US',
+  'US': 'US',
+  'GBR': 'GB',
+  'GB': 'GB',
+  'EUR': 'EUR',
+  'JPN': 'JP',
+  'JP': 'JP',
+  'CAN': 'CA',
+  'CA': 'CA',
+  'AUS': 'AU',
+  'AU': 'AU',
+  'ZAF': 'ZA',
+  'ZA': 'ZA',
+  'CHE': 'CH',
+  'CH': 'CH',
+  'NZL': 'NZ',
+  'NZ': 'NZ',
+  'NOR': 'NO',
+  'NO': 'NO',
+  'SWE': 'SE',
+  'SE': 'SE',
+  'DNK': 'DK',
+  'DK': 'DK',
+  'BRA': 'BR',
+  'BR': 'BR',
+  'MEX': 'MX',
+  'MX': 'MX',
+  'IND': 'IN',
+  'IN': 'IN',
+  'CHN': 'CN',
+  'CN': 'CN',
+  'KOR': 'KR',
+  'KR': 'KR',
+  'SGP': 'SG',
+  'SG': 'SG',
+  'HKG': 'HK',
+  'HK': 'HK',
+  'RUS': 'RU',
+  'RU': 'RU',
+  'TUR': 'TR',
+  'TR': 'TR',
+  'SAU': 'SA',
+  'SA': 'SA',
+  'ARE': 'AE',
+  'AE': 'AE',
+  'ISR': 'IL',
+  'IL': 'IL'
+}
+
 export function useFredMarket(defaultMaturity = '1Y') {
   // ===== STATE =====
   const fredFilters = ref({
@@ -43,6 +94,12 @@ export function useFredMarket(defaultMaturity = '1Y') {
   })
 
   // ===== METHODS =====
+
+  function normalizeCountry(country) {
+    if (!country) return 'US'
+    const normalized = COUNTRY_MAP[country.toUpperCase()]
+    return normalized || country.toUpperCase()
+  }
 
   async function loadFilterOptions() {
     isLoading.value = true
@@ -90,7 +147,7 @@ export function useFredMarket(defaultMaturity = '1Y') {
     try {
       const res = await fredAPI.getSeriesByMaturity(
         fredFilters.value.maturity,
-        fredFilters.value.country
+        normalizeCountry(fredFilters.value.country)
       )
       return res?.series_id || null
     } catch (error) {
@@ -99,24 +156,21 @@ export function useFredMarket(defaultMaturity = '1Y') {
     }
   }
 
-  // ===== fetchBenchmark – no fallback =====
+  // ===== fetchBenchmark – no fallback (backend handles it) =====
   async function fetchBenchmark(instrumentType) {
     isLoading.value = true
     lastError.value = null
     try {
-      console.log(`Fetching FRED benchmark for ${instrumentType} ${fredFilters.value.maturity} ${fredFilters.value.country}`)
+      const country = normalizeCountry(fredFilters.value.country)
+      console.log(`Fetching FRED benchmark for ${instrumentType} ${fredFilters.value.maturity} ${country}`)
       const res = await fredAPI.getBenchmark(
         instrumentType,
         fredFilters.value.maturity,
-        fredFilters.value.country,
+        country,
         fredFilters.value.currency
       )
       if (res?.success && res.data && res.data.benchmark_rate !== undefined) {
         console.log('FRED benchmark received:', res.data)
-        return res.data
-      }
-      if (res?.data && res.data.benchmark_rate !== undefined) {
-        console.log('FRED benchmark received (data only):', res.data)
         return res.data
       }
       throw new Error(res?.message || 'No benchmark data received')
@@ -131,7 +185,8 @@ export function useFredMarket(defaultMaturity = '1Y') {
 
   // ===== fetchYieldCurve – no fallback =====
   async function fetchYieldCurve(instrumentType = 'money_market') {
-    const cacheKey = `${instrumentType}_${fredFilters.value.country}_${fredFilters.value.currency}`
+    const country = normalizeCountry(fredFilters.value.country)
+    const cacheKey = `${instrumentType}_${country}_${fredFilters.value.currency}`
     
     // Check cache
     const cached = yieldCurveCache.get(cacheKey)
@@ -143,10 +198,10 @@ export function useFredMarket(defaultMaturity = '1Y') {
     isLoading.value = true
     lastError.value = null
     try {
-      console.log(`Fetching FRED yield curve for ${instrumentType} ${fredFilters.value.country} ${fredFilters.value.currency}`)
+      console.log(`Fetching FRED yield curve for ${instrumentType} ${country} ${fredFilters.value.currency}`)
       const res = await fredAPI.getYieldCurve(
         instrumentType,
-        fredFilters.value.country,
+        country,
         fredFilters.value.currency
       )
       if (res?.success && res.data && res.data.maturities && res.data.maturities.length) {
@@ -194,6 +249,7 @@ export function useFredMarket(defaultMaturity = '1Y') {
     onCountryChange,
     seriesIdForMaturity,
     fetchBenchmark,
-    fetchYieldCurve
+    fetchYieldCurve,
+    normalizeCountry
   }
 }

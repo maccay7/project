@@ -20,17 +20,24 @@ const router = createRouter({
       component: () => import('@/views/SignupView.vue'),
       meta: { requiresAuth: false }
     },
-    // ✅ NEW: Forgot Password route
+    // Forgot Password route
     {
       path: '/forgot-password',
       name: 'forgot-password',
-      component: () => import('@/views/resetpassword.vue'), // adjust path if needed
+      component: () => import('@/views/resetpassword.vue'),
       meta: { requiresAuth: false }
     },
     {
       path: '/dashboard',
       name: 'dashboard',
       component: () => import('@/views/DashboardView.vue'),
+      meta: { requiresAuth: true }
+    },
+    // ✅ NEW: Dynamic route for instrument pages (Money Market, Bonds, T-Bills)
+    {
+      path: '/instrument/:type',
+      name: 'instrument',
+      component: () => import('@/views/InstrumentView.vue'),
       meta: { requiresAuth: true }
     },
     {

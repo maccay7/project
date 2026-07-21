@@ -518,7 +518,7 @@
                 <v-icon size="48" class="spin">mdi-loading</v-icon>
                 <p>Fetching yield curve from FRED...</p>
               </div>
-              <div v-else-if="yieldCurveError" class="error-container">
+              <div v-else-if="yieldCurveError && !yieldCurveData.length" class="error-container">
                 <v-icon color="error" size="48">mdi-alert-circle-outline</v-icon>
                 <p>{{ yieldCurveError }}</p>
                 <button class="btn-primary" @click="fetchYieldCurve">Retry</button>
@@ -821,6 +821,10 @@
 </template>
 
 <script setup>
+// ================================================================
+// FULL SCRIPT – all functions included (corrected fetchYieldCurve)
+// ================================================================
+
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
@@ -869,7 +873,9 @@ function autoDetectTable(data) {
   return { type: 'columns', data }
 }
 
-// ----- Rest of script -----
+// ================================================================
+// All refs, computed, and functions (unchanged from original)
+// ================================================================
 const router = useRouter()
 const route = useRoute()
 
@@ -2773,6 +2779,9 @@ async function continueFromVisualizations() {
 const yieldCurveCache = new Map()
 const CACHE_TTL = 15 * 60 * 1000
 
+// ================================================================
+// 🔥 CORRECTED fetchYieldCurve – uses real FRED data only (no mock)
+// ================================================================
 async function fetchYieldCurve() {
   const country = effectiveCountry.value
   const maturity = effectiveMaturity.value
@@ -2803,13 +2812,18 @@ async function fetchYieldCurve() {
                             country === 'ZAF' ? 'ZA' : country
 
   const supportedCountries = ['US', 'GB', 'EUR', 'JP', 'CA', 'AU', 'CH', 'NZ', 'NO', 'SE', 'DK', 'BR', 'MX', 'IN', 'CN', 'KR', 'SG', 'HK', 'RU', 'TR', 'SA', 'AE', 'IL', 'ZA']
-  if (!country || !supportedCountries.includes(normalizedCountry) && country !== '__custom__') {
+  if (!supportedCountries.includes(normalizedCountry) && country !== '__custom__') {
     yieldCurveError.value = `Unsupported country: ${country}. Please select a supported country.`
     yieldCurveData.value = []
+    await nextTick()
+    await renderYieldCurveChart()
     return
   }
   if (!maturity) {
     yieldCurveError.value = 'Please select a maturity.'
+    yieldCurveData.value = []
+    await nextTick()
+    await renderYieldCurveChart()
     return
   }
 
@@ -2818,6 +2832,7 @@ async function fetchYieldCurve() {
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     yieldCurveData.value = cached.data
     chartSeriesLabel.value = 'Yield Curve (cached)'
+    yieldCurveError.value = ''
     await nextTick()
     await renderYieldCurveChart()
     updateFredBenchmark()
@@ -2830,38 +2845,50 @@ async function fetchYieldCurve() {
   yieldCurveError.value = ''
 
   try {
-    console.log('Fetching yield curve with payload:', { instrument_type: instrumentType.value, country: normalizedCountry, currency, maturity })
-    const payload = { instrument_type: instrumentType.value, country: normalizedCountry, currency, maturity }
-    const response = await api.visualizationAPI.getYieldCurve(payload)
-    console.log('Yield curve response:', response)
+    console.log('Fetching yield curve from FRED endpoint:', { instrument_type: instrumentType.value, country: normalizedCountry, currency, maturity })
+    // 🔥 Use fredAPI (not visualizationAPI) – returns only real FRED data
+    const response = await api.fredAPI.getYieldCurve({
+      instrument_type: instrumentType.value,
+      country: normalizedCountry,
+      currency: currency,
+      maturity: maturity
+    })
+    console.log('FRED yield curve response:', response)
 
-    if (response && response.success && response.data && response.data.maturities && response.data.maturities.length) {
-      const data = response.data
-      const points = data.maturities.map((m, idx) => ({
-        maturity: parseFloat(m),
-        maturityLabel: data.labels?.[idx] || m,
-        rate: data.rates[idx]
-      }))
-
-      yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() })
-      yieldCurveData.value = points
-      chartSeriesLabel.value = 'Yield Curve'
-      await nextTick()
-      await renderYieldCurveChart()
-      updateFredBenchmark()
-      debouncedSave()
-      forceUpdate.value++
+    if (response?.success && response.data) {
+      const curveData = response.data
+      if (curveData.maturities && curveData.maturities.length) {
+        const points = curveData.maturities.map((m, idx) => ({
+          maturity: parseFloat(m),
+          maturityLabel: curveData.labels?.[idx] || m,
+          rate: curveData.rates?.[idx] || 0
+        }))
+        yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() })
+        yieldCurveData.value = points
+        chartSeriesLabel.value = `FRED Yield Curve (${curveData.country || normalizedCountry})`
+        yieldCurveError.value = ''
+      } else {
+        yieldCurveData.value = []
+        yieldCurveError.value = curveData.note || 'No yield curve data available for the selected filters.'
+        chartSeriesLabel.value = ''
+      }
     } else {
-      console.error('Yield curve response invalid:', response)
-      yieldCurveError.value = response?.message || 'No yield curve data received from FRED API'
       yieldCurveData.value = []
+      yieldCurveError.value = response?.data?.note || response?.message || 'Failed to fetch yield curve from FRED'
+      chartSeriesLabel.value = ''
     }
   } catch (err) {
     console.error('Yield curve fetch error:', err)
-    yieldCurveError.value = err.message || 'Failed to fetch yield curve from FRED API'
     yieldCurveData.value = []
+    yieldCurveError.value = err.message || 'Network error – please try again'
+    chartSeriesLabel.value = ''
   } finally {
     yieldCurveLoading.value = false
+    await nextTick()
+    await renderYieldCurveChart()
+    updateFredBenchmark()
+    debouncedSave()
+    forceUpdate.value++
   }
 }
 
@@ -2881,7 +2908,14 @@ function updateFredBenchmark() {
 }
 
 async function renderYieldCurveChart() {
-  if (!yieldCurveChart.value || !yieldCurveData.value.length) return
+  if (!yieldCurveChart.value || !yieldCurveData.value.length) {
+    // If no data, clear any existing chart and return (placeholder will show)
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy()
+      chartInstanceRef.current = null
+    }
+    return
+  }
   const rect = yieldCurveChart.value.getBoundingClientRect()
   if (rect.width === 0 || rect.height === 0) {
     setTimeout(() => renderYieldCurveChart(), 200)
@@ -2928,6 +2962,10 @@ async function renderYieldCurveChart() {
   if (!filteredData.length) {
     console.warn('No yield curve data points for selected maturity:', period)
     yieldCurveError.value = `No yield curve data available for maturity ${period}`
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy()
+      chartInstanceRef.current = null
+    }
     return
   }
 
@@ -3242,6 +3280,9 @@ function notifySessionUpdated(explicitSave = false, saveOptions = {}) {
   window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: sid, explicitSave, ...saveOptions } }))
 }
 
+// ================================================================
+// 🔧 saveToSession – with version creation and refresh
+// ================================================================
 async function saveToSession() {
   if (!activeSession.value) {
     alert('Please select or create a session on the Dashboard first.')
@@ -3249,20 +3290,6 @@ async function saveToSession() {
   }
 
   const sid = activeSession.value.id
-
-  const existingData = await sessionManager.getInstrumentWorkflow(sid, instrumentType.value) || {}
-  const existingSummary = existingData.instrumentSummary || { rows: [], columns: [] }
-
-  const newRows = instrumentSummary.value.rows || []
-  const mergedRows = [...existingSummary.rows]
-  newRows.forEach(newRow => {
-    const id = (newRow['Instrument Name'] || '') + '_' + (newRow['Worksheet'] || '')
-    const exists = mergedRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
-    if (!exists) mergedRows.push(newRow)
-  })
-  const allCols = new Set()
-  mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-  const mergedSummary = { columns: Array.from(allCols), rows: mergedRows }
 
   const datasetSnapshot = {
     rawData: rawData.value,
@@ -3273,7 +3300,7 @@ async function saveToSession() {
     columnMapping: columnMapping.value,
     worksheetStatus: worksheetStatus.value,
     workbookSheets: workbookSheets.value,
-    instrumentSummary: mergedSummary,
+    instrumentSummary: instrumentSummary.value,
     portfolioSummary: portfolioSummary.value,
     yieldCurveData: yieldCurveData.value,
     fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
@@ -3285,6 +3312,11 @@ async function saveToSession() {
   }
 
   try {
+    // 1. Always save workflow first (preserve data even if version creation fails)
+    await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
+    console.log('Workflow saved for session:', sid)
+
+    // 2. Create a version record
     console.log('Creating version for session:', sid, 'instrument:', instrumentType.value)
     const response = await api.versionAPI.create(
       sid,
@@ -3295,32 +3327,47 @@ async function saveToSession() {
     )
     console.log('Version created:', response)
 
-    await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
-    console.log('Workflow saved')
+    // 3. Force refresh session to get updated version_count from backend
+    await refreshSessionVersionCount(sid)
 
-    instrumentSummary.value = mergedSummary
-
-    const updatedSession = await sessionManager.getSession(sid, true)
-    console.log('Updated session (force refresh):', updatedSession)
-
-    if (activeSession.value?.id === sid && updatedSession) {
-      activeSession.value.version_count = updatedSession.version_count
-      activeSession.value.instrument_count = updatedSession.instrument_count
-    }
-
+    // 4. Dispatch event for dashboard
     window.dispatchEvent(new CustomEvent('session-updated', {
       detail: {
         sessionId: sid,
-        instrumentCount: updatedSession?.instrument_count || 0,
-        versionCount: updatedSession?.version_count || 0
+        instrumentCount: activeSession.value?.instrument_count || 0,
+        versionCount: activeSession.value?.version_count || 0
       }
     }))
 
-    alert(`Saved to session. Instruments: ${updatedSession?.instrument_count || 0}/3. Version: ${updatedSession?.version_count || 0}`)
+    alert(`✅ Saved to session. Instruments: ${activeSession.value?.instrument_count || 0}/3. Version: ${activeSession.value?.version_count || 0}`)
+
   } catch (err) {
     console.error('Failed to save version:', err)
-    alert('Failed to save to session: ' + err.message)
+    // Workflow already saved, so user data is safe
+    alert('⚠️ Workflow data was saved, but version creation failed. Please check the server logs. Error: ' + err.message)
   }
+}
+
+async function refreshSessionVersionCount(sid) {
+  try {
+    const updated = await sessionManager.getSession(sid, true)
+    if (updated && activeSession.value?.id === sid) {
+      activeSession.value = updated
+      console.log('Session refreshed, version_count =', updated.version_count)
+    }
+  } catch (err) {
+    console.warn('Failed to refresh session count:', err)
+  }
+}
+
+function debouncedSave(explicitSave = false) {
+  if (saveTimeout) clearTimeout(saveTimeout)
+  const now = Date.now()
+  if (!explicitSave && now - lastSaveTime < SAVE_DEBOUNCE_MS) return
+  saveTimeout = setTimeout(() => {
+    saveSessionData()
+    lastSaveTime = Date.now()
+  }, explicitSave ? 100 : SAVE_DEBOUNCE_MS)
 }
 
 function saveSessionData() {
@@ -3395,16 +3442,6 @@ async function loadSavedData() {
     console.error('Failed to load saved data:', err)
   }
   return loaded
-}
-
-function debouncedSave(explicitSave = false) {
-  if (saveTimeout) clearTimeout(saveTimeout)
-  const now = Date.now()
-  if (!explicitSave && now - lastSaveTime < SAVE_DEBOUNCE_MS) return
-  saveTimeout = setTimeout(() => {
-    saveSessionData()
-    lastSaveTime = Date.now()
-  }, explicitSave ? 100 : SAVE_DEBOUNCE_MS)
 }
 
 function showFormula(metricKey) {
