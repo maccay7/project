@@ -2,8 +2,9 @@ import os
 import json
 import requests
 from utils.db import get_db
+from utils.fred_config import get_yield_curve, FRED_API_KEY   # <-- corrected import
 
-FRED_API_KEY = os.environ.get('FRED_API_KEY')
+FRED_API_KEY = os.environ.get('FRED_API_KEY', FRED_API_KEY)
 FRED_URL = 'https://api.stlouisfed.org/fred/series/observations'
 
 
@@ -109,10 +110,12 @@ def get_dashboard_charts():
 
 
 def get_yield_curve(instrument_type='all', country='US', currency='USD'):
-    from utils.fred_config import build_yield_curve_response, FRED_KEY
-    if not FRED_KEY:
-        return {'labels': [], 'current': [], 'datasets': [], 'error': 'FRED API key missing'}
+    """Fetch yield curve points and format them for charts."""
     try:
-        return build_yield_curve_response(instrument_type, country, currency)
+        # Use the real get_yield_curve from fred_config
+        points = get_yield_curve(country)  # returns list of dicts with maturity, maturityLabel, rate, source
+        labels = [p['maturityLabel'] for p in points]
+        values = [p['rate'] for p in points]
+        return {'labels': labels, 'values': values, 'source': 'FRED (with fallback)'}
     except Exception as err:
-        return {'labels': [], 'current': [], 'datasets': [], 'error': str(err)}
+        return {'labels': [], 'values': [], 'error': str(err)}
