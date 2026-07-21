@@ -8,8 +8,8 @@ import openpyxl
 import tempfile
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from routes.dataset import parse_full_workbook
+# Use our central excel_parser
+from utils.excel_parser import parse_full_workbook
 
 def create_processed_data_table():
     conn = get_db()
@@ -282,7 +282,8 @@ def data_processing_routes(app):
         instrument_type = request.args.get('instrument_type', 'money-market')
         
         try:
-            result = parse_full_workbook(file_path, instrument_type)
+            # Use our central parser
+            result = parse_full_workbook(file_path, instrument_type, max_rows=10000)
             print(f"Workbook parsed: {len(result.get('sheets', []))} sheets")
             
             _workbook_cache[file_id] = result
@@ -338,7 +339,7 @@ def data_processing_routes(app):
         try:
             if return_full_workbook:
                 print("Calling parse_full_workbook (for viewer)...")
-                result = parse_full_workbook(file_path, instrument_type)
+                result = parse_full_workbook(file_path, instrument_type, max_rows=10000)
                 print(f"Parse result type: {type(result)}")
                 print(f"Parse result sheets: {len(result.get('sheets', []))}")
                 _workbook_cache[file_id] = result

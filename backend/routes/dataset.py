@@ -7,6 +7,7 @@ from utils.db import get_db
 import openpyxl
 import pandas as pd
 from datetime import datetime
+from utils.excel_parser import parse_full_workbook  # Use the central parser
 
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
@@ -77,252 +78,6 @@ def save_dataset_metadata(file_name, original_name, file_path, file_size, instru
         return None
 
 
-def parse_excel_file(file_path, instrument_type):
-    result = {
-        'sheets': [],
-        'metadata': {},
-        'warnings': []
-    }
-    
-    try:
-        import openpyxl
-        workbook = openpyxl.load_workbook(file_path, data_only=False, read_only=False)
-        
-        result['metadata']['sheet_names'] = workbook.sheetnames
-        result['metadata']['sheet_count'] = len(workbook.sheetnames)
-        
-        named_ranges = []
-        for name in workbook.defined_names:
-            named_ranges.append({
-                'name': name.name,
-                'value': str(name.attr_text) if hasattr(name, 'attr_text') else str(name.value)
-            })
-        result['metadata']['named_ranges'] = named_ranges
-        
-        total_rows = 0
-        total_columns = 0
-        
-        for sheet_name in workbook.sheetnames:
-            try:
-                sheet = workbook[sheet_name]
-                
-                tables = []
-                for table in sheet.tables:
-                    tables.append({
-                        'name': table.name,
-                        'ref': table.ref,
-                        'display_name': table.displayName
-                    })
-                
-                data_ranges = []
-                if sheet.dimensions:
-                    data_ranges.append(sheet.dimensions)
-                
-                headers = []
-                data = []
-                
-                for row_idx, row in enumerate(sheet.iter_rows(values_only=False)):
-                    row_data = []
-                    for cell in row:
-                        cell_info = {
-                            'value': cell.value if cell.value is not None else '',
-                            'formula': None,
-                            'data_type': cell.data_type
-                        }
-                        if cell.data_type == 'f':
-                            cell_info['formula'] = cell.value
-                        row_data.append(cell_info)
-                    
-                    if row_idx == 0:
-                        headers = row_data
-                    else:
-                        row_dict = {}
-                        for idx, (header, value) in enumerate(zip(headers, row_data)):
-                            row_dict[str(header)] = value
-                        data.append(row_dict)
-                
-                merged_ranges = []
-                for merge_range in sheet.merged_cells.ranges:
-                    merged_ranges.append(str(merge_range))
-                
-                sheet_info = {
-                    'name': sheet_name,
-                    'headers': headers,
-                    'data': data,
-                    'row_count': len(data),
-                    'column_count': len(headers),
-                    'total_rows': sheet.max_row,
-                    'tables': tables,
-                    'data_ranges': data_ranges,
-                    'merged_ranges': merged_ranges
-                }
-                
-                result['sheets'].append(sheet_info)
-                total_rows += len(data)
-                total_columns = max(total_columns, len(headers))
-                
-            except Exception as e:
-                result['warnings'].append(f"Error parsing sheet '{sheet_name}': {str(e)}")
-        
-        workbook.close()
-        result['metadata']['total_rows'] = total_rows
-        result['metadata']['total_columns'] = total_columns
-        
-    except ImportError:
-        excel_file = pd.ExcelFile(file_path)
-        
-        result['metadata']['sheet_names'] = excel_file.sheet_names
-        result['metadata']['sheet_count'] = len(excel_file.sheet_names)
-        
-        total_rows = 0
-        total_columns = 0
-        
-        for sheet_name in excel_file.sheet_names:
-            try:
-                df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
-                
-                header_row_idx = 0
-                max_non_null = 0
-                for idx, row in df.iterrows():
-                    non_null_count = row.notna().sum()
-                    if non_null_count > max_non_null:
-                        max_non_null = non_null_count
-                        header_row_idx = idx
-                
-                if header_row_idx < len(df):
-                    headers = df.iloc[header_row_idx].fillna('').astype(str).tolist()
-                    data_df = df.iloc[header_row_idx + 1:].reset_index(drop=True)
-                else:
-                    headers = [f'Column {i}' for i in range(len(df.columns))]
-                    data_df = df
-                
-                data = []
-                for _, row in data_df.iterrows():
-                    row_dict = {}
-                    for idx, (header, value) in enumerate(zip(headers, row)):
-                        row_dict[str(header)] = value if pd.notna(value) else ''
-                    data.append(row_dict)
-                
-                sheet_info = {
-                    'name': sheet_name,
-                    'headers': headers,
-                    'data': data,
-                    'row_count': len(data),
-                    'column_count': len(headers),
-                    'total_rows': len(df)
-                }
-                
-                result['sheets'].append(sheet_info)
-                total_rows += len(data)
-                total_columns = max(total_columns, len(headers))
-                
-            except Exception as e:
-                result['warnings'].append(f"Error parsing sheet '{sheet_name}': {str(e)}")
-        
-        result['metadata']['total_rows'] = total_rows
-        result['metadata']['total_columns'] = total_columns
-        
-    except Exception as e:
-        result['warnings'].append(f"Error parsing Excel file: {str(e)}")
-    
-    return result
-
-
-def parse_full_workbook(file_path, instrument_type):
-    print(f"=== parse_full_workbook called ===")
-    print(f"File path: {file_path}")
-    print(f"Instrument type: {instrument_type}")
-    
-    result = {
-        'sheets': [],
-        'metadata': {},
-        'warnings': []
-    }
-    
-    try:
-        import openpyxl
-        print("openpyxl imported successfully")
-        
-        workbook = openpyxl.load_workbook(file_path, data_only=False, read_only=False)
-        print(f"Workbook loaded. Sheets: {workbook.sheetnames}")
-        
-        result['metadata']['sheet_names'] = workbook.sheetnames
-        result['metadata']['sheet_count'] = len(workbook.sheetnames)
-        
-        for sheet_name in workbook.sheetnames:
-            try:
-                print(f"Parsing sheet: {sheet_name}")
-                sheet = workbook[sheet_name]
-                headers = []
-                data = []
-                
-                for row_idx, row in enumerate(sheet.iter_rows(values_only=False)):
-                    row_data = []
-                    for cell in row:
-                        cell_info = {
-                            'value': cell.value if cell.value is not None else '',
-                            'formula': None
-                        }
-                        if cell.data_type == 'f':
-                            cell_info['formula'] = cell.value
-                            try:
-                                cell_info['value'] = openpyxl.load_workbook(file_path, data_only=True, read_only=True)[sheet_name].cell(row=cell.row, column=cell.column).value
-                            except:
-                                pass
-                        row_data.append(cell_info)
-                    
-                    if row_idx == 0:
-                        headers = row_data
-                    else:
-                        row_dict = {}
-                        for idx, (header, value) in enumerate(zip(headers, row_data)):
-                            row_dict[str(header)] = value
-                        data.append(row_dict)
-                
-                merged_ranges = []
-                for merge_range in sheet.merged_cells.ranges:
-                    merged_ranges.append(str(merge_range))
-                
-                sheet_info = {
-                    'name': sheet_name,
-                    'headers': headers,
-                    'data': data,
-                    'row_count': len(data),
-                    'column_count': len(headers),
-                    'total_rows': sheet.max_row,
-                    'merged_ranges': merged_ranges
-                }
-                
-                result['sheets'].append(sheet_info)
-                print(f"Sheet {sheet_name} parsed: {len(data)} rows, {len(headers)} columns")
-                
-            except Exception as e:
-                print(f"Error parsing sheet '{sheet_name}': {str(e)}")
-                result['warnings'].append(f"Error parsing sheet '{sheet_name}': {str(e)}")
-        
-        workbook.close()
-        
-        result['metadata']['total_rows'] = sum(s['row_count'] for s in result['sheets'])
-        result['metadata']['total_columns'] = max((s['column_count'] for s in result['sheets']), default=0)
-        
-        print(f"=== parse_full_workbook complete: {len(result['sheets'])} sheets ===")
-        
-    except ImportError as e:
-        print(f"ImportError: {e}")
-        result = parse_excel_file(file_path, instrument_type)
-    except Exception as e:
-        print(f"Exception in parse_full_workbook: {e}")
-        import traceback
-        traceback.print_exc()
-        result['warnings'].append(f"Error parsing workbook: {str(e)}")
-        try:
-            result = parse_excel_file(file_path, instrument_type)
-        except:
-            pass
-    
-    return result
-
-
 def intelligent_parse(file_path, instrument_type):
     field_map = {
         'money-market': {
@@ -370,15 +125,18 @@ def intelligent_parse(file_path, instrument_type):
     all_fields = field_config['required'] + field_config['optional']
     keywords = field_config['keywords']
     
-    parsed = parse_excel_file(file_path, instrument_type)
+    # Use the full parser to get the raw data
+    parsed = parse_full_workbook(file_path, instrument_type, max_rows=10000)
     warnings = parsed.get('warnings', [])
     metadata = parsed.get('metadata', {})
     
     extracted_data = []
     
     for sheet in parsed.get('sheets', []):
-        headers = sheet.get('headers', [])
+        # Use the fullData to preserve structure (we'll extract from data or headers)
+        # For intelligent parse, we prefer the table data (data list of dict)
         data = sheet.get('data', [])
+        headers = sheet.get('headers', [])
         
         column_map = {}
         for field in all_fields:
@@ -436,10 +194,20 @@ def dataset_routes(app):
             file.save(file_path)
             file_size = os.path.getsize(file_path)
             
-            parsed = parse_excel_file(file_path, instrument_type)
-            sheet_count = parsed['metadata'].get('sheet_count', 0)
-            total_rows = parsed['metadata'].get('total_rows', 0)
-            total_columns = parsed['metadata'].get('total_columns', 0)
+            # Use central parser to get sheet info
+            parsed = parse_full_workbook(file_path, instrument_type, max_rows=10000)
+            sheet_count = len(parsed.get('sheets', []))
+            total_rows = sum(s.get('total_rows', 0) for s in parsed.get('sheets', []))
+            total_columns = max((s.get('total_columns', 0) for s in parsed.get('sheets', [])), default=0)
+            
+            # Prepare metadata
+            metadata = {
+                'sheet_count': sheet_count,
+                'sheet_names': [s['name'] for s in parsed.get('sheets', [])],
+                'total_rows': total_rows,
+                'total_columns': total_columns,
+                'parse_warnings': parsed.get('warnings', [])
+            }
             
             dataset_id = save_dataset_metadata(
                 unique_filename,
@@ -452,7 +220,7 @@ def dataset_routes(app):
                 total_columns,
                 user_id,
                 session_id,
-                parsed['metadata']
+                metadata
             )
             
             if dataset_id:
@@ -463,7 +231,7 @@ def dataset_routes(app):
                         'file_name': file.filename,
                         'file_size': file_size,
                         'instrument_type': instrument_type,
-                        'metadata': parsed['metadata'],
+                        'metadata': metadata,
                         'warnings': parsed.get('warnings', [])
                     }
                 })
@@ -498,7 +266,7 @@ def dataset_routes(app):
             if not os.path.exists(file_path):
                 return jsonify({'success': False, 'message': 'File not found on server'}), 404
             
-            parsed = parse_excel_file(file_path, instrument_type)
+            parsed = parse_full_workbook(file_path, instrument_type, max_rows=10000)
             
             return jsonify({
                 'success': True,
