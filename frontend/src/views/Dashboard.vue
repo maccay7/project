@@ -15,7 +15,7 @@
 
     <div class="dashboard-title">
       <h1>Dashboard</h1>
-      <button class="btn-refresh" @click="refreshDashboard"><v-icon>mdi-refresh</v-icon> Refresh</button>
+      <!-- Refresh button removed as requested -->
     </div>
 
     <!-- Two-column: Recent Sessions + Create Session -->
@@ -159,13 +159,19 @@
                     <span v-if="ver.versionNumber" class="version-number">v{{ ver.versionNumber }}</span>
                     {{ formatVersionTime(ver.timestamp) }}
                   </div>
-                  <div class="version-entry-badge" :class="ver.changeTypeClass">{{ ver.changeType }}</div>
+                  <div class="version-entry-badge" :class="ver.changeTypeClass">{{ ver.changeType || 'Saved' }}</div>
                 </div>
                 <div class="version-entry-details">
-                  <div class="version-entry-row">
+                  <!-- 🔥 Display Instrument and Change separately -->
+                  <div class="version-entry-row" style="margin-bottom: 4px;">
                     <span class="label">Instrument</span>
-                    <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.instrument || '—' }}</span>
+                    <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.instrumentType || '—' }}</span>
                   </div>
+                  <div class="version-entry-row">
+                    <span class="label">Change</span>
+                    <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.changeSummary || 'No description' }}</span>
+                  </div>
+                  <!-- Additional info if available -->
                   <div class="version-entry-row" v-if="ver.modifiedInstruments && ver.modifiedInstruments.length">
                     <span class="label">Modified</span>
                     <span class="value fields-tags">
@@ -241,7 +247,7 @@
 <script setup>
 // ================================================================
 // ✅ FULL IMPLEMENTATION – ALL FIXES APPLIED
-// Fixed: onBeforeUnmount warning, version updates, refresh.
+// Fixed: version fetching, change summary display, instrument count.
 // ================================================================
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
@@ -309,14 +315,15 @@ const activeInstrumentCount = computed(() => {
   return activeSession.value.instrument_count || 0
 })
 
+// ---- 🔥 FIX: filteredVersions uses actual versions from API ----
 const filteredVersions = computed(() => {
   const versions = selectedSessionForVersions.value?.versions || []
   const q = versionSearchQuery.value.toLowerCase()
   if (!q) return versions
   return versions.filter(v =>
-    (v.instrument || '').toLowerCase().includes(q) ||
-    (v.changeType || '').toLowerCase().includes(q) ||
-    (v.shortDescription || '').toLowerCase().includes(q)
+    (v.instrumentType || '').toLowerCase().includes(q) ||
+    (v.changeSummary || '').toLowerCase().includes(q) ||
+    (v.changeType || '').toLowerCase().includes(q)
   )
 })
 
@@ -359,12 +366,33 @@ async function refreshSession(sessionId) {
   try {
     const session = await sessionManager.getSession(sessionId)
     if (session) {
-      const idx = sessions.value.findIndex(s => s.id === sessionId)
+      // Fetch versions from API
+      let versions = []
+      try {
+        const res = await api.versionAPI.getVersions(sessionId)
+        if (res && res.success && res.data) {
+          versions = res.data.map(v => ({
+            id: v.id,
+            versionNumber: v.versionNumber,
+            timestamp: v.timestamp || v.created_at,
+            changeSummary: v.changeSummary || v.change_summary || 'No description',
+            instrumentType: v.instrumentType || v.instrument_type || 'General',
+            changeType: v.changeType || 'Saved',
+            changeTypeClass: v.changeTypeClass || 'badge-saved',
+            modifiedInstruments: v.modifiedInstruments || [],
+            fieldsChanged: v.fieldsChanged || []
+          }))
+        }
+      } catch (e) {
+        console.warn('Failed to fetch versions for session:', sessionId, e)
+      }
       const enriched = {
         ...session,
-        version_count: session.version_count || 0,
+        versions: versions,
+        version_count: versions.length || session.version_count || 0,
         instrument_count: Math.min(session.instrument_count || 0, 3)
       }
+      const idx = sessions.value.findIndex(s => s.id === sessionId)
       if (idx !== -1) {
         sessions.value[idx] = enriched
       }
@@ -399,6 +427,26 @@ async function loadExistingSession(sessionId) {
   try {
     const session = await sessionManager.getSession(sessionId)
     if (session) {
+      // Fetch versions
+      let versions = []
+      try {
+        const res = await api.versionAPI.getVersions(sessionId)
+        if (res && res.success && res.data) {
+          versions = res.data.map(v => ({
+            id: v.id,
+            versionNumber: v.versionNumber,
+            timestamp: v.timestamp || v.created_at,
+            changeSummary: v.changeSummary || v.change_summary || 'No description',
+            instrumentType: v.instrumentType || v.instrument_type || 'General',
+            changeType: v.changeType || 'Saved',
+            changeTypeClass: v.changeTypeClass || 'badge-saved',
+            modifiedInstruments: v.modifiedInstruments || [],
+            fieldsChanged: v.fieldsChanged || []
+          }))
+        }
+      } catch (e) {}
+      session.versions = versions
+      session.version_count = versions.length
       activeSession.value = session
       sessionManager.setActiveSession(session)
       localStorage.setItem(ACTIVE_KEY, session.id)
@@ -444,12 +492,36 @@ async function openVersionModal(sessionId) {
   try {
     const session = await sessionManager.getSession(sessionId)
     if (session) {
-      if (!session.versions || session.versions.length === 0) {
+      // Fetch versions from API
+      let versions = []
+      try {
         const res = await api.versionAPI.getVersions(sessionId)
-        session.versions = res || []
-        await sessionManager.updateSession(sessionId, { versions: session.versions })
+        if (res && res.success && res.data) {
+          versions = res.data.map(v => ({
+            id: v.id,
+            versionNumber: v.versionNumber,
+            timestamp: v.timestamp || v.created_at,
+            changeSummary: v.changeSummary || v.change_summary || 'No description',
+            instrumentType: v.instrumentType || v.instrument_type || 'General',
+            changeType: v.changeType || 'Saved',
+            changeTypeClass: v.changeTypeClass || 'badge-saved',
+            modifiedInstruments: v.modifiedInstruments || [],
+            fieldsChanged: v.fieldsChanged || []
+          }))
+          // Update session versions
+          session.versions = versions
+          session.version_count = versions.length
+          await sessionManager.updateSession(sessionId, { versions, version_count: versions.length })
+        }
+      } catch (e) {
+        console.warn('Failed to fetch versions:', e)
+        // Fallback to existing
+        versions = session.versions || []
       }
-      selectedSessionForVersions.value = session
+      selectedSessionForVersions.value = {
+        ...session,
+        versions: versions
+      }
       versionSearchQuery.value = ''
       versionDialogVisible.value = true
     }
@@ -492,11 +564,11 @@ async function openInstrumentModal(sessionId) {
         const existingVersions = session.versions || []
         const seen = new Set()
         for (const v of existingVersions) {
-          if (v.instrument && !seen.has(v.instrument)) {
-            seen.add(v.instrument)
+          if (v.instrumentType && !seen.has(v.instrumentType)) {
+            seen.add(v.instrumentType)
             instruments.push({
-              instrument_type: v.instrument,
-              instrument_name: v.instrument,
+              instrument_type: v.instrumentType,
+              instrument_name: v.instrumentType,
               status: 'Saved',
               saved_at: v.timestamp,
               version_count: 1
@@ -605,6 +677,26 @@ onMounted(async () => {
   if (activeId) {
     const session = sessions.value.find(s => s.id === activeId)
     if (session) {
+      // Fetch versions
+      let versions = []
+      try {
+        const res = await api.versionAPI.getVersions(activeId)
+        if (res && res.success && res.data) {
+          versions = res.data.map(v => ({
+            id: v.id,
+            versionNumber: v.versionNumber,
+            timestamp: v.timestamp || v.created_at,
+            changeSummary: v.changeSummary || v.change_summary || 'No description',
+            instrumentType: v.instrumentType || v.instrument_type || 'General',
+            changeType: v.changeType || 'Saved',
+            changeTypeClass: v.changeTypeClass || 'badge-saved',
+            modifiedInstruments: v.modifiedInstruments || [],
+            fieldsChanged: v.fieldsChanged || []
+          }))
+        }
+      } catch (e) {}
+      session.versions = versions
+      session.version_count = versions.length
       activeSession.value = session
       sessionManager.setActiveSession(session)
     } else {
@@ -639,8 +731,6 @@ onBeforeUnmount(() => {
 .nav-icon-btn:hover { background: #f0f0f0; color: #0B2044; }
 .dashboard-title { margin-top: 80px; margin-bottom: 25px; display: flex; align-items: center; justify-content: space-between; }
 .dashboard-title h1 { color: #0B2044; font-size: 28px; font-weight: 700; margin: 0; }
-.btn-refresh { background: #0B2044; color: white; border: none; padding: 6px 14px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
-.btn-refresh:hover { background: #1a3a6e; }
 .session-management-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 30px; }
 .recent-sessions-card, .create-session-card { width: 100%; }
 .session-card { border-radius: 16px; background: white; overflow: hidden; position: relative; height: 100%; min-height: 440px; display: flex; flex-direction: column; }

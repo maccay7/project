@@ -4,6 +4,9 @@ from pages.calculations_details import calculate_data
 from utils.db import get_db
 from utils.fred_config import attach_fred_to_calculation, get_market_benchmark
 from datetime import datetime
+from calculations.tbills import calculate_tbills
+from calculations.bonds import calculate_bonds
+from calculations.money_market import calculate_money_market
 
 
 def normalize_instrument_type(instrument_type):
@@ -141,6 +144,7 @@ def save_calculation(instrument_type, input_data, result_data, dataset_id=None, 
                         )
                         if version_id:
                             print(f"✅ Created version {next_version} for session {session_id}")
+                            # Ensure session version_count is updated (already done, but double-check)
                             cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (next_version, session_id))
                             conn.commit()
                     except Exception as e:
@@ -660,3 +664,162 @@ def calculations_routes(app):
             return jsonify({'success': True, 'data': result})
         except Exception as e:
             return jsonify({'success': False, 'message': str(e)}), 500
+
+    # ===== NEW: Comprehensive Calculation Endpoints =====
+    
+    @app.route('/api/calculate/tbills', methods=['POST', 'OPTIONS'])
+    def calculate_tbills_endpoint():
+        """Calculate all T-Bills metrics using the comprehensive calculator."""
+        if request.method == 'OPTIONS':
+            return '', 200
+        payload = request.get_json() or {}
+        inputs = payload.get('inputs', {})
+        benchmark_yield = payload.get('benchmark_yield')
+        inflation_rate = payload.get('inflation_rate')
+        session_id = payload.get('session_id')
+        
+        try:
+            results = calculate_tbills(inputs, benchmark_yield, inflation_rate)
+            
+            # Save calculation if session_id provided
+            if session_id:
+                save_calculation('tbills', inputs, results, None, session_id)
+            
+            return jsonify({
+                'success': True,
+                'instrument_type': 'tbills',
+                'results': results
+            })
+        except Exception as e:
+            print(f"❌ T-Bills calculation error: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+    @app.route('/api/calculate/bonds', methods=['POST', 'OPTIONS'])
+    def calculate_bonds_endpoint():
+        """Calculate all Bonds metrics using the comprehensive calculator."""
+        if request.method == 'OPTIONS':
+            return '', 200
+        payload = request.get_json() or {}
+        inputs = payload.get('inputs', {})
+        benchmark_yield = payload.get('benchmark_yield')
+        benchmark_curve = payload.get('benchmark_curve')
+        inflation_rate = payload.get('inflation_rate')
+        session_id = payload.get('session_id')
+        
+        try:
+            results = calculate_bonds(inputs, benchmark_yield, benchmark_curve, inflation_rate)
+            
+            # Save calculation if session_id provided
+            if session_id:
+                save_calculation('bonds', inputs, results, None, session_id)
+            
+            return jsonify({
+                'success': True,
+                'instrument_type': 'bonds',
+                'results': results
+            })
+        except Exception as e:
+            print(f"❌ Bonds calculation error: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+    @app.route('/api/calculate/money-market', methods=['POST', 'OPTIONS'])
+    def calculate_money_market_endpoint():
+        """Calculate all Money Market metrics using the comprehensive calculator."""
+        if request.method == 'OPTIONS':
+            return '', 200
+        payload = request.get_json() or {}
+        inputs = payload.get('inputs', {})
+        benchmark_yield = payload.get('benchmark_yield')
+        inflation_rate = payload.get('inflation_rate')
+        session_id = payload.get('session_id')
+        
+        try:
+            results = calculate_money_market(inputs, benchmark_yield, inflation_rate)
+            
+            # Save calculation if session_id provided
+            if session_id:
+                save_calculation('money-market', inputs, results, None, session_id)
+            
+            return jsonify({
+                'success': True,
+                'instrument_type': 'money-market',
+                'results': results
+            })
+        except Exception as e:
+            print(f"❌ Money Market calculation error: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+    @app.route('/api/calculate/comprehensive', methods=['POST', 'OPTIONS'])
+    def calculate_comprehensive_endpoint():
+        """Auto-detect instrument type and calculate all applicable metrics."""
+        if request.method == 'OPTIONS':
+            return '', 200
+        payload = request.get_json() or {}
+        inputs = payload.get('inputs', {})
+        instrument_type = payload.get('instrument_type')  # Optional: auto-detect if not provided
+        benchmark_yield = payload.get('benchmark_yield')
+        benchmark_curve = payload.get('benchmark_curve')
+        inflation_rate = payload.get('inflation_rate')
+        session_id = payload.get('session_id')
+        
+        try:
+            # Auto-detect instrument type if not provided
+            if not instrument_type:
+                instrument_type = auto_detect_instrument_type(inputs)
+            
+            # Route to appropriate calculator
+            if instrument_type == 'tbills':
+                results = calculate_tbills(inputs, benchmark_yield, inflation_rate)
+            elif instrument_type == 'bonds':
+                results = calculate_bonds(inputs, benchmark_yield, benchmark_curve, inflation_rate)
+            elif instrument_type == 'money-market':
+                results = calculate_money_market(inputs, benchmark_yield, inflation_rate)
+            else:
+                return jsonify({'success': False, 'message': f'Unknown instrument type: {instrument_type}'}), 400
+            
+            # Save calculation if session_id provided
+            if session_id:
+                save_calculation(instrument_type, inputs, results, None, session_id)
+            
+            return jsonify({
+                'success': True,
+                'instrument_type': instrument_type,
+                'results': results
+            })
+        except Exception as e:
+            print(f"❌ Comprehensive calculation error: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+
+def auto_detect_instrument_type(inputs: dict) -> str:
+    """
+    Auto-detect instrument type from input data.
+    
+    Args:
+        inputs: Dictionary containing instrument parameters
+        
+    Returns:
+        Detected instrument type: 'tbills', 'bonds', or 'money-market'
+    """
+    # Check for T-Bills indicators
+    if inputs.get('discount_rate') and not inputs.get('coupon_rate'):
+        return 'tbills'
+    
+    # Check for Bonds indicators
+    if inputs.get('coupon_rate') and inputs.get('years_to_maturity'):
+        return 'bonds'
+    
+    # Check for Money Market indicators
+    if inputs.get('interest_rate') and inputs.get('principal'):
+        return 'money-market'
+    
+    # Default to money-market if uncertain
+    return 'money-market'
