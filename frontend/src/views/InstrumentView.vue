@@ -443,12 +443,16 @@
                         <p>No instruments detected. Please process a worksheet first.</p>
                       </div>
                       <div v-else class="excel-table-container">
-                        <p class="popup-instruction">Click any row to load its calculations into the main view.</p>
-                        <div style="margin-bottom: 16px;">
-                          <button class="btn-primary" @click="loadAllInstruments">
-                            📊 Load All Instruments (Aggregate)
-                          </button>
+                        <div class="search-bar-container">
+                          <input 
+                            type="text" 
+                            v-model="instrumentSearchQuery" 
+                            placeholder="Search instruments..." 
+                            class="search-input"
+                          />
+                          <v-icon class="search-icon">mdi-magnify</v-icon>
                         </div>
+                        <p class="popup-instruction">View all calculated instrument values below.</p>
                         <table class="excel-table">
                           <thead>
                             <tr>
@@ -459,8 +463,6 @@
                             <tr
                               v-for="(row, idx) in sortedInstrumentSummaryRows"
                               :key="idx"
-                              :class="{ 'selected-row': currentlyViewingInstrument === (row['Instrument Name'] || `Instrument ${idx + 1}`) }"
-                              @click="selectInstrumentFromPopup(idx)"
                             >
                               <td v-for="col in instrumentSummaryColumnsForDisplay" :key="col">
                                 {{ formatTableCell(row[col], col) }}
@@ -1321,9 +1323,24 @@ function getDisplayColumns() {
 
 const instrumentSummaryColumnsForDisplay = computed(() => getDisplayColumns())
 
+const instrumentSearchQuery = ref('')
+
 const sortedInstrumentSummaryRows = computed(() => {
-  if (!sortColumn.value) return instrumentSummary.value.rows
-  return [...instrumentSummary.value.rows].sort((a, b) => {
+  let rows = instrumentSummary.value.rows
+  
+  // Apply search filter
+  if (instrumentSearchQuery.value) {
+    const query = instrumentSearchQuery.value.toLowerCase()
+    rows = rows.filter(row => {
+      return Object.values(row).some(val => 
+        String(val).toLowerCase().includes(query)
+      )
+    })
+  }
+  
+  // Apply sorting
+  if (!sortColumn.value) return rows
+  return [...rows].sort((a, b) => {
     let valA = a[sortColumn.value]
     let valB = b[sortColumn.value]
     if (typeof valA === 'number' && typeof valB === 'number') {
@@ -3575,10 +3592,49 @@ function saveSessionData() {
     manualInputs: manualInputs.value,
     formulas: formulas.value
   }
+  
+  // Save workflow data
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
-    .then(() => {
+    .then(async () => {
       const count = sessionManager.countSessionInstruments(sid)
       sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
+      
+      // Create version automatically on save
+      try {
+        const currentVersionCount = activeSession.value?.version_count || 0
+        const versionNumber = currentVersionCount + 1
+        
+        // Determine what changed
+        const changeSummary = `Saved ${instrumentType.value} workflow`
+        const modifiedInstruments = [instrumentType.value]
+        const fieldsChanged = Object.keys(datasetSnapshot).filter(key => 
+          datasetSnapshot[key] !== undefined && datasetSnapshot[key] !== null
+        )
+        
+        // Create version via API
+        await api.versionAPI.createVersion(sid, {
+          versionNumber: versionNumber,
+          changeSummary: changeSummary,
+          instrumentType: instrumentType.value,
+          changeType: 'Saved',
+          changeTypeClass: 'badge-saved',
+          modifiedInstruments: modifiedInstruments,
+          fieldsChanged: fieldsChanged,
+          worksheet: currentSheetName.value,
+          workbookName: uploadedFile.value?.name || 'Unknown',
+          timestamp: new Date().toISOString()
+        })
+        
+        // Update session version count
+        await sessionManager.updateSession(sid, { 
+          version_count: versionNumber,
+          updated_at: new Date().toISOString()
+        })
+        
+        console.log(`✅ Created version ${versionNumber} for session ${sid}`)
+      } catch (versionError) {
+        console.warn('Failed to create version:', versionError)
+      }
     })
     .catch(err => console.error('Failed to save workflow:', err))
 }
@@ -3629,29 +3685,34 @@ async function loadSavedData() {
 
 function showFormula(metricKey) {
   const formulaMap = {
-    'Total Portfolio Value': 'Σ (Face Value or Amount) for all rows',
-    'Average Rate': 'Σ (Rate, CouponRate, or DiscountRate) / Number of Instruments',
-    'Number of Instruments': 'Count of distinct Instrument/BondName/TBillName (unique securities)',
-    'weightedAvgRate': 'Σ (Rate × Amount) / Σ Amount',
-    'totalInterest': 'Total Value × Average Rate / 100',
-    'interestEarned': 'Total Interest × (90/365)',
-    'annualYield': '((1 + AvgRate/100)^(365/90) - 1) × 100',
-    'effectiveAnnualRate': '((1 + AvgRate/100) - 1) × 100',
-    'avgDaysToMaturity': 'Average of DaysToMaturity column',
-    'totalPrincipal': 'Sum of Principal/Amount',
-    'weightedAvgCoupon': 'Σ (CouponRate × FaceValue) / Σ FaceValue',
-    'totalAnnualIncome': 'Total Face Value × Avg Coupon Rate / 100',
-    'avgYTM': 'Average of Yield column',
-    'duration': 'Approximated Macaulay duration (10 years × 0.7)',
-    'weightedAvgDiscount': 'Σ (DiscountRate × FaceValue) / Σ FaceValue',
-    'totalDiscount': 'Total Face Value × Avg Discount Rate / 100 × 91/360',
-    'effectiveYield': '((1 + TotalDiscount/Price)^(365/91) - 1) × 100',
-    'bondEquivalentYield': '(TotalDiscount/Price) × (365/91) × 100',
-    'pricePer100': '100 × (1 - (DiscountRate/100) × (91/360))',
-    'totalPurchasePrice': 'Total Face Value - Total Discount',
+    // Money Market Formulas
+    'Total Portfolio Value': 'Σ Principal for all instruments',
+    'Average Rate': 'Σ (Interest Rate × Principal) / Σ Principal',
+    'Number of Instruments': 'Count of all instrument rows',
+    'weightedAvgRate': 'Σ (Interest Rate × Principal) / Σ Principal',
+    'totalInterest': 'Σ (Principal × Interest Rate × Days/360)',
+    'interestEarned': 'Σ (Principal × Interest Rate × Days/360)',
+    'annualYield': '(Interest / Principal) × (365 / Days) × 100',
+    'effectiveAnnualRate': '(Interest / Principal) × (365 / Days) × 100',
+    'avgDaysToMaturity': 'Σ Days / Number of Instruments',
+    'totalPrincipal': 'Σ Principal',
+    
+    // T-Bills Formulas
+    'weightedAvgDiscount': 'Σ (Discount Rate × Face Value) / Σ Face Value',
+    'totalDiscount': 'Σ ((Face Value - Purchase Price) / Face Value × Face Value)',
+    'effectiveYield': '((Face Value / Purchase Price)^(365/Days) - 1) × 100',
+    'bondEquivalentYield': '((Face Value - Purchase Price) / Purchase Price) × (365 / Days) × 100',
+    'pricePer100': 'Purchase Price / Face Value × 100',
+    'totalPurchasePrice': 'Σ Purchase Price',
     'avgInvestment': 'Total Purchase Price / Number of Instruments',
-    'holdingPeriodYield': '(TotalDiscount/Price) × 100',
-    'annualizedYield': '(TotalDiscount/Price) × (365/91) × 100'
+    'holdingPeriodYield': '((Face Value - Purchase Price) / Purchase Price) × 100',
+    'annualizedYield': '((Face Value - Purchase Price) / Purchase Price) × (365 / Days) × 100',
+    
+    // Bonds Formulas
+    'weightedAvgCoupon': 'Σ (Coupon Rate × Face Value) / Σ Face Value',
+    'totalAnnualIncome': 'Σ (Coupon Rate × Face Value)',
+    'avgYTM': 'Σ Yield to Maturity / Number of Instruments',
+    'duration': 'Macaulay Duration = Σ (t × PV(C_t)) / Price'
   }
   formulaText.value = formulaMap[metricKey] || 'No formula available for this metric.'
   formulaDialog.value = true

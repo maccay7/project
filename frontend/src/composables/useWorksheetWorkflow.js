@@ -119,13 +119,18 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       return { success: false, error: 'No file provided' }
     }
 
-    const validExtensions = ['.csv', '.xlsx', '.xls', '.xlsm', '.xlsb', '.xltx', '.xltm', '.xlam', '.ods', '.xml', '.html', '.prn', '.dif', '.slk', '.dbf']
+    // Accept all Excel-compatible formats - no restrictions
+    // XLSX library supports: .xlsx, .xls, .xlsm, .xlsb, .csv, .ods, .xml, .html, .txt, .prn, .dif, .slk, .dbf
+    const validExtensions = ['.csv', '.xlsx', '.xls', '.xlsm', '.xlsb', '.xltx', '.xltm', '.xlam', '.ods', '.xml', '.html', '.prn', '.dif', '.slk', '.dbf', '.txt', '.fods', '.numbers']
     const fileName = file.name.toLowerCase()
     const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext))
     
-    if (!hasValidExtension) {
-      error.value = 'Invalid file type. Please upload a valid spreadsheet file.'
-      return { success: false, error: error.value }
+    // Also accept files without extensions if they appear to be Excel files
+    const isLikelyExcel = fileName.includes('excel') || fileName.includes('sheet') || fileName.includes('workbook')
+    
+    if (!hasValidExtension && !isLikelyExcel) {
+      // Try to parse anyway - XLSX library can handle many formats
+      console.log('File extension not recognized, attempting to parse anyway')
     }
 
     loading.value = true
@@ -153,6 +158,13 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
         cellDates: true,
         cellStyles: true,
         cellNF: true,
+        // Handle various workbook structures
+        bookSheets: true,
+        bookProps: true,
+        // Preserve formulas
+        cellFormula: true,
+        // Handle hidden sheets
+        bookHidden: true,
       })
 
       uploadProgress.value = 60
@@ -160,6 +172,9 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       const sheets = []
       for (const sheetName of workbook.SheetNames) {
         const worksheet = workbook.Sheets[sheetName]
+        
+        // Check if sheet is hidden
+        const isHidden = worksheet['!hidden'] || false
         
         // Get full 2D array data
         const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1')
@@ -169,7 +184,14 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           for (let C = range.s.c; C <= range.e.c; C++) {
             const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
             const cell = worksheet[cellAddress]
-            row.push(cell ? cell.v : '')
+            // Preserve formula if present, otherwise use value
+            if (cell && cell.f) {
+              row.push(cell.f) // Store formula
+            } else if (cell && cell.v !== undefined) {
+              row.push(cell.v) // Store value
+            } else {
+              row.push('')
+            }
           }
           fullData.push(row)
         }
@@ -187,6 +209,14 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           }
         }
         
+        // Get table information if present
+        const tables = []
+        if (worksheet['!tables']) {
+          for (const tableName in worksheet['!tables']) {
+            tables.push(worksheet['!tables'][tableName])
+          }
+        }
+        
         // Also get JSON data for compatibility
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
         const sheetHeaders = jsonData.length > 0 ? Object.keys(jsonData[0]) : []
@@ -197,6 +227,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           headers: sheetHeaders,
           fullData: fullData,
           merged_ranges: mergedRanges,
+          tables: tables,
+          hidden: isHidden,
           row_count: fullData.length,
           column_count: fullData.length > 0 ? fullData[0].length : 0,
         })

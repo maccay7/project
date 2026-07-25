@@ -545,9 +545,13 @@ async function openInstrumentModal(sessionId) {
       const instruments = []
       const workflows = session.instrumentWorkflow || {}
       const instrumentKeys = ['money-market', 'bonds', 'tbills']
+      
+      // Count actual instruments with data
+      let instrumentCount = 0
       for (const key of instrumentKeys) {
         const wf = workflows[key]
         if (wf && (wf.cleanedData?.length > 0 || wf.rawData?.length > 0 || wf.data?.length > 0 || wf.calculations)) {
+          instrumentCount++
           let instrumentName = wf.instrumentName || key
           if (instrumentName.includes('.')) instrumentName = instrumentName.split('.')[0]
           instruments.push({
@@ -560,7 +564,15 @@ async function openInstrumentModal(sessionId) {
           })
         }
       }
-      if (instruments.length === 0 && session.instrument_count > 0) {
+      
+      // Update session instrument count
+      if (instrumentCount !== session.instrument_count) {
+        sessionManager.updateSession(sessionId, { instrument_count: instrumentCount })
+        session.instrument_count = instrumentCount
+      }
+      
+      // Fallback to versions if no workflow data
+      if (instruments.length === 0 && session.version_count > 0) {
         const existingVersions = session.versions || []
         const seen = new Set()
         for (const v of existingVersions) {
@@ -576,6 +588,7 @@ async function openInstrumentModal(sessionId) {
           }
         }
       }
+      
       sessionInstruments.value = instruments
       instrumentDialogVisible.value = true
     }
