@@ -168,6 +168,7 @@ def sessions_routes(app):
             conn.close()
             if not row:
                 return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
+            
             versions = []
             if row.get('versions'):
                 try:

@@ -8,7 +8,6 @@ import openpyxl
 import tempfile
 import os
 import sys
-# Use our central excel_parser
 from utils.excel_parser import parse_full_workbook
 
 def create_processed_data_table():
@@ -248,7 +247,6 @@ def auto_match_columns(file_columns, required_columns):
                 break
     return mapping
 
-# Cache for parsed workbook data
 _workbook_cache = {}
 
 def data_processing_routes(app):
@@ -257,38 +255,28 @@ def data_processing_routes(app):
     @app.route('/api/data/workbook/<file_id>', methods=['GET'])
     def get_workbook_by_id(file_id):
         print(f"=== Get Workbook by ID: {file_id} ===")
-        
         if file_id in _workbook_cache:
             print(f"✅ Returning cached workbook data for {file_id}")
             return jsonify({'success': True, 'data': _workbook_cache[file_id]})
-        
         upload_folder = 'uploads'
         if not os.path.exists(upload_folder):
             return jsonify({'success': False, 'error': 'Uploads folder not found'}), 404
-        
         matching_files = []
         for filename in os.listdir(upload_folder):
             if filename.startswith(file_id):
                 file_path = os.path.join(upload_folder, filename)
                 matching_files.append(file_path)
-        
         if not matching_files:
             print(f"ERROR: No file found with ID {file_id}")
             return jsonify({'success': False, 'error': 'File not found'}), 404
-        
         file_path = matching_files[0]
         print(f"Found file: {file_path}")
-        
         instrument_type = request.args.get('instrument_type', 'money-market')
-        
         try:
-            # Use our central parser
-            result = parse_full_workbook(file_path, instrument_type, max_rows=10000)
+            result = parse_full_workbook(file_path, instrument_type, max_rows=100000)
             print(f"Workbook parsed: {len(result.get('sheets', []))} sheets")
-            
             _workbook_cache[file_id] = result
             print(f"✅ Cached workbook data for {file_id}")
-            
             return jsonify({'success': True, 'data': result})
         except Exception as e:
             print(f"ERROR parsing workbook: {e}")
@@ -306,21 +294,9 @@ def data_processing_routes(app):
             return response, 200
         
         print("=== Parse Excel Request ===")
-        print(f"Request method: {request.method}")
-        print(f"Request files keys: {list(request.files.keys())}")
-        print(f"Request form keys: {list(request.form.keys())}")
-        
         file = request.files.get('file')
         instrument_type = request.form.get('instrument_type', 'money-market')
         return_full_workbook = request.form.get('return_full_workbook', 'false').lower() == 'true'
-        
-        print(f"File received: {file.filename if file else 'None'}")
-        print(f"File content type: {file.content_type if file else 'None'}")
-        print(f"File size: {len(file.read()) if file else 0} bytes")
-        if file:
-            file.seek(0)
-        print(f"Instrument type: {instrument_type}")
-        print(f"Return full workbook: {return_full_workbook}")
         
         if not file:
             print("ERROR: No file uploaded")
@@ -339,7 +315,7 @@ def data_processing_routes(app):
         try:
             if return_full_workbook:
                 print("Calling parse_full_workbook (for viewer)...")
-                result = parse_full_workbook(file_path, instrument_type, max_rows=10000)
+                result = parse_full_workbook(file_path, instrument_type, max_rows=100000)
                 print(f"Parse result type: {type(result)}")
                 print(f"Parse result sheets: {len(result.get('sheets', []))}")
                 _workbook_cache[file_id] = result
@@ -394,7 +370,22 @@ def data_processing_routes(app):
         data = payload.get('data', [])
         cleaning_options = payload.get('cleaning_options', {})
         result = clean_data(data, cleaning_options)
-        return jsonify({'success': True, 'data': result})
+        # Ensure stats keys match frontend expectations
+        stats = result.get('stats', {})
+        mapped_stats = {
+            'totalRows': stats.get('original_rows', 0),
+            'validRows': stats.get('final_rows', 0),
+            'removedRows': stats.get('original_rows', 0) - stats.get('final_rows', 0),
+            'duplicatesRemoved': stats.get('removed_duplicates', 0),
+            'missingValuesFilled': stats.get('filled_missing_text', 0),
+            'removedMissingRows': stats.get('removed_missing_rows', 0),
+            'trimmedWhitespace': stats.get('trimmed_whitespace', 0)
+        }
+        return jsonify({
+            'success': True,
+            'data': result.get('cleaned_data', []),
+            'stats': mapped_stats
+        })
 
     @app.route('/api/data/validate', methods=['POST', 'OPTIONS'])
     def validate_dataset():
@@ -484,7 +475,15 @@ def data_processing_routes(app):
             'data': {
                 'processed_id': processed_id,
                 'cleaned_data': cleaned,
-                'stats': clean_result['stats'],
+                'stats': {
+                    'totalRows': clean_result['stats'].get('original_rows', 0),
+                    'validRows': clean_result['stats'].get('final_rows', 0),
+                    'removedRows': clean_result['stats'].get('original_rows', 0) - clean_result['stats'].get('final_rows', 0),
+                    'duplicatesRemoved': clean_result['stats'].get('removed_duplicates', 0),
+                    'missingValuesFilled': clean_result['stats'].get('filled_missing_text', 0),
+                    'removedMissingRows': clean_result['stats'].get('removed_missing_rows', 0),
+                    'trimmedWhitespace': clean_result['stats'].get('trimmed_whitespace', 0)
+                },
                 'validation': {
                     'total_rows': len(validations),
                     'valid_rows': valid_count,

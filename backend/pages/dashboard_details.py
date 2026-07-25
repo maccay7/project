@@ -26,19 +26,23 @@ def get_kpi():
         datasets_processed = cursor.fetchone().get('datasets_processed', 0)
         
         cursor.execute("""
-            SELECT COUNT(DISTINCT 
-                CASE 
-                    WHEN JSON_EXTRACT(instrument_workflows, '$.money-market.data') IS NOT NULL 
-                         OR JSON_EXTRACT(instrument_workflows, '$.money-market.cleanedData') IS NOT NULL THEN 'money-market'
-                    WHEN JSON_EXTRACT(instrument_workflows, '$.bonds.data') IS NOT NULL 
-                         OR JSON_EXTRACT(instrument_workflows, '$.bonds.cleanedData') IS NOT NULL THEN 'bonds'
-                    WHEN JSON_EXTRACT(instrument_workflows, '$.tbills.data') IS NOT NULL 
-                         OR JSON_EXTRACT(instrument_workflows, '$.tbills.cleanedData') IS NOT NULL THEN 'tbills'
-                END
-            ) as instrument_count
-            FROM ui_sessions
-            WHERE instrument_workflows IS NOT NULL
-            AND instrument_workflows != 'null'
+            SELECT COUNT(DISTINCT inst_key) AS instrument_count
+            FROM (
+                SELECT 'money-market' AS inst_key FROM ui_sessions
+                    WHERE JSON_EXTRACT(instrument_workflows, '$."money-market".data') IS NOT NULL
+                       OR JSON_EXTRACT(instrument_workflows, '$."money-market".cleanedData') IS NOT NULL
+                       OR JSON_EXTRACT(instrument_workflows, '$."money-market".calculations') IS NOT NULL
+                UNION
+                SELECT 'bonds' FROM ui_sessions
+                    WHERE JSON_EXTRACT(instrument_workflows, '$.bonds.data') IS NOT NULL
+                       OR JSON_EXTRACT(instrument_workflows, '$.bonds.cleanedData') IS NOT NULL
+                       OR JSON_EXTRACT(instrument_workflows, '$.bonds.calculations') IS NOT NULL
+                UNION
+                SELECT 'tbills' FROM ui_sessions
+                    WHERE JSON_EXTRACT(instrument_workflows, '$.tbills.data') IS NOT NULL
+                       OR JSON_EXTRACT(instrument_workflows, '$.tbills.cleanedData') IS NOT NULL
+                       OR JSON_EXTRACT(instrument_workflows, '$.tbills.calculations') IS NOT NULL
+            ) AS inst_counts
         """)
         instrument_count_result = cursor.fetchone()
         total_instruments = min(instrument_count_result.get('instrument_count', 0) if instrument_count_result else 0, 3)
@@ -110,12 +114,18 @@ def get_dashboard_charts():
 
 
 def get_yield_curve(instrument_type='all', country='US', currency='USD'):
-    """Fetch yield curve points and format them for charts."""
+    """Fetch yield curve points from FRED API only (no mock/synthetic data)."""
+    from utils.fred_config import normalize_country, build_yield_curve_response
     try:
-        # Use the real get_yield_curve from fred_config
-        points = get_yield_curve(country)  # returns list of dicts with maturity, maturityLabel, rate, source
-        labels = [p['maturityLabel'] for p in points]
-        values = [p['rate'] for p in points]
-        return {'labels': labels, 'values': values, 'source': 'FRED (with fallback)'}
+        country_code = normalize_country(country)
+        result = build_yield_curve_response(instrument_type, country_code, currency)
+        if result.get('error'):
+            return {'labels': [], 'values': [], 'error': result['error']}
+        return {
+            'labels': result.get('labels', []),
+            'values': result.get('values', []),
+            'source': 'FRED',
+            'country': country_code
+        }
     except Exception as err:
         return {'labels': [], 'values': [], 'error': str(err)}

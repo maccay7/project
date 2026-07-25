@@ -125,8 +125,8 @@ def intelligent_parse(file_path, instrument_type):
     all_fields = field_config['required'] + field_config['optional']
     keywords = field_config['keywords']
     
-    # Use the full parser to get the raw data
-    parsed = parse_full_workbook(file_path, instrument_type, max_rows=10000)
+    # Use the full parser to get the raw data (with increased row limit)
+    parsed = parse_full_workbook(file_path, instrument_type, max_rows=100000)
     warnings = parsed.get('warnings', [])
     metadata = parsed.get('metadata', {})
     
@@ -194,8 +194,8 @@ def dataset_routes(app):
             file.save(file_path)
             file_size = os.path.getsize(file_path)
             
-            # Use central parser to get sheet info
-            parsed = parse_full_workbook(file_path, instrument_type, max_rows=10000)
+            # Use central parser to get sheet info (increased row limit)
+            parsed = parse_full_workbook(file_path, instrument_type, max_rows=100000)
             sheet_count = len(parsed.get('sheets', []))
             total_rows = sum(s.get('total_rows', 0) for s in parsed.get('sheets', []))
             total_columns = max((s.get('total_columns', 0) for s in parsed.get('sheets', [])), default=0)
@@ -266,7 +266,8 @@ def dataset_routes(app):
             if not os.path.exists(file_path):
                 return jsonify({'success': False, 'message': 'File not found on server'}), 404
             
-            parsed = parse_full_workbook(file_path, instrument_type, max_rows=10000)
+            # Use central parser with increased row limit
+            parsed = parse_full_workbook(file_path, instrument_type, max_rows=100000)
             
             return jsonify({
                 'success': True,

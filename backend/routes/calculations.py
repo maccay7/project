@@ -54,106 +54,104 @@ def save_calculation(instrument_type, input_data, result_data, dataset_id=None, 
                 INDEX (created_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
+        conn.commit()
         
-        # Ensure version_history table exists
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS version_history (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                session_id VARCHAR(64) NOT NULL,
-                version_number INT NOT NULL,
-                instrument_type VARCHAR(64) NOT NULL,
-                change_summary TEXT,
-                dataset_snapshot JSON,
-                mapping_snapshot JSON,
-                calculation_snapshot JSON,
-                portfolio_snapshot JSON,
-                report_snapshot JSON,
-                user_id INT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX (session_id),
-                INDEX (version_number),
-                INDEX (instrument_type)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-        """)
+        # Add session_id column if it doesn't exist (for existing tables)
+        try:
+            cursor.execute("SHOW COLUMNS FROM calculations LIKE 'session_id'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE calculations ADD COLUMN session_id VARCHAR(64) AFTER dataset_id")
+                cursor.execute("CREATE INDEX idx_session_id ON calculations(session_id)")
+                conn.commit()
+                print("✅ Added missing session_id column to calculations table")
+        except Exception as alter_error:
+            print(f"⚠️ Could not add session_id column: {alter_error}")
 
-        cursor.execute(
-            """INSERT INTO calculations 
-               (instrument_type, dataset_id, session_id, input_data, result_data, calculation_status, completed_at) 
-               VALUES (%s, %s, %s, %s, %s, %s, NOW())""",
-            (instrument_type, dataset_id, session_id, json.dumps(input_data), json.dumps(result_data), 'completed')
-        )
+        # Verify column exists before inserting
+        cursor.execute("SHOW COLUMNS FROM calculations LIKE 'session_id'")
+        if not cursor.fetchone():
+            print("❌ session_id column does not exist, skipping session_id in INSERT")
+            cursor.execute(
+                """INSERT INTO calculations 
+                   (instrument_type, dataset_id, input_data, result_data, calculation_status, completed_at) 
+                   VALUES (%s, %s, %s, %s, %s, NOW())""",
+                (instrument_type, dataset_id, json.dumps(input_data), json.dumps(result_data), 'completed')
+            )
+        else:
+            cursor.execute(
+                """INSERT INTO calculations 
+                   (instrument_type, dataset_id, session_id, input_data, result_data, calculation_status, completed_at) 
+                   VALUES (%s, %s, %s, %s, %s, %s, NOW())""",
+                (instrument_type, dataset_id, session_id, json.dumps(input_data), json.dumps(result_data), 'completed')
+            )
         conn.commit()
         calculation_id = cursor.lastrowid
         print(f"✅ Calculation saved with ID: {calculation_id}")
-        
-        # Update session instrument_count and create version
+
+        # Update session and create version if session_id provided
         if session_id:
-            try:
-                # Get current session
+            # Get current session
+            cursor.execute(
+                "SELECT instrument_workflows, version_count FROM ui_sessions WHERE session_id = %s",
+                (session_id,)
+            )
+            session_row = cursor.fetchone()
+            if session_row:
+                instrument_workflows = session_row.get('instrument_workflows')
+                try:
+                    instrument_workflows = json.loads(instrument_workflows) if isinstance(instrument_workflows, str) else instrument_workflows or {}
+                except:
+                    instrument_workflows = {}
+
+                if instrument_type not in instrument_workflows:
+                    instrument_workflows[instrument_type] = {}
+                instrument_workflows[instrument_type]['calculations'] = result_data
+                instrument_workflows[instrument_type]['calculated_at'] = datetime.now().isoformat()
+
+                # Count distinct instruments with data
+                instrument_count = 0
+                for key in ['money-market', 'bonds', 'tbills']:
+                    if key in instrument_workflows and instrument_workflows[key]:
+                        wf = instrument_workflows[key]
+                        if (wf.get('cleanedData') and len(wf.get('cleanedData')) > 0) or \
+                           (wf.get('data') and len(wf.get('data')) > 0) or \
+                           (wf.get('calculations') and wf.get('calculations', {}).get('totalValue', 0) > 0):
+                            instrument_count += 1
+
+                # Update session
                 cursor.execute(
-                    "SELECT instrument_workflows, version_count FROM ui_sessions WHERE session_id = %s",
-                    (session_id,)
+                    """UPDATE ui_sessions 
+                       SET instrument_workflows = %s, instrument_count = %s, version_count = version_count + 1 
+                       WHERE session_id = %s""",
+                    (json.dumps(instrument_workflows), instrument_count, session_id)
                 )
-                session_row = cursor.fetchone()
-                if session_row:
-                    instrument_workflows = session_row.get('instrument_workflows')
-                    try:
-                        instrument_workflows = json.loads(instrument_workflows) if isinstance(instrument_workflows, str) else instrument_workflows or {}
-                    except:
-                        instrument_workflows = {}
-                    
-                    if instrument_type not in instrument_workflows:
-                        instrument_workflows[instrument_type] = {}
-                    instrument_workflows[instrument_type]['calculations'] = result_data
-                    instrument_workflows[instrument_type]['calculated_at'] = datetime.now().isoformat()
-                    
-                    # Count distinct instruments with data
-                    instrument_count = 0
-                    for key in ['money-market', 'bonds', 'tbills']:
-                        if key in instrument_workflows and instrument_workflows[key]:
-                            wf = instrument_workflows[key]
-                            if (wf.get('cleanedData') and len(wf.get('cleanedData')) > 0) or \
-                               (wf.get('data') and len(wf.get('data')) > 0) or \
-                               (wf.get('calculations') and wf.get('calculations', {}).get('totalValue', 0) > 0):
-                                instrument_count += 1
-                    
-                    # Update session with new instrument_count and increment version_count
-                    cursor.execute(
-                        """UPDATE ui_sessions 
-                           SET instrument_workflows = %s, instrument_count = %s, version_count = version_count + 1 
-                           WHERE session_id = %s""",
-                        (json.dumps(instrument_workflows), instrument_count, session_id)
+                conn.commit()
+
+                # Create version record
+                try:
+                    from routes.version_history import create_version, get_next_version_number
+                    next_version = get_next_version_number(session_id)
+                    version_id = create_version(
+                        session_id,
+                        next_version,
+                        instrument_type,
+                        f"Calculated {instrument_type}",
+                        None,
+                        None,
+                        result_data,
+                        None,
+                        None,
+                        None
                     )
-                    conn.commit()
-                    
-                    # Create version record
-                    try:
-                        from routes.version_history import create_version, get_next_version_number
-                        next_version = get_next_version_number(session_id)
-                        version_id = create_version(
-                            session_id,
-                            next_version,
-                            instrument_type,
-                            f"Calculated {instrument_type}",
-                            None,  # dataset_snapshot
-                            None,  # mapping_snapshot
-                            result_data,  # calculation_snapshot
-                            None,  # portfolio_snapshot
-                            None,  # report_snapshot
-                            None   # user_id
-                        )
-                        if version_id:
-                            print(f"✅ Created version {next_version} for session {session_id}")
-                            # Ensure session version_count is updated (already done, but double-check)
-                            cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (next_version, session_id))
-                            conn.commit()
-                    except Exception as e:
-                        print(f"⚠️ Failed to create version: {e}")
-                    
-                    print(f"✅ Session {session_id} updated: instrument_count={instrument_count}, version_count={session_row.get('version_count', 0) + 1}")
-            except Exception as e:
-                print(f"⚠️ Failed to update session: {e}")
-        
+                    if version_id:
+                        print(f"✅ Created version {next_version} for session {session_id}")
+                        # Ensure session version_count is updated (already done, but double-check)
+                        cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (next_version, session_id))
+                        conn.commit()
+                except Exception as e:
+                    print(f"⚠️ Failed to create version: {e}")
+
+                print(f"✅ Session {session_id} updated: instrument_count={instrument_count}, version_count={session_row.get('version_count', 0) + 1}")
         cursor.close()
         conn.close()
     except Exception as e:
@@ -163,7 +161,6 @@ def save_calculation(instrument_type, input_data, result_data, dataset_id=None, 
 
 
 def get_history():
-    """Get calculation history for the current user/session."""
     conn = get_db()
     if not conn:
         return []
@@ -193,7 +190,6 @@ def get_history():
 
 
 def get_latest_calculation(dataset_id=None, session_id=None):
-    """Get the latest calculation for a dataset or session."""
     conn = get_db()
     if not conn:
         return None
@@ -236,7 +232,6 @@ def get_latest_calculation(dataset_id=None, session_id=None):
 
 
 def get_calculations_by_session(session_id):
-    """Get all calculations for a session."""
     conn = get_db()
     if not conn:
         return []
@@ -249,7 +244,6 @@ def get_calculations_by_session(session_id):
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        
         calculations = []
         for row in rows:
             result_data = row.get('result_data')
@@ -272,7 +266,6 @@ def get_calculations_by_session(session_id):
         return []
 
 
-# ===== 🔥 FIXED: generate_instrument_summary =====
 def generate_instrument_summary(session_id, instrument_type=None):
     """
     Generate instrument summary from saved calculations.
@@ -299,11 +292,9 @@ def generate_instrument_summary(session_id, instrument_type=None):
         cursor.close()
         conn.close()
 
-        # If no calculations, return empty
         if not rows:
             return {'columns': [], 'rows': []}
 
-        # Build summary rows from each calculation's result_data
         summary_rows = []
         for row in rows:
             result_data = row.get('result_data')
@@ -315,7 +306,6 @@ def generate_instrument_summary(session_id, instrument_type=None):
             elif not isinstance(result_data, dict):
                 result_data = {}
 
-            # Get the instrument name from input_data or fallback
             input_data = row.get('input_data')
             if isinstance(input_data, str):
                 try:
@@ -325,11 +315,9 @@ def generate_instrument_summary(session_id, instrument_type=None):
 
             instrument_name = input_data.get('instrument_name') or input_data.get('Instrument Name') or 'Instrument'
 
-            # 🔥 CRITICAL FIX: Check if result_data has per-instrument calculations
-            calculations = result_data.get('calculations', [])
-            if calculations and isinstance(calculations, list):
-                # Each item in calculations is a dict for one instrument
-                for calc in calculations:
+            calculations_list = result_data.get('calculations', [])
+            if calculations_list and isinstance(calculations_list, list):
+                for calc in calculations_list:
                     if isinstance(calc, dict):
                         summary_row = {
                             'Instrument Name': calc.get('instrument_name', instrument_name),
@@ -337,13 +325,11 @@ def generate_instrument_summary(session_id, instrument_type=None):
                             'Calculation ID': row.get('id'),
                             'Created At': row.get('created_at').isoformat() if row.get('created_at') else None,
                         }
-                        # Merge all calc fields
                         for key, value in calc.items():
                             if key not in summary_row and key not in ['_raw', '_source', 'index', '__v']:
                                 summary_row[key] = value
                         summary_rows.append(summary_row)
             else:
-                # No per-instrument calculations – create one row with aggregated data
                 summary_row = {
                     'Instrument Name': instrument_name,
                     'Instrument Type': row.get('instrument_type'),
@@ -361,7 +347,6 @@ def generate_instrument_summary(session_id, instrument_type=None):
                     'Total Principal': result_data.get('totalPrincipal', 0),
                     'FRED Benchmark': result_data.get('fred', {}).get('benchmark_rate') if result_data.get('fred') else None
                 }
-                # Add instrument-specific fields
                 inst_type = row.get('instrument_type')
                 if inst_type == 'bonds':
                     summary_row.update({
@@ -386,10 +371,8 @@ def generate_instrument_summary(session_id, instrument_type=None):
                     })
                 summary_rows.append(summary_row)
 
-        # Determine columns dynamically from all rows
         columns = []
         if summary_rows:
-            # Get all unique keys across all rows
             all_keys = set()
             for row in summary_rows:
                 all_keys.update(row.keys())
@@ -404,12 +387,7 @@ def generate_instrument_summary(session_id, instrument_type=None):
         return {'columns': [], 'rows': []}
 
 
-# ===== 🔥 FIXED: generate_portfolio_summary =====
 def generate_portfolio_summary(session_id):
-    """
-    Generate portfolio summary from all instrument calculations in a session.
-    Returns: { columns: [], rows: [], portfolio_total: 0, instrument_counts: {} }
-    """
     conn = get_db()
     if not conn:
         return {'columns': [], 'rows': [], 'portfolio_total': 0, 'instrument_counts': {}}
@@ -448,7 +426,6 @@ def generate_portfolio_summary(session_id):
             portfolio_total += total_value
             instrument_counts[inst_type] = instrument_counts.get(inst_type, 0) + instrument_count
             
-            # Check for per-instrument calculations
             calculations = result_data.get('calculations', [])
             if calculations and isinstance(calculations, list):
                 for calc in calculations:
@@ -510,7 +487,6 @@ def generate_portfolio_summary(session_id):
 
 
 def get_session_instrument_workflows(session_id):
-    """Get instrument workflows from the session for display in dashboard."""
     conn = get_db()
     if not conn:
         return {}
@@ -555,13 +531,21 @@ def calculations_routes(app):
         manual_inputs = payload.get('manualInputs', {})
         
         try:
+            print(f"🔍 Starting calculation for {inst_type} with {len(data)} rows")
+            print(f"🔍 Data sample: {data[0] if data else 'No data'}")
+            print(f"🔍 Session ID: {session_id}, Dataset ID: {dataset_id}")
+            
             result = calculate_data(data, inst_type)
+            print(f"✅ Calculation result: {result}")
+            
             attach_fred_to_calculation(result, inst_type, maturity, country, currency)
             
-            # Save calculation with session_id for retrieval – this updates instrument_count and creates version
-            save_calculation(inst_type, data, result, dataset_id, session_id)
+            # Save calculation asynchronously - don't block response
+            try:
+                save_calculation(inst_type, data, result, dataset_id, session_id)
+            except Exception as save_error:
+                print(f"⚠️ Failed to save calculation to database (non-blocking): {save_error}")
             
-            # Get updated instrument summary from backend
             summary = generate_instrument_summary(session_id, inst_type) if session_id else {'columns': [], 'rows': []}
             portfolio = generate_portfolio_summary(session_id) if session_id else {'columns': [], 'rows': [], 'portfolio_total': 0}
             
@@ -584,7 +568,7 @@ def calculations_routes(app):
             print(f"❌ Calculation error: {e}")
             import traceback
             traceback.print_exc()
-            return jsonify({'success': False, 'message': str(e)}), 500
+            return jsonify({'success': False, 'message': f"Calculation failed: {str(e)}"}), 500
 
     @app.route('/api/calculations/history', methods=['GET', 'OPTIONS'])
     def calculations_history():
@@ -617,10 +601,8 @@ def calculations_routes(app):
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
         instrument_type = payload.get('instrument_type')
-        
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id required'}), 400
-        
         summary = generate_instrument_summary(session_id, instrument_type)
         return jsonify({'success': True, 'data': summary})
 
@@ -630,10 +612,8 @@ def calculations_routes(app):
             return '', 200
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
-        
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id required'}), 400
-        
         summary = generate_portfolio_summary(session_id)
         return jsonify({'success': True, 'data': summary})
 
@@ -644,7 +624,6 @@ def calculations_routes(app):
         workflows = get_session_instrument_workflows(session_id)
         return jsonify({'success': True, 'data': workflows})
 
-    # Legacy endpoint
     @app.route('/api/calculate', methods=['POST', 'OPTIONS'])
     def calculate_legacy():
         if request.method == 'OPTIONS':
@@ -665,31 +644,38 @@ def calculations_routes(app):
         except Exception as e:
             return jsonify({'success': False, 'message': str(e)}), 500
 
-    # ===== NEW: Comprehensive Calculation Endpoints =====
-    
     @app.route('/api/calculate/tbills', methods=['POST', 'OPTIONS'])
     def calculate_tbills_endpoint():
-        """Calculate all T-Bills metrics using the comprehensive calculator."""
         if request.method == 'OPTIONS':
             return '', 200
         payload = request.get_json() or {}
+        # Support both 'data' array (new format) and 'inputs' object (old format)
+        data = payload.get('data', [])
         inputs = payload.get('inputs', {})
         benchmark_yield = payload.get('benchmark_yield')
         inflation_rate = payload.get('inflation_rate')
         session_id = payload.get('session_id')
+        country = payload.get('country', 'US')
+        currency = payload.get('currency', 'USD')
+        maturity = payload.get('maturity', '13W')
         
         try:
-            results = calculate_tbills(inputs, benchmark_yield, inflation_rate)
-            
-            # Save calculation if session_id provided
-            if session_id:
-                save_calculation('tbills', inputs, results, None, session_id)
-            
-            return jsonify({
-                'success': True,
-                'instrument_type': 'tbills',
-                'results': results
-            })
+            # If data array is provided, use the new calculation function
+            if data and len(data) > 0:
+                result = calculate_data(data, 'tbills')
+                attach_fred_to_calculation(result, 'tbills', maturity, country, currency)
+                # Save calculation asynchronously - don't block response
+                try:
+                    save_calculation('tbills', data, result, None, session_id)
+                except Exception as save_error:
+                    print(f"⚠️ Failed to save calculation to database (non-blocking): {save_error}")
+                return jsonify({'success': True, 'instrument_type': 'tbills', 'data': result})
+            else:
+                # Fall back to old single-instrument calculation
+                results = calculate_tbills(inputs, benchmark_yield, inflation_rate)
+                if session_id:
+                    save_calculation('tbills', inputs, results, None, session_id)
+                return jsonify({'success': True, 'instrument_type': 'tbills', 'data': results})
         except Exception as e:
             print(f"❌ T-Bills calculation error: {e}")
             import traceback
@@ -698,28 +684,37 @@ def calculations_routes(app):
 
     @app.route('/api/calculate/bonds', methods=['POST', 'OPTIONS'])
     def calculate_bonds_endpoint():
-        """Calculate all Bonds metrics using the comprehensive calculator."""
         if request.method == 'OPTIONS':
             return '', 200
         payload = request.get_json() or {}
+        # Support both 'data' array (new format) and 'inputs' object (old format)
+        data = payload.get('data', [])
         inputs = payload.get('inputs', {})
         benchmark_yield = payload.get('benchmark_yield')
         benchmark_curve = payload.get('benchmark_curve')
         inflation_rate = payload.get('inflation_rate')
         session_id = payload.get('session_id')
+        country = payload.get('country', 'US')
+        currency = payload.get('currency', 'USD')
+        maturity = payload.get('maturity', '10Y')
         
         try:
-            results = calculate_bonds(inputs, benchmark_yield, benchmark_curve, inflation_rate)
-            
-            # Save calculation if session_id provided
-            if session_id:
-                save_calculation('bonds', inputs, results, None, session_id)
-            
-            return jsonify({
-                'success': True,
-                'instrument_type': 'bonds',
-                'results': results
-            })
+            # If data array is provided, use the new calculation function
+            if data and len(data) > 0:
+                result = calculate_data(data, 'bonds')
+                attach_fred_to_calculation(result, 'bonds', maturity, country, currency)
+                # Save calculation asynchronously - don't block response
+                try:
+                    save_calculation('bonds', data, result, None, session_id)
+                except Exception as save_error:
+                    print(f"⚠️ Failed to save calculation to database (non-blocking): {save_error}")
+                return jsonify({'success': True, 'instrument_type': 'bonds', 'data': result})
+            else:
+                # Fall back to old single-instrument calculation
+                results = calculate_bonds(inputs, benchmark_yield, benchmark_curve, inflation_rate)
+                if session_id:
+                    save_calculation('bonds', inputs, results, None, session_id)
+                return jsonify({'success': True, 'instrument_type': 'bonds', 'data': results})
         except Exception as e:
             print(f"❌ Bonds calculation error: {e}")
             import traceback
@@ -728,27 +723,36 @@ def calculations_routes(app):
 
     @app.route('/api/calculate/money-market', methods=['POST', 'OPTIONS'])
     def calculate_money_market_endpoint():
-        """Calculate all Money Market metrics using the comprehensive calculator."""
         if request.method == 'OPTIONS':
             return '', 200
         payload = request.get_json() or {}
+        # Support both 'data' array (new format) and 'inputs' object (old format)
+        data = payload.get('data', [])
         inputs = payload.get('inputs', {})
         benchmark_yield = payload.get('benchmark_yield')
         inflation_rate = payload.get('inflation_rate')
         session_id = payload.get('session_id')
+        country = payload.get('country', 'US')
+        currency = payload.get('currency', 'USD')
+        maturity = payload.get('maturity', '1Y')
         
         try:
-            results = calculate_money_market(inputs, benchmark_yield, inflation_rate)
-            
-            # Save calculation if session_id provided
-            if session_id:
-                save_calculation('money-market', inputs, results, None, session_id)
-            
-            return jsonify({
-                'success': True,
-                'instrument_type': 'money-market',
-                'results': results
-            })
+            # If data array is provided, use the new calculation function
+            if data and len(data) > 0:
+                result = calculate_data(data, 'money-market')
+                attach_fred_to_calculation(result, 'money-market', maturity, country, currency)
+                # Save calculation asynchronously - don't block response
+                try:
+                    save_calculation('money-market', data, result, None, session_id)
+                except Exception as save_error:
+                    print(f"⚠️ Failed to save calculation to database (non-blocking): {save_error}")
+                return jsonify({'success': True, 'instrument_type': 'money-market', 'data': result})
+            else:
+                # Fall back to old single-instrument calculation
+                results = calculate_money_market(inputs, benchmark_yield, inflation_rate)
+                if session_id:
+                    save_calculation('money-market', inputs, results, None, session_id)
+                return jsonify({'success': True, 'instrument_type': 'money-market', 'data': results})
         except Exception as e:
             print(f"❌ Money Market calculation error: {e}")
             import traceback
@@ -757,23 +761,18 @@ def calculations_routes(app):
 
     @app.route('/api/calculate/comprehensive', methods=['POST', 'OPTIONS'])
     def calculate_comprehensive_endpoint():
-        """Auto-detect instrument type and calculate all applicable metrics."""
         if request.method == 'OPTIONS':
             return '', 200
         payload = request.get_json() or {}
         inputs = payload.get('inputs', {})
-        instrument_type = payload.get('instrument_type')  # Optional: auto-detect if not provided
+        instrument_type = payload.get('instrument_type')
         benchmark_yield = payload.get('benchmark_yield')
         benchmark_curve = payload.get('benchmark_curve')
         inflation_rate = payload.get('inflation_rate')
         session_id = payload.get('session_id')
-        
         try:
-            # Auto-detect instrument type if not provided
             if not instrument_type:
                 instrument_type = auto_detect_instrument_type(inputs)
-            
-            # Route to appropriate calculator
             if instrument_type == 'tbills':
                 results = calculate_tbills(inputs, benchmark_yield, inflation_rate)
             elif instrument_type == 'bonds':
@@ -782,16 +781,9 @@ def calculations_routes(app):
                 results = calculate_money_market(inputs, benchmark_yield, inflation_rate)
             else:
                 return jsonify({'success': False, 'message': f'Unknown instrument type: {instrument_type}'}), 400
-            
-            # Save calculation if session_id provided
             if session_id:
                 save_calculation(instrument_type, inputs, results, None, session_id)
-            
-            return jsonify({
-                'success': True,
-                'instrument_type': instrument_type,
-                'results': results
-            })
+            return jsonify({'success': True, 'instrument_type': instrument_type, 'results': results})
         except Exception as e:
             print(f"❌ Comprehensive calculation error: {e}")
             import traceback
@@ -800,26 +792,10 @@ def calculations_routes(app):
 
 
 def auto_detect_instrument_type(inputs: dict) -> str:
-    """
-    Auto-detect instrument type from input data.
-    
-    Args:
-        inputs: Dictionary containing instrument parameters
-        
-    Returns:
-        Detected instrument type: 'tbills', 'bonds', or 'money-market'
-    """
-    # Check for T-Bills indicators
     if inputs.get('discount_rate') and not inputs.get('coupon_rate'):
         return 'tbills'
-    
-    # Check for Bonds indicators
     if inputs.get('coupon_rate') and inputs.get('years_to_maturity'):
         return 'bonds'
-    
-    # Check for Money Market indicators
     if inputs.get('interest_rate') and inputs.get('principal'):
         return 'money-market'
-    
-    # Default to money-market if uncertain
     return 'money-market'

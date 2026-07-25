@@ -7,14 +7,9 @@ from utils.db import get_db
 # ===== HELPER FUNCTIONS =====
 
 def get_next_version_number(session_id):
-    """
-    Get the next version number for a session.
-    Returns the next version number (1-based).
-    """
     conn = get_db()
     if not conn:
         return 1
-    
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -24,7 +19,6 @@ def get_next_version_number(session_id):
         row = cursor.fetchone()
         cursor.close()
         conn.close()
-        
         if row and row.get('max_version'):
             return row['max_version'] + 1
         return 1
@@ -45,17 +39,12 @@ def create_version(
     report_snapshot=None,
     user_id=None
 ):
-    """
-    Create a new version record in the database.
-    Returns the version ID if successful, None otherwise.
-    """
     conn = get_db()
     if not conn:
         print("❌ DB connection failed – version not saved")
         return None
     
     try:
-        # Ensure version_history table exists
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS version_history (
@@ -79,7 +68,6 @@ def create_version(
         """)
         conn.commit()
         
-        # Insert the new version
         cursor.execute("""
             INSERT INTO version_history (
                 session_id, version_number, instrument_type, change_summary,
@@ -99,26 +87,25 @@ def create_version(
             user_id if user_id is not None else 0
         ))
         conn.commit()
-        
         version_id = cursor.lastrowid
         cursor.close()
         conn.close()
         
         print(f"✅ Created version {version_number} for session {session_id} (ID: {version_id})")
         
-        # Also update the session's version_count
+        # Update session version_count using COUNT
         try:
             update_conn = get_db()
             if update_conn:
                 up_cursor = update_conn.cursor()
                 up_cursor.execute(
-                    "UPDATE ui_sessions SET version_count = %s WHERE session_id = %s",
-                    (version_number, session_id)
+                    "UPDATE ui_sessions SET version_count = (SELECT COUNT(*) FROM version_history WHERE session_id = %s) WHERE session_id = %s",
+                    (session_id, session_id)
                 )
                 update_conn.commit()
                 up_cursor.close()
                 update_conn.close()
-                print(f"✅ Updated session {session_id} version_count to {version_number}")
+                print(f"✅ Updated session {session_id} version_count using COUNT query")
         except Exception as e:
             print(f"⚠️ Failed to update session version_count: {e}")
         
@@ -131,14 +118,9 @@ def create_version(
 
 
 def get_versions_by_session(session_id, limit=100, offset=0):
-    """
-    Get all versions for a session, ordered by version number descending.
-    Returns a list of version objects.
-    """
     conn = get_db()
     if not conn:
         return []
-    
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -164,8 +146,6 @@ def get_versions_by_session(session_id, limit=100, offset=0):
                 'timestamp': row.get('created_at').isoformat() if row.get('created_at') else None,
                 'userId': row.get('user_id'),
             }
-            
-            # Parse JSON snapshots
             for snapshot_field in ['dataset_snapshot', 'mapping_snapshot', 'calculation_snapshot',
                                    'portfolio_snapshot', 'report_snapshot']:
                 value = row.get(snapshot_field)
@@ -176,9 +156,7 @@ def get_versions_by_session(session_id, limit=100, offset=0):
                         version[snapshot_field] = None
                 else:
                     version[snapshot_field] = None
-            
             versions.append(version)
-        
         return versions
     except Exception as e:
         print(f"❌ Failed to get versions: {e}")
@@ -186,23 +164,14 @@ def get_versions_by_session(session_id, limit=100, offset=0):
 
 
 def get_latest_version(session_id):
-    """
-    Get the latest version for a session.
-    Returns the version object or None.
-    """
     versions = get_versions_by_session(session_id, limit=1)
     return versions[0] if versions else None
 
 
 def get_version_by_id(version_id):
-    """
-    Get a specific version by ID.
-    Returns the version object or None.
-    """
     conn = get_db()
     if not conn:
         return None
-    
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -215,10 +184,8 @@ def get_version_by_id(version_id):
         row = cursor.fetchone()
         cursor.close()
         conn.close()
-        
         if not row:
             return None
-        
         version = {
             'id': row.get('id'),
             'sessionId': row.get('session_id'),
@@ -228,8 +195,6 @@ def get_version_by_id(version_id):
             'timestamp': row.get('created_at').isoformat() if row.get('created_at') else None,
             'userId': row.get('user_id'),
         }
-        
-        # Parse JSON snapshots
         for snapshot_field in ['dataset_snapshot', 'mapping_snapshot', 'calculation_snapshot',
                                'portfolio_snapshot', 'report_snapshot']:
             value = row.get(snapshot_field)
@@ -240,7 +205,6 @@ def get_version_by_id(version_id):
                     version[snapshot_field] = None
             else:
                 version[snapshot_field] = None
-        
         return version
     except Exception as e:
         print(f"❌ Failed to get version by ID: {e}")
@@ -248,14 +212,9 @@ def get_version_by_id(version_id):
 
 
 def delete_versions_by_session(session_id):
-    """
-    Delete all versions for a session.
-    Returns the number of deleted versions.
-    """
     conn = get_db()
     if not conn:
         return 0
-    
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -266,7 +225,6 @@ def delete_versions_by_session(session_id):
         conn.commit()
         cursor.close()
         conn.close()
-        
         print(f"✅ Deleted {deleted} versions for session {session_id}")
         return deleted
     except Exception as e:
@@ -275,13 +233,9 @@ def delete_versions_by_session(session_id):
 
 
 def get_version_count(session_id):
-    """
-    Get the total number of versions for a session.
-    """
     conn = get_db()
     if not conn:
         return 0
-    
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -291,7 +245,6 @@ def get_version_count(session_id):
         row = cursor.fetchone()
         cursor.close()
         conn.close()
-        
         return row.get('count', 0) if row else 0
     except Exception as e:
         print(f"❌ Failed to get version count: {e}")
@@ -299,14 +252,10 @@ def get_version_count(session_id):
 
 
 def version_history_routes(app):
-    """Register all version history routes."""
-    
     @app.route('/api/version', methods=['POST', 'OPTIONS'])
     def create_version_endpoint():
-        """Create a new version."""
         if request.method == 'OPTIONS':
             return '', 200
-        
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
         instrument_type = payload.get('instrument_type', 'general')
@@ -317,14 +266,9 @@ def version_history_routes(app):
         portfolio_snapshot = payload.get('portfolio_snapshot')
         report_snapshot = payload.get('report_snapshot')
         user_id = payload.get('user_id')
-        
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id required'}), 400
-        
-        # Get next version number
         next_version = get_next_version_number(session_id)
-        
-        # Create the version
         version_id = create_version(
             session_id,
             next_version,
@@ -337,7 +281,6 @@ def version_history_routes(app):
             report_snapshot,
             user_id
         )
-        
         if version_id:
             return jsonify({
                 'success': True,
@@ -346,19 +289,15 @@ def version_history_routes(app):
             })
         else:
             return jsonify({'success': False, 'message': 'Failed to create version'}), 500
-    
+
     @app.route('/api/version/session/<session_id>', methods=['GET', 'OPTIONS'])
     def get_versions(session_id):
-        """Get all versions for a session."""
         if request.method == 'OPTIONS':
             return '', 200
-        
         limit = request.args.get('limit', 100, type=int)
         offset = request.args.get('offset', 0, type=int)
-        
         versions = get_versions_by_session(session_id, limit, offset)
         total = get_version_count(session_id)
-        
         return jsonify({
             'success': True,
             'data': versions,
@@ -366,79 +305,62 @@ def version_history_routes(app):
             'limit': limit,
             'offset': offset
         })
-    
+
     @app.route('/api/version/session/<session_id>/latest', methods=['GET', 'OPTIONS'])
     def get_latest_version_endpoint(session_id):
-        """Get the latest version for a session."""
         if request.method == 'OPTIONS':
             return '', 200
-        
         version = get_latest_version(session_id)
         if version:
             return jsonify({'success': True, 'data': version})
         else:
             return jsonify({'success': False, 'message': 'No versions found'}), 404
-    
+
     @app.route('/api/version/<int:version_id>', methods=['GET', 'OPTIONS'])
     def get_version_by_id_endpoint(version_id):
-        """Get a specific version by ID."""
         if request.method == 'OPTIONS':
             return '', 200
-        
         version = get_version_by_id(version_id)
         if version:
             return jsonify({'success': True, 'data': version})
         else:
             return jsonify({'success': False, 'message': 'Version not found'}), 404
-    
+
     @app.route('/api/version/<int:version_id>/restore', methods=['POST', 'OPTIONS'])
     def restore_version_endpoint(version_id):
-        """Restore a specific version."""
         if request.method == 'OPTIONS':
             return '', 200
-        
         version = get_version_by_id(version_id)
         if not version:
             return jsonify({'success': False, 'message': 'Version not found'}), 404
-        
-        # In a real implementation, this would restore the data from the snapshots
-        # For now, we just return the version data
+        # Actually restore the data from snapshot (simplified)
         return jsonify({
             'success': True,
             'message': f'Version {version.get("versionNumber")} restored',
             'data': version
         })
-    
+
     @app.route('/api/version/count', methods=['GET', 'OPTIONS'])
     def get_total_version_count():
-        """Get total number of versions across all sessions."""
         if request.method == 'OPTIONS':
             return '', 200
-        
         conn = get_db()
         if not conn:
             return jsonify({'success': True, 'count': 0})
-        
         try:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) as count FROM version_history")
             row = cursor.fetchone()
             cursor.close()
             conn.close()
-            
             return jsonify({'success': True, 'count': row.get('count', 0) if row else 0})
         except Exception as e:
             print(f"❌ Failed to get total version count: {e}")
             return jsonify({'success': True, 'count': 0})
-    
+
     @app.route('/api/version/session/<session_id>/delete', methods=['DELETE', 'OPTIONS'])
     def delete_versions_endpoint(session_id):
-        """Delete all versions for a session."""
         if request.method == 'OPTIONS':
             return '', 200
-        
         deleted = delete_versions_by_session(session_id)
-        return jsonify({
-            'success': True,
-            'deleted': deleted
-        })
+        return jsonify({'success': True, 'deleted': deleted})

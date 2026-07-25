@@ -1,10 +1,7 @@
 import os
 import json
 import requests
-import math
-import random
 import logging
-from flask import jsonify
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
@@ -12,107 +9,41 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-FRED_API_KEY = os.environ.get('FRED_API_KEY', 'b40141a5119f30bc2388d63f59d8847e')
+FRED_API_KEY = os.environ.get('FRED_API_KEY')
 FRED_BASE_URL = 'https://api.stlouisfed.org/fred'
 
-# ===== SYNTHETIC GENERATORS (kept only for benchmark fallback) =====
-def generate_synthetic_yield_curve(country='US', maturity='10Y'):
-    base_rates = {
-        'US': {'level': 4.2, 'slope': 0.08, 'curvature': 0.02},
-        'GB': {'level': 4.0, 'slope': 0.07, 'curvature': 0.01},
-        'GBR': {'level': 4.0, 'slope': 0.07, 'curvature': 0.01},
-        'EUR': {'level': 3.5, 'slope': 0.06, 'curvature': 0.01},
-        'JP': {'level': 2.0, 'slope': 0.04, 'curvature': 0.005},
-        'JPN': {'level': 2.0, 'slope': 0.04, 'curvature': 0.005},
-        'CA': {'level': 4.0, 'slope': 0.07, 'curvature': 0.015},
-        'CAN': {'level': 4.0, 'slope': 0.07, 'curvature': 0.015},
-        'AU': {'level': 4.3, 'slope': 0.09, 'curvature': 0.02},
-        'AUS': {'level': 4.3, 'slope': 0.09, 'curvature': 0.02},
-        'ZA': {'level': 8.0, 'slope': 0.15, 'curvature': 0.03},
-        'ZAF': {'level': 8.0, 'slope': 0.15, 'curvature': 0.03},
-        'CH': {'level': 3.0, 'slope': 0.05, 'curvature': 0.01},
-        'CHE': {'level': 3.0, 'slope': 0.05, 'curvature': 0.01},
-        'NZ': {'level': 4.1, 'slope': 0.08, 'curvature': 0.015},
-        'NZL': {'level': 4.1, 'slope': 0.08, 'curvature': 0.015},
-        'NO': {'level': 3.8, 'slope': 0.07, 'curvature': 0.01},
-        'NOR': {'level': 3.8, 'slope': 0.07, 'curvature': 0.01},
-        'SE': {'level': 3.5, 'slope': 0.06, 'curvature': 0.01},
-        'SWE': {'level': 3.5, 'slope': 0.06, 'curvature': 0.01},
-        'DK': {'level': 3.3, 'slope': 0.06, 'curvature': 0.01},
-        'DNK': {'level': 3.3, 'slope': 0.06, 'curvature': 0.01},
-        'BR': {'level': 10.5, 'slope': 0.12, 'curvature': 0.02},
-        'BRA': {'level': 10.5, 'slope': 0.12, 'curvature': 0.02},
-        'MX': {'level': 8.5, 'slope': 0.11, 'curvature': 0.02},
-        'MEX': {'level': 8.5, 'slope': 0.11, 'curvature': 0.02},
-        'IN': {'level': 6.8, 'slope': 0.10, 'curvature': 0.015},
-        'IND': {'level': 6.8, 'slope': 0.10, 'curvature': 0.015},
-        'CN': {'level': 3.0, 'slope': 0.05, 'curvature': 0.01},
-        'CHN': {'level': 3.0, 'slope': 0.05, 'curvature': 0.01},
-        'KR': {'level': 3.5, 'slope': 0.06, 'curvature': 0.01},
-        'KOR': {'level': 3.5, 'slope': 0.06, 'curvature': 0.01},
-        'SG': {'level': 3.2, 'slope': 0.05, 'curvature': 0.01},
-        'SGP': {'level': 3.2, 'slope': 0.05, 'curvature': 0.01},
-        'HK': {'level': 3.0, 'slope': 0.05, 'curvature': 0.01},
-        'HKG': {'level': 3.0, 'slope': 0.05, 'curvature': 0.01},
-        'RU': {'level': 9.0, 'slope': 0.12, 'curvature': 0.02},
-        'RUS': {'level': 9.0, 'slope': 0.12, 'curvature': 0.02},
-        'TR': {'level': 20.0, 'slope': 0.20, 'curvature': 0.03},
-        'TUR': {'level': 20.0, 'slope': 0.20, 'curvature': 0.03},
-        'SA': {'level': 5.0, 'slope': 0.08, 'curvature': 0.01},
-        'SAU': {'level': 5.0, 'slope': 0.08, 'curvature': 0.01},
-        'AE': {'level': 4.5, 'slope': 0.07, 'curvature': 0.01},
-        'ARE': {'level': 4.5, 'slope': 0.07, 'curvature': 0.01},
-        'IL': {'level': 4.5, 'slope': 0.07, 'curvature': 0.01},
-        'ISR': {'level': 4.5, 'slope': 0.07, 'curvature': 0.01},
-    }
-    params = base_rates.get(country.upper(), base_rates.get('US', {'level': 4.2, 'slope': 0.08, 'curvature': 0.02}))
-    maturity_map = {
-        '1M': 0.083, '3M': 0.25, '6M': 0.5, '1Y': 1.0, '2Y': 2.0, '3Y': 3.0,
-        '5Y': 5.0, '7Y': 7.0, '10Y': 10.0, '20Y': 20.0, '30Y': 30.0,
-        '4W': 0.077, '13W': 0.25, '26W': 0.5, '52W': 1.0
-    }
-    maturities = list(maturity_map.keys())
-    points = []
-    for mat_label in maturities:
-        years = maturity_map[mat_label]
-        rate = params['level'] + params['slope'] * years + params['curvature'] * math.pow(years, 1.2)
-        rate += (random.random() - 0.5) * 0.15
-        rate = max(0.1, min(25.0, rate))
-        points.append({
-            'maturity': years,
-            'maturityLabel': mat_label,
-            'rate': round(rate, 2)
-        })
-    return points
+# Alias used by some modules
+FRED_KEY = FRED_API_KEY
 
-def generate_synthetic_benchmark(instrument_type='money_market', maturity='1Y', country='US', currency='USD'):
-    base_rates = {
-        'money_market': {'US': 4.2, 'GB': 4.0, 'EUR': 3.5, 'JP': 2.0, 'CA': 4.0, 'AU': 4.3, 'ZA': 8.0},
-        'money-market': {'US': 4.2, 'GB': 4.0, 'EUR': 3.5, 'JP': 2.0, 'CA': 4.0, 'AU': 4.3, 'ZA': 8.0},
-        'bonds': {'US': 4.5, 'GB': 4.2, 'EUR': 3.8, 'JP': 2.2, 'CA': 4.3, 'AU': 4.5, 'ZA': 8.5},
-        'tbills': {'US': 3.8, 'GB': 3.5, 'EUR': 3.2, 'JP': 1.8, 'CA': 3.7, 'AU': 4.0, 'ZA': 7.5}
-    }
-    maturity_spread = {
-        '1M': -0.2, '3M': -0.1, '6M': 0.0, '1Y': 0.1, '2Y': 0.3,
-        '3Y': 0.5, '5Y': 0.8, '7Y': 1.0, '10Y': 1.2, '20Y': 1.5, '30Y': 1.6,
-        '4W': -0.3, '13W': -0.1, '26W': 0.0, '52W': 0.1
-    }
-    inst_base = base_rates.get(instrument_type, base_rates.get('money_market', {}))
-    country_upper = country.upper()
-    base = inst_base.get(country_upper, inst_base.get('US', 4.0))
-    spread = maturity_spread.get(maturity, 0.0)
-    rate = base + spread + (random.random() - 0.5) * 0.2
-    rate = max(0.1, min(25.0, rate))
-    return {
-        'benchmark_rate': round(rate, 2),
-        'series_label': f'{maturity} {country} Synthetic',
-        'series_id': f'SYNTH_{country}_{maturity}',
-        'country': country_upper,
-        'currency': currency,
-        'maturity': maturity,
-        'note': 'Synthetic fallback generated locally (FRED API unavailable)'
-    }
+# Map frontend country codes to FRED country codes
+COUNTRY_ALIASES = {
+    'USA': 'US', 'US': 'US',
+    'GBR': 'GB', 'GB': 'GB', 'UK': 'GB',
+    'EUR': 'EUR', 'EU': 'EUR', 'DE': 'EUR', 'DEU': 'EUR',
+    'JPN': 'JP', 'JP': 'JP',
+    'CAN': 'CA', 'CA': 'CA',
+    'AUS': 'AU', 'AU': 'AU',
+    'ZAF': 'ZA', 'ZA': 'ZA',
+    'CHE': 'CH', 'CH': 'CH',
+    'NZL': 'NZ', 'NZ': 'NZ',
+    'NOR': 'NO', 'NO': 'NO',
+    'SWE': 'SE', 'SE': 'SE',
+    'DNK': 'DK', 'DK': 'DK',
+    'BRA': 'BR', 'BR': 'BR',
+    'MEX': 'MX', 'MX': 'MX',
+    'IND': 'IN', 'IN': 'IN',
+    'CHN': 'CN', 'CN': 'CN',
+    'KOR': 'KR', 'KR': 'KR',
+    'SGP': 'SG', 'SG': 'SG',
+    'HKG': 'HK', 'HK': 'HK',
+    'RUS': 'RU', 'RU': 'RU',
+    'TUR': 'TR', 'TR': 'TR',
+    'SAU': 'SA', 'SA': 'SA',
+    'ARE': 'AE', 'AE': 'AE',
+    'ISR': 'IL', 'IL': 'IL',
+}
 
+# Valid FRED series IDs only – no fake/mock series
 COUNTRY_SERIES_MAP = {
     'US': {
         '1M': 'DGS1MO', '3M': 'DGS3MO', '6M': 'DGS6MO', '1Y': 'DGS1',
@@ -121,35 +52,44 @@ COUNTRY_SERIES_MAP = {
         '4W': 'DTB4WK', '13W': 'DTB3', '26W': 'DTB6', '52W': 'DTB1Y',
     },
     'GB': {
-        '1M': 'GB1MT', '3M': 'GB3MT', '6M': 'GB6MT', '1Y': 'GB1YT',
-        '2Y': 'GB2YT', '5Y': 'GB5YT', '10Y': 'GB10YT', '30Y': 'GB30YT',
-    },
-    'EUR': {
-        '1M': 'EUR1MT', '3M': 'EUR3MT', '6M': 'EUR6MT', '1Y': 'EUR1YT',
-        '2Y': 'EUR2YT', '5Y': 'EUR5YT', '10Y': 'EUR10YT', '30Y': 'EUR30YT',
+        '3M': 'IR3TTS01GBM156N', '1Y': 'IR3TTS01GBM156N',
+        '5Y': 'IR5TTS01GBM156N', '10Y': 'IRLTLT01GBM156N',
     },
     'JP': {
-        '1M': 'JP1MT', '3M': 'JP3MT', '6M': 'JP6MT', '1Y': 'JP1YT',
-        '2Y': 'JP2YT', '5Y': 'JP5YT', '10Y': 'JP10YT', '30Y': 'JP30YT',
+        '3M': 'IR3TTS01JPM156N', '1Y': 'IR3TTS01JPM156N',
+        '5Y': 'IR5TTS01JPM156N', '10Y': 'IRLTLT01JPM156N',
+    },
+    'EUR': {
+        '3M': 'IR3TTS01EZM156N', '1Y': 'IR3TTS01EZM156N',
+        '5Y': 'IR5TTS01EZM156N', '10Y': 'IRLTLT01EZM156N',
     },
     'CA': {
-        '1M': 'CA1MT', '3M': 'CA3MT', '6M': 'CA6MT', '1Y': 'CA1YT',
-        '2Y': 'CA2YT', '5Y': 'CA5YT', '10Y': 'CA10YT', '30Y': 'CA30YT',
+        '3M': 'IR3TTS01CAM156N', '1Y': 'IR3TTS01CAM156N',
+        '5Y': 'IR5TTS01CAM156N', '10Y': 'IRLTLT01CAM156N',
     },
     'AU': {
-        '1M': 'AU1MT', '3M': 'AU3MT', '6M': 'AU6MT', '1Y': 'AU1YT',
-        '2Y': 'AU2YT', '5Y': 'AU5YT', '10Y': 'AU10YT', '30Y': 'AU30YT',
+        '3M': 'IR3TTS01AUM156N', '1Y': 'IR3TTS01AUM156N',
+        '5Y': 'IR5TTS01AUM156N', '10Y': 'IRLTLT01AUM156N',
     },
     'ZA': {
-        '1M': 'ZA1MT', '3M': 'ZA3MT', '6M': 'ZA6MT', '1Y': 'ZA1YT',
-        '2Y': 'ZA2YT', '5Y': 'ZA5YT', '10Y': 'ZA10YT', '30Y': 'ZA30YT',
-    }
+        '3M': 'IR3TTS01ZAM156N', '1Y': 'IR3TTS01ZAM156N',
+        '5Y': 'IR5TTS01ZAM156N', '10Y': 'IRLTLT01ZAM156N',
+    },
 }
+
+
+def normalize_country(country):
+    """Convert any country code (USA, GBR, etc.) to our FRED map key."""
+    if not country:
+        return 'US'
+    code = str(country).upper().strip()
+    return COUNTRY_ALIASES.get(code, code)
 
 def series_for_country(country, maturity):
     country_upper = country.upper()
     maturity_map = COUNTRY_SERIES_MAP.get(country_upper)
     if not maturity_map:
+        # Fallback to US if country not found
         maturity_map = COUNTRY_SERIES_MAP.get('US')
         country_upper = 'US'
         note = f'Country "{country}" not in map, using US fallback'
@@ -159,21 +99,17 @@ def series_for_country(country, maturity):
     if series_id:
         label = f'{maturity} {country_upper} Treasury'
         return series_id, label, maturity, country_upper, 'USD', note
+    # Try to find a close match
     for key in maturity_map:
         if maturity in key or key in maturity:
             series_id = maturity_map[key]
             label = f'{key} {country_upper} Treasury'
             return series_id, label, key, country_upper, 'USD', note
-    if '10Y' in maturity_map:
-        return maturity_map['10Y'], '10Y {country_upper} Treasury', '10Y', country_upper, 'USD', 'Fallback to 10Y'
-    first_key = list(maturity_map.keys())[0] if maturity_map else '10Y'
-    series_id = maturity_map.get(first_key, 'DGS10')
-    label = f'{first_key} {country_upper} Treasury'
-    return series_id, label, first_key, country_upper, 'USD', 'Fallback'
+    return None, None, maturity, country_upper, 'USD', 'No series found'
 
 def fetch_fred_observation(series_id):
     if not FRED_API_KEY:
-        logger.warning("FRED_API_KEY not set, cannot fetch real data")
+        logger.error("FRED_API_KEY not set – cannot fetch real data")
         return None, None
     try:
         params = {
@@ -232,7 +168,7 @@ def get_yield_curve(country='US', maturities=None):
         else:
             logger.warning(f"FRED failed for {series_id} – skipping this maturity")
     points.sort(key=lambda x: x['maturity'])
-    return points
+    return points  # Will be empty if no data fetched
 
 def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency='USD'):
     series_id, label, used_mat, _, _, note = series_for_country(country, maturity)
@@ -249,15 +185,23 @@ def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency=
                 'date': date,
                 'note': note
             }
-    return generate_synthetic_benchmark(instrument_type, maturity, country, currency)
+    # No synthetic fallback – return error
+    return {
+        'error': f'No benchmark data available for {instrument_type} {maturity} {country}',
+        'benchmark_rate': None,
+        'note': 'FRED API returned no data'
+    }
 
 def attach_fred_to_calculation(result, instrument_type, maturity='1Y', country='US', currency='USD'):
     try:
         benchmark = get_market_benchmark(instrument_type, maturity, country, currency)
-        result['fred'] = benchmark
+        if benchmark.get('benchmark_rate') is not None:
+            result['fred'] = benchmark
+        else:
+            result['fred'] = {'error': benchmark.get('error'), 'note': benchmark.get('note')}
     except Exception as e:
         logger.error(f"Error attaching FRED benchmark: {e}")
-        result['fred'] = generate_synthetic_benchmark(instrument_type, maturity, country, currency)
+        result['fred'] = {'error': str(e), 'note': 'Failed to fetch benchmark'}
 
 def build_filter_options():
     countries = []

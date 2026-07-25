@@ -6,7 +6,6 @@ from utils.fred_config import (
     build_filter_options,
     get_market_benchmark,
     series_for_country,
-    generate_synthetic_benchmark,
     get_yield_curve,
     logger
 )
@@ -24,11 +23,9 @@ def fred_routes(app):
             return '', 200
         if not FRED_API_KEY:
             return jsonify({
-                'success': True,
-                'series_id': series_id,
-                'data': [{'date': '2024-01-01', 'value': 4.0}],
-                'note': 'Synthetic fallback (no key)'
-            }), 200
+                'success': False,
+                'error': 'FRED_API_KEY not set'
+            }), 500
         params = {
             'series_id': series_id,
             'api_key': FRED_API_KEY,
@@ -41,13 +38,13 @@ def fred_routes(app):
             resp.raise_for_status()
             data = resp.json()
             if 'error_code' in data:
-                return jsonify({'success': True, 'data': [], 'note': 'FRED error'}), 200
+                return jsonify({'success': False, 'error': data.get('error_message')}), 400
             observations = data.get('observations', [])
             result = [{'date': obs['date'], 'value': float(obs['value'])} 
                       for obs in observations if obs.get('value') and obs['value'] != '.']
             return jsonify({'success': True, 'series_id': series_id, 'data': result})
         except Exception as e:
-            return jsonify({'success': True, 'data': [], 'note': str(e)}), 200
+            return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/fred/categories', methods=['GET', 'OPTIONS'])
     def get_fred_categories():
@@ -73,24 +70,7 @@ def fred_routes(app):
             return jsonify({'success': True, 'data': data})
         except Exception as e:
             logger.error(f"Filters error: {e}")
-            return jsonify({
-                'success': True,
-                'data': {
-                    'countries': [
-                        {'code': 'US', 'name': 'United States', 'currency': 'USD', 'maturities': [
-                            {'code': '1M', 'name': '1 Month'},
-                            {'code': '3M', 'name': '3 Months'},
-                            {'code': '6M', 'name': '6 Months'},
-                            {'code': '1Y', 'name': '1 Year'},
-                            {'code': '2Y', 'name': '2 Years'},
-                            {'code': '5Y', 'name': '5 Years'},
-                            {'code': '10Y', 'name': '10 Years'},
-                            {'code': '30Y', 'name': '30 Years'}
-                        ]}
-                    ],
-                    'currencies': [{'code': 'USD', 'name': 'USD'}]
-                }
-            }), 200
+            return jsonify({'success': False, 'error': str(e)}), 500
 
     @app.route('/api/fred/benchmark', methods=['GET', 'OPTIONS'])
     def fred_benchmark():
@@ -101,6 +81,8 @@ def fred_routes(app):
         country = request.args.get('country', 'US')
         currency = request.args.get('currency', 'USD')
         data = get_market_benchmark(inst, maturity, country, currency)
+        if data.get('benchmark_rate') is None:
+            return jsonify({'success': False, 'error': data.get('error'), 'note': data.get('note')}), 404
         return jsonify({'success': True, 'data': data})
 
     @app.route('/api/fred/series-by-maturity', methods=['GET', 'OPTIONS'])
@@ -110,6 +92,8 @@ def fred_routes(app):
         maturity = request.args.get('maturity', '1Y')
         country = request.args.get('country', 'US')
         series_id, label, used_mat, _, _, note = series_for_country(country, maturity)
+        if not series_id:
+            return jsonify({'success': False, 'error': 'No series found'}), 404
         return jsonify({
             'success': True,
             'series_id': series_id,
@@ -119,7 +103,7 @@ def fred_routes(app):
             'note': note
         })
 
-    # ===== YIELD CURVE – using app.add_url_rule with unique endpoint names =====
+    # ===== YIELD CURVE =====
     def _fred_yield_curve_handler():
         if request.method == 'OPTIONS':
             return '', 200
@@ -136,19 +120,22 @@ def fred_routes(app):
         points = get_yield_curve(country, maturities)
         if points:
             note = f'Yield curve from FRED (real data only). Retrieved {len(points)} maturities.'
+            return jsonify({
+                'success': True,
+                'data': {
+                    'maturities': [p['maturity'] for p in points],
+                    'labels': [p['maturityLabel'] for p in points],
+                    'rates': [p['rate'] for p in points],
+                    'country': country,
+                    'note': note
+                }
+            }), 200
         else:
-            note = 'No yield curve data could be fetched from FRED for the selected country and maturities. Please try different filters.'
-
-        return jsonify({
-            'success': True,
-            'data': {
-                'maturities': [p['maturity'] for p in points],
-                'labels': [p['maturityLabel'] for p in points],
-                'rates': [p['rate'] for p in points],
-                'country': country,
-                'note': note
-            }
-        }), 200
+            return jsonify({
+                'success': False,
+                'error': 'No yield curve data could be fetched from FRED for the selected country and maturities.',
+                'note': 'Please try different filters or check your FRED API key.'
+            }), 404
 
     app.add_url_rule(
         '/api/fred/yield-curve',
