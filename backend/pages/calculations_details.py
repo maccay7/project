@@ -30,6 +30,16 @@ def parse_date(value: Any) -> date:
                     pass
     return date.today()
 
+def round_money(value: Any, default: float = 0.0) -> float:
+    """Round monetary values to 2 decimal places"""
+    val = safe_float(value, default)
+    return round(val, 2)
+
+def round_time(value: Any, default: int = 0) -> int:
+    """Round time values (days) to nearest whole number"""
+    val = safe_float(value, default)
+    return int(round(val))
+
 def days_between(date1: date, date2: date) -> int:
     return abs((date2 - date1).days)
 
@@ -164,9 +174,9 @@ def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         'instrument_type': 'tbills',
-        'face_value': round(face, 2),
-        'purchase_price': round(price, 2),
-        'term_days': int(days),
+        'face_value': round_money(face),
+        'purchase_price': round_money(price),
+        'term_days': round_time(days),
         'discount_yield': round(discount_yield, 1),
         'money_market_yield': round(money_market_yield, 1),
         'bond_equivalent_yield': round(bond_equivalent_yield, 1),
@@ -230,8 +240,8 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         'instrument_type': 'bonds',
-        'face_value': round(face, 2),
-        'current_price': round(price, 2),
+        'face_value': round_money(face),
+        'current_price': round_money(price),
         'coupon_rate': round(coupon_rate * 100, 1),
         'years_to_maturity': round(years, 2),
         'frequency': int(frequency),
@@ -239,7 +249,7 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
         'duration': round(duration, 2),
         'modified_duration': round(modified_duration, 2),
         'current_yield': round(current_yield, 1),
-        'accrued_interest': round(accrued_interest, 2),
+        'accrued_interest': round_money(accrued_interest),
         'bond_equivalent_yield': round(ytm, 1),
         'yield_curve_rate': round(ytm, 1)
     }
@@ -262,11 +272,11 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         'instrument_type': 'money-market',
-        'principal': round(principal, 2),
+        'principal': round_money(principal),
         'interest_rate': round(rate * 100, 1),
-        'term_days': int(days),
-        'interest_earned': round(interest, 2),
-        'total_value': round(total_value, 2),
+        'term_days': round_time(days),
+        'interest_earned': round_money(interest),
+        'total_value': round_money(total_value),
         'discount_yield': round(discount_yield, 1),
         'effective_yield': round(effective_yield, 1),
         'yield_curve_rate': round(effective_yield, 1)
