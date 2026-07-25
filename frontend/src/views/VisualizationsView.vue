@@ -288,7 +288,6 @@ function clearData() {
 function chartDatasets(payload) {
   if (payload.datasets && payload.datasets.length) {
     return payload.datasets.map(d => {
-      // Handle both data formats: array of objects with x/y or array of values
       let chartData
       if (d.data && d.data.length > 0 && typeof d.data[0] === 'object' && 'x' in d.data[0]) {
         chartData = d.data
@@ -377,7 +376,7 @@ async function loadYieldCurve() {
   }
 }
 
-// ----- FIXED: renderYieldChart with meaningful x‑axis -----
+// ----- FIXED: renderYieldChart with meaningful x‑axis using actual maturity labels -----
 function renderYieldChart() {
   if (!yieldCanvas.value || !yieldData.value) return
   if (yieldChart) yieldChart.destroy()
@@ -391,10 +390,8 @@ function renderYieldChart() {
   let effectiveMax = maxMaturity
   let xAxisTitle = 'Maturity'
   let stepSize = 1
-  let tickCallback = (val) => Number.isInteger(val) ? val : ''
   let minX = 0
 
-  // Determine unit and max based on selected maturity
   const match = selectedMaturityStr.match(/^(\d+)([YMW])$/)
   if (match) {
     const num = parseInt(match[1], 10)
@@ -415,7 +412,6 @@ function renderYieldChart() {
       minX = 0
     }
   } else {
-    // fallback to years
     xAxisTitle = 'Years'
     const num = parseFloat(selectedMaturityStr) || 10
     effectiveMax = Math.min(maxMaturity, num)
@@ -434,13 +430,24 @@ function renderYieldChart() {
   }
 
   // Determine tick values based on unit
-  if (xAxisTitle === 'Months') {
-    tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= effectiveMax ? val : ''
-  } else if (xAxisTitle === 'Weeks') {
+  let tickCallback
+  if (xAxisTitle === 'Months' || xAxisTitle === 'Weeks') {
     tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= effectiveMax ? val : ''
   } else {
     tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= effectiveMax ? val : ''
   }
+
+  // 🔥 Use actual maturity labels from the data
+  const dataPoints = filteredData[0]?.data || []
+  const labelsMap = {}
+  dataPoints.forEach(pt => {
+    const xVal = pt.x
+    // Find the corresponding maturity label from the original data
+    const labelIndex = yieldData.value.maturities.findIndex(m => Math.abs(m - xVal) < 0.01)
+    if (labelIndex !== -1 && yieldData.value.labels && yieldData.value.labels[labelIndex]) {
+      labelsMap[xVal] = yieldData.value.labels[labelIndex]
+    }
+  })
 
   yieldChart = new Chart(ctx, {
     type: 'line',
@@ -454,7 +461,8 @@ function renderYieldChart() {
           callbacks: {
             label: (ctx) => {
               const pt = ctx.raw
-              return `${pt.x.toFixed(0)}${xAxisTitle === 'Months' ? 'M' : xAxisTitle === 'Weeks' ? 'W' : 'Y'}: ${pt.y.toFixed(2)}%`
+              const label = labelsMap[pt.x] || pt.x.toFixed(0)
+              return `${label}: ${pt.y.toFixed(2)}%`
             }
           }
         }
@@ -467,7 +475,12 @@ function renderYieldChart() {
           min: minX,
           max: effectiveMax,
           ticks: {
-            callback: tickCallback,
+            callback: function(value) {
+              // Use the label from the map if available
+              if (labelsMap[value]) return labelsMap[value]
+              if (Number.isInteger(value) && value >= 0) return value.toString()
+              return null
+            },
             stepSize: stepSize
           }
         }

@@ -114,12 +114,25 @@
                 <v-chip color="green" size="small">Changes Applied</v-chip>
               </v-card-title>
               <v-card-text>
-                <v-alert type="info" class="mb-4">
-                  <strong>Cleaning Summary:</strong> 
-                  {{ results.originalRows }} rows → {{ results.cleanedRows }} rows
-                  <span v-if="results.duplicatesRemoved"> | Duplicates removed: {{ results.duplicatesRemoved }}</span>
-                  <span v-if="results.missingValuesFilled"> | Missing values filled: {{ results.missingValuesFilled }}</span>
-                </v-alert>
+                <!-- ===== CLEANING RESULTS KPI CARDS ===== -->
+                <v-row>
+                  <v-col cols="12" sm="6" md="3" v-for="stat in resultStats" :key="stat.title">
+                    <v-card class="kpi-card result-kpi">
+                      <v-card-text>
+                        <div class="kpi-content">
+                          <div class="kpi-icon" :style="{ backgroundColor: stat.color }">
+                            <v-icon :color="stat.iconColor" size="28">{{ stat.icon }}</v-icon>
+                          </div>
+                          <div class="kpi-info">
+                            <div class="kpi-value">{{ stat.value }}</div>
+                            <div class="kpi-title">{{ stat.title }}</div>
+                          </div>
+                        </div>
+                      </v-card-text>
+                    </v-card>
+                  </v-col>
+                </v-row>
+
                 <ExcelViewer
                   :data="results.cleanedData"
                   :headers="Object.keys(results.cleanedData[0] || {})"
@@ -130,7 +143,7 @@
           </v-col>
         </v-row>
 
-        <!-- Results Summary -->
+        <!-- Results Summary (fallback) -->
         <v-row v-if="results">
           <v-col cols="12">
             <v-card class="stats-card">
@@ -203,7 +216,7 @@ const cleaningOptions = ref([
 
 const hasAnyOption = computed(() => cleaningOptions.value.some(o => o.value))
 
-// KPI Stats
+// KPI Stats for Dataset Overview
 const kpiStats = computed(() => {
   if (!dataset.value?.data) return []
   return [
@@ -211,6 +224,17 @@ const kpiStats = computed(() => {
     { title: 'Total Columns', value: Object.keys(dataset.value.data[0] || {}).length, icon: 'mdi-view-column', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
     { title: 'Instrument Type', value: dataset.value.instrumentType || 'Financial Instruments', icon: 'mdi-chart-line', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
     { title: 'File Name', value: dataset.value.name || 'Dataset', icon: 'mdi-file-document', color: 'rgba(255,193,7,0.1)', iconColor: '#FFC107' }
+  ]
+})
+
+// ===== CLEANING RESULTS KPI STATS =====
+const resultStats = computed(() => {
+  if (!results.value) return []
+  return [
+    { title: 'Original Rows', value: results.value.originalRows, icon: 'mdi-table-row', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
+    { title: 'Cleaned Rows', value: results.value.cleanedRows, icon: 'mdi-check-circle', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
+    { title: 'Duplicates Removed', value: results.value.duplicatesRemoved || 0, icon: 'mdi-delete', color: 'rgba(244,67,54,0.1)', iconColor: '#F44336' },
+    { title: 'Missing Values Filled', value: results.value.missingValuesFilled || 0, icon: 'mdi-pencil', color: 'rgba(255,152,0,0.1)', iconColor: '#FF9800' }
   ]
 })
 
@@ -385,6 +409,7 @@ onMounted(() => {
 .kpi-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; flex-shrink: 0; }
 .kpi-value { font-size: 24px; font-weight: 700; color: #0B2A44; }
 .kpi-title { font-size: 12px; color: #666; }
+.result-kpi { height: 100px; }
 .options-container { max-height: 300px; overflow-y: auto; margin-bottom: 20px; }
 .desc { font-size: 12px; color: #666; margin-top: 4px; }
 .v-checkbox { margin-bottom: 12px; padding: 8px; border-radius: 6px; }

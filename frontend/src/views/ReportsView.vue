@@ -121,15 +121,10 @@ import jsPDF from 'jspdf'
 import { Document, Packer, Paragraph, TextRun } from 'docx'
 import { saveAs } from 'file-saver'
 import api from '@/services/api.js'
-import { useFredMarket } from '@/composables/useFredMarket'
 
 const router = useRouter()
 const route = useRoute()
 
-// ===== Composables =====
-const { fredFilters, fetchYieldCurve } = useFredMarket()
-
-// ===== State =====
 const selectedType = ref('current')
 const previewData = ref(null)
 const reportError = ref('')
@@ -178,6 +173,22 @@ async function loadSummaryData(sessionId, instrumentType) {
     return { rows: wf.data, columns: Object.keys(wf.data[0] || {}) }
   }
   return null
+}
+
+// ===== LOAD FRED DATA FROM SESSION =====
+async function loadFredDataFromSession(sessionId, instrumentType) {
+  try {
+    const wf = await sessionManager.getInstrumentWorkflow(sessionId, instrumentType)
+    if (wf) {
+      return {
+        fredFilters: wf.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
+        yieldCurveData: wf.yieldCurveData || []
+      }
+    }
+  } catch (e) {
+    console.warn('Could not load Fred data from session:', e)
+  }
+  return { fredFilters: { country: 'US', currency: 'USD', maturity: '1Y' }, yieldCurveData: [] }
 }
 
 // ===== Load Dataset Preview =====
@@ -246,38 +257,8 @@ async function generatePreview() {
     currentData = currentSummary.rows
   }
 
-  // 🔥 Load FRED filters from session workflow
-  let fredFiltersFromSession = null
-  try {
-    const wf = await sessionManager.getInstrumentWorkflow(session.id, instrument)
-    if (wf && wf.fredFilters) {
-      fredFiltersFromSession = wf.fredFilters
-    }
-  } catch (e) {
-    console.warn('Could not load fredFilters from session:', e)
-  }
-
-  // 🔥 Fetch yield curve data using the session filters
-  let yieldCurveData = []
-  if (fredFiltersFromSession) {
-    try {
-      // Temporarily set fredFilters to session values, fetch curve, then restore (or keep them)
-      const originalCountry = fredFilters.value.country
-      const originalMaturity = fredFilters.value.maturity
-      const originalCurrency = fredFilters.value.currency
-
-      fredFilters.value.country = fredFiltersFromSession.country || 'US'
-      fredFilters.value.maturity = fredFiltersFromSession.maturity || '1Y'
-      fredFilters.value.currency = fredFiltersFromSession.currency || 'USD'
-
-      yieldCurveData = await fetchYieldCurve(instrument)
-
-      // Optionally keep the session filters (they are now set)
-    } catch (e) {
-      console.warn('Failed to fetch yield curve for report:', e)
-      // Fallback: keep using the session filters even if fetch fails
-    }
-  }
+  // 🔥 Load FRED data from session
+  const fredData = await loadFredDataFromSession(session.id, instrument)
 
   const preview = {
     type: selectedType.value === 'current' ? 'Current Instrument Report' : 'Full Session Report',
@@ -290,8 +271,8 @@ async function generatePreview() {
     valuationDate: new Date().toISOString().split('T')[0],
     totalValue: currentData.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['Calculated Value'] || 0)), 0),
     allWorkedData: allWorkedData,
-    fredFilters: fredFiltersFromSession || { country: 'US', currency: 'USD', maturity: '1Y' },
-    yieldCurveData: yieldCurveData
+    fredFilters: fredData.fredFilters,
+    yieldCurveData: fredData.yieldCurveData
   }
   if (selectedType.value === 'session') {
     const allData = {}
@@ -306,7 +287,7 @@ async function generatePreview() {
   previewData.value = preview
   reportError.value = ''
 
-  // Generate HTML with fredFilters and yieldCurveData
+  // Generate HTML
   if (previewData.value) {
     const data = previewData.value
     const instrumentName = data.instrument || 'unknown'
@@ -402,7 +383,6 @@ function formatForExcel(value, type = 'number') {
   if (value === null || value === undefined || value === '') return ''
   const num = parseFloat(value)
   if (isNaN(num)) return value
-  
   if (type === 'percentage') {
     return Math.round(num * 10) / 10
   } else if (type === 'money') {
@@ -566,177 +546,32 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.reports-view {
-  padding: 30px;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-.page-header {
-  margin-bottom: 30px;
-}
-.back-btn {
-  background: transparent;
-  border: none;
-  color: #0B2044;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-}
-.page-header h1 {
-  color: #0B2044;
-  font-size: 28px;
-  font-weight: 700;
-}
-.page-header p {
-  color: #666;
-  font-size: 14px;
-}
-.report-actions-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 20px;
-}
-.report-options {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 24px;
-  margin-bottom: 40px;
-}
-.option-card {
-  background: white;
-  border-radius: 16px;
-  padding: 30px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.3s;
-  border: 2px solid transparent;
-}
-.option-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-  border-color: #0B2044;
-}
-.option-icon {
-  width: 80px;
-  height: 80px;
-  background: #f5f5f5;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 20px;
-  transition: all 0.3s;
-}
-.option-icon.active {
-  background: #0B2044;
-  color: white;
-}
-.option-card h3 {
-  color: #0B2044;
-  margin-bottom: 10px;
-}
-.option-card p {
-  color: #666;
-  font-size: 13px;
-}
-.preview-section {
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-}
-.preview-section h3 {
-  color: #0B2044;
-  margin-bottom: 20px;
-}
-.preview-content {
-  background: #f5f5f5;
-  border-radius: 8px;
-  padding: 20px;
-  overflow-x: auto;
-  margin-bottom: 20px;
-}
-.preview-content pre {
-  margin: 0;
-  font-size: 12px;
-}
-.btn-primary {
-  background: linear-gradient(135deg, #0B2044, #1E88E5);
-  color: white;
-  border: none;
-  padding: 12px 28px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.download-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.btn-secondary {
-  background: #1E88E5;
-  color: white;
-  border: none;
-  padding: 12px 28px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.dataset-preview {
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-  margin-bottom: 24px;
-}
-.dataset-info-row {
-  display: flex;
-  gap: 24px;
-  margin-bottom: 16px;
-}
-.preview-empty {
-  padding: 40px;
-  text-align: center;
-  color: #999;
-}
-.viz-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 20px;
-}
-.viz-card {
-  background: #f8f9ff;
-  border-radius: 8px;
-  padding: 16px;
-  border: 1px solid #e8ecf1;
-}
-.viz-card h5 {
-  margin: 0 0 8px 0;
-  color: #0B2044;
-}
-.viz-stats .stat {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-}
-.report-preview-iframe-wrapper {
-  margin: 16px 0;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid #e0e0e0;
-  background: white;
-}
+.reports-view { padding: 30px; max-width: 1200px; margin: 0 auto; }
+.page-header { margin-bottom: 30px; }
+.back-btn { background: transparent; border: none; color: #0B2044; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 8px; margin-bottom: 20px; }
+.page-header h1 { color: #0B2044; font-size: 28px; font-weight: 700; }
+.page-header p { color: #666; font-size: 14px; }
+.report-actions-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+.report-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-bottom: 40px; }
+.option-card { background: white; border-radius: 16px; padding: 30px; text-align: center; cursor: pointer; transition: all 0.3s; border: 2px solid transparent; }
+.option-card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1); border-color: #0B2044; }
+.option-icon { width: 80px; height: 80px; background: #f5f5f5; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; transition: all 0.3s; }
+.option-icon.active { background: #0B2044; color: white; }
+.option-card h3 { color: #0B2044; margin-bottom: 10px; }
+.option-card p { color: #666; font-size: 13px; }
+.preview-section { background: white; border-radius: 16px; padding: 24px; }
+.preview-section h3 { color: #0B2044; margin-bottom: 20px; }
+.preview-content { background: #f5f5f5; border-radius: 8px; padding: 20px; overflow-x: auto; margin-bottom: 20px; }
+.preview-content pre { margin: 0; font-size: 12px; }
+.btn-primary { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.download-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn-secondary { background: #1E88E5; color: white; border: none; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.dataset-preview { background: white; border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+.dataset-info-row { display: flex; gap: 24px; margin-bottom: 16px; }
+.preview-empty { padding: 40px; text-align: center; color: #999; }
+.viz-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+.viz-card { background: #f8f9ff; border-radius: 8px; padding: 16px; border: 1px solid #e8ecf1; }
+.viz-card h5 { margin: 0 0 8px 0; color: #0B2044; }
+.viz-stats .stat { display: flex; justify-content: space-between; font-size: 13px; }
+.report-preview-iframe-wrapper { margin: 16px 0; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; background: white; }
 </style>

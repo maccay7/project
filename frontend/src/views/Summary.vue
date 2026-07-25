@@ -305,8 +305,9 @@
 
 <script setup>
 // ================================================================
-// ✅ FULL IMPLEMENTATION – ALL FIXES APPLIED
-// Descriptive analytics, breakdown, allocation, deduplicated columns.
+// FULL IMPLEMENTATION – ALL FIXES APPLIED
+// Fixed: loading instrument summaries, descriptive analytics,
+// breakdown, allocation, deduplicated columns.
 // ================================================================
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
@@ -895,7 +896,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* your existing styles – unchanged */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }

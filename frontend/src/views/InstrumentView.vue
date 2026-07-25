@@ -42,9 +42,8 @@
         </div>
       </div>
 
-      <!-- Tab content -->
-      <div class="tab-content">
-
+      <!-- Tab content wrapper with overflow scroll -->
+      <div class="tab-content-wrapper">
         <!-- ===== UPLOAD ===== -->
         <div v-if="activeTab === 'upload'" class="content-card">
           <v-card>
@@ -88,7 +87,8 @@
                 <button v-if="sheetType === 'multi'" class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
               </div>
 
-              <div v-if="worksheetWorkflow.workbookSheets.length > 0" class="worksheet-selector-section">
+              <!-- Worksheet Selector - hidden after a sheet is processed -->
+              <div v-if="worksheetWorkflow.workbookSheets.length > 0 && !worksheetSelected" class="worksheet-selector-section">
                 <WorksheetSelector
                   :workbook-sheets="worksheetWorkflow.workbookSheets"
                   :worksheet-status="worksheetWorkflow.worksheetStatus"
@@ -101,9 +101,10 @@
                 />
               </div>
 
+              <!-- ===== PREVIEW SECTION ===== -->
               <div v-if="rawData.length && showPreview" class="excel-preview-section">
                 <h4 v-if="sheetType === 'single'">Required Values (Single Instrument)</h4>
-                <h4 v-else>File Preview (first {{ Math.min(rawData.length, 500) }} rows)</h4>
+                <h4 v-else>File Preview – {{ currentSheetName || 'Selected Sheet' }}</h4>
                 <p v-if="sheetType === 'single'" class="preview-info">
                   Automatically extracted required values — verify before calculations
                 </p>
@@ -117,7 +118,7 @@
                   </div>
                 </div>
                 
-                <!-- Multiple Instruments: Show mapped dataset in Excel viewer -->
+                <!-- Multiple Instruments: Show mapped dataset in Excel viewer with mapping controls -->
                 <ExcelViewer
                   v-else-if="sheetType === 'multi' && rawData.length"
                   :data="rawData.slice(0, 500)"
@@ -128,16 +129,15 @@
                   :column-mapping="columnMapping"
                   :available-file-columns="fileColumns"
                   :required-columns="requiredColumns"
-                  :workbook-sheets="workbookSheets"
+                  :workbook-sheets="[]"
                   :current-sheet-name="currentSheetName"
                   @data-update="onRawExcelUpdate"
                   @mapping-update="updateColumnMapping"
-                  @sheet-selected="handleSheetSelected"
                 ></ExcelViewer>
                 
+                <!-- Preview actions - removed "Full Screen" button -->
                 <div v-if="sheetType === 'multi'" class="preview-actions">
                   <button class="btn-primary" @click="saveFinalMapping">Save Mapping</button>
-                  <button class="btn-review-excel-small" @click="openExcelReview(rawData, 'Uploaded Data')">Full Screen</button>
                 </div>
               </div>
 
@@ -328,11 +328,29 @@
                     <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
                   </div>
                 </div>
-                <div v-if="cleanedData.length" class="highlight-box">
-                  <p>✓ Removed {{ cleaningStats.removedRows }} invalid rows</p>
-                  <p>✓ Fixed {{ cleaningStats.fixedMissing }} missing values</p>
-                  <p class="success-text">✓ Data is now clean and ready for calculations</p>
+
+                <!-- ===== FIXED: Redesigned Cleaning Summary with KPI Cards ===== -->
+                <div v-if="cleanedData.length" class="cleaning-summary-cards">
+                  <v-row>
+                    <v-col cols="12" sm="6" md="3" v-for="stat in cleaningResultStats" :key="stat.title">
+                      <v-card class="kpi-card result-kpi">
+                        <v-card-text>
+                          <div class="kpi-content">
+                            <div class="kpi-icon" :style="{ backgroundColor: stat.color }">
+                              <v-icon :color="stat.iconColor" size="28">{{ stat.icon }}</v-icon>
+                            </div>
+                            <div class="kpi-info">
+                              <div class="kpi-value">{{ stat.value }}</div>
+                              <div class="kpi-title">{{ stat.title }}</div>
+                            </div>
+                          </div>
+                        </v-card-text>
+                      </v-card>
+                    </v-col>
+                  </v-row>
+                  <p class="success-text text-center">✓ Data is now clean and ready for calculations</p>
                 </div>
+
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('upload')">Previous</button>
                   <button class="btn-primary" @click="continueAfterCleaning" :disabled="!cleanedData.length">Continue</button>
@@ -846,7 +864,7 @@
 
 <script setup>
 // ================================================================
-// FULL SCRIPT – all functions included (corrected fetchYieldCurve)
+// FULL SCRIPT – all functions included (with all fixes applied)
 // ================================================================
 
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
@@ -899,7 +917,7 @@ function autoDetectTable(data) {
 }
 
 // ================================================================
-// All refs, computed, and functions (unchanged from original)
+// All refs, computed, and functions
 // ================================================================
 const router = useRouter()
 const route = useRoute()
@@ -1338,6 +1356,7 @@ function isStepComplete(tab) {
   return isStepPersistedCompleted(activeSession.value?.id, tab)
 }
 
+// ===== switchTab =====
 function switchTab(tab) {
   const idx = steps.value.findIndex(s => s.tab === tab)
   if (idx > farthestAllowedIndex.value) {
@@ -1347,6 +1366,10 @@ function switchTab(tab) {
   saveSessionData()
   activeTab.value = tab
   forceUpdate.value++
+  nextTick(() => {
+    const container = document.querySelector('.tab-content-wrapper')
+    if (container) container.scrollTop = 0
+  })
 }
 
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
@@ -1848,21 +1871,17 @@ function handleWorksheetSelect(sheetName) {
       originalRawData.value = JSON.parse(JSON.stringify(sheet.data || []))
       fileColumns.value = sheet.headers || []
       originalFileColumns.value = [...fileColumns.value]
-      // Don't auto-apply mapping or show preview - user must click "Work on This Sheet"
-      // sheetType will be set by worksheetWorkflow.selectWorksheet
       sheetType.value = result.type || 'multi'
     }
   }
 }
 
 // ================================================================
-// CORRECTED: handleSheetSelectedFromViewer – only selects sheet
+// handleSheetSelectedFromViewer
 // ================================================================
 function handleSheetSelectedFromViewer(sheetName) {
   console.log('Sheet selected from viewer:', sheetName)
   currentSheetName.value = sheetName
-  // Don't show preview automatically - user must click "Preview" button
-  // Just update the current selected sheet
   worksheetSelected.value = true
 }
 
@@ -1876,12 +1895,11 @@ function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
 }
 
 // ================================================================
-// Handle table isolated from workbook viewer for mapping
+// FIXED: handleTableIsolated – sets worksheetSelected = true
 // ================================================================
 function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }) {
   console.log('Table isolated for mapping:', sheetName, tableName, tableRange)
   
-  // Store the isolated table data
   isolatedTableData.value = {
     sheetName,
     tableName,
@@ -1890,31 +1908,23 @@ function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }
     tableRange
   }
   
-  // Update current sheet name
   currentSheetName.value = sheetName
-  
-  // Close the workbook viewer
   showWorkbookViewer.value = false
-  
-  // Use the isolated table data for mapping
   rawData.value = data
   originalRawData.value = JSON.parse(JSON.stringify(data))
   fileColumns.value = headers
   originalFileColumns.value = [...headers]
-  
-  // Show mapping dialog
   showMappingDialog.value = true
   mappingApplied.value = false
-  
-  // Auto-match columns
   columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
   applyCurrentMapping()
-  
+  worksheetSelected.value = true  // Enable preview, review, map buttons
+  showPreview.value = true
   console.log('Isolated table data loaded for mapping:', data.length, 'rows')
 }
 
 // ================================================================
-// CORRECTED: handleWorkOnSheet – shows mapping only once per sheet
+// handleWorkOnSheet
 // ================================================================
 async function handleWorkOnSheet(sheetName) {
   fileLoading.value = true
@@ -1938,13 +1948,11 @@ async function handleWorkOnSheet(sheetName) {
         originalRawData.value = JSON.parse(JSON.stringify(sheetData))
         fileColumns.value = headers
         originalFileColumns.value = [...headers]
-        console.log('File columns set from sheet data:', fileColumns.value)
       } else {
         const sheet = workbookSheets.value.find(s => s.name === sheetName)
         if (sheet && sheet.headers && sheet.headers.length) {
           fileColumns.value = sheet.headers
           originalFileColumns.value = [...sheet.headers]
-          console.log('File columns set from workbook sheet:', fileColumns.value)
         }
         originalRawData.value = []
       }
@@ -1971,28 +1979,26 @@ async function handleWorkOnSheet(sheetName) {
           }
         }
         applyCurrentMapping()
-        // Show mapping dialog only for multi-instrument on first "Work This Workbook" click
         if (result.type === 'multi' && !mappingShownForSheet.value[sheetName]) {
           mappingShownForSheet.value[sheetName] = true
           showMappingDialog.value = true
         }
+        showPreview.value = true
       } else {
-        // Single instrument – no mapping dialog, show extracted values in preview
+        // Single instrument – show extracted values in preview
         columnMapping.value = {}
         mappingApplied.value = true
         showMappingDialog.value = false
-        // Store extracted values for display
         const fieldMappings = getRequiredFieldMappings(instrumentType.value)
         extractedValues.value = extractSingleInstrumentValues(rawData.value, fieldMappings) || {}
-        // Convert to a displayable row for preview
         const tabularData = convertExtractedToTabular(extractedValues.value)
         rawData.value = tabularData
         originalRawData.value = JSON.parse(JSON.stringify(tabularData))
         fileColumns.value = Object.keys(tabularData[0] || {})
         originalFileColumns.value = [...fileColumns.value]
+        showPreview.value = true
       }
 
-      showPreview.value = true
       debouncedSave()
       forceUpdate.value++
     } else {
@@ -2178,7 +2184,7 @@ function openWorkbookViewer() {
 }
 
 // ================================================================
-// CORRECTED: workOnSelectedSheet – user clicks "Work on This Sheet" button
+// workOnSelectedSheet
 // ================================================================
 function workOnSelectedSheet() {
   if (!currentSheetName.value) {
@@ -2190,9 +2196,8 @@ function workOnSelectedSheet() {
     alert('No data found in the selected sheet.')
     return
   }
-  // Process the sheet (this will detect single/multi and show mapping if needed)
   handleWorkOnSheet(currentSheetName.value)
-  showWorkbookViewer.value = false // close viewer after work
+  showWorkbookViewer.value = false
 }
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
@@ -2623,21 +2628,37 @@ function onExcelDataUpdate(data) {
   debouncedSave()
 }
 
+// ===== FIXED: continueAfterUpload – removed mandatory mapping check =====
 async function continueAfterUpload() {
   if (!uploadedFile.value) { alert('Please upload a file first.'); return }
   if (!rawData.value.length) { alert('No data loaded. Please upload a valid file.'); return }
+  
+  // No mandatory mapping check – user can proceed even if columns are not mapped.
+  // They can always map later via the Map Columns button.
+  
   saveSessionData()
   await nextTick()
   activeTab.value = 'cleaning'
   await nextTick()
-  debouncedSave()
   forceUpdate.value++
+  debouncedSave()
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
     await markStepCompleted(String(sid), 'upload')
     saveSessionData()
   }
 }
+
+// ===== FIXED: cleaning summary KPI stats =====
+const cleaningResultStats = computed(() => {
+  if (!cleaningStats.value || !cleanedData.value.length) return []
+  return [
+    { title: 'Original Rows', value: cleaningStats.value.totalRows || 0, icon: 'mdi-table-row', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
+    { title: 'Cleaned Rows', value: cleanedData.value.length, icon: 'mdi-check-circle', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
+    { title: 'Duplicates Removed', value: cleaningStats.value.removedRows || 0, icon: 'mdi-delete', color: 'rgba(244,67,54,0.1)', iconColor: '#F44336' },
+    { title: 'Missing Values Fixed', value: cleaningStats.value.fixedMissing || 0, icon: 'mdi-pencil', color: 'rgba(255,152,0,0.1)', iconColor: '#FF9800' }
+  ]
+})
 
 function applyCleaning() {
   if (!rawData.value.length) return
@@ -2699,24 +2720,34 @@ function applyCleaning() {
   }
   if (cleaningOptions.value.fillForward) { for (let i = 1; i < data.length; i++) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i-1][k] }) }
   if (cleaningOptions.value.fillBackward) { for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i+1][k] }) }
+  
   cleanedData.value = data
-  cleaningStats.value = { totalRows: rawData.value.length, validRows: cleanedData.value.length, removedRows: rawData.value.length - cleanedData.value.length, fixedMissing: 0 }
+  cleaningStats.value = { 
+    totalRows: rawData.value.length, 
+    validRows: cleanedData.value.length, 
+    removedRows: rawData.value.length - cleanedData.value.length, 
+    fixedMissing: 0 
+  }
   debouncedSave()
   forceUpdate.value++
 }
 
+// ===== FIXED: continueAfterCleaning =====
 async function continueAfterCleaning() {
   if (!cleanedData.value.length) {
     alert('Please clean your data first.')
     return
   }
+  
   try {
     await calculateMetrics()
   } catch (err) {
     console.error('Error calculating metrics:', err)
     alert('There was an error calculating metrics, but you can proceed to calculations.')
   }
-  goToCalculations()
+  await nextTick()
+  activeTab.value = 'calculations'
+  await nextTick()
   forceUpdate.value++
   saveSessionData()
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
@@ -2726,11 +2757,27 @@ async function continueAfterCleaning() {
   }
 }
 
+// ===== FIXED: calculateMetrics with better error handling =====
 async function calculateMetrics() {
   if (!cleanedData.value.length) {
     console.warn('No cleaned data to calculate')
-    return
+    // Try to use rawData as fallback
+    if (rawData.value.length) {
+      console.log('Using rawData as fallback for calculations')
+      cleanedData.value = JSON.parse(JSON.stringify(rawData.value))
+    } else {
+      return
+    }
   }
+
+  // Log the data being sent for debugging
+  console.log('🔍 Sending data to backend:', {
+    instrumentType: instrumentType.value,
+    rowCount: cleanedData.value.length,
+    sampleRow: cleanedData.value[0],
+    columns: Object.keys(cleanedData.value[0] || {}),
+    sessionId: activeSession.value?.id
+  })
 
   try {
     const response = await api.calculationsAPI.executeByType(
@@ -2745,97 +2792,136 @@ async function calculateMetrics() {
       null,
       activeSession.value?.id
     )
-    if (response?.success && response?.data) {
-      calculations.value = response.data
+    
+      console.log('🔍 Backend response:', response)
+      console.log('🔍 Response success:', response?.success)
+      console.log('🔍 Response data:', response?.data)
+      console.log('🔍 Response message:', response?.message)
+      
+      if (response?.success && response?.data) {
+        calculations.value = response.data
+        console.log('✅ Set calculations.value:', calculations.value)
 
-      if (response.data && response.data.calculations && response.data.calculations.length) {
-        const rows = response.data.calculations.map(calc => ({
-          'Instrument Name': calc.instrument_name || 'Instrument',
-          'Instrument Type': instrumentType.value,
-          ...calc,
-          'Worksheet': currentSheetName.value || 'Calculated'
-        }))
+        // Extract calculations array
+        const calcArray = response.data.calculations || []
+        console.log('🔍 Calculations array length:', calcArray.length)
+        console.log('🔍 Calculations array:', calcArray)
+        
+        if (calcArray.length) {
+          // Multiple instruments
+          console.log('🔍 Processing multiple instruments')
+          const rows = calcArray.map(calc => ({
+            'Instrument Name': calc.instrument_name || 'Instrument',
+            'Instrument Type': instrumentType.value,
+            ...calc,
+            'Worksheet': currentSheetName.value || 'Calculated'
+          }))
 
-        const existingRows = instrumentSummary.value.rows || []
-        const mergedRows = [...existingRows]
-        rows.forEach(newRow => {
-          const id = newRow['Instrument Name'] + '_' + (newRow['Worksheet'] || '')
-          const exists = mergedRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
-          if (!exists) mergedRows.push(newRow)
-        })
-        const allCols = new Set()
-        mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-        instrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
-
-        const agg = computeAggregate(mergedRows)
-        const uniqueNames = new Set(mergedRows.map(r => r['Instrument Name']))
-        agg.instrumentCount = uniqueNames.size
-
-        allCalculations.value = agg
-        selectedCalculations.value = agg
-      } else {
-        const instrumentName = columnMapping.value['Instrument Name']
-          ? (cleanedData.value[0]?.[columnMapping.value['Instrument Name']] || instrumentLabel.value)
-          : instrumentLabel.value
-
-        const summaryRow = {
-          'Instrument Name': instrumentName,
-          'Instrument Type': instrumentType.value,
-          'Total Value': response.data.totalValue || 0,
-          'total_value': response.data.totalValue || 0,
-          'Instrument Count': response.data.instrumentCount || 0,
-          'instrument_count': response.data.instrumentCount || 0,
-          'Avg Rate': response.data.avgRate || 0,
-          'avg_rate': response.data.avgRate || 0,
-          'Weighted Avg Rate': response.data.weightedAvgRate || 0,
-          'weighted_avg_rate': response.data.weightedAvgRate || 0,
-          'Total Interest': response.data.totalInterest || 0,
-          'total_interest': response.data.totalInterest || 0,
-          'Interest Earned': response.data.interestEarned || 0,
-          'interest_earned': response.data.interestEarned || 0,
-          'Annual Yield': response.data.annualYield || 0,
-          'annual_yield': response.data.annualYield || 0,
-          'Effective Annual Rate': response.data.effectiveAnnualRate || 0,
-          'effective_annual_rate': response.data.effectiveAnnualRate || 0,
-          'Avg Days to Maturity': response.data.avgDaysToMaturity || 0,
-          'avg_days_to_maturity': response.data.avgDaysToMaturity || 0,
-          'Total Principal': response.data.totalPrincipal || 0,
-          'total_principal': response.data.totalPrincipal || 0,
-          'FRED Benchmark': response.data.fred?.benchmark_rate || null,
-          'fred_benchmark': response.data.fred?.benchmark_rate || null,
-          'Worksheet': currentSheetName.value || 'Calculated'
-        }
-
-        const existingRows = instrumentSummary.value.rows || []
-        const id = summaryRow['Instrument Name'] + '_' + (summaryRow['Worksheet'] || '')
-        const exists = existingRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
-        if (!exists) {
-          instrumentSummary.value.rows.push(summaryRow)
+          const existingRows = instrumentSummary.value.rows || []
+          const mergedRows = [...existingRows]
+          rows.forEach(newRow => {
+            const id = newRow['Instrument Name'] + '_' + (newRow['Worksheet'] || '')
+            const exists = mergedRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
+            if (!exists) mergedRows.push(newRow)
+          })
           const allCols = new Set()
-          instrumentSummary.value.rows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-          instrumentSummary.value.columns = Array.from(allCols)
+          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+          instrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          console.log('🔍 Updated instrumentSummary:', instrumentSummary.value)
+
+          const agg = computeAggregate(mergedRows)
+          const uniqueNames = new Set(mergedRows.map(r => r['Instrument Name']))
+          agg.instrumentCount = uniqueNames.size
+          console.log('🔍 Computed aggregate:', agg)
+
+          allCalculations.value = agg
+          selectedCalculations.value = agg
+          console.log('🔍 Set allCalculations.value:', allCalculations.value)
+          console.log('🔍 Set selectedCalculations.value:', selectedCalculations.value)
+        } else {
+          // Single instrument case - use aggregated values directly
+          console.log('🔍 Processing single instrument case')
+          const instrumentName = columnMapping.value['Instrument Name']
+            ? (cleanedData.value[0]?.[columnMapping.value['Instrument Name']] || instrumentLabel.value)
+            : instrumentLabel.value
+
+          const summaryRow = {
+            'Instrument Name': instrumentName,
+            'Instrument Type': instrumentType.value,
+            'Total Value': response.data.totalValue || 0,
+            'total_value': response.data.totalValue || 0,
+            'Instrument Count': response.data.instrumentCount || 0,
+            'instrument_count': response.data.instrumentCount || 0,
+            'Avg Rate': response.data.avgRate || 0,
+            'avg_rate': response.data.avgRate || 0,
+            'Weighted Avg Rate': response.data.weightedAvgRate || 0,
+            'weighted_avg_rate': response.data.weightedAvgRate || 0,
+            'Total Interest': response.data.totalInterest || 0,
+            'total_interest': response.data.totalInterest || 0,
+            'Interest Earned': response.data.interestEarned || 0,
+            'interest_earned': response.data.interestEarned || 0,
+            'Annual Yield': response.data.annualYield || 0,
+            'annual_yield': response.data.annualYield || 0,
+            'Effective Annual Rate': response.data.effectiveAnnualRate || 0,
+            'effective_annual_rate': response.data.effectiveAnnualRate || 0,
+            'Avg Days to Maturity': response.data.avgDaysToMaturity || 0,
+            'avg_days_to_maturity': response.data.avgDaysToMaturity || 0,
+            'Total Principal': response.data.totalPrincipal || 0,
+            'total_principal': response.data.totalPrincipal || 0,
+            'FRED Benchmark': response.data.fred?.benchmark_rate || null,
+            'fred_benchmark': response.data.fred?.benchmark_rate || null,
+            'Worksheet': currentSheetName.value || 'Calculated'
+          }
+          console.log('🔍 Created summaryRow:', summaryRow)
+
+          const existingRows = instrumentSummary.value.rows || []
+          const id = summaryRow['Instrument Name'] + '_' + (summaryRow['Worksheet'] || '')
+          const exists = existingRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
+          if (!exists) {
+            instrumentSummary.value.rows.push(summaryRow)
+            const allCols = new Set()
+            instrumentSummary.value.rows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+            instrumentSummary.value.columns = Array.from(allCols)
+          }
+          console.log('🔍 Updated instrumentSummary:', instrumentSummary.value)
+
+          const agg = computeAggregate(instrumentSummary.value.rows)
+          const uniqueNames = new Set(instrumentSummary.value.rows.map(r => r['Instrument Name']))
+          agg.instrumentCount = uniqueNames.size
+          console.log('🔍 Computed aggregate:', agg)
+
+          allCalculations.value = agg
+          selectedCalculations.value = agg
+          console.log('🔍 Set allCalculations.value:', allCalculations.value)
+          console.log('🔍 Set selectedCalculations.value:', selectedCalculations.value)
         }
 
-        const agg = computeAggregate(instrumentSummary.value.rows)
-        const uniqueNames = new Set(instrumentSummary.value.rows.map(r => r['Instrument Name']))
-        agg.instrumentCount = uniqueNames.size
-        allCalculations.value = agg
-        selectedCalculations.value = agg
+        console.log('🔍 Final state:', {
+          allCalculations: allCalculations.value,
+          selectedCalculations: selectedCalculations.value,
+          instrumentSummary: instrumentSummary.value,
+          calculationFields: calculationFields.value
+        })
+        saveSessionData()
+      } else {
+        // Show the actual error from the backend
+        const errorMsg = response?.message || response?.error || 'Unknown error'
+        console.error('❌ Backend calculation failed:', errorMsg)
+        console.error('❌ Full response:', response)
+        alert('Calculation failed: ' + errorMsg)
       }
-
-      console.log('Calculations synced to instrumentSummary')
-      saveSessionData()
-    } else {
-      console.error('Backend calculation failed:', response?.message)
+    } catch (err) {
+      console.error('❌ Error calling backend calculation:', err)
+      console.error('❌ Error details:', err.message)
+      console.error('❌ Error stack:', err.stack)
+      alert('Error calculating metrics: ' + (err.message || 'Unknown error'))
     }
-  } catch (err) {
-    console.error('Error calling backend calculation:', err)
-  }
   await enrichCalculationsWithFred()
   debouncedSave()
   forceUpdate.value++
 }
 
+// ===== continueToVisualizations =====
 async function continueToVisualizations() {
   if (!hasCleanedData.value) {
     alert('Please clean your data first.')
@@ -2844,7 +2930,9 @@ async function continueToVisualizations() {
   if (!allCalculations.value.totalValue) {
     await calculateMetrics()
   }
+  await nextTick()
   activeTab.value = 'visualizations'
+  await nextTick()
   forceUpdate.value++
   saveSessionData()
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
@@ -2854,10 +2942,13 @@ async function continueToVisualizations() {
   }
 }
 
+// ===== continueFromVisualizations =====
 async function continueFromVisualizations() {
   if (!hasCleanedData.value) { alert('Please clean your data first.'); return }
   saveSessionData()
+  await nextTick()
   activeTab.value = 'summary'
+  await nextTick()
   forceUpdate.value++
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
@@ -2870,7 +2961,7 @@ const yieldCurveCache = new Map()
 const CACHE_TTL = 15 * 60 * 1000
 
 // ================================================================
-// fetchYieldCurve – uses real FRED data only (no mock)
+// fetchYieldCurve – uses real FRED data only
 // ================================================================
 async function fetchYieldCurve() {
   const country = effectiveCountry.value
@@ -2996,6 +3087,7 @@ function updateFredBenchmark() {
   }
 }
 
+// ===== renderYieldCurveChart with dynamic x-axis labels =====
 async function renderYieldCurveChart() {
   if (!yieldCurveChart.value || !yieldCurveData.value.length) {
     if (chartInstanceRef.current) {
@@ -3101,12 +3193,17 @@ async function renderYieldCurveChart() {
           min: 0,
           max: maxX,
           ticks: {
-            stepSize: stepSize,
-            autoSkip: false,
             callback: function(value) {
-              if (Number.isInteger(value) && value >= 0) return value.toString()
+              const closest = filteredData.find(p => Math.abs(p.maturity - value) < 0.01)
+              if (closest && closest.maturityLabel) {
+                return closest.maturityLabel
+              }
+              if (Number.isInteger(value) && value >= 0) {
+                return value.toString()
+              }
               return null
-            }
+            },
+            stepSize: stepSize
           }
         },
         y: {
@@ -3400,12 +3497,9 @@ async function saveToSession() {
   }
 
   try {
-    // 1. Always save workflow first (preserve data even if version creation fails)
     await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
     console.log('Workflow saved for session:', sid)
 
-    // 2. Create a version record
-    console.log('Creating version for session:', sid, 'instrument:', instrumentType.value)
     const response = await api.versionAPI.create(
       sid,
       instrumentType.value,
@@ -3415,15 +3509,12 @@ async function saveToSession() {
     )
     console.log('Version created:', response)
 
-    // 3. Force refresh session to get updated version_count from backend
     await refreshSessionVersionCount(sid)
 
-    // 4. Ensure version count is at least 1 (first version should be v1, not v0)
     if (!activeSession.value.version_count || activeSession.value.version_count === 0) {
       activeSession.value.version_count = 1
     }
 
-    // 5. Dispatch event for dashboard
     window.dispatchEvent(new CustomEvent('session-updated', {
       detail: {
         sessionId: sid,
@@ -3436,7 +3527,6 @@ async function saveToSession() {
 
   } catch (err) {
     console.error('Failed to save version:', err)
-    // Workflow already saved, so user data is safe
     alert('⚠️ Workflow data was saved, but version creation failed. Please check the server logs. Error: ' + err.message)
   }
 }
@@ -3696,7 +3786,6 @@ async function captureChartImage() {
           return
         } catch (e) { console.warn('DOM canvas capture failed', e) }
       }
-      // Try to find any canvas in the document
       const anyCanvas = document.querySelector('canvas')
       if (anyCanvas && anyCanvas.toDataURL) {
         try {
@@ -3706,7 +3795,7 @@ async function captureChartImage() {
       }
       console.warn('No canvas found for chart capture')
       resolve('')
-    }, 1000) // Increased delay to ensure chart is rendered
+    }, 1000)
   })
 }
 
@@ -4188,11 +4277,7 @@ async function checkAndReset() {
   }, 300)
 }
 
-// ================================================================
-// CORRECTED: onMounted – loads session from route
-// ================================================================
 onMounted(async () => {
-  // Try multiple ways to get the active session
   const qSid = route.query.session
   if (qSid) {
     const s = await sessionManager.getSession(String(qSid))
@@ -4201,12 +4286,10 @@ onMounted(async () => {
       sessionManager.setActiveSession(s)
     }
   }
-  // If still no active session, try to get from sessionManager
   if (!activeSession.value) {
     const current = sessionManager.getActiveSession()
     if (current) activeSession.value = current
   }
-  // If still no session, try localStorage
   if (!activeSession.value) {
     const storedSession = localStorage.getItem('activeSession')
     if (storedSession) {
@@ -4269,6 +4352,7 @@ onBeforeUnmount(() => {
 .progress-step.completed .step-circle { background: #4CAF50; color: white; }
 .step-label { font-size: 11px; color: #999; margin-top: 8px; }
 .progress-step.active .step-label { color: #0B2044; font-weight: 600; }
+.tab-content-wrapper { overflow: auto; height: 100%; padding: 4px 0; }
 .content-card { margin-bottom: 20px; }
 .upload-area { border: 2px dashed #ccc; border-radius: 12px; padding: 50px; text-align: center; cursor: pointer; transition: all 0.3s; }
 .upload-area:hover { border-color: #0B2044; background: #f8f9ff; }
@@ -4486,7 +4570,6 @@ onBeforeUnmount(() => {
 .text-success { color: #0f7b4a; }
 .text-warning { color: #b0720a; }
 
-/* Extracted values styles for single-instrument sheets */
 .extracted-values-list {
   display: flex;
   flex-direction: column;
