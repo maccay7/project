@@ -10,18 +10,34 @@ import {
 import { autoMatchColumns, getDisplayColumns } from '@/utils/instrumentMapping'
 
 const FINANCIAL_SYNONYMS = {
-  principal: ['principal', 'face value', 'nominal value', 'investment amount', 'capital', 'deposit amount', 'initial investment', 'amount invested', 'notional', 'amount'],
-  interestRate: ['interest rate', 'rate', 'coupon', 'coupon rate', 'annual rate', 'fixed rate', 'lending rate', 'investment rate', 'yield rate', 'return', 'yield'],
-  daysToMaturity: ['days to maturity', 'term', 'tenor', 'maturity days', 'duration days', 'period', 'days'],
-  issueDate: ['issue date', 'start date', 'effective date', 'trade date', 'settlement date', 'value date', 'origination date'],
-  maturityDate: ['maturity date', 'end date', 'due date', 'redemption date', 'expiry date'],
-  faceValue: ['face value', 'par value', 'nominal', 'amount', 'principal'],
-  couponRate: ['coupon rate', 'coupon', 'rate', 'interest rate'],
-  yield: ['yield', 'ytm', 'yield to maturity', 'return', 'effective yield'],
-  frequency: ['frequency', 'payment frequency', 'coupon frequency', 'period', 'semi-annual', 'quarterly', 'annual'],
-  discountRate: ['discount rate', 'discount', 'rate', 'bank discount'],
-  purchasePrice: ['purchase price', 'buy price', 'price paid', 'acquisition price'],
-  redemptionValue: ['redemption value', 'call value', 'maturity value'],
+  // Money Market Instruments
+  principal: ['principal', 'face value', 'par value', 'nominal', 'amount', 'notional', 'investment amount', 'capital', 'deposit amount', 'initial investment', 'starting balance'],
+  interestRate: ['interest rate', 'rate', 'yield', 'annual rate', 'nominal rate', 'coupon', 'stated rate', 'apr', 'effective rate'],
+  daysToMaturity: ['days to maturity', 'term', 'tenor', 'maturity days', 'duration days', 'period', 'days', 'contract days'],
+  issueDate: ['issue date', 'start date', 'effective date', 'trade date', 'settlement date', 'origination date', 'value date'],
+  maturityDate: ['maturity date', 'end date', 'due date', 'redemption date', 'expiry date', 'termination date'],
+  purchasePrice: ['purchase price', 'buy price', 'acquisition price', 'entry price', 'cost', 'price paid'],
+  settlementAmount: ['settlement amount', 'settlement value', 'cash flow', 'proceeds'],
+  
+  // T-Bills
+  faceValue: ['face value', 'par value', 'redemption value', 'maturity value', 'amount', 'principal', 'nominal'],
+  discountRate: ['discount rate', 'bank discount', 'discount yield', 'rate', 't-bill rate', 'auction rate', 'discount'],
+  auctionDate: ['auction date', 'issue date', 'start date', 'settlement date', 'trade date'],
+  
+  // Bonds
+  couponRate: ['coupon rate', 'coupon', 'interest rate', 'nominal rate', 'stated rate', 'annual coupon', 'fixed rate'],
+  couponFrequency: ['coupon frequency', 'frequency', 'payment frequency', 'period', 'semi-annual', 'quarterly', 'annual', 'coupon period'],
+  price: ['price', 'market price', 'clean price', 'dirty price', 'current price', 'flat price', 'quoted price'],
+  yield: ['yield', 'yield to maturity', 'ytm', 'required return', 'market yield', 'effective yield', 'redemption yield'],
+  callDate: ['call date', 'first call date', 'callable date', 'early redemption date'],
+  callPrice: ['call price', 'call premium', 'redemption price', 'sinking fund price'],
+  putDate: ['put date', 'puttable date', 'putable date'],
+  putPrice: ['put price', 'put premium'],
+  benchmarkRate: ['benchmark', 'risk-free rate', 'government yield', 'sofr', 'treasury yield'],
+  creditSpread: ['credit spread', 'g-spread', 'z-spread', 'asset swap spread', 'oas'],
+  inflationRate: ['inflation', 'cpi', 'inflation rate', 'real yield proxy'],
+  
+  // Common fields
   instrumentName: ['instrument', 'security', 'name', 'description', 'issuer', 'counterparty', 'company', 'entity', 'bond name', 'tbill name'],
   currency: ['currency', 'ccy', 'curr', 'denomination'],
   country: ['country', 'nation', 'jurisdiction', 'region', 'market']
@@ -116,10 +132,20 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     error.value = ''
     uploadProgress.value = 0
 
+    // Add timeout protection
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('File parsing timeout - file may be too large or corrupted')), 60000)
+    )
+
     try {
-      const arrayBuffer = await file.arrayBuffer()
+      const arrayBuffer = await Promise.race([
+        file.arrayBuffer(),
+        timeoutPromise
+      ])
       originalFileBuffer.value = arrayBuffer
       uploadedFile.value = new File([file], file.name, { type: file.type })
+
+      uploadProgress.value = 30
 
       // Parse full workbook with styles and merged cells for proper display
       const workbook = XLSX.read(arrayBuffer, { 
@@ -128,6 +154,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
         cellStyles: true,
         cellNF: true,
       })
+
+      uploadProgress.value = 60
 
       const sheets = []
       for (const sheetName of workbook.SheetNames) {
