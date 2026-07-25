@@ -33,65 +33,79 @@ def parse_date(value: Any) -> date:
 def days_between(date1: date, date2: date) -> int:
     return abs((date2 - date1).days)
 
-# ===== 🔥 FIXED: Better normalization with more aliases =====
+# ===== 🔥 COMPREHENSIVE: Industry-standard field synonyms =====
 def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(row, dict):
         return {}
 
     aliases = {
+        # Money Market Instruments
+        'principal': ['principal', 'face value', 'par value', 'nominal', 'amount', 'notional', 'investment amount', 'capital', 
+                      'deposit amount', 'initial investment', 'starting balance', 'facevalue', 'parvalue', 'investmentamount',
+                      'depositamount', 'initialinvestment', 'startingbalance'],
+        'interest_rate': ['interest rate', 'rate', 'yield', 'annual rate', 'nominal rate', 'coupon', 'stated rate', 'apr', 
+                         'effective rate', 'interestrate', 'annualrate', 'nominalrate', 'statedrate', 'effectiverate'],
+        'days_to_maturity': ['days to maturity', 'term', 'tenor', 'maturity days', 'duration days', 'period', 'days', 
+                            'contract days', 'daystomaturity', 'maturitydays', 'durationdays', 'contractdays'],
+        'issue_date': ['issue date', 'start date', 'effective date', 'trade date', 'settlement date', 'origination date', 
+                      'value date', 'issuedate', 'startdate', 'effectivedate', 'tradedate', 'settlementdate', 
+                      'originationdate', 'valuedate'],
+        'maturity_date': ['maturity date', 'end date', 'due date', 'redemption date', 'expiry date', 'termination date',
+                         'maturitydate', 'enddate', 'duedate', 'redemptiondate', 'expirydate', 'terminationdate'],
+        'purchase_price': ['purchase price', 'buy price', 'acquisition price', 'entry price', 'cost', 'price paid',
+                         'purchaseprice', 'buyprice', 'acquisitionprice', 'entryprice', 'pricepaid'],
+        'settlement_amount': ['settlement amount', 'settlement value', 'cash flow', 'proceeds', 'settlementamount',
+                            'settlementvalue', 'cashflow'],
+        
+        # T-Bills
+        'face_value': ['face value', 'par value', 'redemption value', 'maturity value', 'amount', 'principal', 'nominal',
+                      'facevalue', 'parvalue', 'redemptionvalue', 'maturityvalue'],
+        'discount_rate': ['discount rate', 'bank discount', 'discount yield', 'rate', 't-bill rate', 'auction rate', 'discount',
+                         'discountrate', 'bankdiscount', 'discountyield', 'tbillrate', 'auctionrate'],
+        'auction_date': ['auction date', 'issue date', 'start date', 'settlement date', 'trade date',
+                        'auctiondate', 'issuedate', 'startdate', 'settlementdate', 'tradedate'],
+        
+        # Bonds
+        'coupon_rate': ['coupon rate', 'coupon', 'interest rate', 'nominal rate', 'stated rate', 'annual coupon', 'fixed rate',
+                       'couponrate', 'interestrate', 'nominalrate', 'statedrate', 'annualcoupon', 'fixedrate'],
+        'coupon_frequency': ['coupon frequency', 'frequency', 'payment frequency', 'period', 'semi-annual', 'quarterly', 
+                           'annual', 'coupon period', 'couponfrequency', 'paymentfrequency', 'semiannual', 'quarterly'],
+        'price': ['price', 'market price', 'clean price', 'dirty price', 'current price', 'flat price', 'quoted price',
+                 'marketprice', 'cleanprice', 'dirtyprice', 'currentprice', 'flatprice', 'quotedprice'],
+        'yield': ['yield', 'yield to maturity', 'ytm', 'required return', 'market yield', 'effective yield', 'redemption yield',
+                'yieldtomaturity', 'requiredreturn', 'marketyield', 'effectiveyield', 'redemptionyield'],
+        'call_date': ['call date', 'first call date', 'callable date', 'early redemption date',
+                     'calldate', 'firstcalldate', 'callabledate', 'earlyredemptiondate'],
+        'call_price': ['call price', 'call premium', 'redemption price', 'sinking fund price',
+                      'callprice', 'callpremium', 'redemptionprice', 'sinkingfundprice'],
+        'put_date': ['put date', 'puttable date', 'putable date', 'putdate', 'puttabledate', 'putabledate'],
+        'put_price': ['put price', 'put premium', 'putprice', 'putpremium'],
+        'benchmark_rate': ['benchmark', 'risk-free rate', 'government yield', 'sofr', 'treasury yield',
+                         'benchmarkrate', 'riskfreerate', 'governmentyield', 'treasuryyield'],
+        'credit_spread': ['credit spread', 'g-spread', 'z-spread', 'asset swap spread', 'oas',
+                        'creditspread', 'gspread', 'zspread', 'assetswapspread'],
+        'inflation_rate': ['inflation', 'cpi', 'inflation rate', 'real yield proxy',
+                         'inflationrate', 'realyieldproxy'],
+        
+        # Common fields
+        'instrument': ['instrument', 'security', 'name', 'description', 'issuer', 'counterparty', 'company', 'entity', 
+                      'bond name', 'tbill name', 'instrumentname', 'securityname', 'bondname', 'tbillname'],
+        'currency': ['currency', 'ccy', 'curr', 'denomination'],
+        'country': ['country', 'nation', 'jurisdiction', 'region', 'market'],
+        
+        # Legacy compatibility
         'date': ['date', 'transaction date', 'trade date', 'settlement date', 'value date', 'start date', 'issue date',
                  'transactiondate', 'tradedate', 'settlementdate', 'valuedate', 'startdate', 'issuedate'],
-        'instrument': ['instrument', 'security', 'name', 'description', 'asset', 'issuer', 'entity', 'company', 'ticker',
-                       'symbol', 'counterparty'],
-        'rate': ['rate', 'interest rate', 'coupon rate', 'discount rate', 'yield', 'return', 'apr', 'interestrate',
-                 'couponrate', 'discountrate', 'annual rate', 'nominal rate'],
         'amount': ['amount', 'face value', 'facevalue', 'value', 'price', 'notional', 'principal', 'investment', 'face',
                    'nominal', 'par', 'principal amount', 'investment amount'],
-        'maturity_date': ['maturitydate', 'maturity date', 'maturity', 'matures', 'end date', 'due date', 'expiry date',
-                          'maturity_date', 'end_date', 'due_date', 'expiry_date'],
-        'days_to_maturity': ['daystomaturity', 'days to maturity', 'tenor', 'days', 'term', 'duration days', 'term_days',
-                             'termdays', 'duration', 'time to maturity'],
-        'principal': ['principal', 'amount', 'face value', 'notional', 'investment amount', 'principal amount',
-                      'initial investment', 'starting amount'],
-        'interest_rate': ['interestrate', 'interest rate', 'rate', 'coupon', 'yield', 'annual rate', 'nominal rate',
-                          'stated rate', 'coupon rate'],
-        'discount_rate': ['discountrate', 'discount rate', 'discount', 'rate', 'bank discount', 'discount yield'],
-        'price': ['price', 'market price', 'current price', 'purchase price', 'bid price', 'ask price', 'clean price',
-                  'dirty price', 'currentprice', 'purchaseprice', 'marketprice'],
-        'face_value': ['facevalue', 'face value', 'face', 'value', 'amount', 'principal', 'par value', 'nominal', 'par',
-                       'notional amount'],
+        'rate': ['rate', 'interest rate', 'coupon rate', 'discount rate', 'yield', 'return', 'apr', 'interestrate',
+                 'couponrate', 'discountrate', 'annual rate', 'nominal rate'],
+        'maturity': ['maturitydate', 'maturity date', 'maturity', 'matures', 'end date', 'due date', 'expiry date',
+                    'maturity_date', 'end_date', 'due_date', 'expiry_date'],
+        'days': ['daystomaturity', 'days to maturity', 'tenor', 'days', 'term', 'duration days', 'term_days',
+                'termdays', 'duration', 'time to maturity'],
         'bond_name': ['bondname', 'bond name', 'bond', 'security', 'issuer', 'description', 'name', 'instrument name',
-                      'security name'],
-        'coupon_rate': ['couponrate', 'coupon rate', 'coupon', 'rate', 'interest rate', 'annual coupon', 'stated coupon',
-                        'nominal coupon'],
-        'yield': ['yield', 'yield to maturity', 'ytm', 'return', 'effective yield', 'current yield', 'annual yield',
-                  'bond yield'],
-        'issue_date': ['issuedate', 'issue date', 'issued', 'issuance date', 'start date', 'origination date',
-                       'settlement date'],
-        'frequency': ['frequency', 'payment frequency', 'coupon frequency', 'period', 'semiannual', 'quarterly', 'annual',
-                      'semi-annual', 'payment period', 'coupon period'],
-        'accrued_interest': ['accruedinterest', 'accrued interest', 'accrued', 'interest accrued', 'accrued amount'],
-        'redemption_value': ['redemptionvalue', 'redemption value', 'call value', 'maturity value', 'redemption price',
-                             'call price'],
-        'tbill_name': ['tbillname', 't-bill name', 'tbill', 't bill', 'security', 'instrument', 'treasury bill',
-                       'treasury', 'bill name'],
-        'purchase_price': ['purchaseprice', 'purchase price', 'buy price', 'price paid', 'acquisition price',
-                           'entry price'],
-        'term_days': ['termdays', 'term_days', 'term days', 'days', 'tenor', 'duration days', 'maturity days',
-                      'time to maturity days'],
-        'current_price': ['currentprice', 'current_price', 'price', 'market price', 'trading price', 'spot price'],
-        'years_to_maturity': ['yearstomaturity', 'years_to_maturity', 'years', 'maturity years',
-                              'time to maturity years', 'remaining years'],
-        'counterparty': ['counterparty', 'issuer', 'borrower', 'entity', 'company', 'bank', 'institution'],
-        'currency': ['currency', 'ccy', 'curr', 'denomination', 'denom'],
-        'country': ['country', 'nation', 'jurisdiction', 'region', 'market'],
-        'settlement_date': ['settlementdate', 'settlement date', 'value date', 'value date', 'settlement'],
-        'issue_price': ['issue price', 'issueprice', 'offering price', 'original price', 'par price'],
-        'call_date': ['call date', 'calldate', 'call date', 'callable date', 'redemption date'],
-        'put_date': ['put date', 'putdate', 'put date', 'puttable date'],
-        'rating': ['rating', 'credit rating', 'credit rating', 'moody rating', 's&p rating', 'fitch rating'],
-        'sector': ['sector', 'industry', 'segment', 'category', 'asset class'],
-        'type': ['type', 'instrument type', 'security type', 'asset type', 'category']
+                     'security name']
     }
 
     def normalize_key(key: str) -> str:
