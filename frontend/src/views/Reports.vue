@@ -363,10 +363,16 @@ function downloadFullReport() {
   URL.revokeObjectURL(url)
 }
 
-function formatForExcel(value, type = 'number') {
+function formatForExcel(value, type = 'number', key = '') {
   if (value === null || value === undefined || value === '') return ''
   const num = parseFloat(value)
   if (isNaN(num)) return value
+  
+  // Round time fields to whole numbers
+  const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
+  if (isTimeField) {
+    return Math.round(num)
+  }
   
   if (type === 'percentage') {
     return Math.round(num * 10) / 10  // Round to 1 decimal place
@@ -380,11 +386,11 @@ function formatRowForExcel(row) {
   const formatted = {}
   for (const [key, value] of Object.entries(row)) {
     if (key.toLowerCase().includes('rate') || key.toLowerCase().includes('yield') || key.toLowerCase().includes('coupon') || key.toLowerCase().includes('discount')) {
-      formatted[key] = formatForExcel(value, 'percentage')
+      formatted[key] = formatForExcel(value, 'percentage', key)
     } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('price') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('principal') || key.toLowerCase().includes('interest')) {
-      formatted[key] = formatForExcel(value, 'money')
+      formatted[key] = formatForExcel(value, 'money', key)
     } else {
-      formatted[key] = value
+      formatted[key] = formatForExcel(value, 'number', key)
     }
   }
   return formatted

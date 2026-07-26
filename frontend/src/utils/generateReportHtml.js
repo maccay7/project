@@ -1,13 +1,14 @@
 /**
  * Generate IFRS‑style report HTML with yield curve appendix from session filters.
- * @param {Array} data - The instrument data rows.
- * @param {string} instrument - Instrument type (e.g., 'money-market').
+ * @param {Array} data - The instrument data rows (can be single instrument or all instruments).
+ * @param {string} instrument - Instrument type (e.g., 'money-market') or 'portfolio' for all instruments.
  * @param {string} session - Session name.
  * @param {string} date - Report generation date.
  * @param {string} valuationDate - Valuation date (YYYY-MM-DD).
  * @param {string} chartImageData - Base64 PNG of yield curve chart.
  * @param {Object} fredFilters - { country, currency, maturity } from session.
  * @param {Array} yieldCurveData - Array of { maturity, maturityLabel, rate }.
+ * @param {Object} allInstrumentsData - Object with instrument types as keys and their data arrays as values.
  * @returns {string} Full HTML report.
  */
 export function generateReportHtml(
@@ -18,15 +19,32 @@ export function generateReportHtml(
   valuationDate,
   chartImageData = '',
   fredFilters = { country: 'US', currency: 'USD', maturity: '1Y' },
-  yieldCurveData = []
+  yieldCurveData = [],
+  allInstrumentsData = {}
 ) {
   const valDate = valuationDate || new Date().toISOString().split('T')[0]
-  const totalValue = data.reduce((s, r) => s + (parseFloat(r.FaceValue || r.Amount || r.Principal || 0)), 0)
-  const totalInterest = data.reduce((s, r) => s + (parseFloat(r.InterestEarned || r.Interest || 0)), 0)
-  const rates = data.map(r => parseFloat(r.Rate || r.InterestRate || r.CouponRate || r.DiscountRate || 0)).filter(r => !isNaN(r) && r > 0)
+  
+  // Handle portfolio report with all instruments
+  let reportData = data
+  let reportInstrument = instrument
+  if (instrument === 'portfolio' && allInstrumentsData && Object.keys(allInstrumentsData).length > 0) {
+    // Combine all instrument data
+    reportData = []
+    Object.values(allInstrumentsData).forEach(instrumentRows => {
+      if (Array.isArray(instrumentRows)) {
+        reportData = reportData.concat(instrumentRows)
+      }
+    })
+    reportInstrument = 'Portfolio'
+  }
+  
+  // Use calculated values from backend
+  const totalValue = reportData.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['total_value'] || r['Calculated Value'] || r['calculated_value'] || r.FaceValue || r.Amount || r.Principal || 0)), 0)
+  const totalInterest = reportData.reduce((s, r) => s + (parseFloat(r['Total Interest'] || r['total_interest'] || r['Interest Earned'] || r['interest_earned'] || r.Interest || 0)), 0)
+  const rates = reportData.map(r => parseFloat(r['Avg Rate'] || r['avg_rate'] || r.Rate || r.InterestRate || r.CouponRate || r.DiscountRate || 0)).filter(r => !isNaN(r) && r > 0)
   const avgRate = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0
 
-  const instType = instrument.toLowerCase()
+  const instType = reportInstrument.toLowerCase()
   let methodology = '',
     formulas = '',
     assumptions = ''
@@ -42,6 +60,10 @@ export function generateReportHtml(
     methodology = 'Treasury Bills: Short-term government securities valued using discount yield methodology.'
     formulas = 'Discount amount = Face value × (Discount rate/100) × (Days to maturity/360). Effective yield = (Face value / Price − 1) × (365 / Days to maturity) × 100.'
     assumptions = 'Bank discount basis (360 days/year) for discount rate; bond equivalent yield uses 365 days.'
+  } else if (instType === 'portfolio') {
+    methodology = 'Portfolio Valuation: Combined valuation of multiple fixed income instrument types including money market instruments, corporate bonds, and treasury bills.'
+    formulas = 'Portfolio Value = Σ Individual Instrument Values. Each instrument is valued using its appropriate methodology.'
+    assumptions = 'Market-consistent valuation using appropriate yield curves for each instrument type.'
   } else {
     methodology = 'General fixed income valuation methodology.'
     formulas = 'Present value of expected future cash flows discounted at appropriate market rates.'
@@ -49,7 +71,7 @@ export function generateReportHtml(
   }
 
   let instrumentRows = ''
-  data.forEach((item, idx) => {
+  reportData.forEach((item, idx) => {
     const name = item.Instrument || item.BondName || item.TBillName || `Instrument ${idx + 1}`
     const faceValue = parseFloat(item.FaceValue || item.Amount || item.Principal || 0)
     const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)

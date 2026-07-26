@@ -1,5 +1,11 @@
 <template>
-  <FixedLayout>
+  <div class="reports-view-fullscreen" v-if="showFullscreenReport">
+    <button class="close-fullscreen-btn" @click="showFullscreenReport = false">
+      <v-icon>mdi-close</v-icon> Close Report
+    </button>
+    <iframe :srcdoc="reportHtml" frameborder="0" class="fullscreen-iframe"></iframe>
+  </div>
+  <FixedLayout v-else>
     <div class="reports-view">
       <div class="page-header">
         <h1>Generate Report</h1>
@@ -18,6 +24,9 @@
         </v-btn>
         <v-btn color="#4CAF50" @click="downloadFullReport">
           <v-icon left>mdi-download</v-icon> Download Full Report (HTML)
+        </v-btn>
+        <v-btn color="#9C27B0" @click="showFullscreenReport = true" v-if="reportHtml">
+          <v-icon left>mdi-fullscreen</v-icon> View Fullscreen
         </v-btn>
       </div>
 
@@ -132,6 +141,7 @@ const dataset = ref(null)
 const showDatasetPreview = ref(false)
 const sessionName = ref('')
 const reportHtml = ref('')
+const showFullscreenReport = ref(false)
 
 // ===== Helper Functions =====
 async function resolveSession() {
@@ -178,8 +188,12 @@ async function loadSummaryData(sessionId, instrumentType) {
 // ===== LOAD FRED DATA FROM SESSION =====
 async function loadFredDataFromSession(sessionId, instrumentType) {
   try {
+    console.log('Loading FRED data from session:', { sessionId, instrumentType })
     const wf = await sessionManager.getInstrumentWorkflow(sessionId, instrumentType)
+    console.log('Workflow data:', wf)
     if (wf) {
+      console.log('FRED filters from workflow:', wf.fredFilters)
+      console.log('Yield curve data from workflow:', wf.yieldCurveData)
       return {
         fredFilters: wf.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
         yieldCurveData: wf.yieldCurveData || []
@@ -188,6 +202,7 @@ async function loadFredDataFromSession(sessionId, instrumentType) {
   } catch (e) {
     console.warn('Could not load Fred data from session:', e)
   }
+  console.log('Returning default FRED data')
   return { fredFilters: { country: 'US', currency: 'USD', maturity: '1Y' }, yieldCurveData: [] }
 }
 
@@ -307,15 +322,22 @@ async function generatePreview() {
       }
     }
     if (fullData.length) {
-      let chartImage = ''
-      try {
-        const canvas = document.querySelector('.chart-container--fred canvas')
-        if (canvas && canvas.toDataURL) {
-          chartImage = canvas.toDataURL('image/png', 1.0)
+      let chartImage = data.chartImage || ''
+      if (!chartImage) {
+        try {
+          console.log('Attempting to capture chart from DOM...')
+          const canvas = document.querySelector('.chart-container--fred canvas')
+          if (canvas && canvas.toDataURL) {
+            chartImage = canvas.toDataURL('image/png', 1.0)
+            console.log('Chart captured from DOM:', chartImage ? 'success' : 'failed')
+          } else {
+            console.warn('No canvas found in DOM for chart capture')
+          }
+        } catch (e) {
+          console.warn('Could not capture chart:', e)
         }
-      } catch (e) {
-        console.warn('Could not capture chart:', e)
       }
+      console.log('Using chart image for report:', chartImage ? 'yes' : 'no')
       reportHtml.value = generateReportHtml(
         fullData,
         instrumentName,
@@ -324,7 +346,8 @@ async function generatePreview() {
         valuationDate,
         chartImage,
         data.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
-        data.yieldCurveData || []
+        data.yieldCurveData || [],
+        data.allWorkedData || {}
       )
     } else {
       reportHtml.value = '<p>No data available for report. Please run calculations first.</p>'
@@ -379,10 +402,17 @@ function downloadFullReport() {
 }
 
 // ===== Other helper functions =====
-function formatForExcel(value, type = 'number') {
+function formatForExcel(value, type = 'number', key = '') {
   if (value === null || value === undefined || value === '') return ''
   const num = parseFloat(value)
   if (isNaN(num)) return value
+  
+  // Round time fields to whole numbers
+  const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
+  if (isTimeField) {
+    return Math.round(num)
+  }
+  
   if (type === 'percentage') {
     return Math.round(num * 10) / 10
   } else if (type === 'money') {
@@ -395,11 +425,11 @@ function formatRowForExcel(row) {
   const formatted = {}
   for (const [key, value] of Object.entries(row)) {
     if (key.toLowerCase().includes('rate') || key.toLowerCase().includes('yield') || key.toLowerCase().includes('coupon') || key.toLowerCase().includes('discount')) {
-      formatted[key] = formatForExcel(value, 'percentage')
+      formatted[key] = formatForExcel(value, 'percentage', key)
     } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('price') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('principal') || key.toLowerCase().includes('interest')) {
-      formatted[key] = formatForExcel(value, 'money')
+      formatted[key] = formatForExcel(value, 'money', key)
     } else {
-      formatted[key] = value
+      formatted[key] = formatForExcel(value, 'number', key)
     }
   }
   return formatted
@@ -574,4 +604,8 @@ onMounted(async () => {
 .viz-card h5 { margin: 0 0 8px 0; color: #0B2044; }
 .viz-stats .stat { display: flex; justify-content: space-between; font-size: 13px; }
 .report-preview-iframe-wrapper { margin: 16px 0; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; background: white; }
+.reports-view-fullscreen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: white; z-index: 2000; }
+.close-fullscreen-btn { position: fixed; top: 20px; right: 20px; z-index: 2001; background: #0B2044; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+.close-fullscreen-btn:hover { background: #1E88E5; }
+.fullscreen-iframe { width: 100%; height: 100%; border: none; }
 </style>

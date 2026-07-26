@@ -348,6 +348,18 @@
                       </v-card>
                     </v-col>
                   </v-row>
+                  
+                  <!-- ===== NEW: Cleaning Operations Performed ===== -->
+                  <div v-if="cleaningOperationsSummary.length" class="cleaning-operations-summary">
+                    <h4 class="operations-title">Operations Performed:</h4>
+                    <ul class="operations-list">
+                      <li v-for="(operation, index) in cleaningOperationsSummary" :key="index" class="operation-item">
+                        <v-icon size="16" color="#4CAF50">mdi-check-circle</v-icon>
+                        {{ operation }}
+                      </li>
+                    </ul>
+                  </div>
+                  
                   <p class="success-text text-center">✓ Data is now clean and ready for calculations</p>
                 </div>
 
@@ -387,11 +399,11 @@
                 <div class="summary-cards">
                   <div class="summary-card total" @click="showFormula('Total Portfolio Value')">
                     <div class="card-label">Total Portfolio Value</div>
-                    <div class="card-value">${{ allCalculations.totalValue?.toLocaleString() || 0 }}</div>
+                    <div class="card-value">${{ formatNumber(allCalculations.totalValue || 0) }}</div>
                   </div>
                   <div class="summary-card rate" @click="showFormula('Average Rate')">
                     <div class="card-label">{{ rateLabel }}</div>
-                    <div class="card-value">{{ allCalculations.avgRate || 0 }}%</div>
+                    <div class="card-value">{{ formatNumber(allCalculations.avgRate || 0) }}%</div>
                   </div>
                   <div class="summary-card count" @click="showFormula('Number of Instruments')">
                     <div class="card-label">Number of Instruments</div>
@@ -402,11 +414,11 @@
                 <div v-if="allCalculations.fred?.benchmark_rate" class="comparison-card fred-calc-card">
                   <div class="comparison-item">
                     <span class="comparison-label">FRED market benchmark ({{ allCalculations.fred.series_label }}):</span>
-                    <span class="comparison-value market">{{ allCalculations.fred.benchmark_rate }}%</span>
+                    <span class="comparison-value market">{{ formatNumber(allCalculations.fred.benchmark_rate) }}%</span>
                   </div>
                   <div class="comparison-item">
                     <span class="comparison-label">Spread vs your portfolio:</span>
-                    <span class="comparison-value" :class="(allCalculations.fred.spread_vs_market || 0) >= 0 ? 'negative' : 'positive'">{{ allCalculations.fred.spread_vs_market }}%</span>
+                    <span class="comparison-value" :class="(allCalculations.fred.spread_vs_market || 0) >= 0 ? 'negative' : 'positive'">{{ formatNumber(allCalculations.fred.spread_vs_market) }}%</span>
                   </div>
                   <small class="fred-meta">{{ allCalculations.fred.country_name || allCalculations.fred.country }} · {{ allCalculations.fred.currency }} · {{ allCalculations.fred.maturity }} · FRED</small>
                   <small v-if="allCalculations.fred.note" class="fred-meta">{{ allCalculations.fred.note }}</small>
@@ -501,14 +513,14 @@
               <div v-if="hasCleanedData && yieldCurveData.length" class="comparison-card">
                 <div class="comparison-item">
                   <span class="comparison-label">Portfolio Average Rate:</span>
-                  <span class="comparison-value portfolio">{{ portfolioAvgRate }}%</span>
+                  <span class="comparison-value portfolio">{{ formatNumber(portfolioAvgRate) }}%</span>
                 </div>
                 <div class="comparison-item">
                   <span class="comparison-label">Benchmark Yield ({{ selectedMaturityOptionLabel }}):</span>
-                  <span class="comparison-value market">{{ benchmarkYield !== null ? benchmarkYield + '%' : '—' }}</span>
+                  <span class="comparison-value market">{{ benchmarkYield !== null ? formatNumber(benchmarkYield) + '%' : '—' }}</span>
                 </div>
                 <div class="comparison-difference" :class="{ 'positive': benchmarkYield - portfolioAvgRate > 0, 'negative': benchmarkYield - portfolioAvgRate < 0 }">
-                  Difference: {{ benchmarkYield !== null ? (benchmarkYield - portfolioAvgRate).toFixed(2) : '—' }}%
+                  Difference: {{ benchmarkYield !== null ? formatNumber(benchmarkYield - portfolioAvgRate) : '—' }}%
                 </div>
               </div>
 
@@ -685,6 +697,15 @@
                       <button class="close-btn" @click="closeInstrumentExcelPopup">×</button>
                     </div>
                     <div class="popup-body">
+                      <div class="search-bar-container">
+                        <input 
+                          type="text" 
+                          v-model="instrumentSearchQuery" 
+                          placeholder="Search instruments..." 
+                          class="search-input"
+                        />
+                        <v-icon class="search-icon">mdi-magnify</v-icon>
+                      </div>
                       <p class="popup-instruction">Complete instrument summary with all calculated values.</p>
                       <div class="excel-table-wrapper">
                         <table class="excel-table">
@@ -1071,7 +1092,19 @@ const fixedValuesTracker = ref(new Map())
 const calculations = ref({})
 const allCalculations = ref({})
 const selectedCalculations = ref({})
-const cleaningStats = ref({ totalRows: 0, validRows: 0, removedRows: 0, fixedMissing: 0 })
+const cleaningStats = ref({ 
+  totalRows: 0, 
+  validRows: 0, 
+  removedRows: 0, 
+  fixedMissing: 0,
+  removedEmptyRows: 0,
+  removedSpecificColumnEmpty: 0,
+  standardizedNumeric: 0,
+  filledForward: 0,
+  filledBackward: 0,
+  removedDuplicates: 0,
+  operationsPerformed: []
+})
 const fileLoading = ref(false)
 const uploadError = ref('')
 const uploadProgress = ref(0)
@@ -1364,7 +1397,23 @@ function formatCalcValue(key, value) {
   if (value === null || value === undefined) return '—'
   const field = config.value.calculationFields.find(f => f.key === key)
   if (!field) return value
-  if (field.prefix) return field.prefix + value.toLocaleString()
+  
+  // Round numeric values to 2 decimal places, but round time values to whole numbers
+  if (typeof value === 'number' && !isNaN(value)) {
+    const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
+    if (isTimeField) {
+      const rounded = Math.round(value)
+      if (field.prefix) return field.prefix + rounded.toLocaleString()
+      if (field.suffix) return rounded.toLocaleString() + field.suffix
+      return rounded.toLocaleString()
+    }
+    const rounded = Math.round(value * 100) / 100
+    if (field.prefix) return field.prefix + rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    if (field.suffix) return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + field.suffix
+    return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
+  
+  if (field.prefix) return field.prefix + value
   if (field.suffix) return value + field.suffix
   return value
 }
@@ -1488,7 +1537,14 @@ function getCurrencyLabel(code) {
 
 function formatNumber(num) {
   if (num === undefined || num === null) return '0.00'
-  return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const rounded = Math.round(num * 100) / 100
+  return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function formatTimeValue(num) {
+  if (num === undefined || num === null) return '0'
+  const rounded = Math.round(num)
+  return rounded.toLocaleString()
 }
 
 function computeAnalytics(rows) {
@@ -1823,12 +1879,15 @@ async function readFileData(file) {
   try {
     const result = await worksheetWorkflow.handleFileUpload(file)
 
+    console.log('File upload result:', result)
+
     if (result.success) {
       workbookSheets.value = worksheetWorkflow.workbookSheets.value
       worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
       originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
 
       console.log('Workbook loaded (preview):', result.sheets.length, 'sheets')
+      console.log('workbookSheets.value:', workbookSheets.value)
 
       worksheetSelected.value = false
       currentSheetName.value = ''
@@ -2380,10 +2439,16 @@ function formatCellValue(value, col) {
   if (value === null || value === undefined || value === '') return '-'
 
   if (typeof value === 'number' && !isNaN(value)) {
-    if (isPercentageField(col)) {
-      return value.toFixed(2) + '%'
+    const isTimeField = col.toLowerCase().includes('day') || col.toLowerCase().includes('maturity') || col.toLowerCase().includes('duration') || col.toLowerCase().includes('term')
+    if (isTimeField) {
+      const rounded = Math.round(value)
+      return rounded.toLocaleString()
     }
-    return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const rounded = Math.round(value * 100) / 100
+    if (isPercentageField(col)) {
+      return rounded.toFixed(2) + '%'
+    }
+    return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
   if (isDateField(value)) {
@@ -2423,11 +2488,33 @@ function calculateTotal(field) {
     const val = parseFloat(row[field])
     if (!isNaN(val)) total += val
   })
-  return total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const rounded = Math.round(total * 100) / 100
+  return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function exportSummary() {
-  console.log('Export summary called')
+  const allData = instrumentSummary.value.rows
+  if (!allData.length) { alert('No data to export'); return }
+
+  const displayCols = getDisplayColumns()
+  const data = allData.map(row => {
+    const obj = {}
+    displayCols.forEach(col => {
+      const value = row[col]
+      if (typeof value === 'number' && !isNaN(value)) {
+        const rounded = Math.round(value * 100) / 100
+        obj[col] = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      } else {
+        obj[col] = value
+      }
+    })
+    return obj
+  })
+
+  const ws = XLSX.utils.json_to_sheet(data)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Instrument Summary')
+  XLSX.writeFile(wb, `instrument_summary_${new Date().toISOString().split('T')[0]}.xlsx`)
 }
 
 function viewInstrumentSummaryExcel() {
@@ -2450,10 +2537,17 @@ function sortByColumn(col) {
   }
 }
 
-function formatForExcel(value, type = 'number') {
+function formatForExcel(value, type = 'number', key = '') {
   if (value === null || value === undefined || value === '') return ''
   const num = parseFloat(value)
   if (isNaN(num)) return value
+  
+  // Round time fields to whole numbers
+  const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
+  if (isTimeField) {
+    return Math.round(num)
+  }
+  
   if (type === 'percentage') {
     return Math.round(num * 100) / 100
   } else if (type === 'money') {
@@ -2478,9 +2572,11 @@ function exportInstrumentSummaryExcel() {
       displayCols.forEach(col => {
         let val = row[col] !== undefined ? row[col] : ''
         if (isPercentageField(col)) {
-          val = formatForExcel(val, 'percentage')
+          val = formatForExcel(val, 'percentage', col)
         } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
-          val = formatForExcel(val, 'money')
+          val = formatForExcel(val, 'money', col)
+        } else {
+          val = formatForExcel(val, 'number', col)
         }
         obj[col] = val
       })
@@ -2493,9 +2589,11 @@ function exportInstrumentSummaryExcel() {
     const analyticsRows = Object.entries(analytics).map(([key, value]) => {
       let formattedValue = value
       if (isPercentageField(key)) {
-        formattedValue = formatForExcel(value, 'percentage')
+        formattedValue = formatForExcel(value, 'percentage', key)
       } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('interest')) {
-        formattedValue = formatForExcel(value, 'money')
+        formattedValue = formatForExcel(value, 'money', key)
+      } else {
+        formattedValue = formatForExcel(value, 'number', key)
       }
       return { Metric: key, Value: formattedValue }
     })
@@ -2593,8 +2691,25 @@ function openInstrumentDataExcel() {
     const value = selectedCalculations.value[field.key] ?? allCalculations.value[field.key]
     if (value !== undefined) {
       let displayValue = value
-      if (field.prefix) displayValue = field.prefix + value.toLocaleString()
-      else if (field.suffix) displayValue = value + field.suffix
+      if (typeof value === 'number' && !isNaN(value)) {
+        // Apply same rounding logic as formatForExcel - time fields to whole numbers, others to 2 decimal places
+        const isTimeField = field.key.toLowerCase().includes('day') || field.key.toLowerCase().includes('maturity') || field.key.toLowerCase().includes('duration') || field.key.toLowerCase().includes('term')
+        if (isTimeField) {
+          const rounded = Math.round(value)
+          if (field.prefix) displayValue = field.prefix + rounded.toLocaleString()
+          else if (field.suffix) displayValue = rounded.toLocaleString() + field.suffix
+          else displayValue = rounded.toLocaleString()
+        } else {
+          const rounded = Math.round(value * 100) / 100
+          if (field.prefix) displayValue = field.prefix + rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          else if (field.suffix) displayValue = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + field.suffix
+          else displayValue = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        }
+      } else if (field.prefix) {
+        displayValue = field.prefix + value
+      } else if (field.suffix) {
+        displayValue = value + field.suffix
+      }
       calcRow[field.label] = displayValue
     }
   })
@@ -2606,8 +2721,8 @@ function openInstrumentDataExcel() {
       'Metric': 'FRED Benchmark',
       'Series ID': allCalculations.value.fred.series_id || '',
       'Series Label': allCalculations.value.fred.series_label || '',
-      'Benchmark Rate': allCalculations.value.fred.benchmark_rate || 0,
-      'Spread vs Market': allCalculations.value.fred.spread_vs_market || 0,
+      'Benchmark Rate': formatNumber(allCalculations.value.fred.benchmark_rate || 0),
+      'Spread vs Market': formatNumber(allCalculations.value.fred.spread_vs_market || 0),
       'Country': allCalculations.value.fred.country || '',
       'Currency': allCalculations.value.fred.currency || '',
       'Maturity': allCalculations.value.fred.maturity || ''
@@ -2677,76 +2792,174 @@ const cleaningResultStats = computed(() => {
   ]
 })
 
+// ===== NEW: cleaning operations performed summary =====
+const cleaningOperationsSummary = computed(() => {
+  if (!cleaningStats.value || !cleaningStats.value.operationsPerformed) return []
+  return cleaningStats.value.operationsPerformed
+})
+
 function applyCleaning() {
-  if (!rawData.value.length) return
-
-  const tableDetection = autoDetectTable(rawData.value)
-  let data = JSON.parse(JSON.stringify(rawData.value))
-
-  if (tableDetection.type === 'table') {
-    console.log('Cleaning raw table data')
-    data = tableDetection.data
-  }
-
-  // Apply cleaning options...
-  if (cleaningOptions.value.removeDuplicates) {
-    const seen = new Set()
-    data = data.filter(row => { const key = JSON.stringify(row); if (seen.has(key)) return false; seen.add(key); return true })
-  }
-  if (cleaningOptions.value.removeEmptyRows) data = data.filter(row => Object.values(row).some(v => v !== null && v !== '' && v !== undefined))
-  if (cleaningOptions.value.trimWhitespace) data = data.map(row => { const newRow = {}; Object.keys(row).forEach(k => { newRow[k] = typeof row[k] === 'string' ? row[k].trim() : row[k] }); return newRow })
-  if (cleaningOptions.value.convertToNumbers) data = data.map(row => { const newRow = { ...row }; Object.keys(newRow).forEach(k => { if (typeof newRow[k] === 'string' && !isNaN(newRow[k]) && newRow[k].trim() !== '') newRow[k] = parseFloat(newRow[k]) }); return newRow })
-  if (cleaningOptions.value.fillMissingText) data = data.map(row => { Object.keys(row).forEach(k => { if (row[k] === undefined || row[k] === null || row[k] === '') row[k] = 'N/A' }); return row })
-  if (cleaningOptions.value.dropRowsWithMissing) data = data.filter(row => Object.values(row).every(v => v !== null && v !== '' && v !== undefined && (typeof v !== 'number' || !isNaN(v))))
-  if (cleaningOptions.value.removeOutliers) {
-    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
-    for (const col of numericCols) {
-      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
-      const mean = values.reduce((a, b) => a + b, 0) / values.length
-      const std = Math.sqrt(values.map(v => Math.pow(v - mean, 2)).reduce((a, b) => a + b, 0) / values.length)
-      const threshold = 3 * std
-      data = data.filter(row => Math.abs(row[col] - mean) <= threshold)
-    }
-  }
-  if (cleaningOptions.value.standardizeDates) data = data.map(row => { Object.keys(row).forEach(k => { if (k.toLowerCase().includes('date') && row[k]) { const d = new Date(row[k]); if (!isNaN(d)) row[k] = d.toISOString().split('T')[0] } }); return row })
-  if (cleaningOptions.value.removeSpecialChars) data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].replace(/[^a-zA-Z0-9\s]/g, '') }); return row })
-  if (cleaningOptions.value.changeCase && cleaningOptions.value.caseType !== 'none') data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') { if (cleaningOptions.value.caseType === 'upper') row[k] = row[k].toUpperCase(); else if (cleaningOptions.value.caseType === 'lower') row[k] = row[k].toLowerCase(); else if (cleaningOptions.value.caseType === 'title') row[k] = row[k].replace(/\b\w/g, l => l.toUpperCase()) } }); return row })
-  if (cleaningOptions.value.fillWithCustom && cleaningOptions.value.customFillValue) data = data.map(row => { Object.keys(row).forEach(k => { if (row[k] === undefined || row[k] === null || row[k] === '') row[k] = cleaningOptions.value.customFillValue }); return row })
-  if (cleaningOptions.value.removeColumnsAllMissing) {
-    const colsToKeep = Object.keys(data[0] || {}).filter(col => data.some(row => row[col] !== null && row[col] !== '' && row[col] !== undefined))
-    data = data.map(row => { const newRow = {}; colsToKeep.forEach(c => newRow[c] = row[c]); return newRow })
-  }
-  if (cleaningOptions.value.capOutliers) {
-    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
-    for (const col of numericCols) {
-      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
-      const mean = values.reduce((a, b) => a + b, 0) / values.length
-      const std = Math.sqrt(values.map(v => Math.pow(v - mean, 2)).reduce((a, b) => a + b, 0) / values.length)
-      const upper = mean + 3 * std, lower = mean - 3 * std
-      data = data.map(row => { if (row[col] > upper) row[col] = upper; if (row[col] < lower) row[col] = lower; return row })
-    }
-  }
-  if (cleaningOptions.value.removeRowsSpecificColumnEmpty && cleaningOptions.value.specificColumn) data = data.filter(row => row[cleaningOptions.value.specificColumn] !== null && row[cleaningOptions.value.specificColumn] !== '')
-  if (cleaningOptions.value.standardizeNumericRange) {
-    const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
-    for (const col of numericCols) {
-      const values = data.map(r => r[col]).filter(v => typeof v === 'number')
-      const min = Math.min(...values), max = Math.max(...values)
-      if (max !== min) data = data.map(row => { if (typeof row[col] === 'number') row[col] = (row[col] - min) / (max - min); return row })
-    }
-  }
-  if (cleaningOptions.value.fillForward) { for (let i = 1; i < data.length; i++) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i-1][k] }) }
-  if (cleaningOptions.value.fillBackward) { for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') data[i][k] = data[i+1][k] }) }
+  console.log('applyCleaning called')
+  console.log('rawData.value.length:', rawData.value.length)
   
-  cleanedData.value = data
-  cleaningStats.value = { 
-    totalRows: rawData.value.length, 
-    validRows: cleanedData.value.length, 
-    removedRows: rawData.value.length - cleanedData.value.length, 
-    fixedMissing: 0 
+  if (!rawData.value.length) {
+    console.log('No raw data to clean')
+    alert('No data to clean. Please upload data first.')
+    return
   }
-  debouncedSave()
-  forceUpdate.value++
+
+  try {
+    const tableDetection = autoDetectTable(rawData.value)
+    let data = JSON.parse(JSON.stringify(rawData.value))
+    const operations = []
+    const originalLength = data.length
+
+    console.log('Starting cleaning process with', originalLength, 'rows')
+
+    if (tableDetection.type === 'table') {
+      console.log('Cleaning raw table data')
+      data = tableDetection.data
+      operations.push('Auto-detected and extracted table data')
+    }
+
+    // Apply cleaning options...
+    if (cleaningOptions.value.removeDuplicates) {
+      const before = data.length
+      const seen = new Set()
+      data = data.filter(row => { const key = JSON.stringify(row); if (seen.has(key)) return false; seen.add(key); return true })
+      const removed = before - data.length
+      if (removed > 0) operations.push(`Removed ${removed} duplicate rows`)
+    }
+    if (cleaningOptions.value.removeEmptyRows) {
+      const before = data.length
+      data = data.filter(row => Object.values(row).some(v => v !== null && v !== '' && v !== undefined))
+      const removed = before - data.length
+      if (removed > 0) operations.push(`Removed ${removed} empty rows`)
+    }
+    if (cleaningOptions.value.trimWhitespace) {
+      data = data.map(row => { const newRow = {}; Object.keys(row).forEach(k => { newRow[k] = typeof row[k] === 'string' ? row[k].trim() : row[k] }); return newRow })
+      operations.push('Trimmed whitespace from all text fields')
+    }
+    if (cleaningOptions.value.convertToNumbers) {
+      let converted = 0
+      data = data.map(row => { const newRow = { ...row }; Object.keys(newRow).forEach(k => { if (typeof newRow[k] === 'string' && !isNaN(newRow[k]) && newRow[k].trim() !== '') { newRow[k] = parseFloat(newRow[k]); converted++ } }); return newRow })
+      if (converted > 0) operations.push(`Converted ${converted} text values to numbers`)
+    }
+    if (cleaningOptions.value.fillMissingText) {
+      let filled = 0
+      data = data.map(row => { Object.keys(row).forEach(k => { if (row[k] === undefined || row[k] === null || row[k] === '') { row[k] = 'N/A'; filled++ } }); return row })
+      if (filled > 0) operations.push(`Filled ${filled} missing values with 'N/A'`)
+    }
+    if (cleaningOptions.value.dropRowsWithMissing) {
+      const before = data.length
+      data = data.filter(row => Object.values(row).every(v => v !== null && v !== '' && v !== undefined && (typeof v !== 'number' || !isNaN(v))))
+      const removed = before - data.length
+      if (removed > 0) operations.push(`Removed ${removed} rows with missing values`)
+    }
+    if (cleaningOptions.value.removeOutliers) {
+      const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+      let removedTotal = 0
+      for (const col of numericCols) {
+        const before = data.length
+        const values = data.map(r => r[col]).filter(v => typeof v === 'number')
+        const mean = values.reduce((a, b) => a + b, 0) / values.length
+        const std = Math.sqrt(values.map(v => Math.pow(v - mean, 2)).reduce((a, b) => a + b, 0) / values.length)
+        const threshold = 3 * std
+        data = data.filter(row => Math.abs(row[col] - mean) <= threshold)
+        removedTotal += before - data.length
+      }
+      if (removedTotal > 0) operations.push(`Removed ${removedTotal} outlier rows`)
+    }
+    if (cleaningOptions.value.standardizeDates) {
+      let standardized = 0
+      data = data.map(row => { Object.keys(row).forEach(k => { if (k.toLowerCase().includes('date') && row[k]) { const d = new Date(row[k]); if (!isNaN(d)) { row[k] = d.toISOString().split('T')[0]; standardized++ } } }); return row })
+      if (standardized > 0) operations.push(`Standardized ${standardized} date values`)
+    }
+    if (cleaningOptions.value.removeSpecialChars) {
+      data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].replace(/[^a-zA-Z0-9\s]/g, '') }); return row })
+      operations.push('Removed special characters from text fields')
+    }
+    if (cleaningOptions.value.changeCase && cleaningOptions.value.caseType !== 'none') {
+      const caseType = cleaningOptions.value.caseType === 'upper' ? 'UPPERCASE' : cleaningOptions.value.caseType === 'lower' ? 'lowercase' : 'Title Case'
+      data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') { if (cleaningOptions.value.caseType === 'upper') row[k] = row[k].toUpperCase(); else if (cleaningOptions.value.caseType === 'lower') row[k] = row[k].toLowerCase(); else if (cleaningOptions.value.caseType === 'title') row[k] = row[k].replace(/\b\w/g, l => l.toUpperCase()) } }); return row })
+      operations.push(`Changed text to ${caseType}`)
+    }
+    if (cleaningOptions.value.fillWithCustom && cleaningOptions.value.customFillValue) {
+      let filled = 0
+      data = data.map(row => { Object.keys(row).forEach(k => { if (row[k] === undefined || row[k] === null || row[k] === '') { row[k] = cleaningOptions.value.customFillValue; filled++ } }); return row })
+      if (filled > 0) operations.push(`Filled ${filled} missing values with custom value`)
+    }
+    if (cleaningOptions.value.removeColumnsAllMissing) {
+      const beforeCols = Object.keys(data[0] || {}).length
+      const colsToKeep = Object.keys(data[0] || {}).filter(col => data.some(row => row[col] !== null && row[col] !== '' && row[col] !== undefined))
+      data = data.map(row => { const newRow = {}; colsToKeep.forEach(c => newRow[c] = row[c]); return newRow })
+      const removedCols = beforeCols - colsToKeep.length
+      if (removedCols > 0) operations.push(`Removed ${removedCols} columns with all missing values`)
+    }
+    if (cleaningOptions.value.capOutliers) {
+      const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+      let capped = 0
+      for (const col of numericCols) {
+        const values = data.map(r => r[col]).filter(v => typeof v === 'number')
+        const mean = values.reduce((a, b) => a + b, 0) / values.length
+        const std = Math.sqrt(values.map(v => Math.pow(v - mean, 2)).reduce((a, b) => a + b, 0) / values.length)
+        const upper = mean + 3 * std, lower = mean - 3 * std
+        data = data.map(row => { if (row[col] > upper) { row[col] = upper; capped++ } if (row[col] < lower) { row[col] = lower; capped++ } return row })
+      }
+      if (capped > 0) operations.push(`Capped ${capped} outlier values`)
+    }
+    if (cleaningOptions.value.removeRowsSpecificColumnEmpty && cleaningOptions.value.specificColumn) {
+      const before = data.length
+      data = data.filter(row => row[cleaningOptions.value.specificColumn] !== null && row[cleaningOptions.value.specificColumn] !== '')
+      const removed = before - data.length
+      if (removed > 0) operations.push(`Removed ${removed} rows with empty ${cleaningOptions.value.specificColumn}`)
+    }
+    if (cleaningOptions.value.standardizeNumericRange) {
+      const numericCols = Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number'))
+      if (numericCols.length > 0) {
+        operations.push(`Standardized numeric range for ${numericCols.length} columns`)
+        for (const col of numericCols) {
+          const values = data.map(r => r[col]).filter(v => typeof v === 'number')
+          const min = Math.min(...values), max = Math.max(...values)
+          if (max !== min) data = data.map(row => { if (typeof row[col] === 'number') row[col] = (row[col] - min) / (max - min); return row })
+        }
+      }
+    }
+    if (cleaningOptions.value.fillForward) {
+      let filled = 0
+      for (let i = 1; i < data.length; i++) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') { data[i][k] = data[i-1][k]; filled++ } })
+      if (filled > 0) operations.push(`Filled ${filled} missing values forward`)
+    }
+    if (cleaningOptions.value.fillBackward) {
+      let filled = 0
+      for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') { data[i][k] = data[i+1][k]; filled++ } })
+      if (filled > 0) operations.push(`Filled ${filled} missing values backward`)
+    }
+  
+    cleanedData.value = data
+    cleaningStats.value = { 
+      totalRows: originalLength, 
+      validRows: cleanedData.value.length, 
+      removedRows: originalLength - cleanedData.value.length, 
+      fixedMissing: 0,
+      removedEmptyRows: cleaningOptions.value.removeEmptyRows ? (originalLength - data.filter(row => Object.values(row).some(v => v !== null && v !== '' && v !== undefined)).length) : 0,
+      removedSpecificColumnEmpty: cleaningOptions.value.removeRowsSpecificColumnEmpty && cleaningOptions.value.specificColumn ? (originalLength - data.filter(row => row[cleaningOptions.value.specificColumn] !== null && row[cleaningOptions.value.specificColumn] !== '').length) : 0,
+      standardizedNumeric: cleaningOptions.value.standardizeNumericRange ? Object.keys(data[0] || {}).filter(col => data.some(row => typeof row[col] === 'number')).length : 0,
+      filledForward: cleaningOptions.value.fillForward ? 1 : 0,
+      filledBackward: cleaningOptions.value.fillBackward ? 1 : 0,
+      removedDuplicates: cleaningOptions.value.removeDuplicates ? 1 : 0,
+      operationsPerformed: operations
+    }
+    
+    console.log('Cleaning completed. Cleaned rows:', cleanedData.value.length)
+    console.log('Cleaning operations:', operations)
+    
+    debouncedSave()
+    forceUpdate.value++
+  } catch (error) {
+    console.error('Error during cleaning:', error)
+    alert('Error during cleaning: ' + error.message)
+  }
 }
 
 // ===== FIXED: continueAfterCleaning =====
@@ -2756,13 +2969,7 @@ async function continueAfterCleaning() {
     return
   }
   
-  try {
-    await calculateMetrics()
-  } catch (err) {
-    console.error('Error calculating metrics:', err)
-    alert('There was an error calculating metrics, but you can proceed to calculations.')
-  }
-  await nextTick()
+  // Navigate immediately, calculate metrics in background
   activeTab.value = 'calculations'
   await nextTick()
   forceUpdate.value++
@@ -2772,6 +2979,11 @@ async function continueAfterCleaning() {
     await markStepCompleted(String(sid), 'cleaning')
     saveSessionData()
   }
+  
+  // Calculate metrics in background without blocking UI
+  calculateMetrics().catch(err => {
+    console.error('Error calculating metrics:', err)
+  })
 }
 
 // ===== FIXED: calculateMetrics with better error handling =====
@@ -3235,9 +3447,12 @@ async function renderYieldCurveChart() {
     if (yieldCurveChart.value) {
       try {
         chartImageData.value = yieldCurveChart.value.toDataURL('image/png', 1.0)
-      } catch (e) {}
+        console.log('Chart image captured successfully')
+      } catch (e) {
+        console.warn('Failed to capture chart image:', e)
+      }
     }
-  }, 300)
+  }, 1000)
 }
 
 function onCustomCountryInput() {
@@ -3449,9 +3664,11 @@ function exportAllCalculations() {
     displayCols.forEach(col => {
       let val = row[col] !== undefined ? row[col] : ''
       if (isPercentageField(col)) {
-        val = formatForExcel(val, 'percentage')
+        val = formatForExcel(val, 'percentage', col)
       } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
-        val = formatForExcel(val, 'money')
+        val = formatForExcel(val, 'money', col)
+      } else {
+        val = formatForExcel(val, 'number', col)
       }
       obj[col] = val
     })
@@ -3465,9 +3682,9 @@ function exportAllCalculations() {
   const summaryRows = [
     ['Instrument Summary'],
     ['Total Instruments', allData.length],
-    ['Total Value', formatForExcel(allCalculations.value.totalValue, 'money')],
-    ['Average Rate', formatForExcel(allCalculations.value.avgRate, 'percentage')],
-    ['Weighted Average Rate', formatForExcel(allCalculations.value.weightedAvgRate, 'percentage')]
+    ['Total Value', formatForExcel(allCalculations.value.totalValue, 'money', 'Total Value')],
+    ['Average Rate', formatForExcel(allCalculations.value.avgRate, 'percentage', 'Average Rate')],
+    ['Weighted Average Rate', formatForExcel(allCalculations.value.weightedAvgRate, 'percentage', 'Weighted Average Rate')]
   ]
   const summaryWs = XLSX.utils.aoa_to_sheet(summaryRows)
   XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary')
@@ -3515,37 +3732,125 @@ async function saveToSession() {
 
   try {
     await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
-    console.log('Workflow saved for session:', sid)
-
-    const response = await api.versionAPI.create(
-      sid,
-      instrumentType.value,
-      `Saved ${instrumentLabel.value} from ${activeTab.value}`,
-      datasetSnapshot,
-      null, null, null, null, null
-    )
-    console.log('Version created:', response)
-
-    await refreshSessionVersionCount(sid)
-
-    if (!activeSession.value.version_count || activeSession.value.version_count === 0) {
-      activeSession.value.version_count = 1
-    }
-
-    window.dispatchEvent(new CustomEvent('session-updated', {
-      detail: {
-        sessionId: sid,
-        instrumentCount: activeSession.value?.instrument_count || 0,
-        versionCount: activeSession.value?.version_count || 0
+    
+    // Update instrument count on explicit save
+    const count = sessionManager.countSessionInstruments(sid)
+    await sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
+    
+    // Create version on explicit save
+    try {
+      const currentVersionCount = activeSession.value?.version_count || 0
+      const versionNumber = currentVersionCount + 1
+      
+      // Create version via API
+      const versionResponse = await api.versionAPI.create(
+        sid,
+        instrumentType.value,
+        `Saved ${instrumentType.value} workflow`,
+        datasetSnapshot,
+        null, null, null, null, null
+      )
+      
+      console.log('Version API response:', versionResponse)
+      console.log('Version API success:', versionResponse?.success)
+      console.log('Version API data:', versionResponse?.data)
+      
+      if (!versionResponse?.success) {
+        console.error('Version creation failed:', versionResponse)
+        console.error('Version creation error message:', versionResponse?.error || versionResponse?.message)
+        // Don't throw error, just log it and continue - version creation shouldn't block save
+        console.warn('Version creation failed, but continuing with save')
+      } else {
+        console.log('Version created successfully, ID:', versionResponse?.data?.id)
+      
+        await sessionManager.updateSession(sid, { 
+          version_count: versionNumber,
+          updated_at: new Date().toISOString()
+        })
+        
+        // Refresh session to get updated version count from backend
+        await refreshSession(sid)
+        
+        // Fetch updated versions from backend
+        try {
+          const versionsRes = await api.versionAPI.getVersions(sid)
+          if (versionsRes && versionsRes.success && versionsRes.data) {
+            const updatedVersionCount = versionsRes.data.length
+            console.log(`Updated version count from backend: ${updatedVersionCount}`)
+            
+            // Update session manager's session object
+            const session = sessionManager.sessions.find(s => s.id === sid)
+            if (session) {
+              session.version_count = updatedVersionCount
+              session.versions = versionsRes.data.map(v => ({
+                id: v.id,
+                versionNumber: v.versionNumber,
+                timestamp: v.timestamp || v.created_at,
+                changeSummary: v.changeSummary || v.change_summary || 'No description',
+                instrumentType: v.instrumentType || v.instrument_type || 'General',
+                changeType: v.changeType || 'Saved',
+                changeTypeClass: v.changeTypeClass || 'badge-saved',
+                modifiedInstruments: v.modifiedInstruments || [],
+                fieldsChanged: v.fieldsChanged || []
+              }))
+            }
+            
+            // Dispatch event with backend version count
+            window.dispatchEvent(new CustomEvent('session-updated', {
+              detail: {
+                sessionId: sid,
+                instrumentCount: Math.min(count, 3),
+                versionCount: updatedVersionCount,
+                explicitSave: true
+              }
+            }))
+          } else {
+            console.warn('Failed to fetch versions or no versions returned')
+            // Fallback to local version count
+            window.dispatchEvent(new CustomEvent('session-updated', {
+              detail: {
+                sessionId: sid,
+                instrumentCount: Math.min(count, 3),
+                versionCount: versionNumber,
+                explicitSave: true
+              }
+            }))
+          }
+        } catch (fetchError) {
+          console.warn('Failed to fetch updated versions:', fetchError)
+          // Fallback to local version count
+          window.dispatchEvent(new CustomEvent('session-updated', {
+            detail: {
+              sessionId: sid,
+              instrumentCount: Math.min(count, 3),
+              versionCount: versionNumber,
+              explicitSave: true
+            }
+          }))
+        }
+        
+        console.log(`✅ Created version ${versionNumber} for session ${sid}`)
       }
-    }))
-
-    alert(`✅ Saved to session. Instruments: ${activeSession.value?.instrument_count || 0}/3. Version: ${activeSession.value?.version_count || 0}`)
-
+    } catch (versionError) {
+      console.error('Version creation error:', versionError)
+      console.warn('Version creation failed, but continuing with save')
+    }
+    
+    alert('✅ Saved to session successfully!')
   } catch (err) {
-    console.error('Failed to save version:', err)
-    alert('⚠️ Workflow data was saved, but version creation failed. Please check the server logs. Error: ' + err.message)
+    console.error('Save to session error:', err)
+    alert('Failed to save to session: ' + err.message)
   }
+}
+
+function debouncedSave(explicitSave = false) {
+  if (saveTimeout) clearTimeout(saveTimeout)
+  const now = Date.now()
+  if (!explicitSave && now - lastSaveTime < SAVE_DEBOUNCE_MS) return
+  saveTimeout = setTimeout(() => {
+    saveSessionData(explicitSave)
+    lastSaveTime = Date.now()
+  }, explicitSave ? 100 : SAVE_DEBOUNCE_MS)
 }
 
 async function refreshSessionVersionCount(sid) {
@@ -3560,17 +3865,7 @@ async function refreshSessionVersionCount(sid) {
   }
 }
 
-function debouncedSave(explicitSave = false) {
-  if (saveTimeout) clearTimeout(saveTimeout)
-  const now = Date.now()
-  if (!explicitSave && now - lastSaveTime < SAVE_DEBOUNCE_MS) return
-  saveTimeout = setTimeout(() => {
-    saveSessionData()
-    lastSaveTime = Date.now()
-  }, explicitSave ? 100 : SAVE_DEBOUNCE_MS)
-}
-
-function saveSessionData() {
+function saveSessionData(explicitSave = false) {
   if (!activeSession.value) return
   const sid = activeSession.value.id
   const datasetSnapshot = {
@@ -3596,44 +3891,42 @@ function saveSessionData() {
   // Save workflow data
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
     .then(async () => {
-      const count = sessionManager.countSessionInstruments(sid)
-      sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
-      
-      // Create version automatically on save
-      try {
-        const currentVersionCount = activeSession.value?.version_count || 0
-        const versionNumber = currentVersionCount + 1
+      // Only update instrument count and create version on explicit save
+      if (explicitSave) {
+        const count = sessionManager.countSessionInstruments(sid)
+        sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
         
-        // Determine what changed
-        const changeSummary = `Saved ${instrumentType.value} workflow`
-        const modifiedInstruments = [instrumentType.value]
-        const fieldsChanged = Object.keys(datasetSnapshot).filter(key => 
-          datasetSnapshot[key] !== undefined && datasetSnapshot[key] !== null
-        )
-        
-        // Create version via API
-        await api.versionAPI.createVersion(sid, {
-          versionNumber: versionNumber,
-          changeSummary: changeSummary,
-          instrumentType: instrumentType.value,
-          changeType: 'Saved',
-          changeTypeClass: 'badge-saved',
-          modifiedInstruments: modifiedInstruments,
-          fieldsChanged: fieldsChanged,
-          worksheet: currentSheetName.value,
-          workbookName: uploadedFile.value?.name || 'Unknown',
-          timestamp: new Date().toISOString()
-        })
-        
-        // Update session version count
-        await sessionManager.updateSession(sid, { 
-          version_count: versionNumber,
-          updated_at: new Date().toISOString()
-        })
-        
-        console.log(`✅ Created version ${versionNumber} for session ${sid}`)
-      } catch (versionError) {
-        console.warn('Failed to create version:', versionError)
+        // Create version only on explicit save
+        try {
+          const currentVersionCount = activeSession.value?.version_count || 0
+          const versionNumber = currentVersionCount + 1
+          
+          // Determine what changed
+          const changeSummary = `Saved ${instrumentType.value} workflow`
+          const modifiedInstruments = [instrumentType.value]
+          const fieldsChanged = Object.keys(datasetSnapshot).filter(key => 
+            datasetSnapshot[key] !== undefined && datasetSnapshot[key] !== null
+          )
+          
+          // Create version via API
+          await api.versionAPI.create(
+            sid,
+            instrumentType.value,
+            changeSummary,
+            datasetSnapshot,
+            null, null, null, null, null
+          )
+          
+          // Update session version count
+          await sessionManager.updateSession(sid, { 
+            version_count: versionNumber,
+            updated_at: new Date().toISOString()
+          })
+          
+          console.log(`✅ Created version ${versionNumber} for session ${sid}`)
+        } catch (versionError) {
+          console.warn('Failed to create version:', versionError)
+        }
       }
     })
     .catch(err => console.error('Failed to save workflow:', err))
@@ -3797,7 +4090,14 @@ const reportPreviewData = computed(() => {
       })
     }
   }
-  return { session: activeSession.value?.name || 'No session', date: new Date().toLocaleString(), instruments: instrumentsData }
+  return { 
+    session: activeSession.value?.name || 'No session', 
+    date: new Date().toLocaleString(), 
+    instruments: instrumentsData,
+    chartImage: chartImageData.value,
+    fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+    yieldCurveData: yieldCurveData.value
+  }
 })
 
 function formatMetricName(key) {
@@ -3821,11 +4121,12 @@ function formatMetricName(key) {
 
 function formatMetricValue(key, value) {
   if (typeof value === 'number') {
+    const rounded = Math.round(value * 100) / 100
     if (key.includes('Value') || key.includes('Price') || key.includes('Interest') || key.includes('Income') || key.includes('Discount') || key.includes('Principal') || key.includes('Investment'))
-      return `$${value.toLocaleString()}`
+      return `$${rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     if (key.includes('Rate') || key.includes('Yield') || key.includes('Coupon') || key.includes('Discount'))
-      return `${value}%`
-    return value.toLocaleString()
+      return `${rounded.toFixed(2)}%`
+    return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
   return value
 }
@@ -3880,17 +4181,32 @@ async function generateReportHtml() {
 
   console.log('Generating report with yield curve data:', yieldCurveData.value.length, 'points')
   console.log('Chart series label:', chartSeriesLabel.value)
+  console.log('Current chart image data:', chartImageData.value ? 'exists' : 'empty')
 
+  // If no chart image exists and we have yield curve data, try to render and capture
   let imageData = chartImageData.value
-  if (!imageData) {
+  if (!imageData && yieldCurveData.value.length > 0) {
+    console.log('No chart image found, attempting to render and capture...')
     try {
-      console.log('Attempting to capture chart image...')
-      imageData = await captureChartImage()
-      console.log('Chart capture result:', imageData ? 'success' : 'failed')
-      if (imageData) {
+      // Switch to visualizations tab temporarily to render chart
+      const previousTab = activeTab.value
+      activeTab.value = 'visualizations'
+      await nextTick()
+      
+      // Wait for chart to render
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      
+      // Try to capture the chart
+      if (yieldCurveChart.value) {
+        imageData = yieldCurveChart.value.toDataURL('image/png', 1.0)
         chartImageData.value = imageData
+        console.log('Chart captured after rendering:', imageData ? 'success' : 'failed')
       }
-    } catch (e) { 
+      
+      // Switch back to previous tab
+      activeTab.value = previousTab
+      await nextTick()
+    } catch (e) {
       console.warn('Chart capture failed:', e)
     }
   }
@@ -4192,9 +4508,9 @@ async function exportToRealExcel() {
       instrumentData.forEach((item, idx) => {
         const name = item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
         const ticker = item.BBTicker || item.Ticker || item.Security || ''
-        const faceValue = formatForExcel(parseFloat(item.FaceValue || item.Amount || item.Principal || 0), 'money')
-        const rate = formatForExcel(parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0), 'percentage')
-        const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
+        const faceValue = formatForExcel(parseFloat(item.FaceValue || item.Amount || item.Principal || 0), 'money', 'FaceValue')
+        const rate = formatForExcel(parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0), 'percentage', 'Rate')
+        const term = formatForExcel(parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0), 'number', 'Term')
         appendixData.push([inst.name, name, ticker, faceValue, rate, term, valuationDate])
       })
     }
@@ -4228,11 +4544,11 @@ function formatRowForExcel(row) {
   const formatted = {}
   for (const [key, value] of Object.entries(row)) {
     if (isPercentageField(key)) {
-      formatted[key] = formatForExcel(value, 'percentage')
+      formatted[key] = formatForExcel(value, 'percentage', key)
     } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('price') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('principal') || key.toLowerCase().includes('interest')) {
-      formatted[key] = formatForExcel(value, 'money')
+      formatted[key] = formatForExcel(value, 'money', key)
     } else {
-      formatted[key] = value
+      formatted[key] = formatForExcel(value, 'number', key)
     }
   }
   return formatted
@@ -4434,6 +4750,11 @@ onBeforeUnmount(() => {
 .btn-view-workbook { background: #9C27B0; color: white; }
 .btn-view-workbook:hover:not(:disabled) { background: #7B1FA2; transform: translateY(-1px); }
 .btn-view-workbook:disabled { opacity: 0.5; cursor: not-allowed; }
+.cleaning-operations-summary { margin-top: 20px; padding: 16px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #4CAF50; }
+.operations-title { font-size: 14px; font-weight: 600; color: #0B2044; margin: 0 0 12px 0; }
+.operations-list { list-style: none; padding: 0; margin: 0; }
+.operation-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; color: #333; }
+.operation-item .v-icon { flex-shrink: 0; }
 .btn-review-excel-small { background: #2196F3; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; transition: all 0.2s; }
 .btn-review-excel-small:hover { background: #0b7dda; }
 .mapping-dialog-title { background: #0B2044; color: white; padding: 16px 24px; }
@@ -4525,6 +4846,11 @@ onBeforeUnmount(() => {
 .popup-header-white .close-btn:hover { background: #f0f0f0; color: #0B2044; }
 .popup-body { flex: 1; overflow-y: auto; padding: 20px; }
 .popup-instruction { color: #666; margin-bottom: 16px; font-size: 14px; }
+.search-bar-container { position: relative; margin-bottom: 16px; display: flex; align-items: center; }
+.search-input { width: 100%; padding: 10px 16px 10px 40px; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.search-input:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.1); }
+.search-input::placeholder { color: #999; }
+.search-icon { position: absolute; left: 12px; color: #999; font-size: 18px; }
 .popup-footer { display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding: 12px 24px; background: #f9fafc; border-top: 1px solid #e0e0e0; flex-shrink: 0; flex-wrap: wrap; }
 .valuation-date-footer { color: #666; font-size: 13px; }
 .viewing-indicator { display: inline-flex; align-items: center; gap: 4px; color: #2e7d32; font-size: 14px; }

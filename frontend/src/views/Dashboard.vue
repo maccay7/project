@@ -496,6 +496,7 @@ async function openVersionModal(sessionId) {
       let versions = []
       try {
         const res = await api.versionAPI.getVersions(sessionId)
+        console.log('Versions API response:', res)
         if (res && res.success && res.data) {
           versions = res.data.map(v => ({
             id: v.id,
@@ -508,6 +509,7 @@ async function openVersionModal(sessionId) {
             modifiedInstruments: v.modifiedInstruments || [],
             fieldsChanged: v.fieldsChanged || []
           }))
+          console.log('Mapped versions:', versions)
           // Update session versions
           session.versions = versions
           session.version_count = versions.length
@@ -518,6 +520,7 @@ async function openVersionModal(sessionId) {
         // Fallback to existing
         versions = session.versions || []
       }
+      console.log('Setting selectedSessionForVersions with versions:', versions.length)
       selectedSessionForVersions.value = {
         ...session,
         versions: versions
@@ -531,9 +534,32 @@ async function openVersionModal(sessionId) {
 }
 
 async function restoreVersion(sessionId, index) {
-  alert('Restore functionality not implemented yet.')
-  versionDialogVisible.value = false
-  await refreshDashboard()
+  try {
+    const session = await sessionManager.getSession(sessionId)
+    if (!session || !session.versions || !session.versions[index]) {
+      alert('Version not found')
+      return
+    }
+    
+    const version = session.versions[index]
+    if (!confirm(`Restore session to version ${version.versionNumber} from ${new Date(version.timestamp).toLocaleString()}?\n\nThis will replace all current data with the saved version.`)) {
+      return
+    }
+    
+    // Restore the version data
+    const response = await api.versionAPI.restoreVersion(sessionId, version.id)
+    if (response && response.success) {
+      alert(`✅ Session restored to version ${version.versionNumber}`)
+      versionDialogVisible.value = false
+      await refreshSession(sessionId)
+      await refreshDashboard()
+    } else {
+      alert('Failed to restore version: ' + (response?.message || 'Unknown error'))
+    }
+  } catch (err) {
+    console.error('Restore error:', err)
+    alert('Error restoring version: ' + err.message)
+  }
 }
 
 // ---- Session instruments modal ----
@@ -666,6 +692,30 @@ const handleSessionUpdate = async (event) => {
     }
     if (instrumentCount !== undefined && activeSession.value?.id === sessionId) {
       activeSession.value.instrument_count = instrumentCount
+    }
+    // Also update selectedSessionForVersions if it matches
+    if (selectedSessionForVersions.value?.id === sessionId) {
+      // Fetch updated versions for the dialog
+      try {
+        const versionsRes = await api.versionAPI.getVersions(sessionId)
+        if (versionsRes && versionsRes.success && versionsRes.data) {
+          const versions = versionsRes.data.map(v => ({
+            id: v.id,
+            versionNumber: v.versionNumber,
+            timestamp: v.timestamp || v.created_at,
+            changeSummary: v.changeSummary || v.change_summary || 'No description',
+            instrumentType: v.instrumentType || v.instrument_type || 'General',
+            changeType: v.changeType || 'Saved',
+            changeTypeClass: v.changeTypeClass || 'badge-saved',
+            modifiedInstruments: v.modifiedInstruments || [],
+            fieldsChanged: v.fieldsChanged || []
+          }))
+          selectedSessionForVersions.value.versions = versions
+          selectedSessionForVersions.value.version_count = versions.length
+        }
+      } catch (e) {
+        console.warn('Failed to update versions in dialog:', e)
+      }
     }
     // Refresh the dashboard to ensure everything is consistent
     await refreshDashboard()

@@ -513,7 +513,9 @@ const sortedInstruments = computed(() => {
 })
 
 function formatNumber(num) {
-  return (num || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  if (num === undefined || num === null) return '0.00'
+  const rounded = Math.round(num * 100) / 100
+  return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function sortByColumn(col) {
@@ -631,10 +633,16 @@ function isPercentageField(col) {
 // ================================================================
 // formatForExcel – prevents 500% errors
 // ================================================================
-function formatForExcel(value, type = 'number') {
+function formatForExcel(value, type = 'number', key = '') {
   if (value === null || value === undefined || value === '') return ''
   const num = parseFloat(value)
   if (isNaN(num)) return value
+  
+  // Round time fields to whole numbers
+  const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
+  if (isTimeField) {
+    return Math.round(num)
+  }
   
   if (type === 'percentage') {
     return Math.round(num * 100) / 100
@@ -679,15 +687,21 @@ async function loadSummary() {
     const wf = await sessionManager.getInstrumentWorkflow(sid, 'money-market')
     const summary = wf?.instrumentSummary || { rows: [], columns: [] }
 
+    // Only show rows from instruments that have been worked on (have data)
     const allSummaryRows = [...summary.rows]
     for (const type of ['bonds', 'tbills']) {
       const wfType = await sessionManager.getInstrumentWorkflow(sid, type)
-      if (wfType?.instrumentSummary?.rows) {
-        wfType.instrumentSummary.rows.forEach(row => {
-          const id = row['Instrument Name'] + '_' + (row['Worksheet'] || '')
-          const exists = allSummaryRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
-          if (!exists) allSummaryRows.push(row)
-        })
+      // Only include if the workflow has actual data (not empty)
+      if (wfType?.instrumentSummary?.rows && wfType.instrumentSummary.rows.length > 0) {
+        // Check if this instrument has been worked on (has cleanedData, calculations, or rawData)
+        const hasData = wfType.cleanedData?.length > 0 || wfType.calculations?.totalValue > 0 || wfType.rawData?.length > 0
+        if (hasData) {
+          wfType.instrumentSummary.rows.forEach(row => {
+            const id = row['Instrument Name'] + '_' + (row['Worksheet'] || '')
+            const exists = allSummaryRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
+            if (!exists) allSummaryRows.push(row)
+          })
+        }
       }
     }
 

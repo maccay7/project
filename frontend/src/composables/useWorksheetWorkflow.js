@@ -152,86 +152,151 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
 
       uploadProgress.value = 30
 
-      // Parse full workbook with styles and merged cells for proper display
-      const workbook = XLSX.read(arrayBuffer, { 
-        type: 'array', 
-        cellDates: true,
-        cellStyles: true,
-        cellNF: true,
-        // Handle various workbook structures
-        bookSheets: true,
-        bookProps: true,
-        // Preserve formulas
-        cellFormula: true,
-        // Handle hidden sheets
-        bookHidden: true,
-      })
+      // Parse workbook with simplified options for better compatibility
+      let workbook
+      try {
+        console.log('Starting XLSX parsing...')
+        workbook = XLSX.read(arrayBuffer, { 
+          type: 'array',
+        })
+        console.log('XLSX parsing completed successfully')
+      } catch (e) {
+        console.error('XLSX parsing error:', e)
+        console.error('Error stack:', e.stack)
+        throw new Error(`Failed to parse Excel file: ${e.message}`)
+      }
+
+      // Validate workbook structure
+      if (!workbook) {
+        throw new Error('Failed to read workbook - invalid file format')
+      }
+
+      console.log('Workbook parsed successfully')
+      console.log('workbook.SheetNames:', workbook.SheetNames)
+      console.log('workbook.Sheets keys:', Object.keys(workbook.Sheets || {}))
 
       uploadProgress.value = 60
 
       const sheets = []
-      for (const sheetName of workbook.SheetNames) {
+      
+      // Use SheetNames array directly
+      const sheetNames = workbook.SheetNames || []
+      
+      console.log(`Processing ${sheetNames.length} sheets from workbook`)
+
+      for (const sheetName of sheetNames) {
+        console.log(`Starting to process sheet: "${sheetName}"`)
+        
+        if (!sheetName || typeof sheetName !== 'string') {
+          console.warn(`Skipping invalid sheet name: ${sheetName}`)
+          continue
+        }
+
         const worksheet = workbook.Sheets[sheetName]
         
-        // Check if sheet is hidden
-        const isHidden = worksheet['!hidden'] || false
+        console.log(`Processing sheet "${sheetName}":`, worksheet ? 'found' : 'NOT FOUND')
         
-        // Get full 2D array data
-        const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1')
-        const fullData = []
-        for (let R = range.s.r; R <= range.e.r; R++) {
-          const row = []
-          for (let C = range.s.c; C <= range.e.c; C++) {
-            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
-            const cell = worksheet[cellAddress]
-            // Preserve formula if present, otherwise use value
-            if (cell && cell.f) {
-              row.push(cell.f) // Store formula
-            } else if (cell && cell.v !== undefined) {
-              row.push(cell.v) // Store value
+        if (!worksheet || typeof worksheet !== 'object') {
+          console.warn(`Skipping invalid sheet: ${sheetName}`)
+          continue
+        }
+        
+        try {
+          // Check if sheet is hidden
+          const isHidden = worksheet['!hidden'] || false
+          
+          // Get full 2D array data with defensive coding
+          let fullData = []
+          try {
+            // Check if worksheet has a valid range
+            const ref = worksheet['!ref']
+            if (!ref) {
+              console.warn(`Sheet ${sheetName} has no valid range, creating empty sheet`)
+              fullData = []
             } else {
-              row.push('')
+              const range = XLSX.utils.decode_range(ref)
+              if (!range || typeof range !== 'object') {
+                console.warn(`Invalid range for sheet ${sheetName}, creating empty sheet`)
+                fullData = []
+              } else {
+                for (let R = range.s.r; R <= range.e.r; R++) {
+                  const row = []
+                  for (let C = range.s.c; C <= range.e.c; C++) {
+                    const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
+                    const cell = worksheet[cellAddress]
+                    // Preserve formula if present, otherwise use value
+                    if (cell && cell.f) {
+                      row.push(cell.f) // Store formula
+                    } else if (cell && cell.v !== undefined) {
+                      row.push(cell.v) // Store value
+                    } else {
+                      row.push('')
+                    }
+                  }
+                  fullData.push(row)
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`Failed to parse sheet data for ${sheetName}:`, e)
+            fullData = []
+          }
+        
+          // Get merged ranges
+          const mergedRanges = []
+          if (worksheet['!merges']) {
+            for (const merge of worksheet['!merges']) {
+              mergedRanges.push({
+                min_row: merge.s.r,
+                max_row: merge.e.r,
+                min_col: merge.s.c,
+                max_col: merge.e.c
+              })
             }
           }
-          fullData.push(row)
-        }
-        
-        // Get merged ranges
-        const mergedRanges = []
-        if (worksheet['!merges']) {
-          for (const merge of worksheet['!merges']) {
-            mergedRanges.push({
-              min_row: merge.s.r,
-              max_row: merge.e.r,
-              min_col: merge.s.c,
-              max_col: merge.e.c
-            })
+          
+          // Get table information if present
+          const tables = []
+          if (worksheet['!tables']) {
+            for (const tableName in worksheet['!tables']) {
+              tables.push(worksheet['!tables'][tableName])
+            }
           }
-        }
-        
-        // Get table information if present
-        const tables = []
-        if (worksheet['!tables']) {
-          for (const tableName in worksheet['!tables']) {
-            tables.push(worksheet['!tables'][tableName])
+          
+          // Also get JSON data for compatibility
+          let jsonData = []
+          let sheetHeaders = []
+          try {
+            jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
+            if (jsonData.length > 0 && jsonData[0]) {
+              sheetHeaders = Object.keys(jsonData[0])
+            }
+          } catch (e) {
+            console.warn(`Failed to parse sheet ${sheetName}:`, e)
+            jsonData = []
+            sheetHeaders = []
           }
-        }
-        
-        // Also get JSON data for compatibility
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
-        const sheetHeaders = jsonData.length > 0 ? Object.keys(jsonData[0]) : []
 
-        sheets.push({
-          name: sheetName,
-          data: jsonData,
-          headers: sheetHeaders,
-          fullData: fullData,
-          merged_ranges: mergedRanges,
-          tables: tables,
-          hidden: isHidden,
-          row_count: fullData.length,
-          column_count: fullData.length > 0 ? fullData[0].length : 0,
-        })
+          sheets.push({
+            name: sheetName,
+            data: jsonData,
+            headers: sheetHeaders,
+            fullData: fullData,
+            merged_ranges: mergedRanges,
+            tables: tables,
+            hidden: isHidden,
+            row_count: fullData.length,
+            column_count: fullData.length > 0 ? fullData[0].length : 0,
+          })
+          console.log(`Added sheet ${sheetName} with ${fullData.length} rows, ${jsonData.length} JSON rows`)
+        } catch (sheetError) {
+          console.error(`Error processing sheet ${sheetName}:`, sheetError)
+          console.error('Sheet error stack:', sheetError.stack)
+        }
+      }
+
+      if (sheets.length === 0) {
+        console.warn('No sheets were successfully processed, but continuing with empty array')
       }
 
       workbookSheets.value = sheets

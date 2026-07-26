@@ -345,11 +345,22 @@ async function loadYieldCurve() {
     }
     lastYieldCurveRequest.value[cacheKey] = Date.now()
 
+    console.log('Loading yield curve with params:', {
+      instrument: selectedInstrument.value,
+      country: fredFilters.value.country,
+      currency: fredFilters.value.currency
+    })
+
     const res = await api.fredAPI.getYieldCurve(
       selectedInstrument.value,
       fredFilters.value.country,
       fredFilters.value.currency
     )
+    
+    console.log('FRED API response:', res)
+    console.log('FRED API success:', res?.success)
+    console.log('FRED API data:', res?.data)
+    
     if (res?.success && res.data?.datasets?.length) {
       yieldData.value = res.data
       yieldAnalytics.value = res.data.analytics || null
@@ -360,7 +371,8 @@ async function loadYieldCurve() {
       })
       await saveFredSettings()
     } else {
-      yieldError.value = res?.data?.error || 'Unable to load Yield Curve. Please try again.'
+      console.error('FRED API failed or returned no data:', res)
+      yieldError.value = res?.data?.error || res?.error || 'Unable to load Yield Curve. Please try again.'
       yieldData.value = null
       yieldAnalytics.value = null
     }
