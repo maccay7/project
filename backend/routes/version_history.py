@@ -333,12 +333,44 @@ def version_history_routes(app):
         version = get_version_by_id(version_id)
         if not version:
             return jsonify({'success': False, 'message': 'Version not found'}), 404
-        # Actually restore the data from snapshot (simplified)
-        return jsonify({
-            'success': True,
-            'message': f'Version {version.get("versionNumber")} restored',
-            'data': version
-        })
+        
+        session_id = version.get('sessionId')
+        if not session_id:
+            return jsonify({'success': False, 'message': 'Session ID not found in version'}), 400
+        
+        # Restore the version data to the session
+        dataset_snapshot = version.get('dataset_snapshot')
+        if dataset_snapshot:
+            conn = get_db()
+            if not conn:
+                return jsonify({'success': False, 'message': 'DB connection failed'}), 500
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE ui_sessions 
+                    SET instrument_workflows = %s,
+                        payload = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE session_id = %s
+                """, (
+                    json.dumps(dataset_snapshot) if dataset_snapshot else None,
+                    json.dumps(dataset_snapshot) if dataset_snapshot else None,
+                    session_id
+                ))
+                conn.commit()
+                cursor.close()
+                conn.close()
+                print(f"✅ Restored session {session_id} to version {version.get('versionNumber')}")
+                return jsonify({
+                    'success': True,
+                    'message': f'Session restored to version {version.get("versionNumber")}',
+                    'data': version
+                })
+            except Exception as e:
+                print(f"❌ Failed to restore version: {e}")
+                return jsonify({'success': False, 'message': f'Restore failed: {str(e)}'}), 500
+        else:
+            return jsonify({'success': False, 'message': 'No dataset snapshot found in version'}), 400
 
     @app.route('/api/version/count', methods=['GET', 'OPTIONS'])
     def get_total_version_count():
