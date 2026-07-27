@@ -123,16 +123,18 @@ def get_versions_by_session(session_id, limit=100, offset=0):
         return []
     try:
         cursor = conn.cursor()
+        print(f"🔍 Querying versions for session_id: {session_id} (type: {type(session_id)})")
+        # Remove ORDER BY to avoid sort buffer memory issues, sort in frontend instead
         cursor.execute("""
             SELECT id, version_number, instrument_type, change_summary,
                    dataset_snapshot, mapping_snapshot, calculation_snapshot,
                    portfolio_snapshot, report_snapshot, user_id, created_at
             FROM version_history
             WHERE session_id = %s
-            ORDER BY version_number DESC
             LIMIT %s OFFSET %s
         """, (session_id, limit, offset))
         rows = cursor.fetchall()
+        print(f"🔍 Found {len(rows)} versions for session {session_id}")
         cursor.close()
         conn.close()
         

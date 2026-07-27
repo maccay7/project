@@ -49,7 +49,12 @@ def sessions_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
         payload = request.get_json() or {}
-        session_id = payload.get('id') or payload.get('session_id') or str(int(uuid.uuid4().int % 1e12))
+        session_id = payload.get('id') or payload.get('session_id')
+        
+        # Require session_id - do not auto-create sessions
+        if not session_id:
+            return jsonify({'success': False, 'message': 'session_id is required'}), 400
+        
         name = payload.get('name') or ''
         status = payload.get('status') or 'in-progress'
         user_id = payload.get('user_id')
