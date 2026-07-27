@@ -554,6 +554,11 @@ async function restoreVersion(sessionId, index) {
       versionDialogVisible.value = false
       await refreshSession(sessionId)
       await refreshDashboard()
+      
+      // Dispatch event to notify InstrumentView to reload data
+      window.dispatchEvent(new CustomEvent('session-restored', {
+        detail: { sessionId, versionId: version.id }
+      }))
     } else {
       alert('Failed to restore version: ' + (response?.message || 'Unknown error'))
     }

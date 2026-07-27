@@ -110,8 +110,10 @@ export function generateReportHtml(
     .page:last-child { page-break-after: auto; }
     .cover-page { background-color: white; background-image: url('${backgroundCoverUrl}'); background-size: 30%; background-position: right center; background-repeat: no-repeat; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; position: relative; min-height: 100vh; width: 210mm; margin: 0 auto; }
     .cover-content { max-width: 70%; position: relative; z-index: 2; color: black; }
-    .cover-logo { position: absolute; top: 30px; left: 40px; z-index: 3; }
+    .cover-logo { position: absolute; top: 30px; right: 40px; z-index: 3; }
     .cover-logo img { max-width: 140px; height: auto; background: white; padding: 4px; }
+    .close-button { position: fixed; top: 20px; right: 20px; z-index: 9999; background: #0B2044; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+    .close-button:hover { background: #1a3a6e; }
     .cover-session-name { font-size: 44px; font-weight: 300; letter-spacing: 2px; margin-bottom: 10px; color: #000; }
     .cover-title { font-size: 48px; font-weight: 700; letter-spacing: 2px; margin-bottom: 20px; color: #000; }
     .cover-subtitle { font-size: 28px; font-weight: 300; opacity: 0.85; margin-bottom: 20px; color: #000; }
@@ -139,6 +141,8 @@ export function generateReportHtml(
   </style>
 </head>
 <body>
+<button class="close-button" onclick="window.close()">×</button>
+
 <div class="page cover-page">
   <div class="cover-logo"><img src="${logoUrl}" alt="Dura Capital Logo" /></div>
   <div class="cover-content">

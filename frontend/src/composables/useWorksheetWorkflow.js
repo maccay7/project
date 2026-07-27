@@ -205,7 +205,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           // Check if sheet is hidden
           const isHidden = worksheet['!hidden'] || false
           
-          // Get full 2D array data with defensive coding
+          // Get full 2D array data with defensive coding - limit to 1000 rows
           let fullData = []
           try {
             // Check if worksheet has a valid range
@@ -219,7 +219,11 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
                 console.warn(`Invalid range for sheet ${sheetName}, creating empty sheet`)
                 fullData = []
               } else {
-                for (let R = range.s.r; R <= range.e.r; R++) {
+                // Process all rows without limiting
+                const maxRows = range.e.r - range.s.r + 1
+                console.log(`Processing ${maxRows} rows from sheet ${sheetName}`)
+                
+                for (let R = range.s.r; R < range.s.r + maxRows; R++) {
                   const row = []
                   for (let C = range.s.c; C <= range.e.c; C++) {
                     const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
@@ -263,11 +267,15 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
             }
           }
           
-          // Also get JSON data for compatibility
+          // Also get JSON data for compatibility - limit to 1000 rows
           let jsonData = []
           let sheetHeaders = []
           try {
             jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
+            if (jsonData.length > 1000) {
+              console.log(`Limiting JSON data to 1000 rows (original: ${jsonData.length})`)
+              jsonData = jsonData.slice(0, 1000)
+            }
             if (jsonData.length > 0 && jsonData[0]) {
               sheetHeaders = Object.keys(jsonData[0])
             }

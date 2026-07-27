@@ -5,7 +5,7 @@
     </button>
     <iframe :srcdoc="reportHtml" frameborder="0" class="fullscreen-iframe"></iframe>
   </div>
-  <FixedLayout v-else>
+  <div v-else class="reports-view-no-nav">
     <div class="reports-view">
       <div class="page-header">
         <h1>Generate Report</h1>
@@ -114,13 +114,12 @@
         </div>
       </div>
     </div>
-  </FixedLayout>
+  </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import FixedLayout from '@/components/FixedLayout.vue'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import sessionManager from '@/services/sessionManager.js'
 import { markStepCompleted } from '@/utils/workflowProgress.js'
@@ -194,10 +193,17 @@ async function loadFredDataFromSession(sessionId, instrumentType) {
     if (wf) {
       console.log('FRED filters from workflow:', wf.fredFilters)
       console.log('Yield curve data from workflow:', wf.yieldCurveData)
-      return {
-        fredFilters: wf.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
-        yieldCurveData: wf.yieldCurveData || []
+      console.log('Yield curve data length:', wf.yieldCurveData?.length || 0)
+      // Return immediately if data exists in workflow
+      if (wf.fredFilters && wf.yieldCurveData && wf.yieldCurveData.length > 0) {
+        console.log('Returning cached FRED data from workflow')
+        return {
+          fredFilters: wf.fredFilters,
+          yieldCurveData: wf.yieldCurveData
+        }
       }
+    } else {
+      console.warn('No workflow data found for instrument type:', instrumentType)
     }
   } catch (e) {
     console.warn('Could not load Fred data from session:', e)
@@ -500,38 +506,46 @@ function downloadReport(format = 'json') {
   }
 
   if (format === 'pdf') {
-    const doc = new jsPDF()
-    doc.setFontSize(16)
-    doc.text('Dura Capital Valuation Report', 20, 20)
-    doc.setFontSize(12)
-    doc.text(`Date: ${data.date}`, 20, 30)
-    doc.text(`Session: ${data.session}`, 20, 40)
-    doc.text(`Instrument: ${data.instrument}`, 20, 50)
-    doc.text(`Total Records: ${data.rows}`, 20, 60)
-    doc.text(`Total Value: ${formatCurrency(data.totalValue)}`, 20, 70)
-    doc.save(`${filename}.pdf`)
+    // Use the HTML report for PDF to preserve formatting
+    const htmlContent = reportHtml.value
+    if (!htmlContent) {
+      alert('No report content available. Please generate the report first.')
+      return
+    }
+    
+    // Create a print window to generate PDF
+    const printWindow = window.open('', '_blank')
+    printWindow.document.write(htmlContent)
+    printWindow.document.close()
+    printWindow.focus()
+    setTimeout(() => {
+      printWindow.print()
+    }, 500)
     return
   }
 
   if (format === 'word') {
-    const doc = new Document({
-      sections: [{
-        properties: {},
-        children: [
-          new Paragraph({
-            children: [new TextRun({ text: 'Dura Capital Valuation Report', bold: true, size: 32 })]
-          }),
-          new Paragraph({ text: `Date: ${data.date}` }),
-          new Paragraph({ text: `Session: ${data.session}` }),
-          new Paragraph({ text: `Instrument: ${data.instrument}` }),
-          new Paragraph({ text: `Total Records: ${data.rows}` }),
-          new Paragraph({ text: `Total Value: ${formatCurrency(data.totalValue)}` })
-        ]
-      }]
-    })
-    Packer.toBlob(doc).then(blob => {
-      saveAs(blob, `${filename}.docx`)
-    })
+    // Use the HTML report for Word to preserve formatting
+    const htmlContent = reportHtml.value
+    if (!htmlContent) {
+      alert('No report content available. Please generate the report first.')
+      return
+    }
+    
+    // Create HTML blob with Word MIME type
+    const htmlWithWordHeader = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">
+      <head><meta charset="utf-8"><title>Report</title></head>
+      <body>${htmlContent}</body>
+      </html>
+    `
+    const blob = new Blob(['\ufeff', htmlWithWordHeader], { type: 'application/msword' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${filename}.doc`
+    a.click()
+    URL.revokeObjectURL(url)
     return
   }
 }
@@ -577,6 +591,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.reports-view-no-nav { min-height: 100vh; background: #f5f7fa; padding-top: 20px; }
 .reports-view { padding: 30px; max-width: 1200px; margin: 0 auto; }
 .page-header { margin-bottom: 30px; }
 .back-btn { background: transparent; border: none; color: #0B2044; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 8px; margin-bottom: 20px; }

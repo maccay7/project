@@ -328,7 +328,7 @@ async function loadYieldCurve() {
   yieldError.value = ''
   yieldLoading.value = true
   try {
-    const cacheKey = `${selectedInstrument.value}_${fredFilters.value.country}_${fredFilters.value.currency}`
+    const cacheKey = `${selectedInstrument.value}_${fredFilters.value.country}_${fredFilters.value.currency}_${fredFilters.value.maturity}`
     if (yieldCurveCache.value.has(cacheKey)) {
       const cached = yieldCurveCache.value.get(cacheKey)
       if (Date.now() - cached.timestamp < 300000) {
@@ -348,13 +348,15 @@ async function loadYieldCurve() {
     console.log('Loading yield curve with params:', {
       instrument: selectedInstrument.value,
       country: fredFilters.value.country,
-      currency: fredFilters.value.currency
+      currency: fredFilters.value.currency,
+      maturity: fredFilters.value.maturity
     })
 
     const res = await api.fredAPI.getYieldCurve(
       selectedInstrument.value,
       fredFilters.value.country,
-      fredFilters.value.currency
+      fredFilters.value.currency,
+      fredFilters.value.maturity
     )
     
     console.log('FRED API response:', res)
@@ -398,6 +400,8 @@ function renderYieldChart() {
   const maxMaturity = maturities.length ? Math.max(...maturities) : 10
   const selectedMaturityStr = fredFilters.value.maturity || '1Y'
   
+  console.log('Rendering yield chart with maturity:', selectedMaturityStr, 'maturities:', maturities)
+  
   // Parse maturity to determine label format and scale
   let effectiveMax = maxMaturity
   let xAxisTitle = 'Maturity'
@@ -430,9 +434,15 @@ function renderYieldChart() {
     stepSize = num > 5 ? 5 : 1
   }
 
-  // Filter data points up to effectiveMax
+  console.log('Chart parameters:', { effectiveMax, minX, stepSize, xAxisTitle })
+
+  // Filter data points up to effectiveMax, but ensure we include 0 if not present
   const filteredData = yieldData.value.datasets.map(ds => {
-    const data = ds.data.filter(pt => pt.x <= effectiveMax)
+    let data = ds.data.filter(pt => pt.x <= effectiveMax)
+    // Ensure 0 point exists for proper chart display
+    if (!data.some(pt => pt.x === 0)) {
+      data = [{ x: 0, y: data[0]?.y || 0 }, ...data]
+    }
     return { ...ds, data }
   })
 
@@ -484,7 +494,7 @@ function renderYieldChart() {
         x: {
           type: 'linear',
           title: { display: true, text: xAxisTitle },
-          min: minX,
+          min: 0, // Always start from 0
           max: effectiveMax,
           ticks: {
             callback: function(value) {
@@ -562,8 +572,26 @@ async function goToReports() {
   try {
     const session = sessionManager.getActiveSession()
     const sid = session?.id || sessionManager.getActiveSessionId()
-    if (sid) await markStepCompleted(String(sid), 'visualizations')
-  } catch (e) { console.warn(e) }
+    if (sid) {
+      await markStepCompleted(String(sid), 'visualizations')
+      
+      // Save FRED filters and yield curve data to session workflow for report
+      const workflow = await sessionManager.getInstrumentWorkflow(sid, selectedInstrument.value)
+      if (workflow) {
+        await sessionManager.updateInstrumentWorkflow(sid, selectedInstrument.value, {
+          ...workflow,
+          fredFilters: { ...fredFilters.value },
+          yieldCurveData: yieldData.value?.rates || []
+        })
+        console.log('Saved FRED filters and yield curve data to session workflow:', {
+          fredFilters: fredFilters.value,
+          yieldCurveData: yieldData.value?.rates?.length || 0
+        })
+      }
+    }
+  } catch (e) { 
+    console.warn('Failed to save FRED settings:', e)
+  }
   router.push({ name: 'reports', query: { dataset_id: datasetId } })
 }
 

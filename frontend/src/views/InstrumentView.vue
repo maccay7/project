@@ -1816,6 +1816,7 @@ function addToHistory(filename, data) {
 }
 
 async function loadHistoryFile(item) {
+  console.log('Loading history file:', item.name)
   if (confirm(`Load ${item.name}? Current unsaved data will be lost.`)) {
     const data = JSON.parse(item.data)
     rawData.value = data
@@ -1829,6 +1830,20 @@ async function loadHistoryFile(item) {
         const response = await fetch(item.fileData)
         const blob = await response.blob()
         uploadedFile.value = new File([blob], item.name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+        
+        // Re-parse the workbook to get workbookSheets for viewer
+        console.log('Re-parsing workbook from history file...')
+        const result = await worksheetWorkflow.handleFileUpload(uploadedFile.value)
+        console.log('Workbook parse result:', result)
+        if (result.success) {
+          workbookSheets.value = worksheetWorkflow.workbookSheets.value
+          worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
+          originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
+          console.log('Workbook re-parsed from history:', workbookSheets.value.length, 'sheets')
+          console.log('workbookSheets.value:', workbookSheets.value)
+        } else {
+          console.error('Workbook parse failed:', result.error)
+        }
       } catch (err) {
         console.error('Failed to restore file from base64:', err)
         uploadedFile.value = { name: item.name, size: 0 }
@@ -1844,6 +1859,7 @@ async function loadHistoryFile(item) {
     showPreview.value = true
     saveSessionData()
     forceUpdate.value++
+    console.log('History file loaded, workbookSheets length:', workbookSheets.value.length)
   }
 }
 
@@ -1853,11 +1869,24 @@ function deleteHistoryItem(idx) {
 }
 
 function handleFileUpload(e) {
+  console.log('handleFileUpload called, event:', e)
+  console.log('Files selected:', e.target.files)
+  console.log('Number of files:', e.target.files.length)
+  
   const file = e.target.files[0]
   if (file) {
+    console.log('File details:', {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      lastModified: file.lastModified
+    })
     const fileCopy = new File([file], file.name, { type: file.type })
     uploadedFile.value = fileCopy
+    console.log('Calling readFileData with file:', fileCopy.name)
     readFileData(fileCopy)
+  } else {
+    console.warn('No file selected')
   }
 }
 
@@ -1873,13 +1902,18 @@ function handleDrop(e) {
 
 async function readFileData(file) {
   console.log('readFileData called with file:', file.name, 'size:', file.size)
+  console.log('uploadedFile.value before:', uploadedFile.value?.name)
   fileLoading.value = true
   uploadError.value = ''
 
   try {
+    console.log('Calling worksheetWorkflow.handleFileUpload...')
     const result = await worksheetWorkflow.handleFileUpload(file)
 
     console.log('File upload result:', result)
+    console.log('Result success:', result.success)
+    console.log('Result sheets:', result.sheets?.length)
+    console.log('Result error:', result.error)
 
     if (result.success) {
       workbookSheets.value = worksheetWorkflow.workbookSheets.value
@@ -1888,6 +1922,11 @@ async function readFileData(file) {
 
       console.log('Workbook loaded (preview):', result.sheets.length, 'sheets')
       console.log('workbookSheets.value:', workbookSheets.value)
+      console.log('worksheetStatus.value:', worksheetStatus.value)
+      console.log('worksheetWorkflow.workbookSheets.value:', worksheetWorkflow.workbookSheets.value)
+      console.log('worksheetWorkflow.workbookSheets.length:', worksheetWorkflow.workbookSheets.value.length)
+      console.log('worksheetSelected.value:', worksheetSelected.value)
+      console.log('UI condition check:', worksheetWorkflow.workbookSheets.value.length > 0 && !worksheetSelected.value)
 
       worksheetSelected.value = false
       currentSheetName.value = ''
@@ -1902,6 +1941,7 @@ async function readFileData(file) {
     }
   } catch (err) {
     console.error('Upload error:', err)
+    console.error('Error stack:', err.stack)
     uploadError.value = err.message
     alert(`Failed to parse file: ${err.message}`)
     rawData.value = []
@@ -2801,6 +2841,9 @@ const cleaningOperationsSummary = computed(() => {
 function applyCleaning() {
   console.log('applyCleaning called')
   console.log('rawData.value.length:', rawData.value.length)
+  console.log('cleanedData.value.length:', cleanedData.value.length)
+  console.log('worksheetSelected.value:', worksheetSelected.value)
+  console.log('currentSheetName.value:', currentSheetName.value)
   
   if (!rawData.value.length) {
     console.log('No raw data to clean')
@@ -2815,6 +2858,7 @@ function applyCleaning() {
     const originalLength = data.length
 
     console.log('Starting cleaning process with', originalLength, 'rows')
+    console.log('Cleaning options:', cleaningOptions.value)
 
     if (tableDetection.type === 'table') {
       console.log('Cleaning raw table data')
@@ -4185,6 +4229,33 @@ const backgroundCoverUrl = '/reportbackground.png'
 
 async function generateReportHtml() {
   await loadSavedData()
+  
+  // Load yield curve data from session workflow if not already loaded
+  const session = activeSession.value
+  console.log('Loading yield curve data for report. Session:', session, 'Instrument type:', instrumentType.value)
+  if (session && session.id) {
+    try {
+      const wf = await sessionManager.getInstrumentWorkflow(session.id, instrumentType.value)
+      console.log('Workflow data from session:', wf)
+      if (wf && wf.yieldCurveData && wf.yieldCurveData.length > 0) {
+        console.log('Loading yield curve data from session workflow:', wf.yieldCurveData.length, 'points')
+        yieldCurveData.value = wf.yieldCurveData
+        if (wf.fredFilters) {
+          effectiveCountry.value = wf.fredFilters.country
+          effectiveCurrency.value = wf.fredFilters.currency
+          effectiveMaturity.value = wf.fredFilters.maturity
+          console.log('Loaded FRED filters:', wf.fredFilters)
+        }
+      } else {
+        console.log('No yield curve data found in session workflow')
+      }
+    } catch (e) {
+      console.warn('Failed to load yield curve data from session workflow:', e)
+    }
+  } else {
+    console.log('No session available to load yield curve data')
+  }
+  
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
     alert('No data available for the selected instruments. Please ensure you have run calculations and have data in the instrument summary.')
@@ -4266,7 +4337,11 @@ async function generateReportHtml() {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Arial', sans-serif; color: #000; background: white; line-height: 1.6; }
     .page { page-break-after: always; padding: 30px 40px; min-height: 100vh; position: relative; width: 210mm; margin: 0 auto; background: white; }
-    .cover-page { background-color: white; background-image: url('${backgroundCoverUrl}'); background-size: 45%; background-position: right center; background-repeat: no-repeat; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; min-height: 100vh; }
+    .cover-page { background-color: white; background-image: url('${backgroundCoverUrl}'); background-size: 45%; background-position: right center; background-repeat: no-repeat; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; min-height: 100vh; position: relative; }
+    .cover-logo { position: absolute; top: 30px; right: 40px; z-index: 3; }
+    .cover-logo img { max-width: 140px; height: auto; background: white; padding: 4px; }
+    .close-button { position: fixed; top: 20px; right: 20px; z-index: 9999; background: #0B2044; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+    .close-button:hover { background: #1a3a6e; }
     .cover-content { max-width: 70%; position: relative; z-index: 2; color: black; }
     .cover-title { font-size: 48px; font-weight: 700; letter-spacing: 2px; margin-bottom: 20px; color: #000; }
     .cover-subtitle { font-size: 28px; font-weight: 300; opacity: 0.85; margin-bottom: 20px; color: #000; }
@@ -4294,8 +4369,10 @@ async function generateReportHtml() {
   </style>
 </head>
 <body>
+<button class="close-button" onclick="window.close()">×</button>
 
 <div class="page cover-page">
+  <div class="cover-logo"><img src="/DuraCapital logo.png" alt="Dura Capital Logo" /></div>
   <div class="cover-content">
     <h1 class="cover-title">Valuation Assessment Report</h1>
     <p class="cover-subtitle">${sessionName}</p>
@@ -4448,8 +4525,10 @@ async function previewReport() {
   await loadSavedData()
   const html = await generateReportHtml()
   if (html) {
-    reportPreviewHtml.value = html
-    reportPreviewDialog.value = true
+    // Open in new window to avoid navbar
+    const win = window.open('', '_blank')
+    win.document.write(html)
+    win.document.close()
   } else {
     alert('No data available to generate the report. Please run calculations first.')
   }
@@ -4713,8 +4792,69 @@ onMounted(async () => {
   }
 })
 
+// Listen for session-restored events from Dashboard (defined outside onMounted for cleanup)
+const handleSessionRestored = async (event) => {
+  const { sessionId } = event.detail || {}
+  if (sessionId && activeSession.value?.id === sessionId) {
+    console.log('Session restored, reloading data...')
+    await loadSavedData()
+    await refreshSessionVersionCount(sessionId)
+    forceUpdate.value++
+  }
+}
+
+onMounted(async () => {
+  const qSid = route.query.session
+  if (qSid) {
+    const s = await sessionManager.getSession(String(qSid))
+    if (s) {
+      activeSession.value = s
+      sessionManager.setActiveSession(s)
+    }
+  }
+  if (!activeSession.value) {
+    const current = sessionManager.getActiveSession()
+    if (current) activeSession.value = current
+  }
+  if (!activeSession.value) {
+    const storedSession = localStorage.getItem('activeSession')
+    if (storedSession) {
+      try {
+        const parsed = JSON.parse(storedSession)
+        activeSession.value = parsed
+        sessionManager.setActiveSession(parsed)
+      } catch (e) {
+        console.error('Failed to parse stored session:', e)
+      }
+    }
+  }
+  await checkAndReset()
+  loadUploadHistory()
+  loadSavedTemplates()
+  window.addEventListener('storage', () => checkAndReset())
+  await loadFilterOptions()
+  if (!effectiveMaturity.value) {
+    const def = config.value.defaultMaturity
+    selectedMaturityOption.value = def
+    fredFilters.value.maturity = def
+  }
+  if (Object.keys(allCalculations.value).length) enrichCalculationsWithFred()
+  if (!allCalculations.value.totalValue && activeSession.value) await loadSavedData()
+  if (cleanedData.value.length) await calculateMetrics()
+  debouncedSave()
+
+  window.addEventListener('session-restored', handleSessionRestored)
+
+  if (instrumentSummary.value.rows.length && !allCalculations.value.totalValue) {
+    allCalculations.value = computeAggregate(instrumentSummary.value.rows)
+    selectedCalculations.value = allCalculations.value
+    calculations.value = allCalculations.value
+  }
+})
+
 onBeforeUnmount(() => {
   window.removeEventListener('storage', () => checkAndReset())
+  window.removeEventListener('session-restored', handleSessionRestored)
   if (saveTimeout) clearTimeout(saveTimeout)
   saveSessionData()
 })
