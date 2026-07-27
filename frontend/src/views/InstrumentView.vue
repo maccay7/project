@@ -3754,6 +3754,8 @@ async function saveToSession() {
       console.log('Version API response:', versionResponse)
       console.log('Version API success:', versionResponse?.success)
       console.log('Version API data:', versionResponse?.data)
+      console.log('Version API version_id:', versionResponse?.version_id)
+      console.log('Version API version_number:', versionResponse?.version_number)
       
       if (!versionResponse?.success) {
         console.error('Version creation failed:', versionResponse)
@@ -3761,19 +3763,23 @@ async function saveToSession() {
         // Don't throw error, just log it and continue - version creation shouldn't block save
         console.warn('Version creation failed, but continuing with save')
       } else {
-        console.log('Version created successfully, ID:', versionResponse?.data?.id)
+        console.log('Version created successfully, ID:', versionResponse?.version_id || versionResponse?.data?.id)
+        console.log('Version number:', versionResponse?.version_number || versionResponse?.data?.versionNumber)
       
-        await sessionManager.updateSession(sid, { 
-          version_count: versionNumber,
-          updated_at: new Date().toISOString()
-        })
+        // Don't update version_count locally - let the backend handle it via COUNT query
+        // The backend version_history.py already updates version_count using COUNT(*) after version creation
+        // await sessionManager.updateSession(sid, { 
+        //   version_count: versionNumber,
+        //   updated_at: new Date().toISOString()
+        // })
         
         // Refresh session to get updated version count from backend
-        await refreshSession(sid)
+        await refreshSessionVersionCount(sid)
         
         // Fetch updated versions from backend
         try {
           const versionsRes = await api.versionAPI.getVersions(sid)
+          console.log('Get versions response:', versionsRes)
           if (versionsRes && versionsRes.success && versionsRes.data) {
             const updatedVersionCount = versionsRes.data.length
             console.log(`Updated version count from backend: ${updatedVersionCount}`)
@@ -3793,6 +3799,12 @@ async function saveToSession() {
                 modifiedInstruments: v.modifiedInstruments || [],
                 fieldsChanged: v.fieldsChanged || []
               }))
+              
+              // Also update activeSession if it's the current session
+              if (activeSession.value?.id === sid) {
+                activeSession.value.version_count = updatedVersionCount
+                activeSession.value.versions = session.versions
+              }
             }
             
             // Dispatch event with backend version count

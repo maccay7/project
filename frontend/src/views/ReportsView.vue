@@ -390,7 +390,8 @@ function downloadFullReport() {
     valuationDate,
     '',
     data.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
-    data.yieldCurveData || []
+    data.yieldCurveData || [],
+    data.allWorkedData || {}
   )
   const blob = new Blob([html], { type: 'text/html' })
   const url = URL.createObjectURL(blob)

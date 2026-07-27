@@ -187,6 +187,7 @@
                 </div>
                 <div class="version-entry-actions">
                   <button class="btn-restore" @click="restoreVersion(selectedSessionForVersions.id, idx)">Restore</button>
+                  <button class="btn-delete" @click="deleteVersion(selectedSessionForVersions.id, ver.id, idx)">Delete</button>
                 </div>
               </div>
             </div>
@@ -562,6 +563,36 @@ async function restoreVersion(sessionId, index) {
   }
 }
 
+async function deleteVersion(sessionId, versionId, index) {
+  try {
+    const session = await sessionManager.getSession(sessionId)
+    if (!session || !session.versions || !session.versions[index]) {
+      alert('Version not found')
+      return
+    }
+    
+    const version = session.versions[index]
+    if (!confirm(`Delete version ${version.versionNumber} from ${new Date(version.timestamp).toLocaleString()}?\n\nThis action cannot be undone.`)) {
+      return
+    }
+    
+    // Delete the version
+    const response = await api.versionAPI.deleteVersion(versionId)
+    if (response && response.success) {
+      alert(`✅ Version ${version.versionNumber} deleted`)
+      // Refresh versions list
+      await openVersionModal(sessionId)
+      await refreshSession(sessionId)
+      await refreshDashboard()
+    } else {
+      alert('Failed to delete version: ' + (response?.message || 'Unknown error'))
+    }
+  } catch (err) {
+    console.error('Delete error:', err)
+    alert('Error deleting version: ' + err.message)
+  }
+}
+
 // ---- Session instruments modal ----
 async function openInstrumentModal(sessionId) {
   try {
@@ -919,9 +950,11 @@ onBeforeUnmount(() => {
 .description-row .description-text { font-weight: 500; color: #0B2044; }
 .fields-tags { display: flex; flex-wrap: wrap; gap: 3px; }
 .field-tag { background: #e8ecf1; padding: 0 8px; border-radius: 20px; font-size: 9px; color: #0B2044; line-height: 1.6; }
-.version-entry-actions { margin-top: 4px; display: flex; justify-content: flex-end; }
+.version-entry-actions { margin-top: 4px; display: flex; justify-content: flex-end; gap: 6px; }
 .btn-restore { background: #0B2044; color: white; border: none; padding: 1px 12px; border-radius: 30px; font-size: 10px; cursor: pointer; transition: background 0.2s; }
 .btn-restore:hover { background: #1a3a6e; }
+.btn-delete { background: #f44336; color: white; border: none; padding: 1px 12px; border-radius: 30px; font-size: 10px; cursor: pointer; transition: background 0.2s; }
+.btn-delete:hover { background: #d32f2f; }
 .version-dialog-actions { padding: 6px 16px 10px; border-top: 1px solid #e8ecf1; flex-shrink: 0; }
 .btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; padding: 4px 16px; border-radius: 30px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
 .btn-secondary:hover { background: #0B2044; color: white; }

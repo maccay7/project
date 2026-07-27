@@ -157,6 +157,7 @@ export const versionAPI = {
   getVersions: (session_id) => callAPI(`/api/version/session/${session_id}`, 'GET'),
   getLatest: (session_id) => callAPI(`/api/version/session/${session_id}/latest`, 'GET'),
   restore: (version_id) => callAPI(`/api/version/${version_id}/restore`, 'POST'),
+  deleteVersion: (version_id) => callAPI(`/api/version/${version_id}/delete`, 'DELETE'),
   getTotalCount: () => callAPI('/api/version/count', 'GET')
 }
 
