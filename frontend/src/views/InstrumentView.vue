@@ -1817,6 +1817,20 @@ function addToHistory(filename, data) {
 
 async function loadHistoryFile(item) {
   console.log('Loading history file:', item.name)
+  console.log('item.fileData exists:', !!item.fileData)
+  
+  // Clear old history items without fileData since they can't support workbook viewer
+  if (!item.fileData) {
+    // Remove this item from history since it's outdated
+    const idx = uploadHistory.value.findIndex(h => h.name === item.name && h.date === item.date)
+    if (idx !== -1) {
+      uploadHistory.value.splice(idx, 1)
+      saveUploadHistory()
+    }
+    alert('This file was uploaded before the workbook viewer feature was added and has been removed from history. Please upload the file again to use the workbook viewer.')
+    return
+  }
+  
   if (confirm(`Load ${item.name}? Current unsaved data will be lost.`)) {
     const data = JSON.parse(item.data)
     rawData.value = data
@@ -1833,14 +1847,17 @@ async function loadHistoryFile(item) {
         
         // Re-parse the workbook to get workbookSheets for viewer
         console.log('Re-parsing workbook from history file...')
+        console.log('Uploaded file:', uploadedFile.value)
         const result = await worksheetWorkflow.handleFileUpload(uploadedFile.value)
         console.log('Workbook parse result:', result)
+        console.log('worksheetWorkflow.workbookSheets.value after parse:', worksheetWorkflow.workbookSheets.value)
         if (result.success) {
           workbookSheets.value = worksheetWorkflow.workbookSheets.value
           worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
           originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
           console.log('Workbook re-parsed from history:', workbookSheets.value.length, 'sheets')
           console.log('workbookSheets.value:', workbookSheets.value)
+          console.log('workbookSheets.value[0]:', workbookSheets.value[0])
         } else {
           console.error('Workbook parse failed:', result.error)
         }
@@ -1855,8 +1872,8 @@ async function loadHistoryFile(item) {
 
     columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
     applyCurrentMapping()
-    worksheetSelected.value = true
-    showPreview.value = true
+    worksheetSelected.value = false  // Don't auto-select, let user choose from workbook viewer
+    showPreview.value = false  // Show workbook viewer instead of preview
     saveSessionData()
     forceUpdate.value++
     console.log('History file loaded, workbookSheets length:', workbookSheets.value.length)
@@ -1907,6 +1924,19 @@ async function readFileData(file) {
   uploadError.value = ''
 
   try {
+    // Convert file to base64 for history storage
+    const base64Promise = new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        uploadedFileBase64.value = e.target.result
+        console.log('File converted to base64, length:', uploadedFileBase64.value?.length)
+        resolve(e.target.result)
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+    await base64Promise
+
     console.log('Calling worksheetWorkflow.handleFileUpload...')
     const result = await worksheetWorkflow.handleFileUpload(file)
 
@@ -3747,12 +3777,16 @@ function notifySessionUpdated(explicitSave = false, saveOptions = {}) {
 // saveToSession – with version creation and refresh
 // ================================================================
 async function saveToSession() {
-  if (!activeSession.value) {
+  console.log('saveToSession called')
+  console.log('activeSession.value:', activeSession.value)
+  if (!activeSession.value || !activeSession.value.id) {
     alert('Please select or create a session on the Dashboard first.')
     return
   }
 
   const sid = activeSession.value.id
+  console.log('Session ID:', sid)
+  console.log('Current version count:', activeSession.value?.version_count)
 
   const datasetSnapshot = {
     rawData: rawData.value,
@@ -3780,6 +3814,13 @@ async function saveToSession() {
     // Update instrument count on explicit save
     const count = sessionManager.countSessionInstruments(sid)
     await sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
+    
+    // Update activeSession instrument count immediately
+    if (activeSession.value?.id === sid) {
+      activeSession.value.instrument_count = Math.min(count, 3)
+    }
+    
+    console.log('✅ Instrument count updated to:', Math.min(count, 3))
     
     // Create version on explicit save
     try {
@@ -3824,32 +3865,42 @@ async function saveToSession() {
         try {
           const versionsRes = await api.versionAPI.getVersions(sid)
           console.log('Get versions response:', versionsRes)
-          if (versionsRes && versionsRes.success && versionsRes.data) {
-            const updatedVersionCount = versionsRes.data.length
-            console.log(`Updated version count from backend: ${updatedVersionCount}`)
+          if (versionsRes && versionsRes.success) {
+            // Use total from backend response instead of data.length
+            const updatedVersionCount = versionsRes.total || 0
+            console.log(`Updated version count from backend total: ${updatedVersionCount}`)
             
             // Update session manager's session object
             const session = sessionManager.sessions.find(s => s.id === sid)
             if (session) {
               session.version_count = updatedVersionCount
-              session.versions = versionsRes.data.map(v => ({
-                id: v.id,
-                versionNumber: v.versionNumber,
-                timestamp: v.timestamp || v.created_at,
-                changeSummary: v.changeSummary || v.change_summary || 'No description',
-                instrumentType: v.instrumentType || v.instrument_type || 'General',
-                changeType: v.changeType || 'Saved',
-                changeTypeClass: v.changeTypeClass || 'badge-saved',
-                modifiedInstruments: v.modifiedInstruments || [],
-                fieldsChanged: v.fieldsChanged || []
-              }))
+              // Only update versions array if data exists
+              if (versionsRes.data && versionsRes.data.length > 0) {
+                // Sort by version_number descending since backend no longer sorts
+                const sortedData = [...versionsRes.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
+                session.versions = sortedData.map(v => ({
+                  id: v.id,
+                  versionNumber: v.versionNumber,
+                  timestamp: v.timestamp || v.created_at,
+                  changeSummary: v.changeSummary || v.change_summary || 'No description',
+                  instrumentType: v.instrumentType || v.instrument_type || 'General',
+                  changeType: v.changeType || 'Saved',
+                  changeTypeClass: v.changeTypeClass || 'badge-saved',
+                  modifiedInstruments: v.modifiedInstruments || [],
+                  fieldsChanged: v.fieldsChanged || []
+                }))
+              }
               
               // Also update activeSession if it's the current session
               if (activeSession.value?.id === sid) {
                 activeSession.value.version_count = updatedVersionCount
-                activeSession.value.versions = session.versions
+                if (versionsRes.data && versionsRes.data.length > 0) {
+                  activeSession.value.versions = session.versions
+                }
               }
             }
+            
+            console.log('✅ Version count updated to:', updatedVersionCount)
             
             // Dispatch event with backend version count
             window.dispatchEvent(new CustomEvent('session-updated', {
@@ -3910,11 +3961,19 @@ function debouncedSave(explicitSave = false) {
 }
 
 async function refreshSessionVersionCount(sid) {
+  console.log('refreshSessionVersionCount called with sid:', sid)
   try {
     const updated = await sessionManager.getSession(sid, true)
-    if (updated && activeSession.value?.id === sid) {
+    console.log('Session refresh returned:', updated)
+    console.log('Session has ID?', updated?.id)
+    // Only update if the returned session has a valid ID
+    if (updated && updated.id && activeSession.value?.id === sid) {
       activeSession.value = updated
       console.log('Session refreshed, version_count =', updated.version_count)
+    } else if (!updated?.id) {
+      console.warn('Session refresh returned invalid session (no ID), keeping current session')
+    } else {
+      console.warn('Session refresh condition failed: updated?', !!updated, 'activeSession.value?.id === sid?', activeSession.value?.id === sid)
     }
   } catch (err) {
     console.warn('Failed to refresh session count:', err)
@@ -4338,7 +4397,7 @@ async function generateReportHtml() {
     body { font-family: 'Arial', sans-serif; color: #000; background: white; line-height: 1.6; }
     .page { page-break-after: always; padding: 30px 40px; min-height: 100vh; position: relative; width: 210mm; margin: 0 auto; background: white; }
     .cover-page { background-color: white; background-image: url('${backgroundCoverUrl}'); background-size: 45%; background-position: right center; background-repeat: no-repeat; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; min-height: 100vh; position: relative; }
-    .cover-logo { position: absolute; top: 30px; right: 40px; z-index: 3; }
+    .cover-logo { position: absolute; top: 30px; left: 40px; z-index: 3; }
     .cover-logo img { max-width: 140px; height: auto; background: white; padding: 4px; }
     .close-button { position: fixed; top: 20px; right: 20px; z-index: 9999; background: #0B2044; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
     .close-button:hover { background: #1a3a6e; }

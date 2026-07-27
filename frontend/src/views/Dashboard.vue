@@ -369,20 +369,27 @@ async function refreshSession(sessionId) {
     if (session) {
       // Fetch versions from API
       let versions = []
+      let totalCount = 0
       try {
         const res = await api.versionAPI.getVersions(sessionId)
-        if (res && res.success && res.data) {
-          versions = res.data.map(v => ({
-            id: v.id,
-            versionNumber: v.versionNumber,
-            timestamp: v.timestamp || v.created_at,
-            changeSummary: v.changeSummary || v.change_summary || 'No description',
-            instrumentType: v.instrumentType || v.instrument_type || 'General',
-            changeType: v.changeType || 'Saved',
-            changeTypeClass: v.changeTypeClass || 'badge-saved',
-            modifiedInstruments: v.modifiedInstruments || [],
-            fieldsChanged: v.fieldsChanged || []
-          }))
+        if (res && res.success) {
+          // Use total from backend response for version count
+          totalCount = res.total || 0
+          if (res.data && res.data.length > 0) {
+            // Sort by version_number descending since backend no longer sorts
+            const sortedData = [...res.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
+            versions = sortedData.map(v => ({
+              id: v.id,
+              versionNumber: v.versionNumber,
+              timestamp: v.timestamp || v.created_at,
+              changeSummary: v.changeSummary || v.change_summary || 'No description',
+              instrumentType: v.instrumentType || v.instrument_type || 'General',
+              changeType: v.changeType || 'Saved',
+              changeTypeClass: v.changeTypeClass || 'badge-saved',
+              modifiedInstruments: v.modifiedInstruments || [],
+              fieldsChanged: v.fieldsChanged || []
+            }))
+          }
         }
       } catch (e) {
         console.warn('Failed to fetch versions for session:', sessionId, e)
@@ -390,7 +397,7 @@ async function refreshSession(sessionId) {
       const enriched = {
         ...session,
         versions: versions,
-        version_count: versions.length || session.version_count || 0,
+        version_count: totalCount || session.version_count || 0,
         instrument_count: Math.min(session.instrument_count || 0, 3)
       }
       const idx = sessions.value.findIndex(s => s.id === sessionId)
@@ -498,23 +505,30 @@ async function openVersionModal(sessionId) {
       try {
         const res = await api.versionAPI.getVersions(sessionId)
         console.log('Versions API response:', res)
-        if (res && res.success && res.data) {
-          versions = res.data.map(v => ({
-            id: v.id,
-            versionNumber: v.versionNumber,
-            timestamp: v.timestamp || v.created_at,
-            changeSummary: v.changeSummary || v.change_summary || 'No description',
-            instrumentType: v.instrumentType || v.instrument_type || 'General',
-            changeType: v.changeType || 'Saved',
-            changeTypeClass: v.changeTypeClass || 'badge-saved',
-            modifiedInstruments: v.modifiedInstruments || [],
-            fieldsChanged: v.fieldsChanged || []
-          }))
-          console.log('Mapped versions:', versions)
-          // Update session versions
+        if (res && res.success) {
+          // Use total from backend response for version count
+          const totalCount = res.total || 0
+          if (res.data && res.data.length > 0) {
+            // Sort by version_number descending since backend no longer sorts
+            const sortedData = [...res.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
+            versions = sortedData.map(v => ({
+              id: v.id,
+              versionNumber: v.versionNumber,
+              timestamp: v.timestamp || v.created_at,
+              changeSummary: v.changeSummary || v.change_summary || 'No description',
+              instrumentType: v.instrumentType || v.instrument_type || 'General',
+              changeType: v.changeType || 'Saved',
+              changeTypeClass: v.changeTypeClass || 'badge-saved',
+              modifiedInstruments: v.modifiedInstruments || [],
+              fieldsChanged: v.fieldsChanged || []
+            }))
+          }
+          console.log('Mapped versions:', versions.length)
+          console.log('Total versions from backend:', totalCount)
+          // Update session versions and count
           session.versions = versions
-          session.version_count = versions.length
-          await sessionManager.updateSession(sessionId, { versions, version_count: versions.length })
+          session.version_count = totalCount
+          await sessionManager.updateSession(sessionId, { versions, version_count: totalCount })
         }
       } catch (e) {
         console.warn('Failed to fetch versions:', e)
@@ -604,6 +618,18 @@ async function openInstrumentModal(sessionId) {
     const session = await sessionManager.getSession(sessionId)
     if (session) {
       selectedSessionForInstruments.value = session
+      
+      // Fetch fresh version count from backend
+      let totalCount = session.version_count || 0
+      try {
+        const res = await api.versionAPI.getVersions(sessionId)
+        if (res && res.success) {
+          totalCount = res.total || 0
+        }
+      } catch (e) {
+        console.warn('Failed to fetch version count:', e)
+      }
+      
       const instruments = []
       const workflows = session.instrumentWorkflow || {}
       const instrumentKeys = ['money-market', 'bonds', 'tbills']
@@ -621,7 +647,7 @@ async function openInstrumentModal(sessionId) {
             instrument_name: instrumentName || 'Unnamed',
             status: 'Saved',
             saved_at: wf.sessionSavedAt || session.updated_at || Date.now(),
-            version_count: session.version_count || 0,
+            version_count: totalCount, // Use session's total version count
             has_data: true
           })
         }
@@ -634,7 +660,7 @@ async function openInstrumentModal(sessionId) {
       }
       
       // Fallback to versions if no workflow data
-      if (instruments.length === 0 && session.version_count > 0) {
+      if (instruments.length === 0 && totalCount > 0) {
         const existingVersions = session.versions || []
         const seen = new Set()
         for (const v of existingVersions) {
@@ -645,7 +671,7 @@ async function openInstrumentModal(sessionId) {
               instrument_name: v.instrumentType,
               status: 'Saved',
               saved_at: v.timestamp,
-              version_count: 1
+              version_count: totalCount
             })
           }
         }
