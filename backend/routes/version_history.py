@@ -396,3 +396,52 @@ def version_history_routes(app):
             return '', 200
         deleted = delete_versions_by_session(session_id)
         return jsonify({'success': True, 'deleted': deleted})
+
+    @app.route('/api/version/<int:version_id>/delete', methods=['DELETE', 'OPTIONS'])
+    def delete_version_by_id_endpoint(version_id):
+        if request.method == 'OPTIONS':
+            return '', 200
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'DB connection failed'}), 500
+        try:
+            cursor = conn.cursor()
+            # Get session_id before deleting
+            cursor.execute('SELECT session_id FROM version_history WHERE id = %s', (version_id,))
+            row = cursor.fetchone()
+            if not row:
+                cursor.close()
+                conn.close()
+                return jsonify({'success': False, 'message': 'Version not found'}), 404
+            session_id = row.get('session_id')
+            
+            # Delete the version
+            cursor.execute('DELETE FROM version_history WHERE id = %s', (version_id,))
+            deleted = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            
+            # Update session version_count using COUNT
+            try:
+                update_conn = get_db()
+                if update_conn:
+                    up_cursor = update_conn.cursor()
+                    up_cursor.execute(
+                        'UPDATE ui_sessions SET version_count = (SELECT COUNT(*) FROM version_history WHERE session_id = %s) WHERE session_id = %s',
+                        (session_id, session_id)
+                    )
+                    update_conn.commit()
+                    up_cursor.close()
+                    update_conn.close()
+                    print(f'✅ Updated session {session_id} version_count after deletion')
+            except Exception as e:
+                print(f'⚠️ Failed to update session version_count: {e}')
+            
+            conn.close()
+            print(f'✅ Deleted version {version_id} for session {session_id}')
+            return jsonify({'success': True, 'deleted': deleted, 'session_id': session_id})
+        except Exception as e:
+            print(f'❌ Failed to delete version: {e}')
+            import traceback
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': str(e)}), 500

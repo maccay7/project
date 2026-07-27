@@ -198,8 +198,8 @@ def sessions_routes(app):
                     # Update session to fix version_count
                     upd_cursor = conn.cursor()
                     upd_cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (row['version_count'], session_id))
-                    upd_cursor.close()
                     conn.commit()
+                    upd_cursor.close()
                 hist_cursor.close()
             except Exception as e:
                 print(f"⚠️ Failed to check version history: {e}")
