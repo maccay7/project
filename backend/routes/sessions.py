@@ -164,7 +164,7 @@ def sessions_routes(app):
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute('''
-                SELECT session_id, name, status, versions, instrument_workflows, payload, 
+                SELECT session_id as id, name, status, versions, instrument_workflows, payload, 
                        instrument_count, version_count, created_at, updated_at
                 FROM ui_sessions WHERE session_id = %s LIMIT 1
             ''', (session_id,))
