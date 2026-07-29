@@ -371,6 +371,33 @@ async function loadYieldCurve() {
         analytics: res.data.analytics || null,
         timestamp: Date.now()
       })
+      
+      // Save yield curve data to session immediately so it persists across page navigation
+      const session = sessionManager.getActiveSession()
+      const sid = session?.id || sessionManager.getActiveSessionId()
+      if (sid) {
+        const workflow = await sessionManager.getInstrumentWorkflow(sid, selectedInstrument.value)
+        if (workflow) {
+          // Convert yield curve data to the format expected by the report
+          const yieldCurvePoints = []
+          if (res.data.datasets[0]?.data) {
+            res.data.datasets[0].data.forEach(pt => {
+              yieldCurvePoints.push({
+                maturity: pt.x,
+                rate: pt.y
+              })
+            })
+          }
+          
+          await sessionManager.updateInstrumentWorkflow(sid, selectedInstrument.value, {
+            ...workflow,
+            fredFilters: { ...fredFilters.value },
+            yieldCurveData: yieldCurvePoints
+          })
+          console.log('Saved yield curve data to session workflow:', yieldCurvePoints.length, 'points')
+        }
+      }
+      
       await saveFredSettings()
     } else {
       console.error('FRED API failed or returned no data:', res)
@@ -578,14 +605,25 @@ async function goToReports() {
       // Save FRED filters and yield curve data to session workflow for report
       const workflow = await sessionManager.getInstrumentWorkflow(sid, selectedInstrument.value)
       if (workflow) {
+        // Convert yield curve data to the format expected by the report
+        const yieldCurvePoints = []
+        if (yieldData.value?.datasets?.[0]?.data) {
+          yieldData.value.datasets[0].data.forEach(pt => {
+            yieldCurvePoints.push({
+              maturity: pt.x,
+              rate: pt.y
+            })
+          })
+        }
+        
         await sessionManager.updateInstrumentWorkflow(sid, selectedInstrument.value, {
           ...workflow,
           fredFilters: { ...fredFilters.value },
-          yieldCurveData: yieldData.value?.rates || []
+          yieldCurveData: yieldCurvePoints
         })
         console.log('Saved FRED filters and yield curve data to session workflow:', {
           fredFilters: fredFilters.value,
-          yieldCurveData: yieldData.value?.rates?.length || 0
+          yieldCurveData: yieldCurvePoints.length
         })
       }
     }

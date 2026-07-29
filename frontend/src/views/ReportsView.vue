@@ -22,9 +22,6 @@
         <v-btn color="#0B2A44" @click="markDone">
           <v-icon left>mdi-check-circle</v-icon> Done
         </v-btn>
-        <v-btn color="#4CAF50" @click="downloadFullReport">
-          <v-icon left>mdi-download</v-icon> Download Full Report (HTML)
-        </v-btn>
         <v-btn color="#9C27B0" @click="showFullscreenReport = true" v-if="reportHtml">
           <v-icon left>mdi-fullscreen</v-icon> View Fullscreen
         </v-btn>
@@ -93,23 +90,11 @@
         </div>
 
         <div class="download-row">
-          <button class="btn-primary" @click="downloadFullReport">
-            <v-icon>mdi-download</v-icon> Download Full Report (HTML)
-          </button>
-          <button class="btn-secondary" @click="downloadReport('json')">
-            <v-icon>mdi-code-json</v-icon> Download JSON
-          </button>
-          <button class="btn-secondary" @click="downloadReport('excel')">
-            <v-icon>mdi-file-excel</v-icon> Download Excel
-          </button>
-          <button class="btn-secondary" @click="downloadReport('pdf')">
+          <button class="btn-primary" @click="downloadReport('pdf')">
             <v-icon>mdi-file-pdf</v-icon> Download PDF
           </button>
           <button class="btn-secondary" @click="downloadReport('word')">
             <v-icon>mdi-file-word</v-icon> Download Word
-          </button>
-          <button class="btn-secondary" @click="downloadReport('csv')">
-            <v-icon>mdi-file-csv</v-icon> Download CSV
           </button>
         </div>
       </div>
@@ -208,6 +193,36 @@ async function loadFredDataFromSession(sessionId, instrumentType) {
   } catch (e) {
     console.warn('Could not load Fred data from session:', e)
   }
+  
+  // If no data in session, fetch from FRED API using default filters
+  console.log('No yield curve data in session, fetching from FRED API')
+  try {
+    const response = await fetch('http://localhost:5000/api/fred/yield-curve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instrument_type: instrumentType,
+        country: 'US',
+        currency: 'USD',
+        maturity: '1Y'
+      })
+    })
+    const data = await response.json()
+    if (data && data.rates && data.rates.length > 0) {
+      const points = data.rates.map((rate, idx) => ({
+        maturity: data.maturities?.[idx] || idx,
+        rate: rate
+      }))
+      console.log('Fetched yield curve from FRED API:', points.length, 'points')
+      return {
+        fredFilters: { country: 'US', currency: 'USD', maturity: '1Y' },
+        yieldCurveData: points
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to fetch yield curve from FRED API:', e)
+  }
+  
   console.log('Returning default FRED data')
   return { fredFilters: { country: 'US', currency: 'USD', maturity: '1Y' }, yieldCurveData: [] }
 }
@@ -361,53 +376,6 @@ async function generatePreview() {
   }
 }
 
-// ===== Download Full Report =====
-function downloadFullReport() {
-  if (!previewData.value) {
-    alert('No report data. Please refresh the report first.')
-    return
-  }
-  const data = previewData.value
-  const instrument = data.instrument || 'unknown'
-  const session = data.session || 'Current Session'
-  const date = data.date || new Date().toLocaleString()
-  const valuationDate = data.valuationDate || new Date().toISOString().split('T')[0]
-  let fullData = []
-  if (selectedType.value === 'session' && data.instruments) {
-    for (const [inst, rows] of Object.entries(data.instruments)) {
-      if (rows && rows.length) fullData = fullData.concat(rows)
-    }
-  } else {
-    if (data.allWorkedData && data.allWorkedData[instrument]) {
-      fullData = data.allWorkedData[instrument]
-    } else if (data.sample) {
-      fullData = data.sample
-    }
-  }
-  if (!fullData.length) {
-    alert('No data available for the report.')
-    return
-  }
-  const html = generateReportHtml(
-    fullData,
-    instrument,
-    session,
-    date,
-    valuationDate,
-    '',
-    data.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
-    data.yieldCurveData || [],
-    data.allWorkedData || {}
-  )
-  const blob = new Blob([html], { type: 'text/html' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `Dura-Capital-Valuation-Report-${new Date().toISOString().split('T')[0]}.html`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
 // ===== Other helper functions =====
 function formatForExcel(value, type = 'number', key = '') {
   if (value === null || value === undefined || value === '') return ''
@@ -513,14 +481,42 @@ function downloadReport(format = 'json') {
       return
     }
     
-    // Create a print window to generate PDF
-    const printWindow = window.open('', '_blank')
-    printWindow.document.write(htmlContent)
-    printWindow.document.close()
-    printWindow.focus()
-    setTimeout(() => {
-      printWindow.print()
-    }, 500)
+    // Use html2canvas and jsPDF to generate PDF directly
+    const { default: html2canvas } = await import('html2canvas')
+    
+    // Create a temporary container to render the HTML
+    const container = document.createElement('div')
+    container.innerHTML = htmlContent
+    container.style.position = 'absolute'
+    container.style.left = '-9999px'
+    container.style.width = '210mm'
+    document.body.appendChild(container)
+    
+    try {
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        logging: false
+      })
+      
+      const imgData = canvas.toDataURL('image/png')
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      const pdfWidth = pdf.internal.pageSize.getWidth()
+      const pdfHeight = pdf.internal.pageSize.getHeight()
+      const imgWidth = canvas.width
+      const imgHeight = canvas.height
+      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight)
+      const imgX = (pdfWidth - imgWidth * ratio) / 2
+      const imgY = 30
+      
+      pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio)
+      pdf.save(`Dura-Capital-Valuation-Report-${new Date().toISOString().split('T')[0]}.pdf`)
+    } catch (e) {
+      console.error('PDF generation error:', e)
+      alert('Failed to generate PDF. Please try again.')
+    } finally {
+      document.body.removeChild(container)
+    }
     return
   }
 

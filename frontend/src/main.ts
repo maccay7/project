@@ -8,6 +8,13 @@ import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import '@mdi/font/css/materialdesignicons.css'
 
+// Import jQuery and make it globally available for Vuetify components
+import jQuery from 'jquery'
+if (typeof window !== 'undefined') {
+  window.$ = jQuery
+  window.jQuery = jQuery
+}
+
 const vuetify = createVuetify({
   components,
   directives,

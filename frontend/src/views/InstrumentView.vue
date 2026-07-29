@@ -3824,8 +3824,8 @@ async function saveToSession() {
     
     // Create version on explicit save
     try {
-      const currentVersionCount = activeSession.value?.version_count || 0
-      const versionNumber = currentVersionCount + 1
+      // Don't use local version_count - let backend determine next version number
+      // Pass null for version_number so backend uses get_next_version_number
       
       // Create version via API
       const versionResponse = await api.versionAPI.create(
