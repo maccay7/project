@@ -110,7 +110,7 @@ import { markStepCompleted } from '@/utils/workflowProgress.js'
 import { generateReportHtml } from '@/utils/generateReportHtml.js'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
-import { Document, Packer, Paragraph, TextRun } from 'docx'
+import { Document, Packer, Paragraph, TextRun, ImageRun } from 'docx'
 import { saveAs } from 'file-saver'
 import api from '@/services/api.js'
 
@@ -457,24 +457,121 @@ function downloadReport(format = 'json') {
   }
 
   if (format === 'word') {
-    const doc = new Document({
-      sections: [{
-        properties: {},
-        children: [
-          new Paragraph({
-            children: [new TextRun({ text: 'Dura Capital Valuation Report', bold: true, size: 32 })]
-          }),
-          new Paragraph({ text: `Date: ${data.date}` }),
-          new Paragraph({ text: `Session: ${data.session}` }),
-          new Paragraph({ text: `Instrument: ${data.instrument}` }),
-          new Paragraph({ text: `Total Records: ${data.rows}` }),
-          new Paragraph({ text: `Total Value: ${formatCurrency(data.totalValue)}` })
-        ]
-      }]
-    })
-    Packer.toBlob(doc).then(blob => {
-      saveAs(blob, `${filename}.docx`)
-    })
+    // Get the HTML content directly from the preview
+    const previewElement = document.querySelector('.preview-content')
+    if (!previewElement) {
+      alert('Preview element not found. Please generate the report first.')
+      return
+    }
+    
+    // Helper function to convert image URL to base64
+    const imageToBase64 = async (url) => {
+      try {
+        const response = await fetch(url)
+        const blob = await response.blob()
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+      } catch (e) {
+        console.error('Error converting image to base64:', e)
+        return url
+      }
+    }
+    
+    // Get the complete HTML content
+    let htmlContent = previewElement.innerHTML
+    
+    // Create a temporary DOM to manipulate
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(htmlContent, 'text/html')
+    
+    // Convert all images to base64
+    const images = doc.querySelectorAll('img')
+    for (const img of images) {
+      const src = img.getAttribute('src')
+      if (src && !src.startsWith('data:')) {
+        const base64 = await imageToBase64(src)
+        img.setAttribute('src', base64)
+      }
+    }
+    
+    // Convert background images to base64
+    const coverPage = doc.querySelector('.cover-page')
+    if (coverPage) {
+      const bgImage = coverPage.style.backgroundImage
+      if (bgImage && bgImage.includes('url(') && !bgImage.includes('data:')) {
+        const urlMatch = bgImage.match(/url\(['"]?(.*?)['"]?\)/)
+        if (urlMatch && urlMatch[1]) {
+          const base64 = await imageToBase64(urlMatch[1])
+          coverPage.style.backgroundImage = `url(${base64})`
+        }
+      }
+    }
+    
+    // Remove the close button
+    const closeButton = doc.querySelector('.close-button')
+    if (closeButton) closeButton.remove()
+    
+    // Get the modified HTML
+    htmlContent = doc.body.innerHTML
+    
+    // Wrap with Word-compatible HTML headers
+    const wordHtml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" 
+            xmlns:w="urn:schemas-microsoft-com:office:word"
+            xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8">
+        <meta name="ProgId" content="Word.Document">
+        <meta name="Generator" content="Microsoft Word">
+        <meta name="Originator" content="Microsoft Word">
+        <style>
+          @page {
+            size: A4;
+            margin: 0.5in;
+          }
+          body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+          }
+          .page {
+            page-break-after: always;
+            min-height: 100vh;
+            position: relative;
+          }
+          .page:last-child {
+            page-break-after: auto;
+          }
+          .cover-page {
+            page-break-after: always;
+            min-height: 100vh;
+            position: relative;
+          }
+          .toc-page {
+            page-break-after: always;
+            min-height: 100vh;
+            position: relative;
+          }
+        </style>
+      </head>
+      <body>
+        ${htmlContent}
+      </body>
+      </html>
+    `
+    
+    // Create blob with Word MIME type
+    const blob = new Blob(['\ufeff', wordHtml], { type: 'application/msword' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Dura-Capital-Valuation-Report-${new Date().toISOString().split('T')[0]}.doc`
+    a.click()
+    URL.revokeObjectURL(url)
     return
   }
 }

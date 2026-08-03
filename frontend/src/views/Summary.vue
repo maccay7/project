@@ -31,31 +31,46 @@
         </div>
       </div>
 
-      <!-- Descriptive Analytics (Pills) -->
+      <!-- Descriptive Analytics (KPI Cards) -->
       <div class="analytics-section" style="margin-bottom: 24px;">
         <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
           <i class="fas fa-chart-line" style="color: #1a4d8f; margin-right: 8px;"></i> Descriptive Analytics
         </h3>
-        <div class="analytics-pills">
-          <div class="analytics-pill">
-            <span class="pill-label">Number of Instruments</span>
-            <span class="pill-value">{{ analyticsData['Number of Records'] || '0' }}</span>
+        <div class="analytics-cards">
+          <div class="kpi-card simple-kpi">
+            <div class="kpi-top-bar"></div>
+            <div class="kpi-info">
+              <div class="kpi-value">{{ analyticsData['Number of Records'] || '0' }}</div>
+              <div class="kpi-title">Number of Instruments</div>
+            </div>
           </div>
-          <div class="analytics-pill">
-            <span class="pill-label">Total Face Value</span>
-            <span class="pill-value">${{ analyticsData['Total Face Value'] || '0.00' }}</span>
+          <div class="kpi-card simple-kpi">
+            <div class="kpi-top-bar"></div>
+            <div class="kpi-info">
+              <div class="kpi-value">${{ analyticsData['Total Face Value'] || '0.00' }}</div>
+              <div class="kpi-title">Total Face Value</div>
+            </div>
           </div>
-          <div class="analytics-pill">
-            <span class="pill-label">Weighted Avg Yield</span>
-            <span class="pill-value">{{ analyticsData['Weighted Average Yield'] || '0.00' }}%</span>
+          <div class="kpi-card simple-kpi">
+            <div class="kpi-top-bar"></div>
+            <div class="kpi-info">
+              <div class="kpi-value">{{ analyticsData['Weighted Average Yield'] || '0.00' }}%</div>
+              <div class="kpi-title">Weighted Avg Yield</div>
+            </div>
           </div>
-          <div class="analytics-pill">
-            <span class="pill-label">Weighted Avg Maturity</span>
-            <span class="pill-value">{{ analyticsData['Weighted Average Maturity'] || '0.00' }}</span>
+          <div class="kpi-card simple-kpi">
+            <div class="kpi-top-bar"></div>
+            <div class="kpi-info">
+              <div class="kpi-value">{{ analyticsData['Weighted Average Maturity'] || '0.00' }}</div>
+              <div class="kpi-title">Weighted Avg Maturity</div>
+            </div>
           </div>
-          <div class="analytics-pill">
-            <span class="pill-label">Average Rate</span>
-            <span class="pill-value">{{ analyticsData['Average Rate'] || '0.00' }}%</span>
+          <div class="kpi-card simple-kpi">
+            <div class="kpi-top-bar"></div>
+            <div class="kpi-info">
+              <div class="kpi-value">{{ analyticsData['Average Rate'] || '0.00' }}%</div>
+              <div class="kpi-title">Average Rate</div>
+            </div>
           </div>
         </div>
       </div>
@@ -474,7 +489,13 @@ const analyticsData = computed(() => {
   }
   for (const [k, v] of Object.entries(stats)) {
     if (typeof v === 'number') {
-      stats[k] = v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      // Check if this is a time field (days, months, years, maturity, duration, term, week, time)
+      const isTimeField = k.toLowerCase().includes('day') || k.toLowerCase().includes('maturity') || k.toLowerCase().includes('duration') || k.toLowerCase().includes('term') || k.toLowerCase().includes('month') || k.toLowerCase().includes('year') || k.toLowerCase().includes('week') || k.toLowerCase().includes('time')
+      if (isTimeField) {
+        stats[k] = Math.round(v).toLocaleString()
+      } else {
+        stats[k] = v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      }
     }
   }
   return stats
@@ -922,8 +943,11 @@ onMounted(async () => {
 .pill-label { display: block; font-size: 12px; opacity: 0.9; }
 .pill-amount { font-size: 30px; font-weight: 700; display: block; }
 .pill-sub { font-size: 12px; opacity: 0.85; }
-.kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; margin-bottom: 28px; }
+.kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-bottom: 28px; }
 .kpi-card { background: white; border-radius: 20px; padding: 18px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; }
+.kpi-card.simple-kpi { padding: 20px; justify-content: center; text-align: center; }
+.kpi-card.simple-kpi .kpi-info { text-align: center; }
+.kpi-card.simple-kpi .kpi-value { font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .kpi-top-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50); transform: scaleX(1); }
 .kpi-card:hover { transform: translateY(-5px); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15); }
 .kpi-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.3s ease; }
@@ -1044,53 +1068,18 @@ onMounted(async () => {
 }
 .valuation-date-footer { color: #666; font-size: 13px; }
 
-.analytics-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  justify-content: space-between;
-  margin: 12px 0;
-}
-.analytics-pill {
-  flex: 1;
-  min-width: 160px;
-  background: #f8faff;
-  padding: 14px 20px;
-  border-radius: 12px;
-  border: 1px solid #edf0f6;
-  text-align: center;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-.analytics-pill:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-}
-.analytics-pill .pill-label {
-  display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #7a879b;
-  margin-bottom: 4px;
-}
-.analytics-pill .pill-value {
-  display: block;
-  font-size: 22px;
-  font-weight: 700;
-  color: #0b1e3c;
-}
+.analytics-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
 
 @media (max-width: 768px) {
   .summary-page { padding: 16px; }
   .hero-header { flex-direction: column; }
   .grand-pill { width: 100%; text-align: center; }
   .summary-cards { grid-template-columns: 1fr; }
-  .kpi-strip { flex-direction: column; }
+  .kpi-strip { grid-template-columns: repeat(2, 1fr); }
+  .analytics-cards { grid-template-columns: repeat(2, 1fr); }
   .export-all-section { flex-direction: column; align-items: center; }
   .action-buttons { flex-direction: column; align-items: center; }
   .dist-bar-container { flex-wrap: wrap; }
   .dist-label { width: 80px; }
-  .analytics-pills { flex-direction: column; }
-  .analytics-pill { min-width: auto; }
 }
 </style>

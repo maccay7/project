@@ -490,6 +490,9 @@
                         <v-icon small>mdi-eye</v-icon> Currently viewing: <strong>{{ currentlyViewingInstrument }}</strong>
                       </span>
                       <v-spacer></v-spacer>
+                      <button class="btn-primary" @click="downloadCalculatedInstrumentsExcel" style="margin-right: 10px;">
+                        <v-icon small style="margin-right: 5px;">mdi-download</v-icon> Download Excel
+                      </button>
                       <button class="btn-secondary" @click="closeAllCalculationsPopup">Close</button>
                     </v-card-actions>
                   </v-card>
@@ -616,26 +619,41 @@
                   <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
                     <i class="fas fa-chart-line" style="color: #1a4d8f; margin-right: 8px;"></i> Descriptive Analytics
                   </h3>
-                  <div class="analytics-pills">
-                    <div class="analytics-pill">
-                      <span class="pill-label">Number of Instruments</span>
-                      <span class="pill-value">{{ descriptiveAnalytics['Number of Records'] || '0' }}</span>
+                  <div class="analytics-cards">
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">{{ descriptiveAnalytics['Number of Records'] || '0' }}</div>
+                        <div class="kpi-title">Number of Instruments</div>
+                      </div>
                     </div>
-                    <div class="analytics-pill">
-                      <span class="pill-label">Total Face Value</span>
-                      <span class="pill-value">${{ descriptiveAnalytics['Total Face Value'] || '0.00' }}</span>
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">${{ descriptiveAnalytics['Total Face Value'] || '0.00' }}</div>
+                        <div class="kpi-title">Total Face Value</div>
+                      </div>
                     </div>
-                    <div class="analytics-pill">
-                      <span class="pill-label">Weighted Avg Yield</span>
-                      <span class="pill-value">{{ descriptiveAnalytics['Weighted Average Yield'] || '0.00' }}%</span>
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Yield'] || '0.00' }}%</div>
+                        <div class="kpi-title">Weighted Avg Yield</div>
+                      </div>
                     </div>
-                    <div class="analytics-pill">
-                      <span class="pill-label">Weighted Avg Maturity</span>
-                      <span class="pill-value">{{ descriptiveAnalytics['Weighted Average Maturity'] || '0.00' }}</span>
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Maturity'] || '0.00' }}</div>
+                        <div class="kpi-title">Weighted Avg Maturity</div>
+                      </div>
                     </div>
-                    <div class="analytics-pill">
-                      <span class="pill-label">Average Rate</span>
-                      <span class="pill-value">{{ descriptiveAnalytics['Average Rate'] || '0.00' }}%</span>
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">{{ descriptiveAnalytics['Average Rate'] || '0.00' }}%</div>
+                        <div class="kpi-title">Average Rate</div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -644,33 +662,41 @@
                   <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
                     <i class="fas fa-check-circle" style="color: #1a4d8f; margin-right: 8px;"></i> Quality Control
                   </h3>
-                  <div class="quality-pills">
-                    <div class="quality-pill">
-                      <span class="pill-label">Data Completeness</span>
-                      <span class="pill-value" :class="dataQualitySummary.completeness >= 80 ? 'text-success' : 'text-warning'">
-                        {{ dataQualitySummary.completeness || 0 }}%
-                      </span>
-                      <span class="pill-sub">{{ dataQualitySummary.completeness >= 80 ? '✅ Good' : '⚠️ Needs Review' }}</span>
+                  <div class="quality-cards">
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">{{ dataQualitySummary.completeness || 0 }}%</div>
+                        <div class="kpi-title">Data Completeness</div>
+                      </div>
                     </div>
-                    <div class="quality-pill">
-                      <span class="pill-label">Columns Mapped</span>
-                      <span class="pill-value">{{ dataQualitySummary.columnsMapped || 0 }} / {{ requiredColumns.length }}</span>
-                      <span class="pill-sub">{{ dataQualitySummary.columnsMapped === requiredColumns.length ? '✅ Complete' : '⚠️ Incomplete' }}</span>
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">{{ dataQualitySummary.columnsMapped || 0 }} / {{ requiredColumns.length }}</div>
+                        <div class="kpi-title">Columns Mapped</div>
+                      </div>
                     </div>
-                    <div class="quality-pill">
-                      <span class="pill-label">Rows Processed</span>
-                      <span class="pill-value">{{ dataQualitySummary.rowsProcessed || 0 }}</span>
-                      <span class="pill-sub">{{ dataQualitySummary.rowsProcessed > 0 ? '✅ Loaded' : '⚠️ No Data' }}</span>
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">{{ dataQualitySummary.rowsProcessed || 0 }}</div>
+                        <div class="kpi-title">Rows Processed</div>
+                      </div>
                     </div>
-                    <div class="quality-pill">
-                      <span class="pill-label">Duplicates Removed</span>
-                      <span class="pill-value">{{ dataQualitySummary.duplicatesRemoved || 0 }}</span>
-                      <span class="pill-sub">{{ dataQualitySummary.duplicatesRemoved === 0 ? '✅ Clean' : '⚠️ Duplicates Found' }}</span>
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">{{ dataQualitySummary.duplicatesRemoved || 0 }}</div>
+                        <div class="kpi-title">Duplicates Removed</div>
+                      </div>
                     </div>
-                    <div class="quality-pill">
-                      <span class="pill-label">Missing Values Fixed</span>
-                      <span class="pill-value">{{ dataQualitySummary.missingValuesFixed || 0 }}</span>
-                      <span class="pill-sub">{{ dataQualitySummary.missingValuesFixed === 0 ? '✅ Complete' : '⚠️ Missing Values' }}</span>
+                    <div class="kpi-card simple-kpi">
+                      <div class="kpi-top-bar"></div>
+                      <div class="kpi-info">
+                        <div class="kpi-value">{{ dataQualitySummary.missingValuesFixed || 0 }}</div>
+                        <div class="kpi-title">Missing Values Fixed</div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1210,7 +1236,13 @@ const descriptiveAnalytics = computed(() => {
   }
   for (const [k, v] of Object.entries(stats)) {
     if (typeof v === 'number') {
-      stats[k] = v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      // Check if this is a time field (days, months, years, maturity, duration, term, week, time)
+      const isTimeField = k.toLowerCase().includes('day') || k.toLowerCase().includes('maturity') || k.toLowerCase().includes('duration') || k.toLowerCase().includes('term') || k.toLowerCase().includes('month') || k.toLowerCase().includes('year') || k.toLowerCase().includes('week') || k.toLowerCase().includes('time')
+      if (isTimeField) {
+        stats[k] = Math.round(v).toLocaleString()
+      } else {
+        stats[k] = v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      }
     }
   }
   return stats
@@ -1392,7 +1424,7 @@ function formatCalcValue(key, value) {
   
   // Round numeric values to 2 decimal places, but round time values to whole numbers
   if (typeof value === 'number' && !isNaN(value)) {
-    const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
+    const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term') || key.toLowerCase().includes('month') || key.toLowerCase().includes('year') || key.toLowerCase().includes('week') || key.toLowerCase().includes('time')
     if (isTimeField) {
       const rounded = Math.round(value)
       if (field.prefix) return field.prefix + rounded.toLocaleString()
@@ -1527,8 +1559,12 @@ function getCurrencyLabel(code) {
   return found ? found.label : code
 }
 
-function formatNumber(num) {
+function formatNumber(num, isTimeField = false) {
   if (num === undefined || num === null) return '0.00'
+  if (isTimeField) {
+    const rounded = Math.round(num)
+    return rounded.toLocaleString()
+  }
   const rounded = Math.round(num * 100) / 100
   return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -2798,6 +2834,79 @@ function openInstrumentDataExcel() {
   showExcelDialog.value = true
 }
 
+function downloadCalculatedInstrumentsExcel() {
+  if (!instrumentSummary.value.rows.length) {
+    alert('No data to download')
+    return
+  }
+
+  const workbook = XLSX.utils.book_new()
+  const columns = instrumentSummaryColumnsForDisplay.value
+  const rows = sortedInstrumentSummaryRows.value
+
+  // Create header row
+  const data = [columns]
+
+  // Add data rows with formatted values
+  rows.forEach(row => {
+    const dataRow = columns.map(col => {
+      const value = row[col]
+      return formatTableCell(value, col)
+    })
+    data.push(dataRow)
+  })
+
+  const worksheet = XLSX.utils.aoa_to_sheet(data)
+  
+  // Set column widths based on content type
+  const columnWidths = columns.map(col => {
+    const isNumeric = columns.some(c => c.toLowerCase().includes('value') || c.toLowerCase().includes('amount') || c.toLowerCase().includes('rate') || c.toLowerCase().includes('yield') || c.toLowerCase().includes('price'))
+    const isDate = col.toLowerCase().includes('date')
+    const isName = col.toLowerCase().includes('name') || col.toLowerCase().includes('instrument') || col.toLowerCase().includes('ticker')
+    
+    if (isNumeric) return { wch: 18 }
+    if (isDate) return { wch: 14 }
+    if (isName) return { wch: 25 }
+    return { wch: 20 }
+  })
+  worksheet['!cols'] = columnWidths
+
+  // Style the header row (first row)
+  const range = XLSX.utils.decode_range(worksheet['!ref'])
+  for (let C = range.s.c; C <= range.e.c; ++C) {
+    const cellAddress = XLSX.utils.encode_cell({ r: 0, c: C })
+    if (!worksheet[cellAddress]) continue
+    worksheet[cellAddress].s = {
+      font: { bold: true, color: { rgb: "FFFFFF" } },
+      fill: { fgColor: { rgb: "0B2044" } },
+      alignment: { horizontal: "center", vertical: "center" }
+    }
+  }
+
+  // Style data rows for alignment
+  for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
+      if (!worksheet[cellAddress]) continue
+      
+      const colName = columns[C]
+      const isNumeric = colName.toLowerCase().includes('value') || colName.toLowerCase().includes('amount') || colName.toLowerCase().includes('rate') || colName.toLowerCase().includes('yield') || colName.toLowerCase().includes('price') || colName.toLowerCase().includes('percentage')
+      
+      worksheet[cellAddress].s = {
+        alignment: {
+          horizontal: isNumeric ? "right" : "left",
+          vertical: "center"
+        }
+      }
+    }
+  }
+
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Calculated Instruments')
+
+  const fileName = `Calculated_Instruments_${activeSession.value?.name || 'Session'}_${new Date().toISOString().split('T')[0]}.xlsx`
+  XLSX.writeFile(workbook, fileName)
+}
+
 function closeExcelDialog() {
   showExcelDialog.value = false
   excelData.value = []
@@ -3700,6 +3809,14 @@ function loadAllInstruments() {
 
 function formatTableCell(value, column) {
   if (value === null || value === undefined || value === '') return '—'
+  
+  // Check if this is a time field (days, months, years, maturity, duration, term, week, time)
+  const isTimeField = column.toLowerCase().includes('day') || column.toLowerCase().includes('maturity') || column.toLowerCase().includes('duration') || column.toLowerCase().includes('term') || column.toLowerCase().includes('month') || column.toLowerCase().includes('year') || column.toLowerCase().includes('week') || column.toLowerCase().includes('time')
+  
+  if (isTimeField && typeof value === 'number') {
+    return formatNumber(value, true)
+  }
+  
   if (isPercentageField(column)) {
     return formatNumber(value) + '%'
   }
@@ -5109,6 +5226,9 @@ onBeforeUnmount(() => {
 .report-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 10px; }
 .btn-preview { background: #673AB7; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .kpi-card { background: white; border-radius: 20px; padding: 18px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; }
+.kpi-card.simple-kpi { padding: 20px; justify-content: center; text-align: center; }
+.kpi-card.simple-kpi .kpi-info { text-align: center; }
+.kpi-card.simple-kpi .kpi-value { font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .kpi-top-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50); transform: scaleX(1); }
 .kpi-card:hover { transform: translateY(-5px); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15); }
 .kpi-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.3s ease; }
@@ -5161,43 +5281,14 @@ onBeforeUnmount(() => {
 .analytics-pill .pill-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #7a879b; margin-bottom: 4px; }
 .analytics-pill .pill-value { display: block; font-size: 22px; font-weight: 700; color: #0b1e3c; }
 
-.quality-pills { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; margin: 12px 0; }
-.quality-pill { flex: 1; min-width: 150px; background: #f8faff; padding: 14px 18px; border-radius: 12px; border: 1px solid #edf0f6; text-align: center; transition: transform 0.2s, box-shadow 0.2s; }
-.quality-pill:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06); }
-.quality-pill .pill-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #7a879b; margin-bottom: 4px; }
-.quality-pill .pill-value { display: block; font-size: 20px; font-weight: 700; color: #0b1e3c; }
-.quality-pill .pill-sub { display: block; font-size: 12px; margin-top: 3px; font-weight: 500; }
-.text-success { color: #0f7b4a; }
-.text-warning { color: #b0720a; }
-
-.extracted-values-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-}
-.extracted-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 12px;
-  background: #f8f9ff;
-  border-radius: 6px;
-  border-left: 3px solid #0B2044;
-}
-.extracted-label {
-  font-weight: 600;
-  color: #0B2044;
-}
-.extracted-value {
-  font-weight: 500;
-  color: #333;
-}
+.analytics-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
+.quality-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
 
 @media (max-width: 768px) {
+  .analytics-cards { grid-template-columns: repeat(2, 1fr); }
+  .quality-cards { grid-template-columns: repeat(2, 1fr); }
   .analytics-pills { flex-direction: column; }
   .analytics-pill { min-width: auto; }
-  .quality-pills { flex-direction: column; }
-  .quality-pill { min-width: auto; }
   .page-header { flex-direction: column; align-items: flex-start; gap: 10px; }
   .summary-cards, .selection-cards, .summary-grid.two-col, .summary-grid.three-col { grid-template-columns: 1fr; }
   .mapping-row { flex-direction: column; align-items: stretch; }
