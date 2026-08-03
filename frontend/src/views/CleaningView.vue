@@ -42,10 +42,11 @@
             <v-row>
               <v-col cols="12" sm="6" md="3" v-for="stat in kpiStats" :key="stat.title">
                 <v-card class="kpi-card">
+                  <div class="kpi-top-bar"></div>
                   <v-card-text>
                     <div class="kpi-content">
-                      <div class="kpi-icon" :style="{ backgroundColor: stat.color }">
-                        <v-icon :color="stat.iconColor" size="28">{{ stat.icon }}</v-icon>
+                      <div class="kpi-icon" :style="{ background: stat.gradient }">
+                        <v-icon size="28" color="white">{{ stat.icon }}</v-icon>
                       </div>
                       <div class="kpi-info">
                         <div class="kpi-value">{{ stat.value }}</div>
@@ -118,10 +119,11 @@
                 <v-row>
                   <v-col cols="12" sm="6" md="3" v-for="stat in resultStats" :key="stat.title">
                     <v-card class="kpi-card result-kpi">
+                      <div class="kpi-top-bar"></div>
                       <v-card-text>
                         <div class="kpi-content">
-                          <div class="kpi-icon" :style="{ backgroundColor: stat.color }">
-                            <v-icon :color="stat.iconColor" size="28">{{ stat.icon }}</v-icon>
+                          <div class="kpi-icon" :style="{ background: stat.gradient }">
+                            <v-icon size="28" color="white">{{ stat.icon }}</v-icon>
                           </div>
                           <div class="kpi-info">
                             <div class="kpi-value">{{ stat.value }}</div>
@@ -220,10 +222,10 @@ const hasAnyOption = computed(() => cleaningOptions.value.some(o => o.value))
 const kpiStats = computed(() => {
   if (!dataset.value?.data) return []
   return [
-    { title: 'Total Rows', value: dataset.value.data.length.toLocaleString(), icon: 'mdi-table-row', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
-    { title: 'Total Columns', value: Object.keys(dataset.value.data[0] || {}).length, icon: 'mdi-view-column', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
-    { title: 'Instrument Type', value: dataset.value.instrumentType || 'Financial Instruments', icon: 'mdi-chart-line', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
-    { title: 'File Name', value: dataset.value.name || 'Dataset', icon: 'mdi-file-document', color: 'rgba(255,193,7,0.1)', iconColor: '#FFC107' }
+    { title: 'Total Rows', value: dataset.value.data.length.toLocaleString(), icon: 'mdi-table-row', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
+    { title: 'Total Columns', value: Object.keys(dataset.value.data[0] || {}).length, icon: 'mdi-view-column', gradient: 'linear-gradient(135deg, #1E88E5, #42a5f5)' },
+    { title: 'Instrument Type', value: dataset.value.instrumentType || 'Financial Instruments', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
+    { title: 'File Name', value: dataset.value.name || 'Dataset', icon: 'mdi-file-document', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
   ]
 })
 
@@ -231,10 +233,10 @@ const kpiStats = computed(() => {
 const resultStats = computed(() => {
   if (!results.value) return []
   return [
-    { title: 'Original Rows', value: results.value.originalRows, icon: 'mdi-table-row', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
-    { title: 'Cleaned Rows', value: results.value.cleanedRows, icon: 'mdi-check-circle', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
-    { title: 'Duplicates Removed', value: results.value.duplicatesRemoved || 0, icon: 'mdi-delete', color: 'rgba(244,67,54,0.1)', iconColor: '#F44336' },
-    { title: 'Missing Values Filled', value: results.value.missingValuesFilled || 0, icon: 'mdi-pencil', color: 'rgba(255,152,0,0.1)', iconColor: '#FF9800' }
+    { title: 'Original Rows', value: results.value.originalRows, icon: 'mdi-table-row', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
+    { title: 'Cleaned Rows', value: results.value.cleanedRows, icon: 'mdi-check-circle', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
+    { title: 'Duplicates Removed', value: results.value.duplicatesRemoved || 0, icon: 'mdi-delete', gradient: 'linear-gradient(135deg, #F44336, #d32f2f)' },
+    { title: 'Missing Values Filled', value: results.value.missingValuesFilled || 0, icon: 'mdi-pencil', gradient: 'linear-gradient(135deg, #FF9800, #F57C00)' }
   ]
 })
 
@@ -402,13 +404,15 @@ onMounted(() => {
 .stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); border-radius: 12px 12px 0 0; }
 .card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
 .title-icon { margin-right: 8px; color: #0B2A44; }
-.kpi-card { height: 120px; border-radius: 12px; transition: 0.2s; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50); border-radius: 12px 12px 0 0; }
-.kpi-card:hover { transform: translateY(-2px); }
-.kpi-content { display: flex; align-items: center; height: 100%; padding: 8px; }
-.kpi-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; flex-shrink: 0; }
-.kpi-value { font-size: 24px; font-weight: 700; color: #0B2A44; }
-.kpi-title { font-size: 12px; color: #666; }
+.kpi-card { background: white; border-radius: 20px; padding: 18px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; }
+.kpi-top-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50); transform: scaleX(1); }
+.kpi-card:hover { transform: translateY(-5px); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15); }
+.kpi-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.3s ease; }
+.kpi-card:hover .kpi-icon { transform: scale(1.05); }
+.kpi-content { display: flex; align-items: center; gap: 12px; height: 100%; }
+.kpi-info { flex: 1; }
+.kpi-value { font-size: 20px; font-weight: 800; color: #0B2044; }
+.kpi-title { font-size: 10px; color: #888; }
 .result-kpi { height: 100px; }
 .options-container { max-height: 300px; overflow-y: auto; margin-bottom: 20px; }
 .desc { font-size: 12px; color: #666; margin-top: 4px; }

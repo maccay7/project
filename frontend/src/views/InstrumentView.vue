@@ -334,10 +334,11 @@
                   <v-row>
                     <v-col cols="12" sm="6" md="3" v-for="stat in cleaningResultStats" :key="stat.title">
                       <v-card class="kpi-card result-kpi">
+                        <div class="kpi-top-bar"></div>
                         <v-card-text>
                           <div class="kpi-content">
-                            <div class="kpi-icon" :style="{ backgroundColor: stat.color }">
-                              <v-icon :color="stat.iconColor" size="28">{{ stat.icon }}</v-icon>
+                            <div class="kpi-icon" :style="{ background: stat.gradient }">
+                              <v-icon size="28" color="white">{{ stat.icon }}</v-icon>
                             </div>
                             <div class="kpi-info">
                               <div class="kpi-value">{{ stat.value }}</div>
@@ -490,7 +491,6 @@
                       </span>
                       <v-spacer></v-spacer>
                       <button class="btn-secondary" @click="closeAllCalculationsPopup">Close</button>
-                      <button class="btn-primary" @click="exportAllCalculations">📥 Download Excel</button>
                     </v-card-actions>
                   </v-card>
                 </v-dialog>
@@ -728,7 +728,6 @@
                     <div class="popup-footer">
                       <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
                       <button class="btn-secondary" @click="closeInstrumentExcelPopup">Close</button>
-                      <button class="btn-primary" @click="exportInstrumentSummaryExcel">📥 Download Excel</button>
                     </div>
                   </div>
                 </div>
@@ -798,12 +797,7 @@
                 </div>
                 <div class="report-actions">
                   <button class="btn-preview" @click="previewReport">Preview Report</button>
-                  <button class="btn-json" @click="downloadCombinedReport('json')">JSON</button>
-                  <button class="btn-csv" @click="downloadCombinedReport('csv')">CSV</button>
-                  <button class="btn-html" @click="downloadCombinedReport('html')">HTML</button>
-                  <button class="btn-pdf" @click="downloadCombinedReport('pdf')">PDF</button>
-                  <button class="btn-word" @click="downloadCombinedReport('word')">Word</button>
-                  <button class="btn-excel" @click="downloadCombinedReport('excel')">Excel (XLSX)</button>
+                  <button class="btn-preview" @click="downloadCombinedReport('word')">Download</button>
                 </div>
               </div>
               <div class="navigation-buttons">
@@ -867,9 +861,7 @@
         <div class="popup-footer">
           <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
           <v-spacer></v-spacer>
-          <button class="btn-primary" @click="downloadFromPreview('html')">Download HTML</button>
-          <button class="btn-pdf" @click="downloadFromPreview('pdf')">Download PDF</button>
-          <button class="btn-word" @click="downloadFromPreview('word')">Download Word</button>
+          <button class="btn-preview" @click="downloadFromPreview('word')">Download</button>
         </div>
       </v-card>
     </v-dialog>
@@ -1805,13 +1797,13 @@ function saveUploadHistory() {
 function addToHistory(filename, data) {
   const existing = uploadHistory.value.find(h => h.name === filename && (Date.now() - h.date) < 5000)
   if (existing) return
+  // Don't store fileData in history to avoid localStorage quota issues
   uploadHistory.value.unshift({
     name: filename,
     date: Date.now(),
-    data: JSON.stringify(data),
-    fileData: uploadedFileBase64.value
+    data: JSON.stringify(data)
   })
-  if (uploadHistory.value.length > 10) uploadHistory.value.pop()
+  if (uploadHistory.value.length > 5) uploadHistory.value.pop() // Reduce from 10 to 5
   saveUploadHistory()
 }
 
@@ -2855,10 +2847,10 @@ async function continueAfterUpload() {
 const cleaningResultStats = computed(() => {
   if (!cleaningStats.value || !cleanedData.value.length) return []
   return [
-    { title: 'Original Rows', value: cleaningStats.value.totalRows || 0, icon: 'mdi-table-row', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
-    { title: 'Cleaned Rows', value: cleanedData.value.length, icon: 'mdi-check-circle', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
-    { title: 'Duplicates Removed', value: cleaningStats.value.removedRows || 0, icon: 'mdi-delete', color: 'rgba(244,67,54,0.1)', iconColor: '#F44336' },
-    { title: 'Missing Values Fixed', value: cleaningStats.value.fixedMissing || 0, icon: 'mdi-pencil', color: 'rgba(255,152,0,0.1)', iconColor: '#FF9800' }
+    { title: 'Original Rows', value: cleaningStats.value.totalRows || 0, icon: 'mdi-table-row', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
+    { title: 'Cleaned Rows', value: cleanedData.value.length, icon: 'mdi-check-circle', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
+    { title: 'Duplicates Removed', value: cleaningStats.value.removedRows || 0, icon: 'mdi-delete', gradient: 'linear-gradient(135deg, #F44336, #d32f2f)' },
+    { title: 'Missing Values Fixed', value: cleaningStats.value.fixedMissing || 0, icon: 'mdi-pencil', gradient: 'linear-gradient(135deg, #FF9800, #F57C00)' }
   ]
 })
 
@@ -5114,8 +5106,18 @@ onBeforeUnmount(() => {
 .selection-card.active { border-color: #0B2044; background: #f8f9ff; }
 .check-indicator { position: absolute; top: 12px; right: 12px; }
 .selection-actions { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
-.report-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 20px; }
+.report-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 10px; }
 .btn-preview { background: #673AB7; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.kpi-card { background: white; border-radius: 20px; padding: 18px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; }
+.kpi-top-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50); transform: scaleX(1); }
+.kpi-card:hover { transform: translateY(-5px); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15); }
+.kpi-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.3s ease; }
+.kpi-card:hover .kpi-icon { transform: scale(1.05); }
+.kpi-content { display: flex; align-items: center; gap: 12px; height: 100%; }
+.kpi-info { flex: 1; }
+.kpi-value { font-size: 20px; font-weight: 800; color: #0B2044; }
+.kpi-title { font-size: 10px; color: #888; }
+.cleaning-summary-cards { margin-bottom: 24px; }
 .btn-json { background: #607d8b; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .btn-csv { background: #4caf50; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .btn-html { background: #ff9800; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }

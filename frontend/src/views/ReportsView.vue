@@ -90,11 +90,8 @@
         </div>
 
         <div class="download-row">
-          <button class="btn-primary" @click="downloadReport('pdf')">
-            <v-icon>mdi-file-pdf</v-icon> Download PDF
-          </button>
-          <button class="btn-secondary" @click="downloadReport('word')">
-            <v-icon>mdi-file-word</v-icon> Download Word
+          <button class="btn-primary" @click="downloadReport('word')">
+            <v-icon>mdi-download</v-icon> Download
           </button>
         </div>
       </div>
@@ -410,115 +407,13 @@ function formatRowForExcel(row) {
   return formatted
 }
 
-function downloadReport(format = 'json') {
+function downloadReport(format = 'word') {
   if (!previewData.value) {
     alert('No report data available.')
     return
   }
   const data = previewData.value
   const filename = `report_${Date.now()}`
-
-  if (format === 'json') {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${filename}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-    return
-  }
-
-  if (format === 'excel') {
-    const workbook = XLSX.utils.book_new()
-    const allData = data.allWorkedData || {}
-    for (const [key, rows] of Object.entries(allData)) {
-      if (rows.length) {
-        const formattedRows = rows.map(row => formatRowForExcel(row))
-        const sheet = XLSX.utils.json_to_sheet(formattedRows)
-        XLSX.utils.book_append_sheet(workbook, sheet, key.substring(0, 31))
-      }
-    }
-    const summary = [
-      ['Report', data.type],
-      ['Session', data.session],
-      ['Date', data.date],
-      ['Valuation Date', data.valuationDate],
-      ['Total Value', formatForExcel(data.totalValue, 'money')],
-      ['Instruments', data.instrument],
-      ['Rows', data.rows]
-    ]
-    const summarySheet = XLSX.utils.aoa_to_sheet(summary)
-    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
-    XLSX.writeFile(workbook, `${filename}.xlsx`)
-    return
-  }
-
-  if (format === 'csv') {
-    const allData = data.allWorkedData || {}
-    const firstKey = Object.keys(allData)[0]
-    if (firstKey && allData[firstKey].length) {
-      const worksheet = XLSX.utils.json_to_sheet(allData[firstKey])
-      const csv = XLSX.utils.sheet_to_csv(worksheet)
-      const blob = new Blob([csv], { type: 'text/csv' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${filename}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
-    } else {
-      alert('No data to export as CSV.')
-    }
-    return
-  }
-
-  if (format === 'pdf') {
-    // Use the HTML report for PDF to preserve formatting
-    const htmlContent = reportHtml.value
-    if (!htmlContent) {
-      alert('No report content available. Please generate the report first.')
-      return
-    }
-    
-    // Use html2canvas and jsPDF to generate PDF directly
-    const { default: html2canvas } = await import('html2canvas')
-    
-    // Create a temporary container to render the HTML
-    const container = document.createElement('div')
-    container.innerHTML = htmlContent
-    container.style.position = 'absolute'
-    container.style.left = '-9999px'
-    container.style.width = '210mm'
-    document.body.appendChild(container)
-    
-    try {
-      const canvas = await html2canvas(container, {
-        scale: 2,
-        useCORS: true,
-        logging: false
-      })
-      
-      const imgData = canvas.toDataURL('image/png')
-      const pdf = new jsPDF('p', 'mm', 'a4')
-      const pdfWidth = pdf.internal.pageSize.getWidth()
-      const pdfHeight = pdf.internal.pageSize.getHeight()
-      const imgWidth = canvas.width
-      const imgHeight = canvas.height
-      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight)
-      const imgX = (pdfWidth - imgWidth * ratio) / 2
-      const imgY = 30
-      
-      pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio)
-      pdf.save(`Dura-Capital-Valuation-Report-${new Date().toISOString().split('T')[0]}.pdf`)
-    } catch (e) {
-      console.error('PDF generation error:', e)
-      alert('Failed to generate PDF. Please try again.')
-    } finally {
-      document.body.removeChild(container)
-    }
-    return
-  }
 
   if (format === 'word') {
     // Use the HTML report for Word to preserve formatting
@@ -542,7 +437,6 @@ function downloadReport(format = 'json') {
     a.download = `${filename}.doc`
     a.click()
     URL.revokeObjectURL(url)
-    return
   }
 }
 

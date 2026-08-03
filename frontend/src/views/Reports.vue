@@ -18,9 +18,6 @@
         <v-btn color="#0B2A44" @click="markDone">
           <v-icon left>mdi-check-circle</v-icon> Done
         </v-btn>
-        <v-btn color="#4CAF50" @click="downloadFullReport">
-          <v-icon left>mdi-download</v-icon> Download Full Report (HTML)
-        </v-btn>
       </div>
 
       <!-- Report Options -->
@@ -94,23 +91,8 @@
         
         <!-- Download Row -->
         <div class="download-row">
-          <button class="btn-primary" @click="downloadFullReport">
-            <v-icon>mdi-download</v-icon> Download Full Report (HTML)
-          </button>
-          <button class="btn-secondary" @click="downloadReport('json')">
-            <v-icon>mdi-code-json</v-icon> Download JSON
-          </button>
-          <button class="btn-secondary" @click="downloadReport('excel')">
-            <v-icon>mdi-file-excel</v-icon> Download Excel
-          </button>
-          <button class="btn-secondary" @click="downloadReport('pdf')">
-            <v-icon>mdi-file-pdf</v-icon> Download PDF
-          </button>
-          <button class="btn-secondary" @click="downloadReport('word')">
-            <v-icon>mdi-file-word</v-icon> Download Word
-          </button>
-          <button class="btn-secondary" @click="downloadReport('csv')">
-            <v-icon>mdi-file-csv</v-icon> Download CSV
+          <button class="btn-primary" @click="downloadReport('word')">
+            <v-icon>mdi-download</v-icon> Download
           </button>
         </div>
       </div>

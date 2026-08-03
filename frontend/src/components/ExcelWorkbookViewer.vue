@@ -1,10 +1,20 @@
 <template>
   <div class="excel-workbook-viewer">
-    <!-- Header with logo only -->
+    <!-- Header with logo and formula bar -->
     <div class="viewer-header">
       <div class="header-left">
         <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
         <span class="excel-filename">{{ fileName || 'Excel Workbook' }}</span>
+      </div>
+      <!-- Formula bar -->
+      <div class="formula-bar">
+        <div class="formula-bar-label">fx</div>
+        <input 
+          v-model="selectedCellFormula" 
+          class="formula-bar-input"
+          placeholder="Formula or value"
+          readonly
+        />
       </div>
     </div>
 
@@ -236,6 +246,7 @@ const columnHeaders = ref([])
 const selectedCell = ref({ row: -1, col: -1 })
 const selectedCellValue = ref('')
 const selectedCellFormula = ref('')
+const cellFormulas = ref(new Map()) // Store formulas by cell reference (e.g., "A1", "B2")
 const mergedRanges = ref([])
 const rowsContainer = ref(null)
 const detectedTables = ref([])
@@ -394,7 +405,21 @@ function getCellStyle(row, col) {
 function selectCell(rowIndex, colIndex, cell) {
   selectedCell.value = { row: rowIndex, col: colIndex }
   selectedCellValue.value = formatCellValue(cell)
-  selectedCellFormula.value = ''
+  
+  // Get cell reference (e.g., "A1", "B2")
+  const cellRef = getCellReference(rowIndex, colIndex)
+  
+  // Check if cell has a formula
+  if (cellFormulas.value.has(cellRef)) {
+    selectedCellFormula.value = cellFormulas.value.get(cellRef)
+  } else {
+    selectedCellFormula.value = formatCellValue(cell)
+  }
+}
+
+function getCellReference(rowIndex, colIndex) {
+  const colLetter = columnHeaders.value[colIndex] || 'A'
+  return `${colLetter}${rowIndex + 1}`
 }
 
 function editCell(rowIndex, colIndex, cell) {
@@ -438,6 +463,10 @@ function loadSheetData() {
       columnHeaders.value = getColumnHeaders(colCount)
       mergedRanges.value = sheet.merged_ranges || []
     }
+    
+    // Extract formulas from sheet data if available
+    extractFormulas(sheet)
+    
     detectTables()
     
     // Auto-detect single instrument sheet and extract values
@@ -464,11 +493,42 @@ function loadSheetData() {
     detectedTables.value = []
     isSingleInstrumentSheet.value = false
     extractedPreviewValues.value = {}
+    cellFormulas.value.clear()
   }
   // Reset selection
   selectedCell.value = { row: -1, col: -1 }
   selectedCellValue.value = ''
   selectedCellFormula.value = ''
+}
+
+function extractFormulas(sheet) {
+  cellFormulas.value.clear()
+  
+  // If sheet has formula data, extract it
+  if (sheet.formulas && typeof sheet.formulas === 'object') {
+    for (const [cellRef, formula] of Object.entries(sheet.formulas)) {
+      if (formula && typeof formula === 'string' && formula.startsWith('=')) {
+        cellFormulas.value.set(cellRef, formula)
+      }
+    }
+  }
+  
+  // Also check if fullData contains formula objects
+  if (sheet.fullData && sheet.fullData.length > 0) {
+    for (let row = 0; row < sheet.fullData.length; row++) {
+      const rowData = sheet.fullData[row]
+      if (!rowData) continue
+      
+      for (let col = 0; col < rowData.length; col++) {
+        const cell = rowData[col]
+        // Check if cell is an object with formula property
+        if (cell && typeof cell === 'object' && cell.f) {
+          const cellRef = getCellReference(row, col)
+          cellFormulas.value.set(cellRef, cell.f)
+        }
+      }
+    }
+  }
 }
 
 function detectTables() {
@@ -662,12 +722,43 @@ onMounted(() => {
   background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
   border-bottom: 1px solid #d0d0d0;
   flex-shrink: 0;
+  gap: 16px;
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
+}
+
+.formula-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  background: #fff;
+  border: 1px solid #c0c0c0;
+  border-radius: 3px;
+  padding: 4px 8px;
+}
+
+.formula-bar-label {
+  font-style: italic;
+  font-family: 'Times New Roman', serif;
+  font-weight: bold;
+  color: #666;
+  font-size: 14px;
+}
+
+.formula-bar-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 13px;
+  color: #333;
+  background: transparent;
 }
 
 .logo {

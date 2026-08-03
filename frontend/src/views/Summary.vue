@@ -19,11 +19,14 @@
 
       <!-- KPI Strip -->
       <div class="kpi-strip">
-        <div class="kpi-mini" v-for="k in extendedKpis" :key="k.label">
-          <v-icon size="20" :color="k.color">{{ k.icon }}</v-icon>
-          <div>
-            <span class="kpi-mini-val">{{ k.value }}</span>
-            <span class="kpi-mini-lbl">{{ k.label }}</span>
+        <div v-for="stat in extendedKpis" :key="stat.label" class="kpi-card">
+          <div class="kpi-top-bar"></div>
+          <div class="kpi-icon" :style="{ background: stat.gradient }">
+            <v-icon size="28" color="white">{{ stat.icon }}</v-icon>
+          </div>
+          <div class="kpi-info">
+            <div class="kpi-value">{{ stat.value }}</div>
+            <div class="kpi-title">{{ stat.label }}</div>
           </div>
         </div>
       </div>
@@ -276,7 +279,6 @@
           <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
           <v-spacer></v-spacer>
           <button class="btn-secondary" @click="combinedModalVisible = false">Close</button>
-          <button class="btn-primary" @click="exportCombinedExcel">📥 Download Excel</button>
         </div>
       </v-card>
     </v-dialog>
@@ -485,10 +487,10 @@ const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => 
 const completedCount = computed(() => instruments.value.filter(i => i.completed).length)
 
 const extendedKpis = computed(() => [
-  { label: 'Total Face Value', value: '$' + formatNumber(totalFaceValue.value), icon: 'mdi-cash', color: '#0B2044' },
-  { label: 'Total Calculated', value: '$' + formatNumber(grandTotal.value), icon: 'mdi-calculator', color: '#1E88E5' },
-  { label: 'Difference', value: '$' + formatNumber(totalFaceValue.value - grandTotal.value), icon: 'mdi-arrow-right', color: '#FF9800' },
-  { label: 'Instrument Types', value: `${completedCount.value}/3`, icon: 'mdi-chart-pie', color: '#4CAF50' }
+  { label: 'Total Face Value', value: '$' + formatNumber(totalFaceValue.value), icon: 'mdi-cash', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
+  { label: 'Total Calculated', value: '$' + formatNumber(grandTotal.value), icon: 'mdi-calculator', gradient: 'linear-gradient(135deg, #1E88E5, #42a5f5)' },
+  { label: 'Difference', value: '$' + formatNumber(totalFaceValue.value - grandTotal.value), icon: 'mdi-arrow-right', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' },
+  { label: 'Instrument Types', value: `${completedCount.value}/3`, icon: 'mdi-chart-pie', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }
 ])
 
 const filteredInstruments = computed(() => {
@@ -920,10 +922,15 @@ onMounted(async () => {
 .pill-label { display: block; font-size: 12px; opacity: 0.9; }
 .pill-amount { font-size: 30px; font-weight: 700; display: block; }
 .pill-sub { font-size: 12px; opacity: 0.85; }
-.kpi-strip { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; }
-.kpi-mini { display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); flex: 1; min-width: 160px; }
-.kpi-mini-val { display: block; font-weight: 700; color: #0B2044; font-size: 16px; }
-.kpi-mini-lbl { font-size: 12px; color: #666; }
+.kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; margin-bottom: 28px; }
+.kpi-card { background: white; border-radius: 20px; padding: 18px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; }
+.kpi-top-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50); transform: scaleX(1); }
+.kpi-card:hover { transform: translateY(-5px); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15); }
+.kpi-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.3s ease; }
+.kpi-card:hover .kpi-icon { transform: scale(1.05); }
+.kpi-info { flex: 1; }
+.kpi-value { font-size: 20px; font-weight: 800; color: #0B2044; }
+.kpi-title { font-size: 10px; color: #888; }
 .section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
 .section-header h2 { color: #0B2044; margin: 0; font-size: 20px; }
 .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }

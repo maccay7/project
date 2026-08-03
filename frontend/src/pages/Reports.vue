@@ -2,7 +2,7 @@
   <div class="card">
     <h3>Generate Report</h3>
     <button @click="generatePreview">Generate</button>
-    <button @click="downloadReport">Download JSON</button>
+    <button @click="downloadReport('word')">Download</button>
     <button @click="markDone">Done (mark current dataset)</button>
   </div>
 </template>

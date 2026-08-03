@@ -30,10 +30,11 @@
             <v-row>
               <v-col cols="12" sm="6" md="3" v-for="stat in kpiStats" :key="stat.title">
                 <v-card class="kpi-card">
+                  <div class="kpi-top-bar"></div>
                   <v-card-text>
                     <div class="kpi-content">
-                      <div class="kpi-icon" :style="{ backgroundColor: stat.color }">
-                        <v-icon :color="stat.iconColor" size="28">{{ stat.icon }}</v-icon>
+                      <div class="kpi-icon" :style="{ background: stat.gradient }">
+                        <v-icon size="28" color="white">{{ stat.icon }}</v-icon>
                       </div>
                       <div class="kpi-info">
                         <div class="kpi-value">{{ stat.value }}</div>
@@ -225,10 +226,10 @@ const lastYieldCurveRequest = ref({})
 
 // KPI Stats
 const kpiStats = ref([
-  { title: 'Records', value: 0, icon: 'mdi-table-large', color: 'rgba(11,42,68,0.1)', iconColor: '#0B2A44' },
-  { title: 'Instrument Type', value: 'N/A', icon: 'mdi-shape-outline', color: 'rgba(30,136,229,0.1)', iconColor: '#1E88E5' },
-  { title: 'Average Yield', value: '0%', icon: 'mdi-percent-outline', color: 'rgba(76,175,80,0.1)', iconColor: '#4CAF50' },
-  { title: 'Data Source', value: 'FRED API', icon: 'mdi-web', color: 'rgba(255,193,7,0.1)', iconColor: '#FFC107' }
+  { title: 'Records', value: 0, icon: 'mdi-table-large', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
+  { title: 'Instrument Type', value: 'N/A', icon: 'mdi-shape-outline', gradient: 'linear-gradient(135deg, #1E88E5, #42a5f5)' },
+  { title: 'Average Yield', value: '0%', icon: 'mdi-percent-outline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
+  { title: 'Data Source', value: 'FRED API', icon: 'mdi-web', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
 ])
 
 // Load data from the latest calculation for the selected dataset
@@ -665,13 +666,15 @@ onMounted(async () => {
 .title-icon { margin-right: 8px; }
 .fred-note { font-size: 13px; color: #666; }
 .chart-container { height: 400px; position: relative; padding: 16px; }
-.kpi-card { height: 120px; border-radius: 12px; transition: 0.2s; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5, #4CAF50); }
-.kpi-card:hover { transform: translateY(-2px); }
-.kpi-content { display: flex; align-items: center; height: 100%; padding: 8px; }
-.kpi-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; flex-shrink: 0; }
-.kpi-value { font-size: 24px; font-weight: 700; color: #0B2A44; }
-.kpi-title { font-size: 12px; color: #666; }
+.kpi-card { background: white; border-radius: 20px; padding: 18px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; }
+.kpi-top-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50); transform: scaleX(1); }
+.kpi-card:hover { transform: translateY(-5px); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15); }
+.kpi-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.3s ease; }
+.kpi-card:hover .kpi-icon { transform: scale(1.05); }
+.kpi-content { display: flex; align-items: center; gap: 12px; height: 100%; }
+.kpi-info { flex: 1; }
+.kpi-value { font-size: 20px; font-weight: 800; color: #0B2044; }
+.kpi-title { font-size: 10px; color: #888; }
 .action-card { border-radius: 12px; background: white; border: 1px solid rgba(11,42,68,0.08); text-align: center; padding: 16px; }
 .analytics-card { border-radius: 8px; background: #f8f9ff; border: 1px solid #e0e0e0; }
 .analytics-label { font-size: 12px; color: #666; margin-bottom: 4px; }

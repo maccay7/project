@@ -72,7 +72,7 @@
         <v-card>
           <v-card-title>Generate Report</v-card-title>
           <v-card-text>
-            <v-btn color="#0B2A44" @click="downloadReport">Download Excel Report</v-btn>
+            <v-btn color="#0B2A44" @click="downloadReport('word')">Download</v-btn>
             <v-btn color="success" class="ml-2" @click="completeAndFinish">Finish & Save</v-btn>
           </v-card-text>
         </v-card>
