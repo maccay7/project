@@ -18,9 +18,15 @@ const routes = [
     meta: { requiresAuth: false }
   },
   {
-    path: '/forgot-password',
-    name: 'forgot-password',
-    component: () => import('@/views/resetpassword.vue'),
+    path: '/verify-code',
+    name: 'verify-code',
+    component: () => import('@/views/VerifyCodeView.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/reset-password',
+    name: 'reset-password',
+    component: () => import('@/views/ResetPasswordView.vue'),
     meta: { requiresAuth: false }
   },
   {
@@ -79,15 +85,32 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next('/login')
-  } else if (to.path === '/login' && authStore.isAuthenticated) {
-    next('/dashboard')
-  } else {
-    next()
+  
+  // For routes requiring authentication
+  if (to.meta.requiresAuth) {
+    if (!authStore.isAuthenticated) {
+      next('/login')
+      return
+    }
+    
+    // Validate session with backend for protected routes
+    const isValid = await authStore.checkSession()
+    if (!isValid) {
+      authStore.logout()
+      next('/login')
+      return
+    }
   }
+  
+  // Redirect authenticated users away from login/signup
+  if ((to.path === '/login' || to.path === '/signup') && authStore.isAuthenticated) {
+    next('/dashboard')
+    return
+  }
+  
+  next()
 })
 
 export default router

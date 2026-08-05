@@ -7,7 +7,7 @@
           src="/Untitled - July 02, 2026 at 13.19.30.png" 
           alt="Logo" 
           class="login-logo"
-          @error="e => e.target.style.display = 'none'"
+          @error="(e: Event) => { const target = e.target as HTMLImageElement; if (target) target.style.display = 'none' }"
         />
       </div>
       
@@ -187,10 +187,13 @@ const sendResetLink = async () => {
     })
     const data = await response.json()
     if (data.success) {
-      resetSuccess.value = 'Reset link sent to your email!'
-      setTimeout(() => closeForgotModal(), 2000)
+      resetSuccess.value = 'Verification code sent!'
+      setTimeout(() => {
+        closeForgotModal()
+        router.push({ path: '/verify-code', query: { email: resetEmail.value } })
+      }, 1000)
     } else {
-      resetError.value = data.message || 'Failed to send reset link'
+      resetError.value = data.message || 'Failed to send verification code'
     }
   } catch (err) {
     resetError.value = 'Network error. Please try again.'

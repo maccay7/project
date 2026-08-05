@@ -70,10 +70,6 @@ export function useFredMarket(defaultMaturity = '1Y') {
   const isLoading = ref(false)
   const lastError = ref(null)
 
-  // Cache for yield curve data (only successful API responses)
-  const yieldCurveCache = new Map()
-  const CACHE_TTL = 15 * 60 * 1000 // 15 minutes
-
   // ===== COMPUTED =====
   const maturityItems = computed(() => {
     const c = filterOptions.value.countries?.find(
@@ -183,17 +179,9 @@ export function useFredMarket(defaultMaturity = '1Y') {
     }
   }
 
-  // ===== fetchYieldCurve – no fallback =====
+  // ===== fetchYieldCurve – always fetch live data from FRED API =====
   async function fetchYieldCurve(instrumentType = 'money_market') {
     const country = normalizeCountry(fredFilters.value.country)
-    const cacheKey = `${instrumentType}_${country}_${fredFilters.value.currency}`
-    
-    // Check cache
-    const cached = yieldCurveCache.get(cacheKey)
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      console.log('Using cached yield curve data')
-      return cached.data
-    }
 
     isLoading.value = true
     lastError.value = null
@@ -211,8 +199,6 @@ export function useFredMarket(defaultMaturity = '1Y') {
           maturityLabel: res.data.labels?.[idx] || m,
           rate: res.data.rates?.[idx] || 0
         }))
-        // Cache the result
-        yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() })
         console.log('FRED yield curve received, points:', points.length)
         return points
       }

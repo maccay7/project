@@ -239,6 +239,82 @@
       </v-card>
     </v-dialog>
 
+    <!-- Change Password Modal -->
+    <v-dialog v-model="changePasswordDialogVisible" max-width="500px" persistent>
+      <v-card>
+        <v-card-title class="version-dialog-title">
+          Change Password
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="closeChangePasswordModal">✕</button>
+        </v-card-title>
+        <v-card-text class="version-dialog-body">
+          <div class="form-group">
+            <div class="input-wrapper">
+              <span class="input-icon">🔒</span>
+              <input 
+                v-model="oldPassword" 
+                :type="showOldPassword ? 'text' : 'password'" 
+                class="form-input" 
+                placeholder="Current Password"
+              />
+              <button 
+                type="button" 
+                class="password-toggle" 
+                @click="showOldPassword = !showOldPassword"
+              >
+                {{ showOldPassword ? '👁️' : '👁️‍🗨️' }}
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="input-wrapper">
+              <span class="input-icon">🔒</span>
+              <input 
+                v-model="newPassword" 
+                :type="showNewPassword ? 'text' : 'password'" 
+                class="form-input" 
+                placeholder="New Password"
+              />
+              <button 
+                type="button" 
+                class="password-toggle" 
+                @click="showNewPassword = !showNewPassword"
+              >
+                {{ showNewPassword ? '👁️' : '👁️‍🗨️' }}
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="input-wrapper">
+              <span class="input-icon">🔒</span>
+              <input 
+                v-model="confirmNewPassword" 
+                :type="showConfirmNewPassword ? 'text' : 'password'" 
+                class="form-input" 
+                placeholder="Confirm New Password"
+              />
+              <button 
+                type="button" 
+                class="password-toggle" 
+                @click="showConfirmNewPassword = !showConfirmNewPassword"
+              >
+                {{ showConfirmNewPassword ? '👁️' : '👁️‍🗨️' }}
+              </button>
+            </div>
+          </div>
+          <div v-if="changePasswordError" class="error-message">{{ changePasswordError }}</div>
+          <div v-if="changePasswordSuccess" class="success-message">{{ changePasswordSuccess }}</div>
+        </v-card-text>
+        <v-card-actions class="version-dialog-actions">
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="closeChangePasswordModal">Cancel</button>
+          <button class="btn-primary" @click="handleChangePassword" :disabled="changePasswordLoading">
+            {{ changePasswordLoading ? 'Changing...' : 'Change Password' }}
+          </button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Snackbar for notifications -->
     <v-snackbar
       v-model="snackbar.show"
@@ -261,8 +337,10 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import sessionManager from '@/services/sessionManager.js'
 import { useRouter } from 'vue-router'
 import api from '@/services/api.js'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const authStore = useAuthStore()
 
 const STORAGE_KEY = 'dura_sessions'
 const ACTIVE_KEY = 'dura_active_session_id'
@@ -281,6 +359,18 @@ const currentUserFullName = ref('')
 const instrumentDialogVisible = ref(false)
 const selectedSessionForInstruments = ref(null)
 const sessionInstruments = ref([])
+
+// ---- Change Password Modal State ----
+const changePasswordDialogVisible = ref(false)
+const oldPassword = ref('')
+const newPassword = ref('')
+const confirmNewPassword = ref('')
+const showOldPassword = ref(false)
+const showNewPassword = ref(false)
+const showConfirmNewPassword = ref(false)
+const changePasswordLoading = ref(false)
+const changePasswordError = ref('')
+const changePasswordSuccess = ref('')
 
 // ---- Snackbar notification system ----
 const snackbar = ref({
@@ -740,13 +830,63 @@ function goToInstrument(instrumentId) {
   router.push({ path: `/instrument/${instrumentId}`, query: { session: activeSession.value.id } })
 }
 
-function goToSettings() { router.push('/settings') }
+function goToSettings() { 
+  router.push('/settings')
+}
 
-function handleLogout() {
-  localStorage.removeItem('auth_token')
-  localStorage.removeItem('user')
-  sessionStorage.clear()
-  window.location.href = '/login'
+function closeChangePasswordModal() {
+  changePasswordDialogVisible.value = false
+  changePasswordError.value = ''
+  changePasswordSuccess.value = ''
+  oldPassword.value = ''
+  newPassword.value = ''
+  confirmNewPassword.value = ''
+}
+
+async function handleChangePassword() {
+  changePasswordError.value = ''
+  changePasswordSuccess.value = ''
+  
+  if (!oldPassword.value) {
+    changePasswordError.value = 'Please enter your current password'
+    return
+  }
+  if (!newPassword.value) {
+    changePasswordError.value = 'Please enter a new password'
+    return
+  }
+  if (newPassword.value.length < 6) {
+    changePasswordError.value = 'Password must be at least 6 characters'
+    return
+  }
+  if (newPassword.value !== confirmNewPassword.value) {
+    changePasswordError.value = 'Passwords do not match'
+    return
+  }
+
+  changePasswordLoading.value = true
+
+  try {
+    const success = await authStore.changePassword(oldPassword.value, newPassword.value)
+    if (success) {
+      changePasswordSuccess.value = 'Password changed successfully!'
+      setTimeout(() => {
+        closeChangePasswordModal()
+        showSnackbar('Password changed successfully', 'success')
+      }, 1500)
+    } else {
+      changePasswordError.value = 'Failed to change password. Please check your current password.'
+    }
+  } catch (err) {
+    changePasswordError.value = 'Network error. Please try again.'
+  } finally {
+    changePasswordLoading.value = false
+  }
+}
+
+async function handleLogout() {
+  await authStore.logout()
+  router.push('/login')
 }
 
 // ---- Functions ----

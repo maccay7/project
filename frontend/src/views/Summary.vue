@@ -761,20 +761,24 @@ async function loadSummary() {
 
     for (const template of templates) {
       const rows = allSummaryRows.filter(r => r['Instrument Type'] === template.id)
-      let totalValue = 0, totalFaceValue = 0, totalAvgRate = 0, fredBench = null
+      let totalValue = 0, totalFaceValue = 0, totalAvgRate = 0, totalFredBench = 0, fredBenchCount = 0
 
       rows.forEach(row => {
         const value = getVal(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
         const faceValue = getVal(row, 'Face Value', 'face_value', 'Amount', 'amount', 'Principal', 'principal')
         const rate = getVal(row, 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate')
+        const fred = getVal(row, 'FRED Benchmark', 'fred_benchmark', 'FRED_Benchmark')
         totalValue += value
         totalFaceValue += faceValue
         totalAvgRate += rate
-        if (row['FRED Benchmark'] !== undefined) fredBench = parseFloat(row['FRED Benchmark'])
-        else if (row['fred_benchmark'] !== undefined) fredBench = parseFloat(row['fred_benchmark'])
+        if (fred !== null && fred !== undefined && fred !== 0) {
+          totalFredBench += fred
+          fredBenchCount++
+        }
       })
 
-      const avgRate = rows.length > 0 && totalAvgRate > 0 ? totalAvgRate / rows.length : null
+      const avgRate = rows.length > 0 ? totalAvgRate / rows.length : null
+      const avgFredBench = fredBenchCount > 0 ? totalFredBench / fredBenchCount : null
       const completed = rows.length > 0
 
       const details = rows.map(row => {
@@ -804,7 +808,7 @@ async function loadSummary() {
         difference: totalFaceValue - totalValue,
         count: rows.length,
         avgRate: avgRate,
-        fredBench: fredBench !== null ? parseFloat(fredBench) : null,
+        fredBench: avgFredBench,
         completed: completed,
         statusClass: completed ? 'completed' : 'pending',
         statusText: completed ? 'Completed' : 'Not started',
