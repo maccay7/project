@@ -19,7 +19,7 @@
           </div>
         </div>
         <div class="header-right">
-          <button v-if="activeSession" class="btn-save-session" @click="saveToSession">
+          <button v-if="activeSession" class="btn-save-session" @click="saveToSession" :disabled="isSaving">
             <v-icon small>mdi-content-save</v-icon> Save to Session
           </button>
           <div class="step-indicator">Step {{ currentStepIndex + 1 }} of {{ totalSteps }}</div>
@@ -900,6 +900,16 @@
       @update:visible="(val) => showModalViewer = val"
       @process-sheet="handleProcessSheetFromModal"
     />
+
+    <!-- Snackbar for notifications -->
+    <v-snackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      :timeout="snackbar.timeout"
+      location="bottom"
+    >
+      {{ snackbar.message }}
+    </v-snackbar>
   </FixedLayout>
 </template>
 
@@ -1144,16 +1154,33 @@ const showPreview = ref(false)
 const worksheetSelected = ref(false)
 const forceUpdate = ref(0)
 
+// Snackbar notification system
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'error',
+  timeout: 4000
+})
+
+function showSnackbar(message, color = 'error', timeout = 4000) {
+  snackbar.value = {
+    show: true,
+    message,
+    color,
+    timeout
+  }
+}
+
 const savedTemplates = ref({})
 const selectedTemplate = ref('')
 const newTemplateName = ref('')
 
 const cleaningOptions = ref({
-  removeDuplicates: true, fillMissingText: true, dropRowsWithMissing: false, trimWhitespace: true,
+  removeDuplicates: true, fillMissingText: false, dropRowsWithMissing: false, trimWhitespace: true,
   convertToNumbers: true, removeOutliers: false, standardizeDates: false, removeSpecialChars: false,
   changeCase: false, caseType: 'none', fillWithCustom: false, customFillValue: '',
   removeColumnsAllMissing: false, capOutliers: false, removeRowsSpecificColumnEmpty: false,
-  specificColumn: '', standardizeNumericRange: false, removeEmptyRows: false, fillForward: false, fillBackward: false
+  specificColumn: '', standardizeNumericRange: false, removeEmptyRows: false, fillForward: true, fillBackward: false
 })
 
 const selectedInstrumentType = computed(() => instrumentLabel.value)
@@ -1450,7 +1477,6 @@ function isStepComplete(tab) {
 function switchTab(tab) {
   const idx = steps.value.findIndex(s => s.tab === tab)
   if (idx > farthestAllowedIndex.value) {
-    alert('You cannot skip ahead. Complete the current step first.')
     return
   }
   saveSessionData()
@@ -1855,7 +1881,6 @@ async function loadHistoryFile(item) {
       uploadHistory.value.splice(idx, 1)
       saveUploadHistory()
     }
-    alert('This file was uploaded before the workbook viewer feature was added and has been removed from history. Please upload the file again to use the workbook viewer.')
     return
   }
   
@@ -2001,7 +2026,7 @@ async function readFileData(file) {
     console.error('Upload error:', err)
     console.error('Error stack:', err.stack)
     uploadError.value = err.message
-    alert(`Failed to parse file: ${err.message}`)
+    showSnackbar(`Failed to parse file: ${err.message}`, 'error')
     rawData.value = []
   } finally {
     fileLoading.value = false
@@ -2238,15 +2263,14 @@ function saveFinalMapping() {
   localStorage.setItem(mappingKey, JSON.stringify(columnMapping.value))
 
   const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'}`
-  savedTemplates.value[templateName] = {
+  savedTemplates.value[newTemplateName.value] = {
     columnMapping: columnMapping.value,
     requiredColumns: requiredColumns.value,
     fileColumns: fileColumns.value,
     savedAt: new Date().toISOString()
   }
-  localStorage.setItem('savedTemplates', JSON.stringify(savedTemplates.value))
-
-  alert('Mapping saved successfully')
+  saveTemplates()
+  newTemplateName.value = ''
   debouncedSave()
 }
 
@@ -2270,7 +2294,6 @@ function refreshFileColumns() {
 
 function openMappingDialog() {
   if (sheetType.value === 'single') {
-    alert('This is a single-instrument sheet. No column mapping needed.')
     return
   }
   refreshFileColumns()
@@ -2344,11 +2367,9 @@ function resetMapping() {
 // ========== WORKBOOK VIEWER ==========
 function openWorkbookViewer() {
   if (!uploadedFile.value) {
-    alert('Please upload a file first.')
     return
   }
   if (!workbookSheets.value.length) {
-    alert('No workbook data available. Please upload a valid Excel file.')
     return
   }
   if (!currentSheetName.value && workbookSheets.value.length) {
@@ -2362,12 +2383,10 @@ function openWorkbookViewer() {
 // ================================================================
 function workOnSelectedSheet() {
   if (!currentSheetName.value) {
-    alert('Please select a sheet first.')
     return
   }
   const sheet = workbookSheets.value.find(s => s.name === currentSheetName.value)
   if (!sheet || !sheet.data || !sheet.data.length) {
-    alert('No data found in the selected sheet.')
     return
   }
   handleWorkOnSheet(currentSheetName.value)
@@ -2592,7 +2611,7 @@ function calculateTotal(field) {
 
 function exportSummary() {
   const allData = instrumentSummary.value.rows
-  if (!allData.length) { alert('No data to export'); return }
+  if (!allData.length) { return }
 
   const displayCols = getDisplayColumns()
   const data = allData.map(row => {
@@ -2657,7 +2676,6 @@ function formatForExcel(value, type = 'number', key = '') {
 function exportInstrumentSummaryExcel() {
   const rows = instrumentSummary.value.rows
   if (!rows.length) {
-    alert('No data to export.')
     return
   }
 
@@ -2699,10 +2717,9 @@ function exportInstrumentSummaryExcel() {
     XLSX.utils.book_append_sheet(wb, ws2, 'Analytics')
 
     XLSX.writeFile(wb, `instrument_summary_${Date.now()}.xlsx`)
-    alert('Excel exported successfully')
   } catch (e) {
     console.error(e)
-    alert('Failed to export Excel: ' + e.message)
+    showSnackbar('Failed to export Excel: ' + e.message, 'error')
   }
 }
 
@@ -2769,7 +2786,7 @@ function openExcelReview(data, title) {
   if (!data?.length) {
     if (cleanedData.value.length) data = cleanedData.value
     else if (rawData.value.length) data = rawData.value
-    else { alert('No data'); return }
+    else { return }
   }
   excelData.value = data
   excelColumns.value = Object.keys(data[0] || {})
@@ -2836,7 +2853,6 @@ function openInstrumentDataExcel() {
 
 function downloadCalculatedInstrumentsExcel() {
   if (!instrumentSummary.value.rows.length) {
-    alert('No data to download')
     return
   }
 
@@ -2931,10 +2947,10 @@ function onExcelDataUpdate(data) {
   debouncedSave()
 }
 
-// ===== FIXED: continueAfterUpload – removed mandatory mapping check =====
+// ===== FIXED: continueAfterUpload =====
 async function continueAfterUpload() {
-  if (!uploadedFile.value) { alert('Please upload a file first.'); return }
-  if (!rawData.value.length) { alert('No data loaded. Please upload a valid file.'); return }
+  if (!uploadedFile.value) { return }
+  if (!rawData.value.length) { return }
   
   // No mandatory mapping check – user can proceed even if columns are not mapped.
   // They can always map later via the Map Columns button.
@@ -2978,7 +2994,6 @@ function applyCleaning() {
   
   if (!rawData.value.length) {
     console.log('No raw data to clean')
-    alert('No data to clean. Please upload data first.')
     return
   }
 
@@ -3133,14 +3148,13 @@ function applyCleaning() {
     forceUpdate.value++
   } catch (error) {
     console.error('Error during cleaning:', error)
-    alert('Error during cleaning: ' + error.message)
+    showSnackbar('Error during cleaning: ' + error.message, 'error')
   }
 }
 
 // ===== FIXED: continueAfterCleaning =====
 async function continueAfterCleaning() {
   if (!cleanedData.value.length) {
-    alert('Please clean your data first.')
     return
   }
   
@@ -3312,13 +3326,13 @@ async function calculateMetrics() {
         const errorMsg = response?.message || response?.error || 'Unknown error'
         console.error('❌ Backend calculation failed:', errorMsg)
         console.error('❌ Full response:', response)
-        alert('Calculation failed: ' + errorMsg)
+        showSnackbar('Calculation failed: ' + errorMsg, 'error')
       }
     } catch (err) {
       console.error('❌ Error calling backend calculation:', err)
       console.error('❌ Error details:', err.message)
       console.error('❌ Error stack:', err.stack)
-      alert('Error calculating metrics: ' + (err.message || 'Unknown error'))
+      showSnackbar('Error calculating metrics: ' + (err.message || 'Unknown error'), 'error')
     }
   await enrichCalculationsWithFred()
   debouncedSave()
@@ -3328,7 +3342,6 @@ async function calculateMetrics() {
 // ===== continueToVisualizations =====
 async function continueToVisualizations() {
   if (!hasCleanedData.value) {
-    alert('Please clean your data first.')
     return
   }
   if (!allCalculations.value.totalValue) {
@@ -3348,7 +3361,7 @@ async function continueToVisualizations() {
 
 // ===== continueFromVisualizations =====
 async function continueFromVisualizations() {
-  if (!hasCleanedData.value) { alert('Please clean your data first.'); return }
+  if (!hasCleanedData.value) { return }
   saveSessionData()
   await nextTick()
   activeTab.value = 'summary'
@@ -3714,20 +3727,19 @@ function saveTemplates() {
 
 function saveCurrentMappingAsTemplate() {
   if (!newTemplateName.value) {
-    alert('Please enter a template name.')
     return
   }
   const hasAnyMapping = requiredColumns.value.some(col => columnMapping.value[col])
   if (!hasAnyMapping) {
-    alert('Cannot save template: no columns are mapped.')
     return
   }
   savedTemplates.value[newTemplateName.value] = {
-    mapping: { ...columnMapping.value },
-    timestamp: Date.now()
+    columnMapping: columnMapping.value,
+    requiredColumns: requiredColumns.value,
+    fileColumns: fileColumns.value,
+    savedAt: new Date().toISOString()
   }
   saveTemplates()
-  alert(`Template "${newTemplateName.value}" saved.`)
   newTemplateName.value = ''
 }
 
@@ -3794,7 +3806,6 @@ function selectInstrumentFromPopup(index) {
 
 function loadAllInstruments() {
   if (!instrumentSummary.value.rows.length) {
-    alert('No instrument data found. Please run calculations first.')
     return
   }
   const agg = computeAggregate(instrumentSummary.value.rows)
@@ -3804,7 +3815,6 @@ function loadAllInstruments() {
   currentlyViewingInstrument.value = null
   closeAllCalculationsPopup()
   saveSessionData()
-  showToast('Loaded aggregate of all instruments')
 }
 
 function formatTableCell(value, column) {
@@ -3839,7 +3849,7 @@ function closeAllCalculationsPopup() {
 
 function exportAllCalculations() {
   const allData = instrumentSummary.value.rows
-  if (!allData.length) { alert('No data to export'); return }
+  if (!allData.length) { return }
 
   const displayCols = getDisplayColumns()
   const data = allData.map(row => {
@@ -3873,7 +3883,6 @@ function exportAllCalculations() {
   XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary')
 
   XLSX.writeFile(wb, 'all_instruments_calculations.xlsx')
-  alert('All calculations exported successfully!')
 }
 
 function notifySessionUpdated(explicitSave = false, saveOptions = {}) {
@@ -3885,177 +3894,208 @@ function notifySessionUpdated(explicitSave = false, saveOptions = {}) {
 // ================================================================
 // saveToSession – with version creation and refresh
 // ================================================================
+const isSaving = ref(false)
+const skipAutoSave = ref(false)
+
+// Track previous state for change detection
+const previousSnapshot = ref(null)
+
+// Generate dynamic version description based on changes
+function generateVersionDescription(newSnapshot, oldSnapshot) {
+  const changes = []
+  
+  if (!oldSnapshot) {
+    return `Initial ${instrumentType.value} workflow setup`
+  }
+  
+  // Check for data changes
+  if (JSON.stringify(newSnapshot.rawData) !== JSON.stringify(oldSnapshot.rawData)) {
+    changes.push('uploaded new data')
+  }
+  
+  // Check for cleaning changes
+  if (JSON.stringify(newSnapshot.cleanedData) !== JSON.stringify(oldSnapshot.cleanedData)) {
+    changes.push('cleaned data')
+  }
+  
+  // Check for calculation changes
+  if (JSON.stringify(newSnapshot.calculations) !== JSON.stringify(oldSnapshot.calculations)) {
+    changes.push('recalculated metrics')
+  }
+  
+  // Check for mapping changes
+  if (JSON.stringify(newSnapshot.columnMapping) !== JSON.stringify(oldSnapshot.columnMapping)) {
+    changes.push('updated column mapping')
+  }
+  
+  // Check for manual input changes
+  if (JSON.stringify(newSnapshot.manualInputs) !== JSON.stringify(oldSnapshot.manualInputs)) {
+    changes.push('updated manual inputs')
+  }
+  
+  // Check for formula changes
+  if (JSON.stringify(newSnapshot.formulas) !== JSON.stringify(oldSnapshot.formulas)) {
+    changes.push('updated formulas')
+  }
+  
+  if (changes.length === 0) {
+    return `Saved ${instrumentType.value} workflow (no changes)`
+  }
+  
+  const changeText = changes.join(', ')
+  return `${instrumentType.value} — ${changeText}`
+}
+
 async function saveToSession() {
-  console.log('saveToSession called')
-  console.log('activeSession.value:', activeSession.value)
+  // Strict version creation guard - prevent duplicate execution
+  if (isSavingVersion) {
+    console.log('Version save already in progress, ignoring duplicate click')
+    return
+  }
+  
+  isSavingVersion = true
+  isSaving.value = true
+  skipAutoSave.value = true
+  console.log('=== saveToSession START ===')
+  console.log('Session ID:', activeSession.value?.id)
+  console.log('Current version count BEFORE save:', activeSession.value?.version_count)
+  
   if (!activeSession.value || !activeSession.value.id) {
-    alert('Please select or create a session on the Dashboard first.')
+    isSavingVersion = false
+    isSaving.value = false
+    skipAutoSave.value = false
     return
   }
 
   const sid = activeSession.value.id
-  console.log('Session ID:', sid)
-  console.log('Current version count:', activeSession.value?.version_count)
-
-  const datasetSnapshot = {
-    rawData: rawData.value,
-    cleanedData: cleanedData.value,
-    calculations: calculations.value,
-    allCalculations: allCalculations.value,
-    selectedCalculations: selectedCalculations.value,
-    columnMapping: columnMapping.value,
-    worksheetStatus: worksheetStatus.value,
-    workbookSheets: workbookSheets.value,
-    instrumentSummary: instrumentSummary.value,
-    portfolioSummary: portfolioSummary.value,
-    yieldCurveData: yieldCurveData.value,
-    fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
-    manualInputs: manualInputs.value,
-    formulas: formulas.value,
-    uploadedFile: uploadedFile.value?.name || null,
-    cleaningStats: cleaningStats.value,
-    sessionSavedAt: new Date().toISOString()
-  }
 
   try {
+    // First, fetch the ACTUAL current version count from database
+    console.log('Fetching current version count from database...')
+    const currentVersionsRes = await api.versionAPI.getVersions(sid)
+    if (currentVersionsRes && currentVersionsRes.success) {
+      const actualCount = currentVersionsRes.total || 0
+      console.log(`Actual version count from database: ${actualCount}`)
+      if (activeSession.value?.id === sid) {
+        activeSession.value.version_count = actualCount
+      }
+    }
+
+    const datasetSnapshot = {
+      rawData: rawData.value,
+      cleanedData: cleanedData.value,
+      calculations: calculations.value,
+      allCalculations: allCalculations.value,
+      selectedCalculations: selectedCalculations.value,
+      columnMapping: columnMapping.value,
+      worksheetStatus: worksheetStatus.value,
+      workbookSheets: workbookSheets.value,
+      instrumentSummary: instrumentSummary.value,
+      portfolioSummary: portfolioSummary.value,
+      yieldCurveData: yieldCurveData.value,
+      fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+      manualInputs: manualInputs.value,
+      formulas: formulas.value,
+      uploadedFile: uploadedFile.value?.name || null,
+      cleaningStats: cleaningStats.value,
+      sessionSavedAt: new Date().toISOString()
+    }
+
+    // Step 1: Save workflow data (NO version creation)
+    console.log('Step 1: Saving workflow data...')
     await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
+    console.log('Step 1 complete: Workflow data saved')
     
-    // Update instrument count on explicit save
+    // Step 2: Update instrument count (NO version creation)
+    console.log('Step 2: Updating instrument count...')
     const count = sessionManager.countSessionInstruments(sid)
     await sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
     
-    // Update activeSession instrument count immediately
     if (activeSession.value?.id === sid) {
       activeSession.value.instrument_count = Math.min(count, 3)
     }
+    console.log('Step 2 complete: Instrument count updated to:', Math.min(count, 3))
     
-    console.log('✅ Instrument count updated to:', Math.min(count, 3))
+    // Step 3: Create EXACTLY ONE version via API
+    console.log('Step 3: Creating version via API...')
     
-    // Create version on explicit save
-    try {
-      // Don't use local version_count - let backend determine next version number
-      // Pass null for version_number so backend uses get_next_version_number
+    // Generate dynamic description based on actual changes
+    const versionDescription = generateVersionDescription(datasetSnapshot, previousSnapshot.value)
+    console.log('Generated version description:', versionDescription)
+    
+    const versionResponse = await api.versionAPI.create(
+      sid,
+      instrumentType.value,
+      versionDescription,
+      datasetSnapshot,
+      null, null, null, null, null
+    )
+    
+    console.log('Version API response:', versionResponse)
+    
+    if (!versionResponse?.success) {
+      console.error('❌ Version creation failed:', versionResponse)
+      showSnackbar('Failed to create version', 'error')
+    } else {
+      console.log('✅ Version created successfully, ID:', versionResponse?.version_id || versionResponse?.data?.id)
       
-      // Create version via API
-      const versionResponse = await api.versionAPI.create(
-        sid,
-        instrumentType.value,
-        `Saved ${instrumentType.value} workflow`,
-        datasetSnapshot,
-        null, null, null, null, null
-      )
+      // Update previous snapshot for next save comparison
+      previousSnapshot.value = JSON.parse(JSON.stringify(datasetSnapshot))
       
-      console.log('Version API response:', versionResponse)
-      console.log('Version API success:', versionResponse?.success)
-      console.log('Version API data:', versionResponse?.data)
-      console.log('Version API version_id:', versionResponse?.version_id)
-      console.log('Version API version_number:', versionResponse?.version_number)
-      
-      if (!versionResponse?.success) {
-        console.error('Version creation failed:', versionResponse)
-        console.error('Version creation error message:', versionResponse?.error || versionResponse?.message)
-        // Don't throw error, just log it and continue - version creation shouldn't block save
-        console.warn('Version creation failed, but continuing with save')
-      } else {
-        console.log('Version created successfully, ID:', versionResponse?.version_id || versionResponse?.data?.id)
-        console.log('Version number:', versionResponse?.version_number || versionResponse?.data?.versionNumber)
-      
-        // Don't update version_count locally - let the backend handle it via COUNT query
-        // The backend version_history.py already updates version_count using COUNT(*) after version creation
-        // await sessionManager.updateSession(sid, { 
-        //   version_count: versionNumber,
-        //   updated_at: new Date().toISOString()
-        // })
-        
-        // Refresh session to get updated version count from backend
-        await refreshSessionVersionCount(sid)
-        
-        // Fetch updated versions from backend
-        try {
-          const versionsRes = await api.versionAPI.getVersions(sid)
-          console.log('Get versions response:', versionsRes)
-          if (versionsRes && versionsRes.success) {
-            // Use total from backend response instead of data.length
-            const updatedVersionCount = versionsRes.total || 0
-            console.log(`Updated version count from backend total: ${updatedVersionCount}`)
+      // Step 4: Fetch updated version count from backend (READ ONLY)
+      console.log('Step 4: Fetching updated version count from backend...')
+      try {
+        const versionsRes = await api.versionAPI.getVersions(sid)
+        console.log('Get versions response:', versionsRes)
+        if (versionsRes && versionsRes.success) {
+          const updatedVersionCount = versionsRes.total || 0
+          console.log(`✅ Updated version count from backend: ${updatedVersionCount}`)
+          
+          const session = sessionManager.sessions.find(s => s.id === sid)
+          if (session) {
+            session.version_count = updatedVersionCount
+            if (versionsRes.data && versionsRes.data.length > 0) {
+              const sortedData = [...versionsRes.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
+              session.versions = sortedData.map(v => ({
+                id: v.id,
+                versionNumber: v.versionNumber,
+                timestamp: v.timestamp || v.created_at,
+                changeSummary: v.changeSummary || v.change_summary || 'No description',
+                instrumentType: v.instrumentType || v.instrument_type || 'General',
+                changeType: v.changeType || 'Saved',
+                changeTypeClass: v.changeTypeClass || 'badge-saved',
+                modifiedInstruments: v.modifiedInstruments || [],
+                fieldsChanged: v.fieldsChanged || []
+              }))
+            }
             
-            // Update session manager's session object
-            const session = sessionManager.sessions.find(s => s.id === sid)
-            if (session) {
-              session.version_count = updatedVersionCount
-              // Only update versions array if data exists
+            if (activeSession.value?.id === sid) {
+              activeSession.value.version_count = updatedVersionCount
               if (versionsRes.data && versionsRes.data.length > 0) {
-                // Sort by version_number descending since backend no longer sorts
-                const sortedData = [...versionsRes.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
-                session.versions = sortedData.map(v => ({
-                  id: v.id,
-                  versionNumber: v.versionNumber,
-                  timestamp: v.timestamp || v.created_at,
-                  changeSummary: v.changeSummary || v.change_summary || 'No description',
-                  instrumentType: v.instrumentType || v.instrument_type || 'General',
-                  changeType: v.changeType || 'Saved',
-                  changeTypeClass: v.changeTypeClass || 'badge-saved',
-                  modifiedInstruments: v.modifiedInstruments || [],
-                  fieldsChanged: v.fieldsChanged || []
-                }))
-              }
-              
-              // Also update activeSession if it's the current session
-              if (activeSession.value?.id === sid) {
-                activeSession.value.version_count = updatedVersionCount
-                if (versionsRes.data && versionsRes.data.length > 0) {
-                  activeSession.value.versions = session.versions
-                }
+                activeSession.value.versions = session.versions
               }
             }
-            
-            console.log('✅ Version count updated to:', updatedVersionCount)
-            
-            // Dispatch event with backend version count
-            window.dispatchEvent(new CustomEvent('session-updated', {
-              detail: {
-                sessionId: sid,
-                instrumentCount: Math.min(count, 3),
-                versionCount: updatedVersionCount,
-                explicitSave: true
-              }
-            }))
-          } else {
-            console.warn('Failed to fetch versions or no versions returned')
-            // Fallback to local version count
-            window.dispatchEvent(new CustomEvent('session-updated', {
-              detail: {
-                sessionId: sid,
-                instrumentCount: Math.min(count, 3),
-                versionCount: versionNumber,
-                explicitSave: true
-              }
-            }))
           }
-        } catch (fetchError) {
-          console.warn('Failed to fetch updated versions:', fetchError)
-          // Fallback to local version count
-          window.dispatchEvent(new CustomEvent('session-updated', {
-            detail: {
-              sessionId: sid,
-              instrumentCount: Math.min(count, 3),
-              versionCount: versionNumber,
-              explicitSave: true
-            }
-          }))
+          
+          console.log('=== saveToSession COMPLETE ===')
+          console.log('Final version count:', updatedVersionCount)
         }
-        
-        console.log(`✅ Created version ${versionNumber} for session ${sid}`)
+      } catch (fetchError) {
+        console.warn('Failed to fetch updated versions:', fetchError)
       }
-    } catch (versionError) {
-      console.error('Version creation error:', versionError)
-      console.warn('Version creation failed, but continuing with save')
     }
-    
-    alert('✅ Saved to session successfully!')
   } catch (err) {
-    console.error('Save to session error:', err)
-    alert('Failed to save to session: ' + err.message)
+    console.error('❌ Save to session error:', err)
+    showSnackbar('Failed to save to session: ' + err.message, 'error')
+  } finally {
+    isSavingVersion = false
+    isSaving.value = false
+    // Re-enable skip flag after delay
+    setTimeout(() => {
+      skipAutoSave.value = false
+      console.log('Skip auto-save flag reset')
+    }, 3000)
+    console.log('isSavingVersion and isSaving flags reset to false')
   }
 }
 
@@ -4090,6 +4130,8 @@ async function refreshSessionVersionCount(sid) {
 }
 
 function saveSessionData(explicitSave = false) {
+  // Do NOT create versions here - only saveToSession should create versions
+  // This function is for auto-saving workflow data only
   if (!activeSession.value) return
   const sid = activeSession.value.id
   const datasetSnapshot = {
@@ -4112,45 +4154,13 @@ function saveSessionData(explicitSave = false) {
     formulas: formulas.value
   }
   
-  // Save workflow data
+  // Save workflow data only - NO version creation
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
-    .then(async () => {
-      // Only update instrument count and create version on explicit save
+    .then(() => {
+      // Only update instrument count on explicit save, but NO version creation
       if (explicitSave) {
         const count = sessionManager.countSessionInstruments(sid)
         sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
-        
-        // Create version only on explicit save
-        try {
-          const currentVersionCount = activeSession.value?.version_count || 0
-          const versionNumber = currentVersionCount + 1
-          
-          // Determine what changed
-          const changeSummary = `Saved ${instrumentType.value} workflow`
-          const modifiedInstruments = [instrumentType.value]
-          const fieldsChanged = Object.keys(datasetSnapshot).filter(key => 
-            datasetSnapshot[key] !== undefined && datasetSnapshot[key] !== null
-          )
-          
-          // Create version via API
-          await api.versionAPI.create(
-            sid,
-            instrumentType.value,
-            changeSummary,
-            datasetSnapshot,
-            null, null, null, null, null
-          )
-          
-          // Update session version count
-          await sessionManager.updateSession(sid, { 
-            version_count: versionNumber,
-            updated_at: new Date().toISOString()
-          })
-          
-          console.log(`✅ Created version ${versionNumber} for session ${sid}`)
-        } catch (versionError) {
-          console.warn('Failed to create version:', versionError)
-        }
       }
     })
     .catch(err => console.error('Failed to save workflow:', err))
@@ -4426,7 +4436,6 @@ async function generateReportHtml() {
   
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
-    alert('No data available for the selected instruments. Please ensure you have run calculations and have data in the instrument summary.')
     return null
   }
 
@@ -4697,8 +4706,6 @@ async function previewReport() {
     const win = window.open('', '_blank')
     win.document.write(html)
     win.document.close()
-  } else {
-    alert('No data available to generate the report. Please run calculations first.')
   }
 }
 
@@ -4720,7 +4727,7 @@ async function downloadFromPreview(format) {
 async function exportToRealExcel() {
   await loadSavedData()
   const report = reportPreviewData.value
-  if (report.instruments.length === 0) { alert('No data available for the selected instruments.'); return }
+  if (report.instruments.length === 0) { return }
   const workbook = XLSX.utils.book_new()
   const valuationDate = new Date().toISOString().split('T')[0]
 
@@ -4848,11 +4855,16 @@ function downloadBlob(content, filename, mimeType) {
   URL.revokeObjectURL(url)
 }
 
-function showToast(msg, type = 'success') {
-  alert(msg)
-}
+const autoSaveEnabled = ref(false)
+let isSavingVersion = false
 
-watch([rawData, cleanedData], () => debouncedSave(), { deep: true })
+watch([rawData, cleanedData], () => {
+  if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion) {
+    console.log('Skipping auto-save - disabled or save in progress')
+    return
+  }
+  debouncedSave()
+}, { deep: true })
 watch(cleanedData, async (newVal) => { if (newVal.length) await calculateMetrics() }, { deep: true })
 
 watch(() => activeTab.value, async (newTab) => {
@@ -4916,15 +4928,41 @@ async function checkAndReset() {
 onMounted(async () => {
   const qSid = route.query.session
   if (qSid) {
-    const s = await sessionManager.getSession(String(qSid))
+    const s = await sessionManager.getSession(String(qSid), true) // Force refresh from backend
     if (s) {
+      // Fetch actual version count from database
+      try {
+        const versionsRes = await api.versionAPI.getVersions(s.id)
+        if (versionsRes && versionsRes.success) {
+          s.version_count = versionsRes.total || 0
+          console.log(`Loaded session ${s.id} with actual version count: ${s.version_count}`)
+        }
+      } catch (e) {
+        console.warn('Failed to fetch version count on mount:', e)
+      }
       activeSession.value = s
       sessionManager.setActiveSession(s)
     }
   }
   if (!activeSession.value) {
     const current = sessionManager.getActiveSession()
-    if (current) activeSession.value = current
+    if (current) {
+      // Force refresh and fetch actual version count
+      const refreshed = await sessionManager.getSession(current.id, true)
+      if (refreshed) {
+        try {
+          const versionsRes = await api.versionAPI.getVersions(refreshed.id)
+          if (versionsRes && versionsRes.success) {
+            refreshed.version_count = versionsRes.total || 0
+          }
+        } catch (e) {
+          console.warn('Failed to fetch version count on mount:', e)
+        }
+        activeSession.value = refreshed
+      } else {
+        activeSession.value = current
+      }
+    }
   }
   if (!activeSession.value) {
     const storedSession = localStorage.getItem('activeSession')

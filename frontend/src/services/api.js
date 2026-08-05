@@ -3,7 +3,10 @@ import { API_BASE_URL, RATE_LIMIT_MESSAGE } from '../config.js'
 
 async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = false, fetchOptions = {}) {
   const url = API_BASE_URL + endpoint
-  console.log('Calling:', url, method)
+  console.log('=== API CALL ===')
+  console.log('URL:', url)
+  console.log('Method:', method)
+  console.log('Body:', body ? (isFileUpload ? '[FormData]' : JSON.stringify(body).substring(0, 200)) : 'null')
   
   const options = { method, ...fetchOptions }
   const token = localStorage.getItem('auth_token')
@@ -33,9 +36,10 @@ async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = fal
       }
       throw new Error(data.message || data.error || 'Request failed')
     }
+    console.log('✅ API Response success')
     return data
   } catch (error) {
-    console.error('API Error:', error)
+    console.error('❌ API Error:', error)
     throw error
   }
 }
@@ -136,8 +140,8 @@ export const sessionsAPI = {
   save: (session) => callAPI('/api/sessions/save', 'POST', session),
   get: (session_id) => callAPI('/api/sessions/get', 'POST', { session_id }),
   list: () => callAPI('/api/sessions/list', 'GET'),
-  delete: (session_id) => callAPI('/api/sessions/delete', 'POST', { session_id }),
-  incrementVersion: (session_id) => callAPI('/api/sessions/increment-version', 'POST', { session_id })
+  delete: (session_id) => callAPI('/api/sessions/delete', 'POST', { session_id })
+  // 🔥 REMOVED: incrementVersion - version_count should only be updated by create_version
 }
 
 // ===== VERSION API =====

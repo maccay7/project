@@ -97,6 +97,16 @@
       </div>
     </div>
   </div>
+
+  <!-- Snackbar for notifications -->
+  <v-snackbar
+    v-model="snackbar.show"
+    :color="snackbar.color"
+    :timeout="snackbar.timeout"
+    location="bottom"
+  >
+    {{ snackbar.message }}
+  </v-snackbar>
 </template>
 
 <script setup>
@@ -124,6 +134,23 @@ const showDatasetPreview = ref(false)
 const sessionName = ref('')
 const reportHtml = ref('')
 const showFullscreenReport = ref(false)
+
+// ---- Snackbar notification system ----
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'error',
+  timeout: 4000
+})
+
+function showSnackbar(message, color = 'error', timeout = 4000) {
+  snackbar.value = {
+    show: true,
+    message,
+    color,
+    timeout
+  }
+}
 
 // ===== Helper Functions =====
 async function resolveSession() {
@@ -231,7 +258,6 @@ async function loadDatasetPreview() {
   try {
     const session = await resolveSession()
     if (!session) {
-      alert('No active session found.')
       return
     }
     const instrument = route.query.instrument || 'money-market'
@@ -247,12 +273,10 @@ async function loadDatasetPreview() {
         data: data
       }
       generatePreview()
-    } else {
-      alert('No data found for this instrument in the session.')
     }
   } catch (err) {
     console.error('Load dataset preview error', err)
-    alert('Error loading dataset: ' + err.message)
+    showSnackbar('Error loading dataset: ' + err.message, 'error')
   }
 }
 
@@ -408,151 +432,118 @@ function formatRowForExcel(row) {
   return formatted
 }
 
-function downloadReport(format = 'word') {
+async function downloadReport(format = 'word') {
   if (!previewData.value) {
-    alert('No report data available.')
     return
   }
+  
   const data = previewData.value
-  const filename = `report_${Date.now()}`
-
+  
   if (format === 'word') {
-    // Get the HTML content directly from the iframe
-    const iframe = document.querySelector('.report-preview-iframe-wrapper iframe')
-    if (!iframe) {
-      alert('Report preview not found. Please generate the report first.')
-      return
-    }
-    
-    iframe.onload = async () => {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+    try {
+      // Get session ID
+      const session = await resolveSession()
+      if (!session) {
+        return
+      }
       
-      // Helper function to convert image URL to base64
-      const imageToBase64 = async (url) => {
-        try {
-          const response = await fetch(url)
-          const blob = await response.blob()
-          return new Promise((resolve, reject) => {
+      // Capture chart image from DOM
+      let chartImageBase64 = ''
+      try {
+        const canvas = document.querySelector('.chart-container--fred canvas')
+        if (canvas && canvas.toDataURL) {
+          chartImageBase64 = canvas.toDataURL('image/png', 1.0)
+        }
+      } catch (e) {
+        console.warn('Could not capture chart from DOM:', e)
+      }
+      
+      // Load logo and background images as base64
+      let logoBase64 = ''
+      let backgroundBase64 = ''
+      try {
+        const logoResponse = await fetch('/DuraCapital%20logo.png')
+        if (logoResponse.ok) {
+          const logoBlob = await logoResponse.blob()
+          logoBase64 = await new Promise((resolve) => {
             const reader = new FileReader()
             reader.onloadend = () => resolve(reader.result)
-            reader.onerror = reject
-            reader.readAsDataURL(blob)
+            reader.readAsDataURL(logoBlob)
           })
-        } catch (e) {
-          console.error('Error converting image to base64:', e)
-          return url
         }
+      } catch (e) {
+        console.warn('Could not load logo:', e)
       }
       
-      // Helper function to convert background image to base64
-      const backgroundToBase64 = async (element) => {
-        const style = window.getComputedStyle(element)
-        const bgImage = style.backgroundImage
-        if (bgImage && bgImage !== 'none') {
-          const urlMatch = bgImage.match(/url\(['"]?(.*?)['"]?\)/)
-          if (urlMatch && urlMatch[1]) {
-            const base64 = await imageToBase64(urlMatch[1])
-            element.style.backgroundImage = `url(${base64})`
+      try {
+        const bgResponse = await fetch('/reportbackground.png')
+        if (bgResponse.ok) {
+          const bgBlob = await bgResponse.blob()
+          backgroundBase64 = await new Promise((resolve) => {
+            const reader = new FileReader()
+            reader.onloadend = () => resolve(reader.result)
+            reader.readAsDataURL(bgBlob)
+          })
+        }
+      } catch (e) {
+        console.warn('Could not load background:', e)
+      }
+      
+      // Prepare report data for backend
+      const reportData = {
+        session: data.session || session.name || 'Current Session',
+        valuationDate: data.valuationDate || new Date().toISOString().split('T')[0],
+        data: data.allWorkedData?.[route.query.instrument || 'money-market'] || data.sample || []
+      }
+      
+      // If session report, combine all instrument data
+      if (selectedType.value === 'session' && data.instruments) {
+        reportData.data = []
+        for (const [inst, rows] of Object.entries(data.instruments)) {
+          if (rows && rows.length) {
+            reportData.data = reportData.data.concat(rows)
           }
         }
       }
       
-      // Get the complete HTML with inline styles
-      let htmlContent = iframeDoc.documentElement.outerHTML
+      // Call backend to generate Word document
+      const response = await fetch('http://localhost:5000/api/report/generate-word', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: session.id,
+          report_data: reportData,
+          instrument_type: route.query.instrument || 'money-market',
+          fred_filters: data.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
+          yield_curve_data: data.yieldCurveData || [],
+          chart_image_base64: chartImageBase64,
+          logo_base64: logoBase64,
+          background_base64: backgroundBase64
+        })
+      })
       
-      // Create a temporary DOM to manipulate
-      const parser = new DOMParser()
-      const doc = parser.parseFromString(htmlContent, 'text/html')
+      const result = await response.json()
       
-      // Convert all images to base64
-      const images = doc.querySelectorAll('img')
-      for (const img of images) {
-        const src = img.getAttribute('src')
-        if (src && !src.startsWith('data:')) {
-          const base64 = await imageToBase64(src)
-          img.setAttribute('src', base64)
+      if (result.success) {
+        // Download the generated file
+        const downloadResponse = await fetch(`http://localhost:5000/api/report/download-word/${session.id}`)
+        if (downloadResponse.ok) {
+          const blob = await downloadResponse.blob()
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = result.data.file_name || `Dura-Capital-Valuation-Report-${new Date().toISOString().split('T')[0]}.docx`
+          a.click()
+          URL.revokeObjectURL(url)
+        } else {
+          showSnackbar('Failed to download the generated report.', 'error')
         }
+      } else {
+        showSnackbar('Failed to generate Word report: ' + (result.message || 'Unknown error'), 'error')
       }
-      
-      // Convert background images to base64
-      const coverPage = doc.querySelector('.cover-page')
-      if (coverPage) {
-        const bgImage = coverPage.style.backgroundImage
-        if (bgImage && bgImage.includes('url(') && !bgImage.includes('data:')) {
-          const urlMatch = bgImage.match(/url\(['"]?(.*?)['"]?\)/)
-          if (urlMatch && urlMatch[1]) {
-            const base64 = await imageToBase64(urlMatch[1])
-            coverPage.style.backgroundImage = `url(${base64})`
-          }
-        }
-      }
-      
-      // Remove the close button
-      const closeButton = doc.querySelector('.close-button')
-      if (closeButton) closeButton.remove()
-      
-      // Get the modified HTML
-      htmlContent = doc.body.innerHTML
-      
-      // Wrap with Word-compatible HTML headers
-      const wordHtml = `
-        <html xmlns:o="urn:schemas-microsoft-com:office:office" 
-              xmlns:w="urn:schemas-microsoft-com:office:word"
-              xmlns="http://www.w3.org/TR/REC-html40">
-        <head>
-          <meta charset="utf-8">
-          <meta name="ProgId" content="Word.Document">
-          <meta name="Generator" content="Microsoft Word">
-          <meta name="Originator" content="Microsoft Word">
-          <style>
-            @page {
-              size: A4;
-              margin: 0.5in;
-            }
-            body {
-              font-family: Arial, sans-serif;
-              margin: 0;
-              padding: 0;
-            }
-            .page {
-              page-break-after: always;
-              min-height: 100vh;
-              position: relative;
-            }
-            .page:last-child {
-              page-break-after: auto;
-            }
-            .cover-page {
-              page-break-after: always;
-              min-height: 100vh;
-              position: relative;
-            }
-            .toc-page {
-              page-break-after: always;
-              min-height: 100vh;
-              position: relative;
-            }
-          </style>
-        </head>
-        <body>
-          ${htmlContent}
-        </body>
-        </html>
-      `
-      
-      // Create blob with Word MIME type
-      const blob = new Blob(['\ufeff', wordHtml], { type: 'application/msword' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `Dura-Capital-Valuation-Report-${new Date().toISOString().split('T')[0]}.doc`
-      a.click()
-      URL.revokeObjectURL(url)
-    }
-    
-    // If iframe is already loaded, trigger capture immediately
-    if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
-      iframe.onload()
+    } catch (err) {
+      console.error('Error downloading Word report:', err)
+      showSnackbar('Error downloading Word report: ' + err.message, 'error')
     }
   }
 }
@@ -575,16 +566,14 @@ async function markDone() {
   try {
     const session = await resolveSession()
     if (!session) {
-      alert('No active session.')
       return
     }
     const instrument = route.query.instrument || 'money-market'
     await markStepCompleted(session.id, 'reports')
-    alert(`Marked ${instrument} as done in session.`)
     router.push('/dashboard')
   } catch (err) {
     console.error(err)
-    alert('Error marking done: ' + err.message)
+    showSnackbar('Error marking done: ' + err.message, 'error')
   }
 }
 

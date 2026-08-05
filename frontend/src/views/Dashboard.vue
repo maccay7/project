@@ -228,10 +228,6 @@
                   <span class="label">Saved At</span>
                   <span class="value">{{ formatVersionTime(inst.saved_at) }}</span>
                 </div>
-                <div class="version-entry-row">
-                  <span class="label">Versions</span>
-                  <span class="value">{{ inst.version_count || 0 }}</span>
-                </div>
               </div>
             </div>
           </div>
@@ -242,6 +238,16 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Snackbar for notifications -->
+    <v-snackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      :timeout="snackbar.timeout"
+      location="bottom"
+    >
+      {{ snackbar.message }}
+    </v-snackbar>
   </div>
 </template>
 
@@ -276,6 +282,23 @@ const instrumentDialogVisible = ref(false)
 const selectedSessionForInstruments = ref(null)
 const sessionInstruments = ref([])
 
+// ---- Snackbar notification system ----
+const snackbar = ref({
+  show: false,
+  message: '',
+  color: 'error',
+  timeout: 4000
+})
+
+function showSnackbar(message, color = 'error', timeout = 4000) {
+  snackbar.value = {
+    show: true,
+    message,
+    color,
+    timeout
+  }
+}
+
 // ---- Instruments data ----
 const instruments = [
   { id: 'money-market', name: 'Money Market', description: 'Short-term debt instruments', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
@@ -295,19 +318,22 @@ const inProgressSessions = computed(() => sessions.value.filter(s => s.status ==
 
 const backendKpiData = ref(null)
 const kpiStats = computed(() => {
+  // Calculate total instruments valued across all sessions
+  const totalInstrumentsValued = sessions.value.reduce((sum, s) => sum + (s.instrument_count || 0), 0)
+  // Calculate total versions across all sessions
+  const totalVersions = sessions.value.reduce((sum, s) => sum + (s.version_count || 0), 0)
+  
   if (backendKpiData.value) {
     return [
       { title: 'Active Sessions', value: backendKpiData.value.active_sessions || totalSessions.value, icon: 'mdi-folder-multiple', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
-      { title: 'Worked Instruments', value: backendKpiData.value.total_instruments || 0, icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
-      { title: 'Portfolio Total', value: formatCurrency(backendKpiData.value.portfolio_total || 0), icon: 'mdi-cash', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
+      { title: 'Total Versions', value: totalVersions, icon: 'mdi-history', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
+      { title: 'Total Instruments Valued', value: totalInstrumentsValued, icon: 'mdi-check-circle', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
     ]
   }
-  const totalInstruments = sessions.value.reduce((sum, s) => sum + (s.instrument_count || 0), 0)
-  const portfolioTotal = sessions.value.reduce((sum, s) => sum + (s.total_value || 0), 0)
   return [
     { title: 'Active Sessions', value: totalSessions.value, icon: 'mdi-folder-multiple', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
-    { title: 'Worked Instruments', value: totalInstruments, icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
-    { title: 'Portfolio Total', value: formatCurrency(portfolioTotal), icon: 'mdi-cash', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
+    { title: 'Total Versions', value: totalVersions, icon: 'mdi-history', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
+    { title: 'Total Instruments Valued', value: totalInstrumentsValued, icon: 'mdi-check-circle', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
   ]
 })
 
@@ -427,7 +453,7 @@ async function createNewSession() {
     }
     newSessionName.value = ''
   } catch (err) {
-    alert('Failed to create session: ' + err.message)
+    showSnackbar('Failed to create session: ' + err.message, 'error')
   }
 }
 
@@ -461,7 +487,7 @@ async function loadExistingSession(sessionId) {
       await refreshDashboard()
     }
   } catch (err) {
-    alert('Error loading session: ' + err.message)
+    showSnackbar('Error loading session: ' + err.message, 'error')
   }
 }
 
@@ -476,7 +502,7 @@ async function openRename(session) {
         if (updated) activeSession.value = updated
       }
     } catch (err) {
-      alert('Rename failed: ' + err.message)
+      showSnackbar('Rename failed: ' + err.message, 'error')
     }
   }
 }
@@ -491,7 +517,7 @@ async function deleteSession(sessionId) {
       localStorage.removeItem(ACTIVE_KEY)
     }
   } catch (err) {
-    alert('Delete failed: ' + err.message)
+    showSnackbar('Delete failed: ' + err.message, 'error')
   }
 }
 
@@ -544,7 +570,7 @@ async function openVersionModal(sessionId) {
       versionDialogVisible.value = true
     }
   } catch (err) {
-    alert('Error loading versions: ' + err.message)
+    showSnackbar('Error loading versions: ' + err.message, 'error')
   }
 }
 
@@ -552,7 +578,7 @@ async function restoreVersion(sessionId, index) {
   try {
     const session = await sessionManager.getSession(sessionId)
     if (!session || !session.versions || !session.versions[index]) {
-      alert('Version not found')
+      showSnackbar('Version not found', 'error')
       return
     }
     
@@ -564,7 +590,6 @@ async function restoreVersion(sessionId, index) {
     // Restore the version data
     const response = await api.versionAPI.restoreVersion(sessionId, version.id)
     if (response && response.success) {
-      alert(`✅ Session restored to version ${version.versionNumber}`)
       versionDialogVisible.value = false
       await refreshSession(sessionId)
       await refreshDashboard()
@@ -574,11 +599,11 @@ async function restoreVersion(sessionId, index) {
         detail: { sessionId, versionId: version.id }
       }))
     } else {
-      alert('Failed to restore version: ' + (response?.message || 'Unknown error'))
+      showSnackbar('Failed to restore version: ' + (response?.message || 'Unknown error'), 'error')
     }
   } catch (err) {
     console.error('Restore error:', err)
-    alert('Error restoring version: ' + err.message)
+    showSnackbar('Error restoring version: ' + err.message, 'error')
   }
 }
 
@@ -586,7 +611,7 @@ async function deleteVersion(sessionId, versionId, index) {
   try {
     const session = await sessionManager.getSession(sessionId)
     if (!session || !session.versions || !session.versions[index]) {
-      alert('Version not found')
+      showSnackbar('Version not found', 'error')
       return
     }
     
@@ -598,17 +623,16 @@ async function deleteVersion(sessionId, versionId, index) {
     // Delete the version
     const response = await api.versionAPI.deleteVersion(versionId)
     if (response && response.success) {
-      alert(`✅ Version ${version.versionNumber} deleted`)
       // Refresh versions list
       await openVersionModal(sessionId)
       await refreshSession(sessionId)
       await refreshDashboard()
     } else {
-      alert('Failed to delete version: ' + (response?.message || 'Unknown error'))
+      showSnackbar('Failed to delete version: ' + (response?.message || 'Unknown error'), 'error')
     }
   } catch (err) {
     console.error('Delete error:', err)
-    alert('Error deleting version: ' + err.message)
+    showSnackbar('Error deleting version: ' + err.message, 'error')
   }
 }
 
@@ -682,7 +706,7 @@ async function openInstrumentModal(sessionId) {
     }
   } catch (err) {
     console.error('Error loading instruments:', err)
-    alert('Error loading instruments: ' + err.message)
+    showSnackbar('Error loading instruments: ' + err.message, 'error')
   }
 }
 
@@ -703,14 +727,13 @@ async function saveRename() {
     if (updated) activeSession.value = updated
     renamingActive.value = false
   } catch (err) {
-    alert('Rename failed: ' + err.message)
+    showSnackbar('Rename failed: ' + err.message, 'error')
   }
 }
 
 // ---- Navigation ----
 function goToInstrument(instrumentId) {
   if (!activeSession.value) {
-    alert('Please select a session first')
     return
   }
   sessionManager.setActiveSession(activeSession.value)
