@@ -2,6 +2,7 @@ from flask import request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from utils.db import get_db
 import uuid
+import os
 from datetime import datetime, timedelta
 
 def auth_routes(app):
@@ -182,6 +183,104 @@ def auth_routes(app):
         except:
             return jsonify({'authenticated': False}), 401
 
+    @app.route('/api/login-history', methods=['GET', 'OPTIONS'])
+    def login_history():
+        if request.method == 'OPTIONS':
+            return '', 200
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT s.user_id FROM auth_sessions s WHERE s.token = %s AND s.expires_at > NOW()',
+                (token,)
+            )
+            session = cursor.fetchone()
+            if not session:
+                cursor.close()
+                conn.close()
+                return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+            
+            cursor.execute(
+                '''SELECT s.created_at, s.expires_at, s.token, u.email 
+                   FROM auth_sessions s 
+                   JOIN users u ON s.user_id = u.id
+                   WHERE s.user_id = %s 
+                   ORDER BY s.created_at DESC 
+                   LIMIT 20''',
+                (session['user_id'],)
+            )
+            sessions = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            
+            history = []
+            for s in sessions:
+                history.append({
+                    'email': s['email'],
+                    'login_time': s['created_at'].isoformat() if s['created_at'] else None,
+                    'expires_at': s['expires_at'].isoformat() if s['expires_at'] else None,
+                    'status': 'Active' if s['expires_at'] and s['expires_at'] > datetime.now() else 'Expired'
+                })
+            
+            return jsonify({'success': True, 'history': history})
+        except Exception as e:
+            print(f"Login history error: {e}")
+            return jsonify({'success': False, 'message': 'Server error'}), 500
+
+    @app.route('/api/active-sessions', methods=['GET', 'OPTIONS'])
+    def active_sessions():
+        if request.method == 'OPTIONS':
+            return '', 200
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT s.user_id FROM auth_sessions s WHERE s.token = %s AND s.expires_at > NOW()',
+                (token,)
+            )
+            session = cursor.fetchone()
+            if not session:
+                cursor.close()
+                conn.close()
+                return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+            
+            cursor.execute(
+                '''SELECT s.created_at, s.expires_at, s.token, u.email 
+                   FROM auth_sessions s 
+                   JOIN users u ON s.user_id = u.id
+                   WHERE s.user_id = %s AND s.expires_at > NOW()
+                   ORDER BY s.created_at DESC''',
+                (session['user_id'],)
+            )
+            sessions = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            
+            active = []
+            for s in sessions:
+                active.append({
+                    'email': s['email'],
+                    'login_time': s['created_at'].isoformat() if s['created_at'] else None,
+                    'expires_at': s['expires_at'].isoformat() if s['expires_at'] else None,
+                    'device': 'Web Browser',
+                    'location': 'Unknown'
+                })
+            
+            return jsonify({'success': True, 'sessions': active})
+        except Exception as e:
+            print(f"Active sessions error: {e}")
+            return jsonify({'success': False, 'message': 'Server error'}), 500
+
     @app.route('/api/forgot-password', methods=['POST', 'OPTIONS'])
     def forgot_password():
         if request.method == 'OPTIONS':
@@ -198,9 +297,15 @@ def auth_routes(app):
             cursor.execute('SELECT id FROM users WHERE email = %s', (email,))
             user = cursor.fetchone()
             if not user:
-                return jsonify({'success': True, 'message': 'If the email exists, a reset link has been sent.'})
-            reset_token = str(uuid.uuid4())
-            expires = datetime.now() + timedelta(hours=1)
+                return jsonify({'success': True, 'message': 'If the email exists, a verification code has been sent.'})
+            # Generate 6-digit verification code
+            import random
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+            
+            verification_code = str(random.randint(100000, 999999))
+            expires = datetime.now() + timedelta(minutes=15)
             cursor.execute('''CREATE TABLE IF NOT EXISTS password_resets (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 user_id INT NOT NULL,
@@ -211,14 +316,84 @@ def auth_routes(app):
             )''')
             cursor.execute(
                 'INSERT INTO password_resets (user_id, token, expires_at) VALUES (%s, %s, %s)',
-                (user['id'], reset_token, expires)
+                (user['id'], verification_code, expires)
             )
             conn.commit()
             cursor.close()
             conn.close()
-            return jsonify({'success': True, 'reset_token': reset_token, 'message': 'Reset token generated (for development)'})
+            
+            # Send email with verification code
+            try:
+                smtp_host = 'smtp.gmail.com'
+                smtp_port = 587
+                smtp_username = os.environ.get('SMTP_USERNAME', 'your-email@gmail.com')
+                smtp_password = os.environ.get('SMTP_PASSWORD', 'your-app-password')
+                
+                msg = MIMEMultipart()
+                msg['From'] = smtp_username
+                msg['To'] = email
+                msg['Subject'] = 'Password Reset Verification Code'
+                
+                body = f"""
+                Your verification code is: {verification_code}
+                
+                This code will expire in 15 minutes.
+                
+                If you did not request this code, please ignore this email.
+                """
+                msg.attach(MIMEText(body, 'plain'))
+                
+                server = smtplib.SMTP(smtp_host, smtp_port)
+                server.starttls()
+                server.login(smtp_username, smtp_password)
+                server.send_message(msg)
+                server.quit()
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Verification code sent to your email'
+                })
+            except Exception as email_error:
+                print(f"Email sending error: {email_error}")
+                # Fallback: return code if email fails (for development)
+                return jsonify({
+                    'success': True,
+                    'message': 'Verification code sent to your email',
+                    'verification_code': verification_code,
+                    'note': 'Email sending failed, code returned for development'
+                })
         except Exception as e:
             print(f"Forgot password error: {e}")
+            return jsonify({'success': False, 'message': 'Server error'}), 500
+
+    @app.route('/api/verify-reset-code', methods=['POST', 'OPTIONS'])
+    def verify_reset_code():
+        if request.method == 'OPTIONS':
+            return '', 200
+        data = request.get_json()
+        email = data.get('email')
+        code = data.get('code')
+        if not email or not code:
+            return jsonify({'success': False, 'message': 'Email and code required'}), 400
+        conn = get_db()
+        if not conn:
+            return jsonify({'success': False, 'message': 'Database error'}), 500
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''SELECT pr.user_id FROM password_resets pr 
+                   JOIN users u ON pr.user_id = u.id 
+                   WHERE u.email = %s AND pr.token = %s AND pr.expires_at > NOW() AND pr.used = FALSE''',
+                (email, code)
+            )
+            reset = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if not reset:
+                return jsonify({'success': False, 'message': 'Invalid or expired code'}), 400
+            return jsonify({'success': True, 'message': 'Code verified'})
+        except Exception as e:
+            print(f"Verify code error: {e}")
             return jsonify({'success': False, 'message': 'Server error'}), 500
 
     @app.route('/api/reset-password', methods=['POST', 'OPTIONS'])
@@ -226,25 +401,28 @@ def auth_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
         data = request.get_json()
-        token = data.get('token')
+        code = data.get('code')
+        email = data.get('email')
         new_password = data.get('new_password')
-        if not token or not new_password:
-            return jsonify({'success': False, 'message': 'Token and new password required'}), 400
+        if not code or not email or not new_password:
+            return jsonify({'success': False, 'message': 'Code, email, and new password required'}), 400
         conn = get_db()
         if not conn:
             return jsonify({'success': False, 'message': 'Database error'}), 500
         try:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT user_id FROM password_resets WHERE token = %s AND expires_at > NOW() AND used = FALSE',
-                (token,)
+                '''SELECT pr.user_id FROM password_resets pr 
+                   JOIN users u ON pr.user_id = u.id 
+                   WHERE u.email = %s AND pr.token = %s AND pr.expires_at > NOW() AND pr.used = FALSE''',
+                (email, code)
             )
             reset = cursor.fetchone()
             if not reset:
-                return jsonify({'success': False, 'message': 'Invalid or expired token'}), 400
+                return jsonify({'success': False, 'message': 'Invalid or expired code'}), 400
             password_hash = generate_password_hash(new_password)
             cursor.execute('UPDATE users SET password_hash = %s WHERE id = %s', (password_hash, reset['user_id']))
-            cursor.execute('UPDATE password_resets SET used = TRUE WHERE token = %s', (token,))
+            cursor.execute('UPDATE password_resets SET used = TRUE WHERE token = %s', (code,))
             cursor.execute('DELETE FROM auth_sessions WHERE user_id = %s', (reset['user_id'],))
             conn.commit()
             cursor.close()

@@ -5,31 +5,11 @@ from datetime import datetime
 from utils.db import get_db
 import requests
 
-_cache = {}
-CACHE_TTL = 15 * 60
-
 FRED_API_KEY = 'b40141a5119f30bc2388d63f59d8847e'
 FRED_BASE_URL = 'https://api.stlouisfed.org/fred'
 
-def get_cached_data(key):
-    if key in _cache:
-        data, timestamp = _cache[key]
-        if (datetime.now() - timestamp).total_seconds() < CACHE_TTL:
-            return data
-        else:
-            del _cache[key]
-    return None
-
-def set_cached_data(key, data):
-    _cache[key] = (data, datetime.now())
-
 def generate_yield_curve_data(instrument_type='all', country='US', currency='USD', maturity='10Y'):
     print(f"📊 Generating yield curve: instrument_type={instrument_type}, country={country}, currency={currency}, maturity={maturity}")
-    cache_key = f"yield_curve_{instrument_type}_{country}_{currency}_{maturity}"
-    cached = get_cached_data(cache_key)
-    if cached:
-        print("📊 Using cached yield curve data")
-        return cached
     try:
         maturities_to_fetch = ['DGS1MO', 'DGS3MO', 'DGS6MO', 'DGS1', 'DGS2', 'DGS3', 'DGS5', 'DGS7', 'DGS10', 'DGS20', 'DGS30']
         maturity_map = {
@@ -98,7 +78,6 @@ def generate_yield_curve_data(instrument_type='all', country='US', currency='USD
                 'note': 'Real FRED API yield curve data'
             }
             print(f"✅ Yield curve generated: {len(maturities)} points")
-        set_cached_data(cache_key, data)
         return data
     except Exception as e:
         print(f"❌ Yield curve generation error: {e}")
@@ -192,13 +171,5 @@ def visualization_routes(app):
         instrument_type = payload.get('instrument_type', 'money-market')
         chart_data = prepare_chart_data(data, instrument_type)
         return jsonify({'success': True, 'data': chart_data})
-
-    @app.route('/api/visualization/cache/clear', methods=['DELETE', 'OPTIONS'])
-    def visualization_clear_cache():
-        if request.method == 'OPTIONS':
-            return '', 200
-        global _cache
-        _cache.clear()
-        return jsonify({'success': True, 'message': 'Cache cleared'})
 
     print("✅ Visualization routes registered – no FRED endpoints")
