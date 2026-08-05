@@ -10,8 +10,8 @@ from datetime import datetime
 from utils.excel_parser import parse_full_workbook  # Use the central parser
 
 UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
-MAX_FILE_SIZE = 16 * 1024 * 1024
+ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'xlsm', 'csv'}
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -79,88 +79,33 @@ def save_dataset_metadata(file_name, original_name, file_path, file_size, instru
 
 
 def intelligent_parse(file_path, instrument_type):
-    field_map = {
-        'money-market': {
-            'required': ['Principal', 'InterestRate', 'DaysToMaturity'],
-            'optional': ['InvestmentAmount', 'IssueDate', 'MaturityDate'],
-            'keywords': {
-                'Principal': ['principal', 'principal amount', 'investment', 'amount', 'notional'],
-                'InterestRate': ['interest rate', 'rate', 'interest', 'coupon', 'annual rate'],
-                'InvestmentAmount': ['investment amount', 'investment', 'amount', 'principal'],
-                'DaysToMaturity': ['days to maturity', 'maturity days', 'term', 'tenor', 'duration'],
-                'IssueDate': ['issue date', 'effective date', 'start date', 'trade date'],
-                'MaturityDate': ['maturity date', 'maturity', 'due date', 'end date']
-            }
-        },
-        'bonds': {
-            'required': ['CouponRate', 'FaceValue', 'MaturityDate'],
-            'optional': ['CouponFrequency', 'Yield', 'SettlementDate', 'IssueDate', 'Price'],
-            'keywords': {
-                'CouponRate': ['coupon rate', 'coupon', 'rate', 'interest rate'],
-                'CouponFrequency': ['coupon frequency', 'frequency', 'payment frequency'],
-                'FaceValue': ['face value', 'face', 'par value', 'par', 'amount', 'principal'],
-                'Yield': ['yield', 'ytm', 'yield to maturity', 'return'],
-                'SettlementDate': ['settlement date', 'settlement', 'trade date'],
-                'MaturityDate': ['maturity date', 'maturity', 'due date'],
-                'IssueDate': ['issue date', 'effective date', 'start date'],
-                'Price': ['price', 'clean price', 'market price']
-            }
-        },
-        'tbills': {
-            'required': ['FaceValue', 'DiscountRate', 'DaysToMaturity'],
-            'optional': ['PurchasePrice', 'RedemptionValue', 'IssueDate', 'MaturityDate'],
-            'keywords': {
-                'FaceValue': ['face value', 'face', 'par value', 'par', 'amount', 'principal'],
-                'DiscountRate': ['discount rate', 'discount', 'rate'],
-                'PurchasePrice': ['purchase price', 'purchase', 'price'],
-                'RedemptionValue': ['redemption value', 'redemption'],
-                'DaysToMaturity': ['days to maturity', 'maturity days', 'term', 'tenor'],
-                'IssueDate': ['issue date', 'effective date', 'start date'],
-                'MaturityDate': ['maturity date', 'maturity', 'due date']
-            }
-        }
-    }
-    
-    field_config = field_map.get(instrument_type, field_map['money-market'])
-    all_fields = field_config['required'] + field_config['optional']
-    keywords = field_config['keywords']
-    
-    # Use the full parser to get the raw data (with increased row limit)
+    # Use the full parser to get the raw data without field restrictions
     parsed = parse_full_workbook(file_path, instrument_type, max_rows=100000)
     warnings = parsed.get('warnings', [])
     metadata = parsed.get('metadata', {})
     
+    # Return all data from all sheets without field mapping restrictions
+    # This allows any Excel structure to be processed
     extracted_data = []
     
     for sheet in parsed.get('sheets', []):
-        # Use the fullData to preserve structure (we'll extract from data or headers)
-        # For intelligent parse, we prefer the table data (data list of dict)
+        # Get the raw data from each sheet
         data = sheet.get('data', [])
         headers = sheet.get('headers', [])
         
-        column_map = {}
-        for field in all_fields:
-            field_keywords = keywords.get(field, [])
-            for idx, header in enumerate(headers):
-                header_lower = str(header).lower()
-                if any(kw in header_lower for kw in field_keywords):
-                    column_map[field] = idx
-                    break
-        
+        # Preserve all columns and data as-is
         for row in data:
             row_data = {}
-            for field in all_fields:
-                col_idx = column_map.get(field)
-                if col_idx is not None and col_idx < len(row):
-                    row_data[field] = row[col_idx]
-                else:
-                    row_data[field] = ''
+            # Map all columns by their actual header names
+            for idx, header in enumerate(headers):
+                row_data[header] = row[idx] if idx < len(row) else ''
             extracted_data.append(row_data)
     
     return {
         'data': extracted_data,
         'warnings': warnings,
-        'metadata': metadata
+        'metadata': metadata,
+        'sheets': parsed.get('sheets', [])
     }
 
 

@@ -110,6 +110,62 @@
         <div v-if="resetSuccess" class="success-message">{{ resetSuccess }}</div>
       </div>
     </div>
+
+    <!-- Verification Code Modal -->
+    <div v-if="showVerifyModal" class="modal-overlay" @click.self="closeVerifyModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Enter Verification Code</h3>
+          <button class="modal-close" @click="closeVerifyModal">✕</button>
+        </div>
+        <p class="modal-instruction">Enter the 6-digit code sent to {{ resetEmail }}</p>
+        <div class="form-group">
+          <div class="input-wrapper">
+            <span class="input-icon">🔢</span>
+            <input 
+              v-model="verifyCode" 
+              type="text" 
+              class="form-input" 
+              placeholder="6-digit code"
+              maxlength="6"
+              @keyup.enter="verifyAndResetPassword"
+            />
+          </div>
+        </div>
+        <div class="form-group">
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input 
+              v-model="newPassword" 
+              type="password" 
+              class="form-input" 
+              placeholder="New Password"
+              @keyup.enter="verifyAndResetPassword"
+            />
+          </div>
+        </div>
+        <div class="form-group">
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input 
+              v-model="confirmPassword" 
+              type="password" 
+              class="form-input" 
+              placeholder="Confirm New Password"
+              @keyup.enter="verifyAndResetPassword"
+            />
+          </div>
+        </div>
+        <button 
+          class="reset-button" 
+          @click="verifyAndResetPassword"
+          :disabled="verifyLoading"
+        >
+          {{ verifyLoading ? 'Verifying...' : 'Reset Password' }}
+        </button>
+        <div v-if="verifyError" class="error-message">{{ verifyError }}</div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -134,6 +190,13 @@ const resetEmail = ref('')
 const resetLoading = ref(false)
 const resetError = ref('')
 const resetSuccess = ref('')
+
+const showVerifyModal = ref(false)
+const verifyCode = ref('')
+const verifyLoading = ref(false)
+const verifyError = ref('')
+const newPassword = ref('')
+const confirmPassword = ref('')
 
 const handleLogin = async () => {
   if (!email.value || !password.value) {
@@ -190,7 +253,11 @@ const sendResetLink = async () => {
       resetSuccess.value = 'Verification code sent!'
       setTimeout(() => {
         closeForgotModal()
-        router.push({ path: '/verify-code', query: { email: resetEmail.value } })
+        showVerifyModal.value = true
+        verifyCode.value = ''
+        verifyError.value = ''
+        newPassword.value = ''
+        confirmPassword.value = ''
       }, 1000)
     } else {
       resetError.value = data.message || 'Failed to send verification code'
@@ -199,6 +266,53 @@ const sendResetLink = async () => {
     resetError.value = 'Network error. Please try again.'
   } finally {
     resetLoading.value = false
+  }
+}
+
+const closeVerifyModal = () => { showVerifyModal.value = false }
+
+const verifyAndResetPassword = async () => {
+  if (!verifyCode.value) {
+    verifyError.value = 'Please enter the verification code'
+    return
+  }
+  if (!newPassword.value || !confirmPassword.value) {
+    verifyError.value = 'Please enter and confirm your new password'
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    verifyError.value = 'Passwords do not match'
+    return
+  }
+  
+  verifyError.value = ''
+  verifyLoading.value = true
+  try {
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
+    const response = await fetch(`${apiUrl}/api/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: resetEmail.value, 
+        code: verifyCode.value,
+        new_password: newPassword.value 
+      })
+    })
+    const data = await response.json()
+    if (data.success) {
+      successMessage.value = 'Password reset successful! Please login with your new password.'
+      closeVerifyModal()
+      resetEmail.value = ''
+      verifyCode.value = ''
+      newPassword.value = ''
+      confirmPassword.value = ''
+    } else {
+      verifyError.value = data.message || 'Invalid verification code'
+    }
+  } catch (err) {
+    verifyError.value = 'Network error. Please try again.'
+  } finally {
+    verifyLoading.value = false
   }
 }
 

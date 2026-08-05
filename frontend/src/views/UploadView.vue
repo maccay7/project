@@ -126,6 +126,37 @@
           </v-row>
         </v-card-text>
       </v-card>
+
+      <!-- Worksheet Selection Dialog -->
+      <v-dialog v-model="showSheetSelection" max-width="500px" persistent>
+        <v-card>
+          <v-card-title class="sheet-dialog-title">
+            <v-icon left>mdi-file-table</v-icon> Select Worksheet
+            <v-spacer></v-spacer>
+            <button class="btn-close-dialog" @click="showSheetSelection = false">✕</button>
+          </v-card-title>
+          <v-card-text class="sheet-dialog-body">
+            <p class="sheet-dialog-text">This file contains {{ sheetNames.length }} worksheet(s). Select one to load:</p>
+            <div class="sheet-list">
+              <div 
+                v-for="sheet in sheetNames" 
+                :key="sheet" 
+                class="sheet-item"
+                :class="{ 'selected': selectedSheet === sheet }"
+                @click="selectSheet(sheet)"
+              >
+                <v-icon>mdi-table</v-icon>
+                <span>{{ sheet }}</span>
+              </div>
+            </div>
+          </v-card-text>
+          <v-card-actions class="sheet-dialog-actions">
+            <v-spacer></v-spacer>
+            <v-btn color="grey" variant="text" @click="showSheetSelection = false">Cancel</v-btn>
+            <v-btn color="#0B2A44" @click="confirmSheetSelection" :disabled="!selectedSheet">Load</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
     </div>
   </fixed-layout>
 </template>
@@ -154,7 +185,13 @@ const dataset = ref([])
 const headers = ref([])
 const savedDatasets = ref([])
 const selectedDatasetId = ref(null)
-const selectedDatasetName = ref('')
+const selectedDatasetName = ref(null)
+
+// Workbook sheet selection
+const workbookData = ref(null)
+const sheetNames = ref([])
+const selectedSheet = ref(null)
+const showSheetSelection = ref(false)
 
 const hasFile = computed(() => uploadedFile.value !== null)
 const hasData = computed(() => dataset.value.length > 0)
@@ -178,20 +215,30 @@ async function readFileData(file) {
         return row
       })
     } else {
-      // Excel / ODS / etc.
+      // Excel / ODS / etc. - read full workbook without row limit
       const buffer = await file.arrayBuffer()
       const workbook = XLSX.read(buffer, {
         type: 'array',
         cellDates: false,
         cellNF: false,
         cellText: false,
-        sheetRows: 5000,
         defval: ""
       })
-      const sheetName = workbook.SheetNames[0]
-      const sheet = workbook.Sheets[sheetName]
-      data = XLSX.utils.sheet_to_json(sheet, { defval: "" })
-      if (data.length === 0) throw new Error('No data found in first sheet')
+      // Store workbook for sheet selection
+      workbookData.value = workbook
+      sheetNames.value = workbook.SheetNames
+      
+      // If only one sheet, auto-select it
+      if (workbook.SheetNames.length === 1) {
+        selectedSheet.value = workbook.SheetNames[0]
+        const sheet = workbook.Sheets[selectedSheet.value]
+        data = XLSX.utils.sheet_to_json(sheet, { defval: "" })
+        if (data.length === 0) throw new Error('No data found in sheet')
+      } else {
+        // Multiple sheets - show selection dialog
+        showSheetSelection.value = true
+        return { workbook, sheetNames: workbook.SheetNames, needsSelection: true }
+      }
     }
     return data
   } catch (err) {
@@ -206,6 +253,14 @@ async function uploadFile(file) {
   isLoading.value = true
   try {
     const parsed = await readFileData(file)
+    
+    // Check if sheet selection is needed
+    if (parsed && parsed.needsSelection) {
+      // Sheet selection dialog will be shown
+      isLoading.value = false
+      return
+    }
+    
     dataset.value = parsed
     headers.value = Object.keys(parsed[0] || {})
     showPreview.value = true
@@ -220,6 +275,46 @@ async function uploadFile(file) {
     headers.value = []
     uploadedFile.value = null
     showPreview.value = false
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// ---------- Sheet Selection Functions ----------
+function selectSheet(sheetName) {
+  selectedSheet.value = sheetName
+}
+
+async function confirmSheetSelection() {
+  if (!selectedSheet.value || !workbookData.value) {
+    showSheetSelection.value = false
+    return
+  }
+  
+  isLoading.value = true
+  try {
+    const sheet = workbookData.value.Sheets[selectedSheet.value]
+    const data = XLSX.utils.sheet_to_json(sheet, { defval: "" })
+    
+    if (data.length === 0) {
+      alert('No data found in selected sheet')
+      showSheetSelection.value = false
+      isLoading.value = false
+      return
+    }
+    
+    dataset.value = data
+    headers.value = Object.keys(data[0] || {})
+    showPreview.value = true
+    showSheetSelection.value = false
+    
+    // Auto-save prompt
+    const name = uploadedFile.value.name.replace(/\.[^/.]+$/, '')
+    if (confirm(`Load successful. Save "${name}" to datasets?`)) {
+      await saveDataset(name)
+    }
+  } catch (err) {
+    alert(`Failed to load sheet: ${err.message}`)
   } finally {
     isLoading.value = false
   }
@@ -399,6 +494,71 @@ onMounted(() => {
 .info-card { border-radius: 12px; margin-top: 20px; background: white; border: 1px solid rgba(11,42,68,0.08); }
 .info-label { font-size: 12px; font-weight: 600; color: #666; margin-bottom: 4px; }
 .info-value { font-size: 20px; font-weight: 700; color: #0B2A44; }
+
+/* Worksheet Selection Dialog Styles */
+.sheet-dialog-title {
+  background: linear-gradient(135deg, #0B2A44, #1a3a5a);
+  color: white;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+}
+.sheet-dialog-body {
+  padding: 20px;
+}
+.sheet-dialog-text {
+  margin-bottom: 16px;
+  color: #666;
+  font-size: 14px;
+}
+.sheet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.sheet-item:hover {
+  border-color: #1E88E5;
+  background: rgba(30, 136, 229, 0.05);
+}
+.sheet-item.selected {
+  border-color: #0B2A44;
+  background: rgba(11, 42, 68, 0.08);
+}
+.sheet-item .v-icon {
+  color: #0B2A44;
+}
+.sheet-item span {
+  font-weight: 500;
+  color: #0B2A44;
+}
+.sheet-dialog-actions {
+  padding: 12px 20px;
+  border-top: 1px solid #e0e0e0;
+}
+.btn-close-dialog {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+.btn-close-dialog:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 @media (max-width: 600px) {
   .upload-page { padding: 0 16px; }
   .drop-area { padding: 20px 16px; }
