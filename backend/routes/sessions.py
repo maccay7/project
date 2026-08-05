@@ -64,21 +64,26 @@ def sessions_routes(app):
         instrument_count = payload.get('instrument_count', 0)
         version_count = payload.get('version_count', 0)
         
-        # Compute instrument_count if not provided or zero
-        if not instrument_count and instrument_workflows and isinstance(instrument_workflows, dict):
+        # Compute instrument_count from instrument_workflows if provided
+        if instrument_workflows and isinstance(instrument_workflows, dict):
             instrument_count = 0
             for key in ['money-market', 'bonds', 'tbills']:
                 wf = instrument_workflows.get(key)
                 if wf and (
                     (wf.get('cleanedData') and len(wf.get('cleanedData')) > 0) or
+                    (wf.get('rawData') and len(wf.get('rawData')) > 0) or
                     (wf.get('data') and len(wf.get('data')) > 0) or
-                    (wf.get('calculations') and wf.get('calculations', {}).get('totalValue', 0) > 0)
+                    (wf.get('calculations') and wf.get('calculations', {}).get('totalValue', 0) > 0) or
+                    (wf.get('instrumentSummary') and wf.get('instrumentSummary', {}).get('rows') and len(wf.get('instrumentSummary', {}).get('rows')) > 0)
                 ):
                     instrument_count += 1
-            if instrument_count == 0 and legacy_payload:
-                for key in ['money-market', 'bonds', 'tbills']:
-                    if legacy_payload.get(key):
-                        instrument_count += 1
+            instrument_count = min(instrument_count, 3)
+        elif legacy_payload:
+            # Fallback to legacy payload structure
+            instrument_count = 0
+            for key in ['money-market', 'bonds', 'tbills']:
+                if legacy_payload.get(key):
+                    instrument_count += 1
             instrument_count = min(instrument_count, 3)
         else:
             instrument_count = min(instrument_count, 3)
@@ -239,13 +244,16 @@ def sessions_routes(app):
                     except:
                         pass
                 instrument_count = row.get('instrument_count', 0)
+                # Recompute instrument_count from workflows if it's 0 or missing
                 if instrument_count == 0 and instrument_workflows:
                     for key in ['money-market', 'bonds', 'tbills']:
                         wf = instrument_workflows.get(key)
                         if wf and (
                             (wf.get('cleanedData') and len(wf.get('cleanedData')) > 0) or
+                            (wf.get('rawData') and len(wf.get('rawData')) > 0) or
                             (wf.get('data') and len(wf.get('data')) > 0) or
-                            (wf.get('calculations') and wf.get('calculations', {}).get('totalValue', 0) > 0)
+                            (wf.get('calculations') and wf.get('calculations', {}).get('totalValue', 0) > 0) or
+                            (wf.get('instrumentSummary') and wf.get('instrumentSummary', {}).get('rows') and len(wf.get('instrumentSummary', {}).get('rows')) > 0)
                         ):
                             instrument_count += 1
                     instrument_count = min(instrument_count, 3)
