@@ -748,11 +748,17 @@ async function openInstrumentModal(sessionId) {
       const workflows = session.instrumentWorkflow || {}
       const instrumentKeys = ['money-market', 'bonds', 'tbills']
       
-      // Count actual instruments with data
+      // Count actual instruments with data (matching backend logic)
       let instrumentCount = 0
       for (const key of instrumentKeys) {
         const wf = workflows[key]
-        if (wf && (wf.cleanedData?.length > 0 || wf.rawData?.length > 0 || wf.data?.length > 0 || wf.calculations)) {
+        if (wf && (
+          (wf.cleanedData && wf.cleanedData.length > 0) ||
+          (wf.rawData && wf.rawData.length > 0) ||
+          (wf.data && wf.data.length > 0) ||
+          (wf.calculations && wf.calculations.totalValue && wf.calculations.totalValue > 0) ||
+          (wf.instrumentSummary && wf.instrumentSummary.rows && wf.instrumentSummary.rows.length > 0)
+        )) {
           instrumentCount++
           let instrumentName = wf.instrumentName || key
           if (instrumentName.includes('.')) instrumentName = instrumentName.split('.')[0]
