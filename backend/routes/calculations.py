@@ -121,37 +121,15 @@ def save_calculation(instrument_type, input_data, result_data, dataset_id=None, 
                 # Update session
                 cursor.execute(
                     """UPDATE ui_sessions 
-                       SET instrument_workflows = %s, instrument_count = %s, version_count = version_count + 1 
+                       SET instrument_workflows = %s, instrument_count = %s 
                        WHERE session_id = %s""",
                     (json.dumps(instrument_workflows), instrument_count, session_id)
                 )
                 conn.commit()
 
-                # Create version record
-                try:
-                    from routes.version_history import create_version, get_next_version_number
-                    next_version = get_next_version_number(session_id)
-                    version_id = create_version(
-                        session_id,
-                        next_version,
-                        instrument_type,
-                        f"Calculated {instrument_type}",
-                        None,
-                        None,
-                        result_data,
-                        None,
-                        None,
-                        None
-                    )
-                    if version_id:
-                        print(f"✅ Created version {next_version} for session {session_id}")
-                        # Ensure session version_count is updated (already done, but double-check)
-                        cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (next_version, session_id))
-                        conn.commit()
-                except Exception as e:
-                    print(f"⚠️ Failed to create version: {e}")
-
-                print(f"✅ Session {session_id} updated: instrument_count={instrument_count}, version_count={session_row.get('version_count', 0) + 1}")
+                # 🔥 REMOVED: Version creation logic - only /api/version endpoint should create versions
+                # This endpoint only saves calculation results, never creates versions
+                print(f"✅ Session {session_id} updated: instrument_count={instrument_count}")
         cursor.close()
         conn.close()
     except Exception as e:

@@ -39,6 +39,11 @@ def create_version(
     report_snapshot=None,
     user_id=None
 ):
+    print(f"=== create_version called ===")
+    print(f"Session ID: {session_id}")
+    print(f"Version number: {version_number}")
+    print(f"Instrument type: {instrument_type}")
+    
     conn = get_db()
     if not conn:
         print("❌ DB connection failed – version not saved")
@@ -68,6 +73,14 @@ def create_version(
         """)
         conn.commit()
         
+        # Check current count before insert
+        cursor.execute(
+            "SELECT COUNT(*) as count FROM version_history WHERE session_id = %s",
+            (session_id,)
+        )
+        count_before = cursor.fetchone()
+        print(f"Version count BEFORE insert: {count_before.get('count', 0) if count_before else 0}")
+        
         cursor.execute("""
             INSERT INTO version_history (
                 session_id, version_number, instrument_type, change_summary,
@@ -88,10 +101,18 @@ def create_version(
         ))
         conn.commit()
         version_id = cursor.lastrowid
+        
+        # Check count after insert
+        cursor.execute(
+            "SELECT COUNT(*) as count FROM version_history WHERE session_id = %s",
+            (session_id,)
+        )
+        count_after = cursor.fetchone()
+        print(f"Version count AFTER insert: {count_after.get('count', 0) if count_after else 0}")
+        print(f"✅ Created version {version_number} for session {session_id} (ID: {version_id})")
+        
         cursor.close()
         conn.close()
-        
-        print(f"✅ Created version {version_number} for session {session_id} (ID: {version_id})")
         
         # Update session version_count using COUNT
         try:
@@ -109,6 +130,7 @@ def create_version(
         except Exception as e:
             print(f"⚠️ Failed to update session version_count: {e}")
         
+        print(f"=== create_version complete ===")
         return version_id
     except Exception as e:
         print(f"❌ Failed to create version: {e}")
@@ -256,7 +278,9 @@ def get_version_count(session_id):
 def version_history_routes(app):
     @app.route('/api/version', methods=['POST', 'OPTIONS'])
     def create_version_endpoint():
+        print("=== /api/version ENDPOINT CALLED ===")
         if request.method == 'OPTIONS':
+            print("OPTIONS request - returning 200")
             return '', 200
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
@@ -268,9 +292,14 @@ def version_history_routes(app):
         portfolio_snapshot = payload.get('portfolio_snapshot')
         report_snapshot = payload.get('report_snapshot')
         user_id = payload.get('user_id')
+        print(f"Session ID: {session_id}")
+        print(f"Instrument type: {instrument_type}")
+        print(f"Change summary: {change_summary}")
         if not session_id:
+            print("ERROR: session_id required")
             return jsonify({'success': False, 'message': 'session_id required'}), 400
         next_version = get_next_version_number(session_id)
+        print(f"Next version number: {next_version}")
         version_id = create_version(
             session_id,
             next_version,
@@ -283,13 +312,16 @@ def version_history_routes(app):
             report_snapshot,
             user_id
         )
+        print(f"Version ID returned: {version_id}")
         if version_id:
+            print(f"✅ Returning success with version_id: {version_id}, version_number: {next_version}")
             return jsonify({
                 'success': True,
                 'version_id': version_id,
                 'version_number': next_version
             })
         else:
+            print("❌ Returning failure")
             return jsonify({'success': False, 'message': 'Failed to create version'}), 500
 
     @app.route('/api/version/session/<session_id>', methods=['GET', 'OPTIONS'])
