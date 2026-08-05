@@ -242,13 +242,16 @@ const sendResetLink = async () => {
   resetSuccess.value = ''
   resetLoading.value = true
   try {
-    const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+    console.log('Sending request to:', `${apiUrl}/api/forgot-password`)
     const response = await fetch(`${apiUrl}/api/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: resetEmail.value })
     })
+    console.log('Response status:', response.status)
     const data = await response.json()
+    console.log('Response data:', data)
     if (data.success) {
       resetSuccess.value = 'Verification code sent!'
       setTimeout(() => {
@@ -263,6 +266,7 @@ const sendResetLink = async () => {
       resetError.value = data.message || 'Failed to send verification code'
     }
   } catch (err) {
+    console.error('Error details:', err)
     resetError.value = 'Network error. Please try again.'
   } finally {
     resetLoading.value = false
@@ -288,7 +292,8 @@ const verifyAndResetPassword = async () => {
   verifyError.value = ''
   verifyLoading.value = true
   try {
-    const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+    console.log('Sending reset request to:', `${apiUrl}/api/reset-password`)
     const response = await fetch(`${apiUrl}/api/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -298,7 +303,9 @@ const verifyAndResetPassword = async () => {
         new_password: newPassword.value 
       })
     })
+    console.log('Reset response status:', response.status)
     const data = await response.json()
+    console.log('Reset response data:', data)
     if (data.success) {
       successMessage.value = 'Password reset successful! Please login with your new password.'
       closeVerifyModal()
@@ -310,6 +317,7 @@ const verifyAndResetPassword = async () => {
       verifyError.value = data.message || 'Invalid verification code'
     }
   } catch (err) {
+    console.error('Reset error details:', err)
     verifyError.value = 'Network error. Please try again.'
   } finally {
     verifyLoading.value = false
