@@ -11,7 +11,7 @@ from utils.excel_parser import parse_full_workbook  # Use the central parser
 
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'xlsm', 'csv'}
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+# No file size limit - accept any file Excel can open
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -79,8 +79,8 @@ def save_dataset_metadata(file_name, original_name, file_path, file_size, instru
 
 
 def intelligent_parse(file_path, instrument_type):
-    # Use the full parser to get the raw data without field restrictions
-    parsed = parse_full_workbook(file_path, instrument_type, max_rows=100000)
+    # Use the full parser to get the raw data without field restrictions or row limits
+    parsed = parse_full_workbook(file_path, instrument_type, max_rows=None)
     warnings = parsed.get('warnings', [])
     metadata = parsed.get('metadata', {})
     
@@ -139,8 +139,8 @@ def dataset_routes(app):
             file.save(file_path)
             file_size = os.path.getsize(file_path)
             
-            # Use central parser to get sheet info (increased row limit)
-            parsed = parse_full_workbook(file_path, instrument_type, max_rows=100000)
+            # Use central parser to get sheet info without row limits
+            parsed = parse_full_workbook(file_path, instrument_type, max_rows=None)
             sheet_count = len(parsed.get('sheets', []))
             total_rows = sum(s.get('total_rows', 0) for s in parsed.get('sheets', []))
             total_columns = max((s.get('total_columns', 0) for s in parsed.get('sheets', [])), default=0)
@@ -211,8 +211,8 @@ def dataset_routes(app):
             if not os.path.exists(file_path):
                 return jsonify({'success': False, 'message': 'File not found on server'}), 404
             
-            # Use central parser with increased row limit
-            parsed = parse_full_workbook(file_path, instrument_type, max_rows=100000)
+            # Use central parser without row limits
+            parsed = parse_full_workbook(file_path, instrument_type, max_rows=None)
             
             return jsonify({
                 'success': True,

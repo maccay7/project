@@ -1149,6 +1149,7 @@ const showCumulativeHistory = ref(false)
 const originalRawData = ref([])
 const originalFileColumns = ref([])
 const originalFileBuffer = ref(null)
+const sheetTotalRows = ref(0)
 const sessionSavedAt = ref(null)
 const showPreview = ref(false)
 const worksheetSelected = ref(false)
@@ -2053,6 +2054,7 @@ function removeFile() {
   showPreview.value = false
   worksheetSelected.value = false
   uploadError.value = ''
+  sheetTotalRows.value = 0
   worksheetWorkflow.reset()
   debouncedSave()
   forceUpdate.value++
@@ -2066,11 +2068,16 @@ function handleWorksheetSelect(sheetName) {
     worksheetSelected.value = true
     const sheet = workbookSheets.value.find(s => s.name === sheetName)
     if (sheet) {
-      rawData.value = sheet.data || []
-      originalRawData.value = JSON.parse(JSON.stringify(sheet.data || []))
-      fileColumns.value = sheet.headers || []
-      originalFileColumns.value = [...fileColumns.value]
-      sheetType.value = result.type || 'multi'
+      // Load preview data (100 rows) instead of full data
+      const previewResult = worksheetWorkflow.parseSheetPreview(sheetName, 100)
+      if (previewResult) {
+        rawData.value = previewResult.jsonData || []
+        originalRawData.value = JSON.parse(JSON.stringify(previewResult.jsonData || []))
+        fileColumns.value = previewResult.headers || []
+        originalFileColumns.value = [...fileColumns.value]
+        sheetTotalRows.value = previewResult.totalRows || 0
+      }
+      sheetType.value = 'multi' // Will be updated after processing
     }
   }
 }
@@ -2361,11 +2368,22 @@ function resetMapping() {
   requiredColumns.value.forEach(col => empty[col] = null)
   columnMapping.value = empty
   applyCurrentMapping()
-  forceUpdate.value++
 }
 
-// ========== WORKBOOK VIEWER ==========
 function openWorkbookViewer() {
+  console.log('Opening workbook viewer...')
+  console.log('workbookSheets.value:', workbookSheets.value)
+  console.log('workbookSheets.length:', workbookSheets.value.length)
+  console.log('originalFileBuffer.value present?', !!originalFileBuffer.value)
+  console.log('originalFileBuffer.value length:', originalFileBuffer.value?.length || 0)
+  console.log('uploadedFile.name:', uploadedFile.value?.name)
+  
+  if (workbookSheets.value.length > 0) {
+    console.log('First sheet:', workbookSheets.value[0])
+    console.log('First sheet has fullData?', !!workbookSheets.value[0]?.fullData)
+    console.log('First sheet fullData length:', workbookSheets.value[0]?.fullData?.length || 0)
+  }
+  
   if (!uploadedFile.value) {
     return
   }

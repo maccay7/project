@@ -374,12 +374,17 @@ def version_history_routes(app):
         
         # Restore the version data to the session
         dataset_snapshot = version.get('dataset_snapshot')
+        mapping_snapshot = version.get('mapping_snapshot')
+        calculation_snapshot = version.get('calculation_snapshot')
+        portfolio_snapshot = version.get('portfolio_snapshot')
+        
         if dataset_snapshot:
             conn = get_db()
             if not conn:
                 return jsonify({'success': False, 'message': 'DB connection failed'}), 500
             try:
                 cursor = conn.cursor()
+                # Restore instrument_workflows from dataset_snapshot (contains all workflow data)
                 cursor.execute("""
                     UPDATE ui_sessions 
                     SET instrument_workflows = %s,
@@ -397,7 +402,7 @@ def version_history_routes(app):
                 print(f"✅ Restored session {session_id} to version {version.get('versionNumber')}")
                 return jsonify({
                     'success': True,
-                    'message': f'Session restored to version {version.get("versionNumber")}',
+                    'message': f'Session restored to version {version.get("versionNumber")}. You can now continue working on this version.',
                     'data': version
                 })
             except Exception as e:

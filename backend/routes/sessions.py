@@ -146,14 +146,32 @@ def sessions_routes(app):
             return jsonify({'success': False, 'message': 'DB error'}), 500
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute('''
+            cursor.execute(''''
                 SELECT session_id as id, name, status, versions, instrument_workflows, payload, 
                        instrument_count, version_count, created_at, updated_at
                 FROM ui_sessions WHERE session_id = %s LIMIT 1
             ''', (session_id,))
             row = cursor.fetchone()
+            
+            # 🔥 Ensure version_count is accurate from history table (before closing connection)
+            try:
+                hist_cursor = conn.cursor()
+                hist_cursor.execute('SELECT COUNT(*) as cnt FROM version_history WHERE session_id = %s', (session_id,))
+                hist_row = hist_cursor.fetchone()
+                if hist_row and hist_row.get('cnt', 0) > row.get('version_count', 0):
+                    row['version_count'] = hist_row.get('cnt', 0)
+                    # Update session to fix version_count
+                    upd_cursor = conn.cursor()
+                    upd_cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (row['version_count'], session_id))
+                    conn.commit()
+                    upd_cursor.close()
+                hist_cursor.close()
+            except Exception as e:
+                print(f"⚠️ Failed to check version history: {e}")
+            
             cursor.close()
             conn.close()
+            
             if not row:
                 return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
             
@@ -175,22 +193,6 @@ def sessions_routes(app):
                     payload = json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
                 except:
                     payload = row['payload']
-            
-            # 🔥 Ensure version_count is accurate from history table
-            try:
-                hist_cursor = conn.cursor()
-                hist_cursor.execute('SELECT COUNT(*) as cnt FROM version_history WHERE session_id = %s', (session_id,))
-                hist_row = hist_cursor.fetchone()
-                if hist_row and hist_row.get('cnt', 0) > row.get('version_count', 0):
-                    row['version_count'] = hist_row.get('cnt', 0)
-                    # Update session to fix version_count
-                    upd_cursor = conn.cursor()
-                    upd_cursor.execute('UPDATE ui_sessions SET version_count = %s WHERE session_id = %s', (row['version_count'], session_id))
-                    conn.commit()
-                    upd_cursor.close()
-                hist_cursor.close()
-            except Exception as e:
-                print(f"⚠️ Failed to check version history: {e}")
             
             return jsonify({
                 'success': True,

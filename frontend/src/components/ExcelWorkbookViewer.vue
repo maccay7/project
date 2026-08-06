@@ -687,19 +687,142 @@ function closeViewer() {
 
 // ===== WATCHERS =====
 watch(() => props.workbookData, (newData) => {
+  console.log('ExcelWorkbookViewer: workbookData changed', newData)
   if (newData && newData.sheets) {
     sheets.value = newData.sheets
-    loadSheetData()
+    console.log('ExcelWorkbookViewer: sheets loaded', sheets.value.length, 'sheets')
+    console.log('ExcelWorkbookViewer: fileBuffer present?', !!newData.fileBuffer)
+    console.log('ExcelWorkbookViewer: first sheet has fullData?', !!newData.sheets[0]?.fullData)
+    
+    // If sheets don't have fullData, parse from fileBuffer
+    if (newData.fileBuffer && (!newData.sheets[0]?.fullData || newData.sheets[0]?.fullData?.length === 0)) {
+      console.log('ExcelWorkbookViewer: Loading from fileBuffer')
+      loadWorkbookFromFileBuffer(newData.fileBuffer)
+    } else {
+      console.log('ExcelWorkbookViewer: Loading from existing fullData')
+      loadSheetData()
+    }
   }
 }, { immediate: true, deep: true })
 
 // ===== LIFECYCLE =====
 onMounted(() => {
+  console.log('ExcelWorkbookViewer: mounted')
   if (props.workbookData && props.workbookData.sheets) {
     sheets.value = props.workbookData.sheets
-    loadSheetData()
+    console.log('ExcelWorkbookViewer: sheets loaded on mount', sheets.value.length, 'sheets')
+    console.log('ExcelWorkbookViewer: fileBuffer present?', !!props.workbookData.fileBuffer)
+    console.log('ExcelWorkbookViewer: first sheet has fullData?', !!props.workbookData.sheets[0]?.fullData)
+    
+    // If sheets don't have fullData, parse from fileBuffer
+    if (props.workbookData.fileBuffer && (!props.workbookData.sheets[0]?.fullData || props.workbookData.sheets[0]?.fullData?.length === 0)) {
+      console.log('ExcelWorkbookViewer: Loading from fileBuffer on mount')
+      loadWorkbookFromFileBuffer(props.workbookData.fileBuffer)
+    } else {
+      console.log('ExcelWorkbookViewer: Loading from existing fullData on mount')
+      loadSheetData()
+    }
   }
 })
+
+// ===== LOAD WORKBOOK FROM FILE BUFFER =====
+function loadWorkbookFromFileBuffer(fileBuffer) {
+  if (!fileBuffer) {
+    console.error('ExcelWorkbookViewer: fileBuffer is null/undefined')
+    return
+  }
+  
+  console.log('ExcelWorkbookViewer: fileBuffer type:', fileBuffer.constructor.name)
+  console.log('ExcelWorkbookViewer: fileBuffer byteLength:', fileBuffer.byteLength || fileBuffer.length || 'unknown')
+  
+  try {
+    console.log('Loading workbook from file buffer for viewer...')
+    const workbook = XLSX.read(fileBuffer, {
+      type: 'array',
+      cellDates: true,
+      cellStyles: true,
+      cellNF: true,
+    })
+    
+    console.log('ExcelWorkbookViewer: Workbook parsed successfully')
+    console.log('ExcelWorkbookViewer: Sheet names:', workbook.SheetNames)
+    
+    const loadedSheets = []
+    for (const sheetName of workbook.SheetNames) {
+      console.log(`ExcelWorkbookViewer: Processing sheet "${sheetName}"`)
+      const worksheet = workbook.Sheets[sheetName]
+      
+      // Get full 2D array data
+      const ref = worksheet['!ref']
+      let fullData = []
+      let totalRows = 0
+      let totalColumns = 0
+      
+      if (ref) {
+        const range = XLSX.utils.decode_range(ref)
+        totalRows = range.e.r - range.s.r + 1
+        totalColumns = range.e.c - range.s.c + 1
+        
+        console.log(`ExcelWorkbookViewer: Sheet "${sheetName}" has ${totalRows} rows, ${totalColumns} columns`)
+        
+        // Limit to 1000 rows for viewer to prevent hang
+        const maxRows = Math.min(1000, totalRows)
+        console.log(`ExcelWorkbookViewer: Loading ${maxRows} rows for display`)
+        
+        for (let R = range.s.r; R < range.s.r + maxRows; R++) {
+          const row = []
+          for (let C = range.s.c; C <= range.e.c; C++) {
+            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
+            const cell = worksheet[cellAddress]
+            // Preserve formula if present, otherwise use value
+            if (cell && cell.f) {
+              row.push({ v: cell.v, f: cell.f }) // Store both value and formula
+            } else if (cell && cell.v !== undefined) {
+              row.push(cell.v)
+            } else {
+              row.push('')
+            }
+          }
+          fullData.push(row)
+        }
+      }
+      
+      // Get merged ranges
+      const mergedRanges = []
+      if (worksheet['!merges']) {
+        for (const merge of worksheet['!merges']) {
+          mergedRanges.push({
+            min_row: merge.s.r,
+            max_row: merge.e.r,
+            min_col: merge.s.c,
+            max_col: merge.e.c
+          })
+        }
+      }
+      
+      // Get JSON data for detection
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
+      
+      loadedSheets.push({
+        name: sheetName,
+        fullData: fullData,
+        data: jsonData,
+        total_rows: totalRows,
+        total_columns: totalColumns,
+        merged_ranges: mergedRanges
+      })
+      
+      console.log(`ExcelWorkbookViewer: Sheet "${sheetName}" loaded with ${fullData.length} rows`)
+    }
+    
+    sheets.value = loadedSheets
+    console.log(`ExcelWorkbookViewer: Total ${loadedSheets.length} sheets loaded from file buffer`)
+    loadSheetData()
+  } catch (err) {
+    console.error('ExcelWorkbookViewer: Failed to load workbook from file buffer:', err)
+    console.error('ExcelWorkbookViewer: Error stack:', err.stack)
+  }
+}
 </script>
 
 <style scoped>

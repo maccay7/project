@@ -509,9 +509,42 @@ def calculations_routes(app):
         manual_inputs = payload.get('manualInputs', {})
         
         try:
-            print(f"🔍 Starting calculation for {inst_type} with {len(data)} rows")
-            print(f"🔍 Data sample: {data[0] if data else 'No data'}")
+            print(f"🔍 Starting calculation for {inst_type}")
             print(f"🔍 Session ID: {session_id}, Dataset ID: {dataset_id}")
+            
+            # If dataset_id is provided, load full dataset from backend file
+            if dataset_id:
+                from utils.db import get_db
+                from utils.excel_parser import parse_full_workbook
+                import os
+                
+                conn = get_db()
+                if conn:
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT file_path, instrument_type FROM datasets WHERE id = %s", (dataset_id,))
+                        dataset = cursor.fetchone()
+                        cursor.close()
+                        conn.close()
+                        
+                        if dataset and dataset.get('file_path') and os.path.exists(dataset['file_path']):
+                            print(f"🔍 Loading full dataset from file: {dataset['file_path']}")
+                            parsed = parse_full_workbook(dataset['file_path'], dataset.get('instrument_type', inst_type), max_rows=None)
+                            sheets = parsed.get('sheets', [])
+                            if sheets:
+                                # Use the first sheet's full data for calculations
+                                full_data = sheets[0].get('data', [])
+                                if full_data and len(full_data) > len(data):
+                                    print(f"🔍 Using full dataset ({len(full_data)} rows) instead of preview ({len(data)} rows)")
+                                    data = full_data
+                                else:
+                                    print(f"🔍 Using provided data ({len(data)} rows)")
+                    except Exception as load_error:
+                        print(f"⚠️ Failed to load full dataset from backend: {load_error}")
+                        print(f"🔍 Using provided data ({len(data)} rows)")
+            
+            print(f"🔍 Processing {len(data)} rows for calculation")
+            print(f"🔍 Data sample: {data[0] if data else 'No data'}")
             
             result = calculate_data(data, inst_type)
             print(f"✅ Calculation result: {result}")

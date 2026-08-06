@@ -111,8 +111,36 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
 
   const currentInstrumentType = computed(() => toValue(instrumentTypeRef))
 
+  // ========== UPLOAD FULL FILE TO BACKEND ==========
+  async function uploadFullFileToBackend(file, sessionId = null, instrumentType = 'money-market') {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('instrument_type', instrumentType)
+    if (sessionId) {
+      formData.append('session_id', sessionId)
+    }
+
+    try {
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+      const response = await fetch(`${apiUrl}/api/upload`, {
+        method: 'POST',
+        body: formData
+      })
+      const result = await response.json()
+      if (result.success) {
+        console.log('Full file uploaded to backend:', result.data)
+        return { success: true, data: result.data }
+      } else {
+        return { success: false, error: result.message }
+      }
+    } catch (err) {
+      console.error('Failed to upload full file to backend:', err)
+      return { success: false, error: err.message }
+    }
+  }
+
   // ========== UPLOAD ==========
-  // Parse only first 1000 rows per sheet for speed – enough for preview & detection
+  // Parse only metadata (sheet names, row counts, column counts) - NOT full data
   async function handleFileUpload(file) {
     if (!file) {
       error.value = 'No file provided'
@@ -184,8 +212,9 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       
       console.log(`Processing ${sheetNames.length} sheets from workbook`)
 
+      // Extract only metadata (sheet names, row counts, column counts) - NOT full data
       for (const sheetName of sheetNames) {
-        console.log(`Starting to process sheet: "${sheetName}"`)
+        console.log(`Extracting metadata for sheet: "${sheetName}"`)
         
         if (!sheetName || typeof sheetName !== 'string') {
           console.warn(`Skipping invalid sheet name: ${sheetName}`)
@@ -193,8 +222,6 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
         }
 
         const worksheet = workbook.Sheets[sheetName]
-        
-        console.log(`Processing sheet "${sheetName}":`, worksheet ? 'found' : 'NOT FOUND')
         
         if (!worksheet || typeof worksheet !== 'object') {
           console.warn(`Skipping invalid sheet: ${sheetName}`)
@@ -205,101 +232,48 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           // Check if sheet is hidden
           const isHidden = worksheet['!hidden'] || false
           
-          // Get full 2D array data with defensive coding - limit to 1000 rows
-          let fullData = []
+          // Extract only metadata - row count, column count, merged ranges
+          let rowCount = 0
+          let colCount = 0
+          let mergedRanges = []
+          
           try {
-            // Check if worksheet has a valid range
             const ref = worksheet['!ref']
-            if (!ref) {
-              console.warn(`Sheet ${sheetName} has no valid range, creating empty sheet`)
-              fullData = []
-            } else {
+            if (ref) {
               const range = XLSX.utils.decode_range(ref)
-              if (!range || typeof range !== 'object') {
-                console.warn(`Invalid range for sheet ${sheetName}, creating empty sheet`)
-                fullData = []
-              } else {
-                // Process all rows without limiting
-                const maxRows = range.e.r - range.s.r + 1
-                console.log(`Processing ${maxRows} rows from sheet ${sheetName}`)
-                
-                for (let R = range.s.r; R < range.s.r + maxRows; R++) {
-                  const row = []
-                  for (let C = range.s.c; C <= range.e.c; C++) {
-                    const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
-                    const cell = worksheet[cellAddress]
-                    // Preserve formula if present, otherwise use value
-                    if (cell && cell.f) {
-                      row.push(cell.f) // Store formula
-                    } else if (cell && cell.v !== undefined) {
-                      row.push(cell.v) // Store value
-                    } else {
-                      row.push('')
-                    }
-                  }
-                  fullData.push(row)
-                }
+              if (range && typeof range === 'object') {
+                rowCount = range.e.r - range.s.r + 1
+                colCount = range.e.c - range.s.c + 1
+                console.log(`Sheet "${sheetName}": ${rowCount} rows, ${colCount} columns`)
+              }
+            }
+            
+            // Get merged ranges
+            if (worksheet['!merges']) {
+              for (const merge of worksheet['!merges']) {
+                mergedRanges.push({
+                  min_row: merge.s.r,
+                  max_row: merge.e.r,
+                  min_col: merge.s.c,
+                  max_col: merge.e.c
+                })
               }
             }
           } catch (e) {
-            console.warn(`Failed to parse sheet data for ${sheetName}:`, e)
-            fullData = []
-          }
-        
-          // Get merged ranges
-          const mergedRanges = []
-          if (worksheet['!merges']) {
-            for (const merge of worksheet['!merges']) {
-              mergedRanges.push({
-                min_row: merge.s.r,
-                max_row: merge.e.r,
-                min_col: merge.s.c,
-                max_col: merge.e.c
-              })
-            }
+            console.warn(`Failed to extract metadata for sheet ${sheetName}:`, e)
           }
           
-          // Get table information if present
-          const tables = []
-          if (worksheet['!tables']) {
-            for (const tableName in worksheet['!tables']) {
-              tables.push(worksheet['!tables'][tableName])
-            }
-          }
-          
-          // Also get JSON data for compatibility - limit to 1000 rows
-          let jsonData = []
-          let sheetHeaders = []
-          try {
-            jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
-            if (jsonData.length > 1000) {
-              console.log(`Limiting JSON data to 1000 rows (original: ${jsonData.length})`)
-              jsonData = jsonData.slice(0, 1000)
-            }
-            if (jsonData.length > 0 && jsonData[0]) {
-              sheetHeaders = Object.keys(jsonData[0])
-            }
-          } catch (e) {
-            console.warn(`Failed to parse sheet ${sheetName}:`, e)
-            jsonData = []
-            sheetHeaders = []
-          }
-
           sheets.push({
             name: sheetName,
-            data: jsonData,
-            headers: sheetHeaders,
-            fullData: fullData,
-            merged_ranges: mergedRanges,
-            tables: tables,
-            hidden: isHidden,
-            row_count: fullData.length,
-            column_count: fullData.length > 0 ? fullData[0].length : 0,
+            rowCount: rowCount,
+            colCount: colCount,
+            mergedRanges: mergedRanges,
+            isHidden: isHidden
+            // NO fullData, jsonData, headers - those will be loaded on demand from backend
           })
-          console.log(`Added sheet ${sheetName} with ${fullData.length} rows, ${jsonData.length} JSON rows`)
-        } catch (sheetError) {
-          console.error(`Error processing sheet ${sheetName}:`, sheetError)
-          console.error('Sheet error stack:', sheetError.stack)
+        } catch (e) {
+          console.warn(`Failed to process sheet ${sheetName}:`, e)
+          console.error('Sheet error stack:', e.stack)
         }
       }
 
@@ -315,7 +289,22 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       })
 
       uploadProgress.value = 100
-      console.log(`Workbook loaded (limited preview): ${sheets.length} sheets`)
+      console.log(`Workbook metadata extracted: ${sheets.length} sheets`)
+      
+      // Upload full file to backend to preserve complete dataset
+      console.log('Uploading full file to backend for preservation...')
+      const uploadResult = await uploadFullFileToBackend(file)
+      if (uploadResult.success) {
+        console.log('Full file uploaded successfully, dataset_id:', uploadResult.data.dataset_id)
+        sheets.forEach(sheet => {
+          sheet.datasetId = uploadResult.data.dataset_id
+          sheet.metadata = uploadResult.data.metadata
+        })
+      } else {
+        console.warn('Failed to upload full file to backend:', uploadResult.error)
+        // Continue anyway - frontend can still work with preview data
+      }
+      
       return { success: true, sheets }
     } catch (err) {
       error.value = `Failed to parse workbook: ${err.message}`
@@ -338,14 +327,60 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     selectedWorksheet.value = sheet
     currentSheetName.value = sheetName
 
-    const detection = detectSheetType(sheet.data, currentInstrumentType.value)
-    sheetType.value = detection.type
-
-    console.log(`Selected sheet: ${sheetName}, type: ${detection.type}`)
-    return { success: true, sheet, type: detection.type }
+    // Don't detect type yet - will do after loading preview data
+    console.log(`Selected sheet: ${sheetName} (${sheet.rowCount} rows, ${sheet.colCount} columns)`)
+    return { success: true, sheet }
   }
 
-  // ========== FULL SHEET PARSING (on demand) ==========
+  // ========== PREVIEW SHEET PARSING (chunked, on demand) ==========
+  function parseSheetPreview(sheetName, maxRows = 100) {
+    if (!originalFileBuffer.value) {
+      throw new Error('No file buffer available')
+    }
+    const workbook = XLSX.read(originalFileBuffer.value, {
+      type: 'array',
+      cellDates: true,
+      cellStyles: true,
+      cellNF: true,
+    })
+    const worksheet = workbook.Sheets[sheetName]
+    if (!worksheet) {
+      throw new Error(`Sheet "${sheetName}" not found in workbook`)
+    }
+    
+    // Get limited preview data
+    const ref = worksheet['!ref']
+    if (!ref) {
+      return { jsonData: [], headers: [], fullData: [] }
+    }
+    
+    const range = XLSX.utils.decode_range(ref)
+    const previewRows = Math.min(maxRows, range.e.r - range.s.r + 1)
+    
+    const fullData = []
+    for (let R = range.s.r; R < range.s.r + previewRows; R++) {
+      const row = []
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
+        const cell = worksheet[cellAddress]
+        row.push(cell ? cell.v : '')
+      }
+      fullData.push(row)
+    }
+    
+    // Get JSON data for preview
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+      defval: '', 
+      raw: false,
+      range: previewRows
+    })
+    
+    const headers = jsonData.length > 0 ? Object.keys(jsonData[0]) : []
+    
+    return { jsonData, headers, fullData, totalRows: range.e.r - range.s.r + 1 }
+  }
+
+  // ========== FULL SHEET PARSING (on demand, for backend processing) ==========
   function parseFullSheet(sheetName) {
     if (!originalFileBuffer.value) {
       throw new Error('No file buffer available')
@@ -393,20 +428,21 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     return { jsonData, fullData, mergedRanges }
   }
 
-  // ========== PROCESS WORKSHEET (re‑parse full sheet) ==========
+  // ========== PROCESS WORKSHEET (use preview data for UI, full data for backend) ==========
   async function processWorksheet(sheetName, requiredColumns, columnVariations) {
-    // Force full re‑parse of the selected sheet from the buffer
+    // Load preview data only (100 rows) for UI processing
     let parseResult = null
     try {
-      parseResult = parseFullSheet(sheetName)
+      parseResult = parseSheetPreview(sheetName, 100)
     } catch (err) {
-      error.value = `Failed to parse full sheet: ${err.message}`
+      error.value = `Failed to parse sheet preview: ${err.message}`
       return { success: false, error: error.value }
     }
 
     const sheetData = parseResult?.jsonData || []
     const fullData = parseResult?.fullData || []
-    const mergedRanges = parseResult?.mergedRanges || []
+    const headers = parseResult?.headers || []
+    const totalRows = parseResult?.totalRows || 0
 
     if (!sheetData || sheetData.length === 0) {
       error.value = `No data found in sheet "${sheetName}"`
@@ -419,14 +455,13 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       const detection = detectSheetType(sheetData, currentInstrumentType.value)
       sheetType.value = detection.type
 
-      // Update the workbookSheets entry with full data andmerged ranges
+      // Update the workbookSheets entry with preview data
       const sheetIndex = workbookSheets.value.findIndex(s => s.name === sheetName)
       if (sheetIndex !== -1) {
         workbookSheets.value[sheetIndex].data = sheetData
         workbookSheets.value[sheetIndex].fullData = fullData
-        workbookSheets.value[sheetIndex].merged_ranges = mergedRanges
-        workbookSheets.value[sheetIndex].row_count = fullData.length
-        workbookSheets.value[sheetIndex].column_count = fullData.length > 0 ? fullData[0].length : 0
+        workbookSheets.value[sheetIndex].headers = headers
+        workbookSheets.value[sheetIndex].totalRows = totalRows
       }
 
       if (detection.type === 'single') {
@@ -439,10 +474,11 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           success: true,
           type: 'single',
           data: tabularData.value,
-          extractedValues: values
+          extractedValues: values,
+          totalRows: totalRows
         }
       } else {
-        // Multi-instrument: use full sheet data
+        // Multi-instrument: use preview data for UI
         tabularData.value = sheetData
 
         // Detect instrument name column
@@ -450,7 +486,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
         if (!nameDetection || !nameDetection.columnName) {
           const namePatterns = ['instrument', 'name', 'security', 'bond', 'tbill', 'issuer', 'counterparty', 'company', 'entity']
           let foundCol = null
-          for (const header of Object.keys(sheetData[0] || {})) {
+          for (const header of headers) {
             const lowerHeader = header.toLowerCase()
             if (namePatterns.some(p => lowerHeader.includes(p))) {
               foundCol = header
@@ -459,8 +495,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           }
           if (foundCol) {
             nameDetection = { columnName: foundCol, confidence: 0.8 }
-          } else if (Object.keys(sheetData[0] || {}).length > 0) {
-            nameDetection = { columnName: Object.keys(sheetData[0])[0], confidence: 0.5 }
+          } else if (headers.length > 0) {
+            nameDetection = { columnName: headers[0], confidence: 0.5 }
           }
         }
         instrumentNameColumn.value = nameDetection?.columnName || null
@@ -472,15 +508,14 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
         // Build column mapping
         let columnMapping = null
         if (requiredColumns && columnVariations) {
-          const fileHeaders = Object.keys(sheetData[0] || {})
-          columnMapping = autoMatchColumns(fileHeaders, requiredColumns, columnVariations)
+          columnMapping = autoMatchColumns(headers, requiredColumns, columnVariations)
           if (nameDetection?.columnName && columnMapping['Instrument Name'] !== nameDetection.columnName) {
-            if (fileHeaders.includes(nameDetection.columnName)) {
+            if (headers.includes(nameDetection.columnName)) {
               columnMapping['Instrument Name'] = nameDetection.columnName
             }
           }
           if (!columnMapping['Instrument Name']) {
-            const nameCol = fileHeaders.find(h => 
+            const nameCol = headers.find(h => 
               /name|instrument|security|bond|tbill|issuer|entity/i.test(h)
             )
             if (nameCol) {
@@ -490,7 +525,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
         }
 
         // Filter display columns
-        const displayCols = getDisplayColumns(Object.keys(sheetData[0] || {}))
+        const displayCols = getDisplayColumns(headers)
         const filteredData = sheetData.map(row => {
           const newRow = {}
           displayCols.forEach(col => {
@@ -499,29 +534,21 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
           return newRow
         })
 
-        // Update the workbookSheets entry with full data
-        const sheetIndex = workbookSheets.value.findIndex(s => s.name === sheetName)
-        if (sheetIndex !== -1) {
-          workbookSheets.value[sheetIndex].data = sheetData
-          workbookSheets.value[sheetIndex].row_count = sheetData.length
-        }
-
         worksheetStatus.value[sheetName] = 'completed'
         return {
           success: true,
           type: 'multi',
           data: filteredData,
-          headers: displayCols,
-          columnMapping,
-          instrumentNameColumn: nameDetection?.columnName || null,
-          instrumentNames: detectedInstrumentNames.value
+          headers: headers,
+          totalRows: totalRows,
+          columnMapping: columnMapping,
+          instrumentNameColumn: instrumentNameColumn.value
         }
       }
     } catch (err) {
       error.value = `Failed to process worksheet: ${err.message}`
-      worksheetStatus.value[sheetName] = 'not_started'
-      console.error('Processing error:', err)
-      return { success: false, error: err.message }
+      worksheetStatus.value[sheetName] = 'error'
+      return { success: false, error: error.value }
     }
   }
 

@@ -4,14 +4,14 @@ import io
 import os
 from pathlib import Path
 
-def parse_full_workbook(file_path_or_bytes, instrument_type='money-market', max_rows=100000):
+def parse_full_workbook(file_path_or_bytes, instrument_type='money-market', max_rows=None):
     """
     Parse an Excel file and return all sheets with data, headers, fullData, and merged ranges.
     
     Args:
         file_path_or_bytes: file path (str/Path) or bytes of the file
         instrument_type: unused but kept for compatibility
-        max_rows: maximum number of rows to read per sheet (default 100,000)
+        max_rows: maximum number of rows to read per sheet (None = no limit, read all rows)
     
     Returns:
         dict with keys: 'success' (bool), 'sheets' (list), 'error' (str if failed)
@@ -26,7 +26,7 @@ def parse_full_workbook(file_path_or_bytes, instrument_type='money-market', max_
                     ws = wb[sheet_name]
                     full_data = []
                     max_col = 0
-                    # Read rows up to max_rows
+                    # Read all rows (no limit) or up to max_rows if specified
                     for row in ws.iter_rows(values_only=True, max_row=max_rows):
                         if not any(cell is not None for cell in row):
                             continue
@@ -96,7 +96,7 @@ def parse_full_workbook(file_path_or_bytes, instrument_type='money-market', max_
         return {'success': False, 'error': str(e), 'sheets': []}
 
 
-def parse_full_workbook_from_bytes(file_bytes, instrument_type='money-market', max_rows=100000):
+def parse_full_workbook_from_bytes(file_bytes, instrument_type='money-market', max_rows=None):
     """
     Parse an Excel file from bytes (e.g., uploaded file) with the same logic.
     """
@@ -107,6 +107,7 @@ def parse_full_workbook_from_bytes(file_bytes, instrument_type='money-market', m
             ws = wb[sheet_name]
             full_data = []
             max_col = 0
+            # Read all rows (no limit) or up to max_rows if specified
             for row in ws.iter_rows(values_only=True, max_row=max_rows):
                 if not any(cell is not None for cell in row):
                     continue
