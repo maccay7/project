@@ -186,6 +186,10 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
         console.log('Starting XLSX parsing...')
         workbook = XLSX.read(arrayBuffer, { 
           type: 'array',
+          cellStyles: true,
+          cellFormula: true,
+          cellDates: true,
+          cellNF: true
         })
         console.log('XLSX parsing completed successfully')
       } catch (e) {
@@ -197,6 +201,10 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       // Validate workbook structure
       if (!workbook) {
         throw new Error('Failed to read workbook - invalid file format')
+      }
+
+      if (!workbook.SheetNames || !workbook.SheetNames.length) {
+        throw new Error('No worksheets found in uploaded workbook')
       }
 
       console.log('Workbook parsed successfully')
@@ -291,6 +299,10 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       uploadProgress.value = 100
       console.log(`Workbook metadata extracted: ${sheets.length} sheets`)
       
+      // Store workbook data for ExcelWorkbookViewer
+      console.log('Storing workbook data for viewer...')
+      console.log('originalFileBuffer.value set, byteLength:', originalFileBuffer.value.byteLength)
+      
       // Upload full file to backend to preserve complete dataset
       console.log('Uploading full file to backend for preservation...')
       const uploadResult = await uploadFullFileToBackend(file)
@@ -339,9 +351,10 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     }
     const workbook = XLSX.read(originalFileBuffer.value, {
       type: 'array',
-      cellDates: true,
       cellStyles: true,
-      cellNF: true,
+      cellFormula: true,
+      cellDates: true,
+      cellNF: true
     })
     const worksheet = workbook.Sheets[sheetName]
     if (!worksheet) {
@@ -387,9 +400,10 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     }
     const workbook = XLSX.read(originalFileBuffer.value, {
       type: 'array',
-      cellDates: true,
       cellStyles: true,
-      cellNF: true,
+      cellFormula: true,
+      cellDates: true,
+      cellNF: true
     })
     const worksheet = workbook.Sheets[sheetName]
     if (!worksheet) {
@@ -661,6 +675,8 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     detectedInstrumentNames,
     handleFileUpload,
     selectWorksheet,
+    parseSheetPreview,
+    parseFullSheet,
     processWorksheet,
     getCurrentData,
     reset,

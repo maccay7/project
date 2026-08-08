@@ -2011,6 +2011,8 @@ async function readFileData(file) {
       console.log('worksheetWorkflow.workbookSheets.length:', worksheetWorkflow.workbookSheets.value.length)
       console.log('worksheetSelected.value:', worksheetSelected.value)
       console.log('UI condition check:', worksheetWorkflow.workbookSheets.value.length > 0 && !worksheetSelected.value)
+      console.log('originalFileBuffer.value set:', !!originalFileBuffer.value)
+      console.log('originalFileBuffer.value byteLength:', originalFileBuffer.value?.byteLength || 0)
 
       worksheetSelected.value = false
       currentSheetName.value = ''
@@ -2249,7 +2251,7 @@ function applyCurrentMapping() {
     const newRow = {}
     requiredColumns.value.forEach(col => {
       const srcCol = columnMapping.value[col]
-      newRow[col] = srcCol ? row[srcCol] : ''
+      newRow[col] = srcCol ? getCellValue(row[srcCol]) : ''
     })
     return newRow
   })
@@ -2297,6 +2299,30 @@ function refreshFileColumns() {
   }
   applyCurrentMapping()
   forceUpdate.value++
+}
+
+// Helper function to extract actual cell value from Excel cell objects
+function getCellValue(cell) {
+  if (cell == null) return ""
+  
+  // SheetJS cell object with formatted value (w) or raw value (v)
+  if (typeof cell === 'object' && cell !== null) {
+    // Try formatted value first (w), then raw value (v), then formula (f)
+    if (cell.w !== undefined && cell.w !== null) return cell.w
+    if (cell.v !== undefined && cell.v !== null) return cell.v
+    if (cell.f !== undefined && cell.f !== null) return cell.f
+    // Handle array objects
+    if (Array.isArray(cell)) return cell.join(', ')
+    // Fallback to string representation for any other object
+    try {
+      return JSON.stringify(cell)
+    } catch {
+      return String(cell)
+    }
+  }
+  
+  // Return as-is if it's already a primitive value
+  return cell
 }
 
 function openMappingDialog() {
@@ -2375,7 +2401,7 @@ function openWorkbookViewer() {
   console.log('workbookSheets.value:', workbookSheets.value)
   console.log('workbookSheets.length:', workbookSheets.value.length)
   console.log('originalFileBuffer.value present?', !!originalFileBuffer.value)
-  console.log('originalFileBuffer.value length:', originalFileBuffer.value?.length || 0)
+  console.log('originalFileBuffer.value length:', originalFileBuffer.value?.byteLength || 0)
   console.log('uploadedFile.name:', uploadedFile.value?.name)
   
   if (workbookSheets.value.length > 0) {
@@ -2385,9 +2411,19 @@ function openWorkbookViewer() {
   }
   
   if (!uploadedFile.value) {
+    alert('Please upload a file first')
     return
   }
   if (!workbookSheets.value.length) {
+    alert('No workbook sheets available')
+    return
+  }
+  if (!originalFileBuffer.value) {
+    alert('File buffer not available. Please try re-uploading the file.')
+    return
+  }
+  if (originalFileBuffer.value.byteLength === 0) {
+    alert('File buffer is empty. Please try re-uploading the file.')
     return
   }
   if (!currentSheetName.value && workbookSheets.value.length) {
@@ -2413,8 +2449,27 @@ function workOnSelectedSheet() {
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
   console.log('Processing sheet from viewer:', sheetName)
-  rawData.value = sheetData || []
-  originalRawData.value = JSON.parse(JSON.stringify(sheetData || []))
+  console.log('sheetData type:', typeof sheetData)
+  console.log('sheetData length:', sheetData?.length)
+  console.log('sheetData sample:', sheetData?.[0])
+  console.log('Checking if sheetData contains objects:', sheetData?.[0] && typeof sheetData[0] === 'object')
+  
+  // Keep raw data as-is (may contain Excel cell objects)
+  originalRawData.value = sheetData || []
+  // Normalize for display - extract real cell values
+  rawData.value = sheetData.map(row => {
+    const normalized = {}
+    for (const [key, value] of Object.entries(row)) {
+      const extracted = getCellValue(value)
+      normalized[key] = extracted
+      // Debug: log if we still get an object
+      if (typeof extracted === 'object' && extracted !== null) {
+        console.log(`Warning: getCellValue returned object for ${key}:`, extracted)
+      }
+    }
+    return normalized
+  })
+  
   fileColumns.value = sheetHeaders || []
   originalFileColumns.value = [...fileColumns.value]
   currentSheetName.value = sheetName

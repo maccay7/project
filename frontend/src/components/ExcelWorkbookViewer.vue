@@ -742,6 +742,7 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
       cellDates: true,
       cellStyles: true,
       cellNF: true,
+      cellFormula: true
     })
     
     console.log('ExcelWorkbookViewer: Workbook parsed successfully')
@@ -757,6 +758,8 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
       let fullData = []
       let totalRows = 0
       let totalColumns = 0
+      let maxRows = 100
+      let maxCols = 50
       
       if (ref) {
         const range = XLSX.utils.decode_range(ref)
@@ -765,20 +768,25 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         
         console.log(`ExcelWorkbookViewer: Sheet "${sheetName}" has ${totalRows} rows, ${totalColumns} columns`)
         
-        // Limit to 1000 rows for viewer to prevent hang
-        const maxRows = Math.min(1000, totalRows)
-        console.log(`ExcelWorkbookViewer: Loading ${maxRows} rows for display`)
+        // Skip sheets that are too large to prevent hanging
+        if (totalRows > 10000 || totalColumns > 1000) {
+          console.log(`ExcelWorkbookViewer: Skipping sheet "${sheetName}" - too large (${totalRows} rows x ${totalColumns} columns)`)
+          continue
+        }
+        
+        // Limit to 100 rows and 50 columns for viewer to prevent hang
+        maxRows = Math.min(100, totalRows)
+        maxCols = Math.min(50, totalColumns)
+        console.log(`ExcelWorkbookViewer: Loading ${maxRows} rows x ${maxCols} columns for display`)
         
         for (let R = range.s.r; R < range.s.r + maxRows; R++) {
           const row = []
-          for (let C = range.s.c; C <= range.e.c; C++) {
+          for (let C = range.s.c; C < range.s.c + maxCols; C++) {
             const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
             const cell = worksheet[cellAddress]
-            // Preserve formula if present, otherwise use value
-            if (cell && cell.f) {
-              row.push({ v: cell.v, f: cell.f }) // Store both value and formula
-            } else if (cell && cell.v !== undefined) {
-              row.push(cell.v)
+            // Extract actual value for display - use formatted value (w) or raw value (v)
+            if (cell) {
+              row.push(cell.w ?? cell.v ?? '')
             } else {
               row.push('')
             }
@@ -800,8 +808,12 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         }
       }
       
-      // Get JSON data for detection
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
+      // Get JSON data for detection - limit to same range as fullData
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+        defval: '', 
+        raw: false,
+        range: maxRows
+      })
       
       loadedSheets.push({
         name: sheetName,
