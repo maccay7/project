@@ -188,32 +188,69 @@
                     <v-spacer></v-spacer>
                     <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">×</button>
                   </v-card-title>
-                  <v-card-text>
-                    <div class="save-section">
-                      <h4>Save current mapping as template</h4>
-                      <div class="save-row">
-                        <input type="text" v-model="newTemplateName" placeholder="Template name" class="template-input" />
-                        <button class="btn-primary" @click="saveCurrentMappingAsTemplate" :disabled="!newTemplateName">Save</button>
-                      </div>
-                    </div>
-                    <div v-if="Object.keys(savedTemplates).length" class="saved-list">
-                      <div v-for="(tmpl, name) in savedTemplates" :key="name" class="saved-item">
-                        <div class="template-info">
-                          <span class="template-name">{{ name }}</span>
-                          <span class="template-timestamp">Saved: {{ tmpl.timestamp ? new Date(tmpl.timestamp).toLocaleString() : '' }}</span>
-                        </div>
-                        <div class="template-actions">
-                          <button class="btn-secondary small" @click="loadTemplateFromPopup(name)">Load</button>
-                          <button class="btn-danger small" @click="deleteTemplateFromPopup(name)">Delete</button>
-                        </div>
-                      </div>
-                    </div>
-                    <div v-else class="empty-saved">
+                  <v-card-text class="saved-mappings-popup-body">
+                    <div v-if="!Object.keys(savedTemplates).length" class="empty-state">
                       <p>No saved mappings yet.</p>
+                    </div>
+                    <div v-else class="saved-mappings-list">
+                      <div v-for="(template, name) in savedTemplates" :key="name" class="saved-mapping-item">
+                        <div class="mapping-name">{{ name }}</div>
+                        <div class="mapping-meta">Saved: {{ new Date(template.savedAt).toLocaleDateString() }}</div>
+                        <div class="mapping-actions">
+                          <button class="btn-secondary small" @click="loadMapping(template)">Load</button>
+                          <button class="btn-secondary small danger" @click="deleteMapping(name)">Delete</button>
+                        </div>
+                      </div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+              </v-dialog>
+
+              <!-- Auto Detection Success Popup -->
+              <v-dialog v-model="showDetectionSuccess" max-width="500px">
+                <v-card>
+                  <v-card-title class="detection-success-title">
+                    Auto Detection Successful ✓
+                    <v-spacer></v-spacer>
+                    <button class="btn-close-dialog" @click="showDetectionSuccess = false">×</button>
+                  </v-card-title>
+                  <v-card-text class="detection-success-body">
+                    <!-- Show instrument type from current page context -->
+                    <div class="instrument-type-display">
+                      <strong>Instrument:</strong> {{ instrumentType.value === 'money-market' ? 'Money Market' : instrumentType.value === 'treasury-bills' ? 'Treasury Bills' : 'Bonds' }}
+                    </div>
+                    
+                    <!-- Currency Selection if multiple currencies detected -->
+                    <div v-if="detectedCurrencies.length > 1" class="currency-selection-section">
+                      <label class="currency-label">Select Currency:</label>
+                      <select v-model="selectedCurrency" class="currency-select">
+                        <option value="">-- Select Currency --</option>
+                        <option v-for="currency in detectedCurrencies" :key="currency" :value="currency">{{ currency }}</option>
+                      </select>
+                    </div>
+                    
+                    <div class="detected-fields-list">
+                      <div v-for="(value, field) in autoDetectedFields" :key="field" class="detected-field-item">
+                        <span class="detected-field-label">{{ field }}:</span>
+                        <span class="detected-field-value">{{ formatDetectedValue(field, value) }}</span>
+                        <span v-if="autoDetectedFieldsWithMetadata[field]" class="detected-field-location">
+                          @ {{ autoDetectedFieldsWithMetadata[field].location }}
+                          ({{ (autoDetectedFieldsWithMetadata[field].confidence * 100).toFixed(0) }}%)
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <!-- Show missing fields if any -->
+                    <div v-if="Object.keys(autoDetectedFields).length < requiredColumns.length" class="missing-fields-warning">
+                      <p><strong>Missing Required Fields:</strong></p>
+                      <ul>
+                        <li v-for="col in requiredColumns.filter(c => !autoDetectedFields[c])" :key="col">{{ col }}</li>
+                      </ul>
                     </div>
                   </v-card-text>
                   <v-card-actions>
-                    <button class="btn-secondary" @click="showSavedMappingsDialog = false">Close</button>
+                    <button class="btn-secondary" @click="showDetectionSuccess = false">Close</button>
+                    <button class="btn-primary" @click="useDetectedFields">Work on This Worksheet</button>
                   </v-card-actions>
                 </v-card>
               </v-dialog>
@@ -224,6 +261,9 @@
                   <v-card-title class="excel-dialog-title-no-logo">
                     <span>Excel Workbook – {{ currentSheetName || 'Select a sheet' }}</span>
                     <v-spacer></v-spacer>
+                    <button class="btn-auto-detect" @click="autoDetectSingleInstrument" v-if="currentSheetName && workbookSheets.length">
+                      Auto Detect
+                    </button>
                     <button class="btn-work-on-sheet" @click="workOnSelectedSheet" v-if="currentSheetName && workbookSheets.length">
                       Work on This Sheet
                     </button>
@@ -933,6 +973,7 @@ import WorksheetSelector from '@/components/WorksheetSelector.vue'
 import { markStepCompleted, isStepPersistedCompleted } from '@/utils/workflowProgress.js'
 import { autoMatchColumns, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping'
 import { detectSheetType, extractSingleInstrumentValues, getRequiredFieldMappings } from '@/utils/sheetTypeDetector'
+import { autoDetectInstrumentFields } from '@/utils/autoDetectInstrument.js'
 import Chart from 'chart.js/auto'
 import { getInstrumentColumns } from '@/config/instrumentColumns.js'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
@@ -1082,9 +1123,20 @@ const worksheetWorkflow = useWorksheetWorkflow(instrumentType.value)
 
 watch(() => route.params.type, (newType) => {
   const type = newType || route.path.split('/').pop() || 'money-market'
+  console.log('=== ROUTE CHANGE DETECTED ===')
+  console.log('New type from route:', newType)
+  console.log('Type from path:', route.path.split('/').pop())
+  console.log('Final type:', type)
+  console.log('Current instrumentType.value:', instrumentType.value)
   if (instrumentType.value !== type) {
     instrumentType.value = type
-    loadConfig(type).catch(() => {})
+    console.log('Updated instrumentType.value to:', instrumentType.value)
+    loadConfig(type).then(() => {
+      console.log('Config loaded for type:', type)
+      console.log('Required columns after load:', requiredColumns.value)
+    }).catch((e) => {
+      console.error('Failed to load config:', e)
+    })
     if (worksheetWorkflow.reset) worksheetWorkflow.reset()
   }
 }, { immediate: true })
@@ -1209,6 +1261,11 @@ const workbookSheets = ref([])
 const currentSheetName = ref('')
 const singleInstrumentExtractedValues = ref({})
 const isolatedTableData = ref(null)
+const autoDetectedFields = ref({})
+const autoDetectedFieldsWithMetadata = ref({})
+const showDetectionSuccess = ref(false)
+const detectedCurrencies = ref([])
+const selectedCurrency = ref('')
 
 const showModalViewer = ref(false)
 const viewerFileData = ref(null)
@@ -2445,6 +2502,135 @@ function workOnSelectedSheet() {
   }
   handleWorkOnSheet(currentSheetName.value)
   showWorkbookViewer.value = false
+}
+
+// ================================================================
+// autoDetectSingleInstrument
+// ================================================================
+async function autoDetectSingleInstrument() {
+  if (!currentSheetName.value || !originalFileBuffer.value) {
+    alert('Please select a sheet first')
+    return
+  }
+
+  console.log('=== Auto Detect Started ===')
+  console.log('Current Sheet:', currentSheetName.value)
+  console.log('Instrument Type from page:', instrumentType.value)
+  console.log('Route path:', window.location.pathname)
+  console.log('Required Columns:', requiredColumns.value)
+  console.log('File Buffer Length:', originalFileBuffer.value.byteLength)
+
+  try {
+    const detectionResult = await autoDetectInstrumentFields(
+      originalFileBuffer.value,
+      currentSheetName.value,
+      requiredColumns.value,
+      instrumentType.value
+    )
+
+    console.log('=== Detection Result ===')
+    console.log('Detected Fields:', detectionResult.fields)
+    console.log('Detected Fields with Metadata:', detectionResult.fieldsWithMetadata)
+    console.log('Detected Currencies:', detectionResult.currencies)
+    console.log('Missing Fields:', detectionResult.missingFields)
+
+    if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
+      autoDetectedFields.value = detectionResult.fields
+      autoDetectedFieldsWithMetadata.value = detectionResult.fieldsWithMetadata || {}
+      detectedCurrencies.value = detectionResult.currencies || []
+      
+      // Auto-select first currency if only one detected
+      if (detectedCurrencies.value.length === 1) {
+        selectedCurrency.value = detectedCurrencies.value[0]
+      } else if (detectedCurrencies.value.length > 1) {
+        selectedCurrency.value = ''
+      }
+      
+      showDetectionSuccess.value = true
+    } else {
+      alert('Auto Detect could not identify required fields. Please try manual entry.')
+    }
+  } catch (error) {
+    console.error('Auto Detect error:', error)
+    alert('Auto Detect failed: ' + error.message)
+  }
+}
+
+// ================================================================
+// formatDetectedValue
+// ================================================================
+function formatDetectedValue(field, value) {
+  if (value === null || value === undefined) return '—'
+  
+  // Format dates
+  if (field.toLowerCase().includes('date') || field.toLowerCase().includes('maturity')) {
+    try {
+      const date = new Date(value)
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+      }
+    } catch {
+      // Not a valid date, return as-is
+    }
+  }
+  
+  // Format percentages
+  if (field.toLowerCase().includes('rate') || field.toLowerCase().includes('yield') || field.toLowerCase().includes('coupon') || field.toLowerCase().includes('discount')) {
+    const num = parseFloat(value)
+    if (!isNaN(num)) {
+      return num.toFixed(2) + '%'
+    }
+  }
+  
+  // Format currency values
+  if (field.toLowerCase().includes('value') || field.toLowerCase().includes('amount') || field.toLowerCase().includes('price') || field.toLowerCase().includes('principal')) {
+    const num = parseFloat(value)
+    if (!isNaN(num)) {
+      return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    }
+  }
+  
+  return String(value)
+}
+
+// ================================================================
+// useDetectedFields
+// ================================================================
+function useDetectedFields() {
+  showDetectionSuccess.value = false
+  showWorkbookViewer.value = false
+  
+  // Convert detected fields to the format expected by the preview
+  extractedValues.value = autoDetectedFields.value
+  
+  // Add selected currency to extracted values if detected
+  if (selectedCurrency.value) {
+    extractedValues.value['Currency'] = selectedCurrency.value
+  }
+  
+  // Create a single-row dataset for the preview
+  const previewRow = {}
+  for (const [key, value] of Object.entries(autoDetectedFields.value)) {
+    previewRow[key] = value
+  }
+  
+  // Add currency if selected
+  if (selectedCurrency.value) {
+    previewRow['Currency'] = selectedCurrency.value
+  }
+  
+  rawData.value = [previewRow]
+  originalRawData.value = JSON.parse(JSON.stringify([previewRow]))
+  fileColumns.value = Object.keys(previewRow)
+  originalFileColumns.value = [...fileColumns.value]
+  
+  worksheetSelected.value = true
+  showPreview.value = true
+  sheetType.value = 'single'
+  mappingApplied.value = true
+  
+  console.log('Auto-detected fields applied to preview:', autoDetectedFields.value)
+  console.log('Selected currency:', selectedCurrency.value)
 }
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
@@ -5217,6 +5403,32 @@ onBeforeUnmount(() => {
 .excel-dialog-title-no-logo span { font-weight: 600; font-size: 18px; }
 .btn-work-on-sheet { background: #0B2044; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 12px; }
 .btn-work-on-sheet:hover { background: #1a3a6e; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(11,32,68,0.2); }
+.btn-auto-detect { background: #4CAF50; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 12px; }
+.btn-auto-detect:hover { background: #45a049; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76,175,80,0.3); }
+.detection-success-title { background: #4CAF50; color: white; padding: 16px 24px; display: flex; align-items: center; }
+.detection-success-body { padding: 20px 24px; }
+.currency-selection-section { margin-bottom: 20px; padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
+.currency-label { display: block; font-weight: 600; color: #0B2044; margin-bottom: 8px; font-size: 14px; }
+.currency-select { width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; }
+.currency-select:focus { outline: none; border-color: #4CAF50; box-shadow: 0 0 0 2px rgba(76,175,80,0.2); }
+.detected-fields-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.detected-field-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #4CAF50; }
+.detected-field-label { font-weight: 600; color: #0B2044; font-size: 14px; }
+.detected-field-value { font-weight: 700; color: #2E7D32; font-size: 15px; }
+.detected-field-location { font-size: 11px; color: #999; font-style: italic; margin-left: 8px; }
+.missing-fields-warning { padding: 12px 16px; background: #FFF3E0; border-radius: 8px; border-left: 4px solid #FF9800; }
+.missing-fields-warning p { margin: 0 0 8px 0; font-weight: 600; color: #E65100; font-size: 14px; }
+.missing-fields-warning ul { margin: 0; padding-left: 20px; }
+.missing-fields-warning li { color: #E65100; font-size: 13px; margin-bottom: 4px; }
+.saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }
+.saved-mappings-popup-body { padding: 20px 24px; }
+.saved-mappings-list { display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto; }
+.saved-mapping-item { padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
+.mapping-name { font-weight: 600; color: #0B2044; font-size: 14px; margin-bottom: 4px; }
+.mapping-meta { font-size: 12px; color: #999; margin-bottom: 8px; }
+.mapping-actions { display: flex; gap: 8px; }
+.btn-secondary.small.danger { background: #f44336; color: white; }
+.btn-secondary.small.danger:hover { background: #d32f2f; }
 .excel-dialog-title-white { background: white; color: #0B2044; padding: 16px 24px; display: flex; align-items: center; border-bottom: 2px solid #e0e0e0; }
 .excel-dialog-title-white .logo { height: 40px; width: auto; object-fit: contain; }
 .excel-dialog-title-white .header-left { display: flex; align-items: center; gap: 16px; }
