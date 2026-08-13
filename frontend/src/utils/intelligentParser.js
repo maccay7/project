@@ -155,36 +155,188 @@ export async function clientParser(file, instrumentType) {
         return pairs;
     }
 
-    // Detect table (existing function)
+    // Enhanced detect table function with orientation and multi-row header detection
     function detectTableData(sheet) {
         const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
         const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
         if (data.length === 0) return null;
-        let maxCount = 0;
-        let headerRowIndex = -1;
-        for (let i = 0; i < data.length; i++) {
-            const row = data[i];
-            const count = row.filter(cell => cell !== '' && cell !== null && cell !== undefined).length;
-            if (count > maxCount) {
-                maxCount = count;
-                headerRowIndex = i;
-            }
-        }
-        if (maxCount < 2) return null;
-        const headerRow = data[headerRowIndex];
-        const tableRows = [];
-        for (let i = headerRowIndex + 1; i < data.length; i++) {
-            const row = data[i];
-            if (row.some(cell => cell !== '' && cell !== null && cell !== undefined)) {
-                const obj = {};
-                for (let j = 0; j < headerRow.length; j++) {
-                    const header = headerRow[j] || `col${j}`;
-                    obj[String(header).trim()] = row[j] !== undefined ? row[j] : '';
+
+        // Detect table orientation
+        function detectOrientation(data, range) {
+            let horizontalScore = 0;
+            let verticalScore = 0;
+
+            // Sample cells to determine orientation
+            for (let R = range.s.r; R <= Math.min(range.e.r, range.s.r + 10); R++) {
+                for (let C = range.s.c; C <= Math.min(range.e.c, range.s.c + 10); C++) {
+                    const cellValue = data[R] && data[R][C];
+                    if (cellValue && typeof cellValue === 'string' && cellValue.trim() !== '') {
+                        // Check if it looks like a header (text, not number/date)
+                        const isLabel = isNaN(parseFloat(cellValue)) && cellValue.trim() !== '';
+                        
+                        if (isLabel) {
+                            // Check right cell for value (horizontal pattern)
+                            if (C + 1 <= range.e.c && data[R] && data[R][C + 1]) {
+                                const rightValue = data[R][C + 1];
+                                if (rightValue && !isNaN(parseFloat(rightValue))) {
+                                    horizontalScore++;
+                                }
+                            }
+                            // Check below cell for value (vertical pattern)
+                            if (R + 1 <= range.e.r && data[R + 1] && data[R + 1][C]) {
+                                const belowValue = data[R + 1][C];
+                                if (belowValue && !isNaN(parseFloat(belowValue))) {
+                                    verticalScore++;
+                                }
+                            }
+                        }
+                    }
                 }
-                tableRows.push(obj);
+            }
+
+            return horizontalScore >= verticalScore ? 'horizontal' : 'vertical';
+        }
+
+        const orientation = detectOrientation(data, range);
+
+        // Detect header rows (for horizontal tables)
+        function detectHeaderRows(data, orientation) {
+            if (orientation === 'vertical') {
+                // For vertical tables, headers are in the first column
+                const headerRows = [];
+                for (let R = range.s.r; R <= range.e.r; R++) {
+                    const cellValue = data[R] && data[R][range.s.c];
+                    if (cellValue && typeof cellValue === 'string' && cellValue.trim() !== '') {
+                        headerRows.push(R);
+                    }
+                }
+                return headerRows;
+            } else {
+                // For horizontal tables, find rows with most non-empty cells (potential headers)
+                const rowCounts = data.map((row, idx) => ({
+                    index: idx,
+                    count: row.filter(cell => cell !== '' && cell !== null && cell !== undefined).length
+                }));
+
+                // Find rows with high cell counts (potential header rows)
+                const maxCount = Math.max(...rowCounts.map(r => r.count));
+                const threshold = Math.max(2, maxCount * 0.5);
+                
+                const headerRows = rowCounts
+                    .filter(r => r.count >= threshold)
+                    .sort((a, b) => a.index - b.index)
+                    .map(r => r.index);
+
+                // Group consecutive rows as multi-row headers
+                const groupedHeaders = [];
+                let currentGroup = [];
+                
+                for (let i = 0; i < headerRows.length; i++) {
+                    if (currentGroup.length === 0) {
+                        currentGroup.push(headerRows[i]);
+                    } else if (headerRows[i] === currentGroup[currentGroup.length - 1] + 1) {
+                        // Consecutive row, add to current group
+                        currentGroup.push(headerRows[i]);
+                    } else {
+                        // Non-consecutive, start new group
+                        if (currentGroup.length > 0) {
+                            groupedHeaders.push(...currentGroup);
+                        }
+                        currentGroup = [headerRows[i]];
+                    }
+                }
+                if (currentGroup.length > 0) {
+                    groupedHeaders.push(...currentGroup);
+                }
+
+                return groupedHeaders;
             }
         }
-        return { headers: headerRow, rows: tableRows };
+
+        const headerRows = detectHeaderRows(data, orientation);
+
+        // Find data start row and column bounds
+        let dataStartRow = -1;
+        let startColumn = range.s.c;
+        let endColumn = range.e.c;
+
+        if (orientation === 'horizontal') {
+            // Data starts after the last header row
+            dataStartRow = headerRows.length > 0 ? Math.max(...headerRows) + 1 : range.s.r;
+            
+            // Find column bounds based on header rows
+            if (headerRows.length > 0) {
+                let minCol = range.e.c;
+                let maxCol = range.s.c;
+                for (const rowIdx of headerRows) {
+                    const row = data[rowIdx];
+                    if (row) {
+                        for (let C = range.s.c; C <= range.e.c; C++) {
+                            if (row[C] && row[C] !== '') {
+                                minCol = Math.min(minCol, C);
+                                maxCol = Math.max(maxCol, C);
+                            }
+                        }
+                    }
+                }
+                startColumn = minCol;
+                endColumn = maxCol;
+            }
+        } else {
+            // For vertical tables, data starts in column 1
+            dataStartRow = range.s.r;
+            startColumn = range.s.c;
+            endColumn = range.s.c + 1; // Label column + value column
+        }
+
+        // Extract headers
+        let headers = [];
+        if (orientation === 'horizontal' && headerRows.length > 0) {
+            // Use the first header row as primary headers
+            const primaryHeaderRow = headerRows[0];
+            headers = data[primaryHeaderRow] || [];
+        } else if (orientation === 'vertical') {
+            // Headers are in the first column
+            headers = headerRows.map(rowIdx => data[rowIdx] && data[rowIdx][range.s.c]);
+        }
+
+        // Extract table rows
+        const tableRows = [];
+        if (orientation === 'horizontal') {
+            for (let i = dataStartRow; i < data.length; i++) {
+                const row = data[i];
+                if (row && row.some(cell => cell !== '' && cell !== null && cell !== undefined)) {
+                    const obj = {};
+                    for (let j = startColumn; j <= endColumn; j++) {
+                        const header = headers[j - startColumn] || `col${j}`;
+                        obj[String(header).trim()] = row[j] !== undefined ? row[j] : '';
+                    }
+                    tableRows.push(obj);
+                }
+            }
+        } else {
+            // Vertical table: each row is a key-value pair
+            for (let i = 0; i < headerRows.length; i++) {
+                const rowIdx = headerRows[i];
+                const label = data[rowIdx] && data[rowIdx][startColumn];
+                const value = data[rowIdx] && data[rowIdx][startColumn + 1];
+                if (label) {
+                    const obj = {};
+                    obj[String(label).trim()] = value !== undefined ? value : '';
+                    tableRows.push(obj);
+                }
+            }
+        }
+
+        return {
+            headers,
+            rows: tableRows,
+            orientation,
+            headerRows,
+            dataStartRow,
+            startColumn,
+            endColumn
+        };
     }
 
     // Process each sheet
@@ -216,6 +368,13 @@ export async function clientParser(file, instrumentType) {
                 allRows.push(...mappedRows);
                 metadata.primarySheet = sheetName;
                 metadata.parseMethod = 'table';
+                metadata.tableStructure = {
+                    orientation: tableResult.orientation,
+                    headerRows: tableResult.headerRows,
+                    dataStartRow: tableResult.dataStartRow,
+                    startColumn: tableResult.startColumn,
+                    endColumn: tableResult.endColumn
+                };
                 continue;
             }
         }

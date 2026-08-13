@@ -113,7 +113,7 @@
                 <!-- Single Instrument: Show extracted values in key-value format -->
                 <div v-if="sheetType === 'single' && Object.keys(extractedValues).length > 0" class="extracted-values-display">
                   <div v-for="(value, key) in extractedValues" :key="key" class="extracted-field-row">
-                    <div class="field-label">{{ formatFieldName(key) }}</div>
+                    <div class="field-label">{{ key.charAt(0).toUpperCase() + key.slice(1) }}</div>
                     <div class="field-value">{{ value || '—' }}</div>
                   </div>
                 </div>
@@ -215,9 +215,10 @@
                     <button class="btn-close-dialog" @click="showDetectionSuccess = false">×</button>
                   </v-card-title>
                   <v-card-text class="detection-success-body">
-                    <!-- Show instrument type from current page context -->
+                    <!-- Show instrument type from detection time (stored) -->
                     <div class="instrument-type-display">
-                      <strong>Instrument:</strong> {{ instrumentType.value === 'money-market' ? 'Money Market' : instrumentType.value === 'treasury-bills' ? 'Treasury Bills' : 'Bonds' }}
+                      <strong>Instrument:</strong> {{ detectedInstrumentType === 'money-market' ? 'Money Market' : detectedInstrumentType === 'treasury-bills' ? 'Treasury Bills' : 'Bonds' }}
+                      ({{ detectedInstrumentType }})
                     </div>
                     
                     <!-- Currency Selection if multiple currencies detected -->
@@ -1191,6 +1192,7 @@ const uploadProgress = ref(0)
 
 const showInstrumentExcelPopup = ref(false)
 const showWorkflowPopup = ref(false)
+const showDetectionSuccess = ref(false)
 const selectedWorkflowInstrument = ref(null)
 const selectedWorkflowIndex = ref(0)
 const sortColumn = ref('')
@@ -1263,8 +1265,8 @@ const singleInstrumentExtractedValues = ref({})
 const isolatedTableData = ref(null)
 const autoDetectedFields = ref({})
 const autoDetectedFieldsWithMetadata = ref({})
-const showDetectionSuccess = ref(false)
 const detectedCurrencies = ref([])
+const detectedInstrumentType = ref('') // Store instrument type at detection time
 const selectedCurrency = ref('')
 
 const showModalViewer = ref(false)
@@ -2536,8 +2538,9 @@ async function autoDetectSingleInstrument() {
 
     if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
       autoDetectedFields.value = detectionResult.fields
-      autoDetectedFieldsWithMetadata.value = detectionResult.fieldsWithMetadata || {}
+      autoDetectedFieldsWithMetadata.value = detectionResult.fieldsWithMetadata
       detectedCurrencies.value = detectionResult.currencies || []
+      detectedInstrumentType.value = instrumentType.value // Store instrument type at detection time
       
       // Auto-select first currency if only one detected
       if (detectedCurrencies.value.length === 1) {
@@ -2547,6 +2550,10 @@ async function autoDetectSingleInstrument() {
       }
       
       showDetectionSuccess.value = true
+  console.log('=== POPUP OPENING ===')
+  console.log('instrumentType.value at popup:', instrumentType.value)
+  console.log('detectedInstrumentType.value:', detectedInstrumentType.value)
+  console.log('instrumentType object:', instrumentType)
     } else {
       alert('Auto Detect could not identify required fields. Please try manual entry.')
     }

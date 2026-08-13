@@ -148,7 +148,14 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     'Price': ['price', 'market price', 'clean price', 'dirty price', 'bond price', 'purchase price', 'unit price'],
     'Yield': ['yield', 'ytm', 'yield to maturity', 'rate', 'current yield', 'running yield', 'internal rate of return'],
     'Discount Rate': ['discount rate', 'discount', 'discount yield'],
+    'DiscountRate': ['discount rate', 'discount', 'discount yield', 'rate', 'yield'],
     'Interest Rate': ['interest rate', 'rate', 'coupon rate', 'coupon', 'annual rate', 'interest', 'yield', 'nominal rate', 'fixed rate', 'floating rate'],
+    'InterestRate': ['interest rate', 'rate', 'coupon rate', 'coupon', 'annual rate', 'interest', 'yield', 'nominal rate', 'fixed rate', 'floating rate', 'discount rate'],
+    'Interest Accrued': ['interest accrued', 'accrued interest', 'interest accrued to', 'accrued interest to', 'interest accrued to 30 june 2024'],
+    'InterestAccrued': ['interest accrued', 'accrued interest', 'interest accrued to', 'accrued interest to', 'interest accrued to 30 june 2024'],
+    'Interest Pmt Frequency': ['interest pmt frequency', 'interest payment frequency', 'coupon frequency', 'payment frequency', 'frequency', 'pmt frequency', 'interest pmt fequency', 'annually', 'semi-annually', 'quarterly', 'monthly'],
+    'InterestPmtFrequency': ['interest pmt frequency', 'interest payment frequency', 'coupon frequency', 'payment frequency', 'frequency', 'pmt frequency', 'interest pmt fequency', 'annually', 'semi-annually', 'quarterly', 'monthly'],
+    'Frequency': ['frequency', 'interest pmt frequency', 'interest payment frequency', 'coupon frequency', 'payment frequency', 'pmt frequency', 'annually', 'semi-annually', 'quarterly', 'monthly', 'fequency'],
     'Reference Rate': ['reference rate', 'benchmark rate', 'index rate', 'base rate'],
     'Benchmark Rate': ['benchmark rate', 'reference rate', 'index rate', 'base rate'],
     'Spread': ['spread', 'margin', 'credit spread', 'currency spread', 'basis points'],
@@ -291,6 +298,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     
     // Treasury Bill-specific fields
     'T-Bill Name': ['t-bill name', 'instrument name', 'name'],
+    'TBillName': ['t-bill name', 'instrument name', 'name', 'counterparty', 'issuer', 'borrower', 'party', 'entity', 'nhimbe', 'solgas', 'glytime', 'richaw', 'centragrid', 'gzh', 'zimcampus'],
     'T-Bill ID': ['t-bill id', 'instrument id', 'security id'],
     'Government': ['government', 'issuer'],
     'Discount Yield': ['discount yield', 'discount rate'],
@@ -429,6 +437,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   function calculateConfidence(label, matchedVariation, value, fieldName) {
     let score = 0.5 // Base score
     
+    const dateFields = ['Date', 'Issue Date', 'Maturity Date', 'Valuation Date', 'Trade Date', 'Settlement Date', 'MaturityDate']
+    
     // Exact match gets higher score
     if (label.toLowerCase() === matchedVariation.toLowerCase()) {
       score += 0.3
@@ -441,25 +451,92 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     
     // Value validation based on field type
     if (isValidValueForField(fieldName, value)) {
-      score += 0.2
+      score += 0.3
+    } else {
+      // Heavy penalty for invalid values
+      score -= 0.5
     }
     
     // Penalize if value looks like text for numeric fields
-    if (isNumericField(fieldName) && isNaN(parseFloat(value))) {
-      score -= 0.3
+    if (isNumericField(fieldName) && isNaN(parseFloat(String(value).replace(/[%,\s]/g, '')))) {
+      score -= 0.4
     }
     
     // Penalize if value looks like number for text fields
-    if (isTextField(fieldName) && !isNaN(parseFloat(value))) {
-      score -= 0.2
+    if (isTextField(fieldName) && !isNaN(parseFloat(value)) && String(value).length <= 5) {
+      score -= 0.3
+    }
+    
+    // Bonus for values that look like actual data (not headings)
+    if (!isTableHeading(value)) {
+      score += 0.2
+    }
+    
+    // Bonus for numeric fields with proper formatting (%, commas, decimals)
+    if (isNumericField(fieldName)) {
+      const strValue = String(value)
+      if (strValue.includes('%') || strValue.includes(',') || strValue.includes('.')) {
+        score += 0.1
+      }
+    }
+    
+    // Bonus for date fields with proper date format
+    if (dateFields.includes(fieldName)) {
+      if (!isNaN(Date.parse(value)) || /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(value)) {
+        score += 0.2
+      }
     }
     
     return Math.max(0, Math.min(score, 1.0))
   }
 
+  // Helper function to check if a value is a table heading (should not be used as data value)
+  function isTableHeading(value) {
+    const strValue = String(value).trim().toUpperCase()
+    
+    // Common table headings that should never be used as data values
+    const tableHeadings = [
+      'CF', 'PV', 'FV', 'NPV', 'IRR', 'BALANCE', 'PRINCIPAL', 'INTEREST',
+      'CASH FLOW', 'PRESENT VALUE', 'FUTURE VALUE', 'NET PRESENT VALUE',
+      'INTERNAL RATE OF RETURN', 'PAYMENT', 'PMT', 'RATE', 'NPER',
+      'TOTAL', 'SUM', 'SUBTOTAL', 'GRAND TOTAL', 'AVERAGE', 'AVG',
+      'MAX', 'MIN', 'COUNT', 'HEADER', 'LABEL', 'VALUE', 'AMOUNT',
+      'DATE', 'PERIOD', 'YEAR', 'MONTH', 'QUARTER', 'DAY',
+      'BEGINNING', 'ENDING', 'OPENING', 'CLOSING', 'START', 'END',
+      'IN', 'OUT', 'INFLOW', 'OUTFLOW', 'DEBIT', 'CREDIT',
+      'ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE',
+      'BUY', 'SELL', 'PURCHASE', 'SALE', 'TRANSACTION',
+      'ROW', 'COLUMN', 'CELL', 'SHEET', 'WORKSHEET',
+      'YES', 'NO', 'TRUE', 'FALSE', 'N/A', 'NA', 'NULL',
+      'CATEGORY', 'TYPE', 'CLASS', 'GROUP', 'SECTION',
+      'INPUT', 'OUTPUT', 'RESULT', 'CALCULATION', 'FORMULA'
+    ]
+    
+    // Check if value matches any table heading
+    if (tableHeadings.includes(strValue)) return true
+    
+    // Check if value is a very short abbreviation (likely a heading)
+    if (strValue.length <= 3 && /^[A-Z]+$/.test(strValue)) {
+      // Allow common currency codes
+      if (!['USD', 'EUR', 'GBP', 'ZAR', 'ZWG', 'JPY', 'CAD', 'AUD'].includes(strValue)) {
+        return true
+      }
+    }
+    
+    // Check if value looks like a column header (all caps, short)
+    if (strValue.length <= 10 && /^[A-Z\s]+$/.test(strValue) && strValue.includes(' ')) {
+      return true
+    }
+    
+    return false
+  }
+
   // Helper function to check if value is valid for field type
   function isValidValueForField(fieldName, value) {
     if (!value || value === '') return false
+    
+    // Reject table headings
+    if (isTableHeading(value)) return false
     
     const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
     const dateFields = ['Date', 'Issue Date', 'Maturity Date', 'Valuation Date', 'Trade Date', 'Settlement Date', 'MaturityDate']
@@ -503,9 +580,12 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     'Principal': ['principal', 'face value', 'par value', 'nominal value', 'notional amount', 'principal amount', 'nominal', 'notional', 'face'],
     'FaceValue': ['principal', 'face value', 'par value', 'nominal value', 'notional amount', 'facevalue', 'face', 'principal amount', 'nominal', 'notional'],
     'Interest Rate': ['interest rate', 'coupon rate', 'rate', 'coupon', 'interest', 'interestrate', 'couponrate', 'annual rate'],
+    'InterestRate': ['interest rate', 'coupon rate', 'rate', 'coupon', 'interest', 'interestrate', 'couponrate', 'annual rate', 'yield', 'discount rate'],
     'Coupon Rate': ['coupon rate', 'interest rate', 'coupon', 'rate', 'couponrate', 'interestrate'],
     'CouponRate': ['interest rate', 'coupon rate', 'rate', 'coupon', 'interest', 'interestrate', 'couponrate', 'annual rate'],
     'Yield': ['yield', 'ytm', 'yield to maturity', 'rate of return', 'ytm'],
+    'Discount Rate': ['discount rate', 'discount', 'discount yield', 'rate'],
+    'DiscountRate': ['discount rate', 'discount', 'discount yield', 'rate', 'yield'],
     'YTM': ['ytm', 'yield', 'yield to maturity'],
     'Price': ['price', 'clean price', 'dirty price', 'market price', 'current price', 'valuation price'],
     'Clean Price': ['clean price', 'price', 'market price'],
@@ -522,6 +602,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     'Exchange Rate': ['exchange rate', 'exch rate', 'fx rate', 'forex rate', 'conversion rate', 'exch', 'spot rate', 'exchangerate', 'fxrate'],
     'Amount': ['amount', 'value', 'investment amount', 'purchase amount', 'total amount'],
     'BondName': ['counterparty', 'instrument name', 'bond name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party'],
+    'TBillName': ['counterparty', 'instrument name', 't-bill name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party', 'nhimbe', 'solgas', 'glytime', 'richaw', 'centragrid', 'gzh', 'zimcampus'],
+    'Instrument': ['counterparty', 'instrument name', 'bond name', 't-bill name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party', 'nhimbe', 'solgas', 'glytime', 'richaw', 'centragrid', 'gzh', 'zimcampus'],
     'Frequency': ['frequency', 'interest pmt frequency', 'interest payment frequency', 'interest pmt fequency', 'coupon frequency', 'payment frequency', 'pmt frequency', 'annually', 'semi-annually', 'quarterly', 'monthly', 'fequency'],
     'Accrued Interest': ['accrued interest', 'interest accrued', 'accrued coupon', 'interest accrued to', 'accruedinterest'],
     'AccruedInterest': ['interest accrued', 'accrued interest', 'accrued coupon', 'interest accrued to', 'interest accrued to 30 june 2024'],
@@ -589,6 +671,12 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
             const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
             const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
             
+            // Reject low-confidence matches
+            if (confidence < 0.5) {
+              console.log(`Rejected "${requiredField}": "${value}" at ${location} (confidence: ${confidence.toFixed(2)} too low)`)
+              continue
+            }
+            
             detectedFields[requiredField] = {
               value: value,
               location: location,
@@ -635,6 +723,12 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
             const location = rowColToCellRef(R + 1, C)
             const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
             const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
+            
+            // Reject low-confidence matches
+            if (confidence < 0.5) {
+              console.log(`Rejected "${requiredField}": "${value}" at ${location} (vertical, confidence: ${confidence.toFixed(2)} too low)`)
+              continue
+            }
             
             detectedFields[requiredField] = {
               value: value,
@@ -693,6 +787,12 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
               const location = rowColToCellRef(R + 1, C)
               const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
               const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
+              
+              // Reject low-confidence matches
+              if (confidence < 0.5) {
+                console.log(`Rejected "${requiredField}": "${value}" at ${location} (table, confidence: ${confidence.toFixed(2)} too low)`)
+                continue
+              }
               
               detectedFields[requiredField] = {
                 value: value,
@@ -802,8 +902,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
                   const location = rowColToCellRef(searchR, searchC)
                   const confidence = calculateConfidence(cellLower, cellLower, nearbyValue, requiredField)
                   
-                  // Only assign if confidence is reasonable
-                  if (confidence >= 0.4) {
+                  // Only assign if confidence is high enough (stricter threshold)
+                  if (confidence >= 0.6) {
                     detectedFields[requiredField] = {
                       value: nearbyValue,
                       location: location,
