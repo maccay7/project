@@ -1,6 +1,148 @@
 import * as XLSX from 'xlsx'
 
 /**
+ * Detect table boundaries in a worksheet
+ * Finds the actual data table by identifying non-empty cell clusters
+ * @param {Array} data - 2D array of worksheet data
+ * @returns {Object} Table boundaries { startRow, endRow, startCol, endCol }
+ */
+function detectTableBoundaries(data) {
+  console.log('=== Detecting Table Boundaries ===')
+  
+  if (!data || data.length === 0) {
+    return { startRow: 0, endRow: data.length - 1, startCol: 0, endCol: 0 }
+  }
+
+  // Find the first non-empty row
+  let startRow = 0
+  for (let r = 0; r < data.length; r++) {
+    if (data[r].some(cell => cell && String(cell).trim() !== '')) {
+      startRow = r
+      break
+    }
+  }
+
+  // Find the last non-empty row
+  let endRow = data.length - 1
+  for (let r = data.length - 1; r >= startRow; r--) {
+    if (data[r].some(cell => cell && String(cell).trim() !== '')) {
+      endRow = r
+      break
+    }
+  }
+
+  // Find the first non-empty column
+  let startCol = 0
+  for (let c = 0; c < data[0].length; c++) {
+    let hasContent = false
+    for (let r = startRow; r <= endRow; r++) {
+      if (data[r] && data[r][c] && String(data[r][c]).trim() !== '') {
+        hasContent = true
+        break
+      }
+    }
+    if (hasContent) {
+      startCol = c
+      break
+    }
+  }
+
+  // Find the last non-empty column
+  let endCol = data[0].length - 1
+  for (let c = data[0].length - 1; c >= startCol; c--) {
+    let hasContent = false
+    for (let r = startRow; r <= endRow; r++) {
+      if (data[r] && data[r][c] && String(data[r][c]).trim() !== '') {
+        hasContent = true
+        break
+      }
+    }
+    if (hasContent) {
+      endCol = c
+      break
+    }
+  }
+
+  const boundaries = { startRow, endRow, startCol, endCol }
+  console.log('Table boundaries:', boundaries)
+  console.log('Table size:', endRow - startRow + 1, 'rows x', endCol - startCol + 1, 'cols')
+  
+  return boundaries
+}
+
+/**
+ * Detect table orientation (vertical vs horizontal)
+ * @param {Array} data - 2D array of worksheet data
+ * @param {Object} boundaries - Table boundaries
+ * @returns {string} 'vertical' or 'horizontal'
+ */
+function detectTableOrientation(data, boundaries) {
+  const { startRow, endRow, startCol, endCol } = boundaries
+  
+  // Count label-like cells in first column vs first row
+  let firstColLabels = 0
+  let firstRowLabels = 0
+  
+  // Check first column for label-like content
+  for (let r = startRow; r <= endRow; r++) {
+    const cell = data[r] && data[r][startCol] ? String(data[r][startCol]).trim() : ''
+    if (cell && cell.length > 0 && cell.length < 50 && !isNumeric(cell)) {
+      firstColLabels++
+    }
+  }
+  
+  // Check first row for label-like content
+  for (let c = startCol; c <= endCol; c++) {
+    const cell = data[startRow] && data[startRow][c] ? String(data[startRow][c]).trim() : ''
+    if (cell && cell.length > 0 && cell.length < 50 && !isNumeric(cell)) {
+      firstRowLabels++
+    }
+  }
+  
+  const orientation = firstColLabels > firstRowLabels ? 'vertical' : 'horizontal'
+  console.log('Table orientation:', orientation, `(firstColLabels: ${firstColLabels}, firstRowLabels: ${firstRowLabels})`)
+  
+  return orientation
+}
+
+/**
+ * Check if a value is numeric
+ */
+function isNumeric(value) {
+  if (value === null || value === undefined || value === '') return false
+  const str = String(value).replace(/[%,\s]/g, '')
+  return !isNaN(parseFloat(str)) && isFinite(str)
+}
+
+/**
+ * Check if a value looks like a date
+ */
+function isDateLike(value) {
+  if (!value || value === '') return false
+  const str = String(value).trim()
+  
+  // Check for common date patterns
+  const datePatterns = [
+    /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/, // DD-MM-YYYY, MM/DD/YYYY
+    /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/, // YYYY-MM-DD
+    /^[A-Za-z]{3}[-/]\d{1,2}[-/]\d{2,4}$/, // Dec-31-2024
+    /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/, // 31-Dec-2024
+    /^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/ // Dec 31, 2024
+  ]
+  
+  if (datePatterns.some(pattern => pattern.test(str))) return true
+  
+  // Check if it can be parsed as a date
+  const date = new Date(str)
+  if (!isNaN(date.getTime())) {
+    // Check if it's not just a number (e.g., 2024 could be a year, not a date)
+    if (!/^\d{4}$/.test(str)) return true
+  }
+  
+  return false
+}
+
+/**
  * Auto-detect instrument fields from a worksheet
  * Scans the entire worksheet for label-value pairs in various layouts
  * @param {ArrayBuffer} fileBuffer - Excel file buffer
@@ -72,6 +214,16 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   
   console.log('Extracted Data Dimensions:', data.length, 'rows x', data[0]?.length || 0, 'cols')
   console.log('Sample Data (first 3 rows):', data.slice(0, 3))
+
+  // Detect table boundaries for single-instrument detection
+  const tableBoundaries = detectTableBoundaries(data)
+  const tableOrientation = detectTableOrientation(data, tableBoundaries)
+  
+  console.log('=== SINGLE INSTRUMENT DETECTION CONTEXT ===')
+  console.log('Worksheet Name (Instrument Name):', sheetName)
+  console.log('Table Boundaries:', tableBoundaries)
+  console.log('Table Orientation:', tableOrientation)
+  console.log('Detection will be limited to table boundaries only')
 
   // Define comprehensive field variations for detection - instrument-specific
   const fieldVariations = {
@@ -543,9 +695,58 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     const textFields = ['Instrument', 'Instrument Name', 'Bond Name', 'Issuer', 'Counterparty', 'Currency']
     
     if (numericFields.includes(fieldName)) {
+      // CRITICAL: Reject dates for numeric fields
+      if (isDateLike(value)) {
+        console.log(`Rejected "${fieldName}": "${value}" (is a date, not a number)`)
+        return false
+      }
+      
+      // CRITICAL: Reject text values for numeric fields (e.g., "Semi-annually" for InterestRate)
+      const strValue = String(value).trim()
+      // Allow currency symbols ($, €, £, etc.) for Amount field
+      const currencySymbolRegex = fieldName === 'Amount' ? /[%,\s$€£¥₹]/g : /[%,\s]/g
+      const numericValue = strValue.replace(currencySymbolRegex, '')
+      
+      // If after removing symbols and spaces, it's still not a number, reject it
+      if (isNaN(parseFloat(numericValue))) {
+        console.log(`Rejected "${fieldName}": "${value}" (is text, not a number)`)
+        return false
+      }
+      
+      const parsedValue = parseFloat(numericValue)
+      
+      // CRITICAL: Realistic range validation for specific numeric fields
+      if (fieldName === 'InterestRate' || fieldName === 'Interest Rate' || fieldName === 'Coupon Rate' || fieldName === 'CouponRate' || fieldName === 'Rate' || fieldName === 'Discount Rate' || fieldName === 'DiscountRate' || fieldName === 'Yield') {
+        // Rates should be between 0 and 100 (or 0 and 1 if expressed as decimal)
+        if (parsedValue < 0 || parsedValue > 100) {
+          console.log(`Rejected "${fieldName}": "${value}" (value ${parsedValue} is outside realistic rate range 0-100)`)
+          return false
+        }
+      }
+      
+      if (fieldName === 'Price') {
+        // Price should NOT be a percentage (rates are percentages, prices are currency amounts)
+        if (strValue.includes('%')) {
+          console.log(`Rejected "${fieldName}": "${value}" (is a percentage, not a price)`)
+          return false
+        }
+        // Price should be a reasonable currency amount (not too small like 7.5, not too large like billions)
+        if (parsedValue < 1 || parsedValue > 1000000000) {
+          console.log(`Rejected "${fieldName}": "${value}" (value ${parsedValue} is outside realistic price range)`)
+          return false
+        }
+      }
+      
+      if (fieldName === 'Exchange Rate') {
+        // Exchange rates should be between 0 and 1000
+        if (parsedValue < 0 || parsedValue > 1000) {
+          console.log(`Rejected "${fieldName}": "${value}" (value ${parsedValue} is outside realistic exchange rate range)`)
+          return false
+        }
+      }
+      
       // Check if it's a valid number (can include % sign, commas, etc.)
-      const numericValue = String(value).replace(/[%,\s]/g, '')
-      return !isNaN(parseFloat(numericValue)) && parseFloat(numericValue) !== 0
+      return !isNaN(parsedValue) && parsedValue !== 0
     }
     
     if (dateFields.includes(fieldName)) {
@@ -642,11 +843,11 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     })
   }
 
-  // First pass: Scan for label-value pairs in the entire worksheet
+  // First pass: Scan for label-value pairs within table boundaries
   // This handles the most common pattern: label in one cell, value in adjacent cell
-  console.log('=== Pass 1: Horizontal label-value pairs ===')
-  for (let R = 0; R < data.length; R++) {
-    for (let C = 0; C < data[R].length - 1; C++) {
+  console.log('=== Pass 1: Horizontal label-value pairs (within table boundaries) ===')
+  for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
+    for (let C = tableBoundaries.startCol; C < tableBoundaries.endCol; C++) {
       const label = String(data[R][C]).toLowerCase().trim()
       const value = data[R][C + 1]
       
@@ -696,10 +897,10 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   }
   console.log('Pass 1 detected fields:', Object.keys(detectedFields))
 
-  // Second pass: Scan for vertical label-value pairs (label above value)
-  console.log('=== Pass 2: Vertical label-value pairs ===')
-  for (let R = 0; R < data.length - 1; R++) {
-    for (let C = 0; C < data[R].length; C++) {
+  // Second pass: Scan for vertical label-value pairs within table boundaries (label above value)
+  console.log('=== Pass 2: Vertical label-value pairs (within table boundaries) ===')
+  for (let R = tableBoundaries.startRow; R < tableBoundaries.endRow; R++) {
+    for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol; C++) {
       const label = String(data[R][C]).toLowerCase().trim()
       const value = data[R + 1][C]
       
@@ -749,10 +950,10 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   }
   console.log('Pass 2 detected fields:', Object.keys(detectedFields))
 
-  // Third pass: Scan for table-like structures with headers in first row
+  // Third pass: Scan for table-like structures with headers within table boundaries
   // This handles structured tables where field names are in a header row
-  console.log('=== Pass 3: Table header structures ===')
-  for (let R = 0; R < data.length; R++) {
+  console.log('=== Pass 3: Table header structures (within table boundaries) ===')
+  for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
     const row = data[R]
     if (!row || row.length === 0) continue
     
@@ -762,11 +963,11 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       Object.values(fieldVariations).flat().some(v => label.includes(v))
     )
     
-    if (hasFieldLabels && R + 1 < data.length) {
+    if (hasFieldLabels && R + 1 <= tableBoundaries.endRow) {
       // This is likely a header row, get values from next row
       const valueRow = data[R + 1]
       
-      for (let C = 0; C < row.length && C < valueRow.length; C++) {
+      for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol && C < valueRow.length; C++) {
         const label = headerLabels[C]
         const value = valueRow[C]
         
@@ -813,10 +1014,10 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   }
   console.log('Pass 3 detected fields:', Object.keys(detectedFields))
 
-  // Fourth pass: Scan for currency codes and exchange rates anywhere in the sheet
-  console.log('=== Pass 4: Currency codes and exchange rates ===')
-  for (let R = 0; R < data.length; R++) {
-    for (let C = 0; C < data[R].length; C++) {
+  // Fourth pass: Scan for currency codes and exchange rates within table boundaries
+  console.log('=== Pass 4: Currency codes and exchange rates (within table boundaries) ===')
+  for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
+    for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol; C++) {
       const cellValue = data[R][C]
       
       // Check for currency codes (3-letter uppercase)
@@ -855,10 +1056,10 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   console.log('Pass 4 detected fields:', Object.keys(detectedFields))
   console.log('Detected currencies:', Array.from(detectedCurrencies))
 
-  // Pass 5: Comprehensive scattered field search - look for values near labels in any direction
-  console.log('=== Pass 5: Comprehensive scattered field search ===')
-  for (let R = 0; R < data.length; R++) {
-    for (let C = 0; C < data[R].length; C++) {
+  // Pass 5: Comprehensive scattered field search within table boundaries - look for values near labels in any direction
+  console.log('=== Pass 5: Comprehensive scattered field search (within table boundaries) ===')
+  for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
+    for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol; C++) {
       const cellValue = data[R][C]
       if (!cellValue || String(cellValue).trim() === '') continue
       
@@ -884,6 +1085,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
             { dr: -1, dc: -1 }  // Up-left
           ]
           
+          let valueFound = false
           for (const { dr, dc } of directions) {
             const searchR = R + dr
             const searchC = C + dc
@@ -893,6 +1095,20 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
               if (nearbyValue && String(nearbyValue).trim() !== '') {
                 // Validate the value for this field type
                 if (isValidValueForField(requiredField, nearbyValue)) {
+                  // CRITICAL: Check if this value is already assigned to another field
+                  const valueStr = String(nearbyValue).trim()
+                  let isDuplicate = false
+                  for (const [existingField, existingData] of Object.entries(detectedFields)) {
+                    if (existingField !== requiredField && String(existingData.value).trim() === valueStr) {
+                      console.log(`Rejected "${requiredField}": "${nearbyValue}" (value already assigned to "${existingField}")`)
+                      isDuplicate = true
+                      break // Break out of duplicate check loop
+                    }
+                  }
+                  
+                  // If duplicate, skip this value entirely and continue to next direction
+                  if (isDuplicate) continue
+                  
                   // Create a unique key for this label-value pair
                   const pairKey = `${cellLower}_${nearbyValue}_${searchR}_${searchC}`
                   
@@ -916,12 +1132,16 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
                     if (requiredField === 'Currency' || /^[A-Z]{3}$/.test(String(nearbyValue).toUpperCase())) {
                       detectedCurrencies.add(String(nearbyValue).toUpperCase())
                     }
+                    valueFound = true
                     break // Found a valid value, stop searching directions
                   }
                 }
               }
             }
           }
+          
+          // If we found a value, move to next required field
+          if (valueFound) break
         }
       }
     }
@@ -931,6 +1151,21 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   console.log('=== Final Detection Results ===')
   console.log('Total detected fields:', Object.keys(detectedFields).length)
   console.log('Missing fields:', requiredColumns.filter(col => !detectedFields[col]))
+
+  // CRITICAL: For single-instrument detection, instrument name MUST come from worksheet name
+  // Never use detected Instrument Name, Bond Name, T-Bill Name, Security, etc. from cells
+  if (requiredColumns.includes('Instrument Name') || requiredColumns.includes('BondName') || requiredColumns.includes('TBillName')) {
+    const instrumentNameField = requiredColumns.includes('Instrument Name') ? 'Instrument Name' : 
+                                requiredColumns.includes('BondName') ? 'BondName' : 'TBillName'
+    
+    // Force instrument name to be the worksheet name
+    detectedFields[instrumentNameField] = {
+      value: sheetName,
+      location: 'Worksheet Name',
+      confidence: 1.0
+    }
+    console.log(`FORCED: ${instrumentNameField} = "${sheetName}" (from worksheet name)`)
+  }
 
   // Convert detected fields to simple value format for backward compatibility
   const simpleDetectedFields = {}

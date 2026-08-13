@@ -103,24 +103,16 @@
 
               <!-- ===== PREVIEW SECTION ===== -->
               <div v-if="rawData.length && showPreview" class="excel-preview-section">
-                <h4 v-if="sheetType === 'single'">Required Values (Single Instrument)</h4>
+                <h4 v-if="sheetType === 'single'">File Preview – {{ currentSheetName || 'Selected Sheet' }}</h4>
                 <h4 v-else>File Preview – {{ currentSheetName || 'Selected Sheet' }}</h4>
                 <p v-if="sheetType === 'single'" class="preview-info">
-                  Automatically extracted required values — verify before calculations
+                  {{ rawData.length }} total rows — edit cells below like Excel
                 </p>
                 <p v-else class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
                 
-                <!-- Single Instrument: Show extracted values in key-value format -->
-                <div v-if="sheetType === 'single' && Object.keys(extractedValues).length > 0" class="extracted-values-display">
-                  <div v-for="(value, key) in extractedValues" :key="key" class="extracted-field-row">
-                    <div class="field-label">{{ key.charAt(0).toUpperCase() + key.slice(1) }}</div>
-                    <div class="field-value">{{ value || '—' }}</div>
-                  </div>
-                </div>
-                
                 <!-- Multiple Instruments: Show mapped dataset in Excel viewer with mapping controls -->
                 <ExcelViewer
-                  v-else-if="sheetType === 'multi' && rawData.length"
+                  v-if="sheetType === 'multi' && rawData.length"
                   :data="rawData.slice(0, 500)"
                   :headers="uploadPreviewHeaders"
                   :original-data="originalRawData.slice(0, 500)"
@@ -133,6 +125,22 @@
                   :current-sheet-name="currentSheetName"
                   @data-update="onRawExcelUpdate"
                   @mapping-update="updateColumnMapping"
+                ></ExcelViewer>
+                
+                <!-- Single Instrument: Show extracted values in Excel viewer -->
+                <ExcelViewer
+                  v-else-if="sheetType === 'single' && rawData.length"
+                  :data="rawData.slice(0, 500)"
+                  :headers="uploadPreviewHeaders"
+                  :original-data="originalRawData.slice(0, 500)"
+                  :original-headers="originalFileColumns"
+                  :show-mapping-controls="false"
+                  :column-mapping="{}"
+                  :available-file-columns="fileColumns"
+                  :required-columns="requiredColumns"
+                  :workbook-sheets="[]"
+                  :current-sheet-name="currentSheetName"
+                  @data-update="onRawExcelUpdate"
                 ></ExcelViewer>
                 
                 <!-- Preview actions - removed "Full Screen" button -->
@@ -291,24 +299,49 @@
 
               <!-- ===== Required Columns / Extracted Values ===== -->
               <div class="required-columns">
-                <h4 v-if="sheetType === 'multi'">Required Columns:</h4>
-                <h4 v-else>Extracted Values:</h4>
+                <h4 v-if="sheetType === 'multi'">Required Columns</h4>
+                <h4 v-else>Required Values (Single Instrument)</h4>
+                
+                <!-- Multi-sheet: Column badges -->
                 <div v-if="sheetType === 'multi'" class="columns-list">
                   <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
+                    <span class="badge-icon">{{ hasRequiredColumn(col) ? '✓' : '○' }}</span>
                     {{ col }}
                   </span>
                 </div>
-                <div v-else class="extracted-values-list">
-                  <div v-for="(value, key) in extractedValues" :key="key" class="extracted-item">
-                    <span class="extracted-label">{{ key }}</span>
-                    <span class="extracted-value">{{ value }}</span>
+                
+                <!-- Single-sheet: Extracted values table (like mapping preview) -->
+                <div v-else class="extracted-values-table">
+                  <div class="table-header">
+                    <span class="header-field">Field</span>
+                    <span class="header-value">Extracted Value</span>
+                    <span class="header-status">Status</span>
+                  </div>
+                  <div v-for="(value, key) in extractedValues" :key="key" class="table-row" :class="{ 'row-missing': !value || value === 'N/A' }">
+                    <span class="row-field">{{ key }}</span>
+                    <div class="row-value">
+                      <span v-if="value && value !== 'N/A'" class="value-text">{{ value }}</span>
+                      <span v-else class="value-placeholder">Not detected</span>
+                    </div>
+                    <span class="row-status" :class="{ 'status-missing': !value || value === 'N/A' }">
+                      {{ value && value !== 'N/A' ? '✓ Detected' : '! Missing' }}
+                    </span>
                   </div>
                 </div>
+                
+                <!-- Status messages -->
                 <div v-if="rawData.length && sheetType === 'multi' && missingColumns.length" class="warning-message">
+                  <span class="warning-icon">⚠</span>
                   <span>Missing required columns. Use the dropdowns on the column headers or click "Map Columns" to assign them.</span>
                 </div>
                 <div v-if="rawData.length && sheetType === 'multi' && missingColumns.length === 0 && mappingApplied" class="success-message">
+                  <span class="success-icon">✓</span>
                   <span>All columns mapped. Ready to continue.</span>
+                </div>
+                <div v-if="sheetType === 'single' && Object.keys(extractedValues).length > 0" class="values-summary">
+                  <span class="summary-text">
+                    {{ Object.values(extractedValues).filter(v => v && v !== 'N/A').length }} of {{ Object.keys(extractedValues).length }} required values detected
+                  </span>
                 </div>
               </div>
 
@@ -2495,13 +2528,33 @@ function openWorkbookViewer() {
 // workOnSelectedSheet
 // ================================================================
 function workOnSelectedSheet() {
+  console.log('=== workOnSelectedSheet called ===')
+  console.log('currentSheetName.value:', currentSheetName.value)
+  console.log('workbookSheets.value.length:', workbookSheets.value.length)
+  
   if (!currentSheetName.value) {
+    console.log('ERROR: No sheet selected')
+    alert('Please select a sheet first')
     return
   }
+  
   const sheet = workbookSheets.value.find(s => s.name === currentSheetName.value)
-  if (!sheet || !sheet.data || !sheet.data.length) {
+  console.log('Found sheet:', sheet)
+  
+  if (!sheet) {
+    console.log('ERROR: Sheet not found in workbookSheets')
+    alert('Sheet not found')
     return
   }
+  
+  if (!sheet.data || !sheet.data.length) {
+    console.log('ERROR: Sheet has no data')
+    console.log('sheet.data:', sheet.data)
+    alert('Sheet has no data to process')
+    return
+  }
+  
+  console.log('Calling handleWorkOnSheet with:', currentSheetName.value)
   handleWorkOnSheet(currentSheetName.value)
   showWorkbookViewer.value = false
 }
@@ -5447,12 +5500,40 @@ onBeforeUnmount(() => {
 .btn-close-dialog:hover { background: #f0f0f0; color: #0B2044; }
 .excel-dialog-content { padding: 0; height: calc(100vh - 140px); }
 .required-columns { margin: 20px 0; }
+.required-columns h4 { color: #0B2044; font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.required-columns h4::before { content: '📋'; font-size: 18px; }
+
 .columns-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-.column-badge { background: #e8ecf1; padding: 6px 12px; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
-.column-badge.missing-column { background: #FFEBEE; color: #c62828; }
-.column-badge.mapped-column { background: #E8F5E9; color: #2E7D32; }
-.success-message { margin-top: 10px; padding: 8px 12px; background: #E8F5E9; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #2E7D32; }
-.warning-message { margin-top: 10px; padding: 8px 12px; background: #FFF3E0; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #E65100; }
+.column-badge { background: linear-gradient(135deg, #e8ecf1, #f5f7fa); padding: 8px 16px; border-radius: 24px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #e0e0e0; transition: all 0.2s; }
+.column-badge:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+.column-badge .badge-icon { font-weight: 700; font-size: 14px; }
+.column-badge.missing-column { background: linear-gradient(135deg, #FFEBEE, #FFCDD2); color: #c62828; border-color: #ef9a9a; }
+.column-badge.mapped-column { background: linear-gradient(135deg, #E8F5E9, #C8E6C9); color: #2E7D32; border-color: #a5d6a7; }
+
+.extracted-values-table { background: white; border-radius: 12px; border: 1px solid #e0e0e0; overflow: hidden; margin-top: 16px; }
+.table-header { display: grid; grid-template-columns: 1fr 1fr 120px; gap: 0; background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; padding: 12px 16px; font-weight: 600; font-size: 13px; }
+.header-field, .header-value, .header-status { padding: 4px 8px; }
+.table-row { display: grid; grid-template-columns: 1fr 1fr 120px; gap: 0; padding: 12px 16px; border-bottom: 1px solid #f0f0f0; transition: background 0.2s; align-items: center; }
+.table-row:hover { background: #f8f9ff; }
+.table-row:last-child { border-bottom: none; }
+.table-row.row-missing { background: #FFF3E0; }
+.table-row.row-missing:hover { background: #FFE0B2; }
+
+.row-field { font-weight: 600; color: #0B2044; font-size: 13px; padding: 4px 8px; }
+.row-value { padding: 4px 8px; }
+.value-text { color: #333; font-size: 14px; font-weight: 500; }
+.value-placeholder { color: #999; font-style: italic; font-size: 13px; }
+.row-status { font-size: 12px; font-weight: 600; padding: 4px 8px; text-align: center; }
+.row-status:not(.status-missing) { color: #2E7D32; background: #E8F5E9; padding: 4px 8px; border-radius: 12px; }
+.row-status.status-missing { color: #c62828; background: #FFEBEE; padding: 4px 8px; border-radius: 12px; }
+
+.values-summary { margin-top: 16px; padding: 12px 16px; background: linear-gradient(135deg, #f8f9ff, #eef2ff); border-radius: 12px; border-left: 4px solid #0B2044; }
+.summary-text { font-size: 13px; font-weight: 500; color: #0B2044; }
+
+.success-message { margin-top: 10px; padding: 10px 16px; background: linear-gradient(135deg, #E8F5E9, #C8E6C9); border-radius: 10px; display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 500; color: #2E7D32; border: 1px solid #a5d6a7; }
+.success-icon { font-size: 16px; }
+.warning-message { margin-top: 10px; padding: 10px 16px; background: linear-gradient(135deg, #FFF3E0, #FFE0B2); border-radius: 10px; display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 500; color: #E65100; border: 1px solid #FFB74D; }
+.warning-icon { font-size: 16px; }
 .cleaning-options-panel { background: #f8f9ff; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
 .filter-scroll-container { max-height: 200px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px; background: #fafafa; margin: 12px 0; padding: 8px 4px; }
 .options-list { display: flex; flex-direction: column; gap: 8px; }
