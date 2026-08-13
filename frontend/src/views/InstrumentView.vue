@@ -214,6 +214,49 @@
                 </v-card>
               </v-dialog>
 
+              <!-- Multi-Table Detection Success Popup -->
+              <v-dialog v-model="showMultiTableDetectionSuccess" max-width="700px">
+                <v-card>
+                  <v-card-title class="detection-success-title">
+                    Multi-Table Detection Successful ✓
+                    <v-spacer></v-spacer>
+                    <button class="btn-close-dialog" @click="showMultiTableDetectionSuccess = false">×</button>
+                  </v-card-title>
+                  <v-card-text class="detection-success-body">
+                    <div class="instrument-type-display">
+                      <strong>Instrument:</strong> {{ instrumentType === 'money-market' ? 'Money Market' : instrumentType === 'treasury-bills' ? 'Treasury Bills' : 'Bonds' }}
+                      ({{ instrumentType }})
+                    </div>
+                    <div class="multi-table-summary">
+                      <strong>{{ multiTableDetectionResults.length }} table(s) selected</strong>
+                      <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">All detected fields from selected tables will be combined into a single instrument for calculations.</p>
+                    </div>
+                    
+                    <div class="multi-instruments-list">
+                      <div v-for="(instrument, index) in multiTableDetectionResults" :key="index" class="multi-instrument-item">
+                        <div class="multi-instrument-header">
+                          <strong>Table {{ index + 1 }}: {{ instrument.tableName }}</strong>
+                        </div>
+                        <div class="multi-instrument-fields">
+                          <div v-for="(value, field) in instrument.fields" :key="field" class="multi-detected-field-item">
+                            <span class="multi-detected-field-label">{{ field }}:</span>
+                            <span class="multi-detected-field-value">{{ formatDetectedValue(field, value) }}</span>
+                          </div>
+                        </div>
+                        <div v-if="instrument.missingFields.length > 0" class="multi-missing-fields">
+                          <span class="missing-label">Missing:</span>
+                          {{ instrument.missingFields.join(', ') }}
+                        </div>
+                      </div>
+                    </div>
+                  </v-card-text>
+                  <v-card-actions>
+                    <button class="btn-secondary" @click="showMultiTableDetectionSuccess = false">Close</button>
+                    <button class="btn-primary" @click="useMultiTableDetectedFields">Use Combined Fields</button>
+                  </v-card-actions>
+                </v-card>
+              </v-dialog>
+
               <!-- Auto Detection Success Popup -->
               <v-dialog v-model="showDetectionSuccess" max-width="500px">
                 <v-card>
@@ -283,10 +326,12 @@
                       :workbook-data="{ sheets: workbookSheets, fileBuffer: originalFileBuffer }"
                       :file-name="uploadedFile?.name || 'Workbook'"
                       :instrument-type="instrumentType"
+                      :worksheet-statuses="worksheetStatuses"
                       @close="showWorkbookViewer = false"
                       @sheet-selected="handleSheetSelectedFromViewer"
                       @single-instrument-extracted="handleSingleInstrumentExtracted"
                       @table-isolated="handleTableIsolated"
+                      @multi-table-detect="handleMultiTableDetect"
                     />
                   </v-card-text>
                   <div class="popup-footer">
@@ -320,8 +365,23 @@
                   <div v-for="(value, key) in extractedValues" :key="key" class="table-row" :class="{ 'row-missing': !value || value === 'N/A' }">
                     <span class="row-field">{{ key }}</span>
                     <div class="row-value">
-                      <span v-if="value && value !== 'N/A'" class="value-text">{{ value }}</span>
-                      <span v-else class="value-placeholder">Not detected</span>
+                      <input
+                        v-if="value && value !== 'N/A'"
+                        type="text"
+                        class="value-input"
+                        :value="value"
+                        @input="updateExtractedValue(key, $event.target.value)"
+                        @blur="updateExtractedValue(key, $event.target.value)"
+                      />
+                      <input
+                        v-else
+                        type="text"
+                        class="value-input placeholder"
+                        placeholder="Enter value..."
+                        @input="updateExtractedValue(key, $event.target.value)"
+                        @blur="updateExtractedValue(key, $event.target.value)"
+                      />
+                      <button class="btn-clear-value" @click="clearExtractedValue(key)" title="Clear value">×</button>
                     </div>
                     <span class="row-status" :class="{ 'status-missing': !value || value === 'N/A' }">
                       {{ value && value !== 'N/A' ? '✓ Detected' : '! Missing' }}
@@ -781,6 +841,22 @@
                       📊 View Instrument Summary Excel
                     </button>
                   </div>
+                  <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <h4 style="margin-bottom: 15px; color: #0B2044;">Continue Working</h4>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                      <button class="btn-secondary" @click="continueWorkingOnCurrent" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-pencil</v-icon>
+                        Continue on Current Sheet
+                      </button>
+                      <button class="btn-primary" @click="chooseAnotherSheet" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-table-multiple</v-icon>
+                        Choose Another Sheet
+                      </button>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 13px; color: #666;">
+                      Current worksheet: <strong>{{ currentSheetName || 'Not selected' }}</strong>
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -1184,6 +1260,9 @@ const yieldCurveData = ref([])
 const chartSeriesLabel = ref('')
 const chartImageData = ref('')
 
+// NEW: Track worksheet processing status
+const worksheetStatuses = ref({})
+
 const selectedMaturityOption = ref('')
 const selectedCountryOption = ref('USA')
 const selectedCurrencyOption = ref('USD')
@@ -1226,6 +1305,8 @@ const uploadProgress = ref(0)
 const showInstrumentExcelPopup = ref(false)
 const showWorkflowPopup = ref(false)
 const showDetectionSuccess = ref(false)
+const showMultiTableDetectionSuccess = ref(false)
+const multiTableDetectionResults = ref([])
 const selectedWorkflowInstrument = ref(null)
 const selectedWorkflowIndex = ref(0)
 const sortColumn = ref('')
@@ -2046,6 +2127,8 @@ function handleFileUpload(e) {
     })
     const fileCopy = new File([file], file.name, { type: file.type })
     uploadedFile.value = fileCopy
+    // Reset worksheet statuses when new file is uploaded
+    worksheetStatuses.value = {}
     console.log('Calling readFileData with file:', fileCopy.name)
     readFileData(fileCopy)
   } else {
@@ -2059,6 +2142,8 @@ function handleDrop(e) {
   if (file) {
     const fileCopy = new File([file], file.name, { type: file.type })
     uploadedFile.value = fileCopy
+    // Reset worksheet statuses when new file is uploaded
+    worksheetStatuses.value = {}
     readFileData(fileCopy)
   }
 }
@@ -2315,11 +2400,8 @@ async function handleWorkOnSheet(sheetName) {
 function handleViewResults(sheetName) {
   const status = worksheetStatus.value[sheetName]
   if (status?.processed) {
-    if (status.sheetType === 'single') {
-      activeTab.value = 'summary'
-    } else {
-      activeTab.value = 'calculations'
-    }
+    // Both single and multi instruments should show calculations tab
+    activeTab.value = 'calculations'
   }
 }
 
@@ -2521,6 +2603,12 @@ function openWorkbookViewer() {
   if (!currentSheetName.value && workbookSheets.value.length) {
     currentSheetName.value = workbookSheets.value[0].name
   }
+  
+  // Load worksheet statuses from session
+  if (activeSession.value?.id) {
+    loadWorksheetStatuses()
+  }
+  
   showWorkbookViewer.value = true
 }
 
@@ -2538,19 +2626,9 @@ function workOnSelectedSheet() {
     return
   }
   
-  const sheet = workbookSheets.value.find(s => s.name === currentSheetName.value)
-  console.log('Found sheet:', sheet)
-  
-  if (!sheet) {
-    console.log('ERROR: Sheet not found in workbookSheets')
-    alert('Sheet not found')
-    return
-  }
-  
-  if (!sheet.data || !sheet.data.length) {
-    console.log('ERROR: Sheet has no data')
-    console.log('sheet.data:', sheet.data)
-    alert('Sheet has no data to process')
+  if (!originalFileBuffer.value) {
+    console.log('ERROR: No file buffer available')
+    alert('File buffer not available')
     return
   }
   
@@ -2614,6 +2692,137 @@ async function autoDetectSingleInstrument() {
     console.error('Auto Detect error:', error)
     alert('Auto Detect failed: ' + error.message)
   }
+}
+
+// ================================================================
+// handleMultiTableDetect
+// ================================================================
+async function handleMultiTableDetect(event) {
+  console.log('=== Multi-Table Detect Started ===')
+  console.log('Sheet Name:', event.sheetName)
+  console.log('Number of tables:', event.tables.length)
+  console.log('Instrument Type:', event.instrumentType)
+
+  const detectedInstruments = []
+  
+  for (const table of event.tables) {
+    console.log(`Processing table: ${table.tableName}`)
+    console.log(`Table range: Row ${table.range.startRow + 1} - ${table.range.endRow + 1}, Col ${table.range.startCol} - ${table.range.endCol}`)
+    console.log(`Table data length:`, table.data?.length)
+    console.log(`Table data sample:`, table.data?.slice(0, 3))
+    
+    try {
+      // Extract only this table's data from the full sheet
+      const tableData = table.data
+      
+      // Create a minimal worksheet structure for this table only
+      const tableWorksheet = {
+        name: table.tableName,
+        data: tableData,
+        range: table.range
+      }
+      
+      // Run auto-detection directly on the table data (not the full file buffer)
+      const detectionResult = await autoDetectInstrumentFields(
+        originalFileBuffer.value,
+        event.sheetName,
+        requiredColumns.value,
+        event.instrumentType,
+        table.range,
+        tableData // Pass the table-specific data
+      )
+
+      console.log(`Detection result for ${table.tableName}:`, detectionResult)
+
+      if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
+        detectedInstruments.push({
+          tableName: table.tableName,
+          instrumentName: detectionResult.fields.Instrument || table.tableName,
+          fields: detectionResult.fields,
+          fieldsWithMetadata: detectionResult.fieldsWithMetadata,
+          currencies: detectionResult.currencies || [],
+          missingFields: detectionResult.missingFields || [],
+          range: table.range
+        })
+      }
+    } catch (error) {
+      console.error(`Error detecting table ${table.tableName}:`, error)
+    }
+  }
+
+  if (detectedInstruments.length > 0) {
+    console.log('=== Multi-Table Detection Complete ===')
+    console.log('Detected instruments:', detectedInstruments.length)
+    
+    // Store multi-table detection results
+    multiTableDetectionResults.value = detectedInstruments
+    
+    // Show multi-table detection success popup
+    showMultiTableDetectionSuccess.value = true
+    
+    // Close workbook viewer
+    showWorkbookViewer.value = false
+  } else {
+    alert('Auto Detect could not identify required fields in any selected table. Please try manual entry.')
+  }
+}
+
+// ================================================================
+// useMultiTableDetectedFields
+// ================================================================
+function useMultiTableDetectedFields() {
+  showMultiTableDetectionSuccess.value = false
+  showWorkbookViewer.value = false
+
+  console.log('=== Using Multi-Table Detected Fields ===')
+  console.log('Number of tables:', multiTableDetectionResults.value.length)
+
+  // Combine all detected fields from all tables into a single dataset
+  const combinedFields = {}
+  for (const instrument of multiTableDetectionResults.value) {
+    console.log('Merging fields from table:', instrument.tableName, instrument.fields)
+    // Merge all fields from this table into the combined object
+    for (const [key, fieldObj] of Object.entries(instrument.fields)) {
+      // Extract the actual value from the field object (which has { value, location, confidence })
+      const actualValue = fieldObj?.value || fieldObj
+      // If field already exists, keep the first one (or could merge differently based on requirements)
+      if (!combinedFields[key]) {
+        combinedFields[key] = actualValue
+      }
+    }
+  }
+
+  // Add instrument name from the first table or use worksheet name
+  if (!combinedFields.Instrument && multiTableDetectionResults.value.length > 0) {
+    combinedFields.Instrument = multiTableDetectionResults.value[0].instrumentName || 'Combined Instrument'
+  }
+
+  console.log('Combined fields from all tables:', combinedFields)
+  console.log('Number of combined fields:', Object.keys(combinedFields).length)
+
+  // Create single-row tabular data
+  const tabularData = [combinedFields]
+
+  // Set up for single-instrument workflow (since we're combining into one)
+  rawData.value = tabularData
+  originalRawData.value = JSON.parse(JSON.stringify(tabularData))
+  cleanedData.value = JSON.parse(JSON.stringify(tabularData)) // Also set cleanedData to avoid fallback issues
+  
+  const headers = Object.keys(combinedFields)
+  fileColumns.value = headers
+  originalFileColumns.value = [...headers]
+  
+  worksheetSelected.value = true
+  showPreview.value = true
+  sheetType.value = 'single'
+  mappingApplied.value = true
+  
+  // Set extracted values for single-instrument display
+  extractedValues.value = combinedFields
+  
+  console.log('Combined table data applied to preview:', tabularData)
+  console.log('Number of rows in tabularData:', tabularData.length)
+  console.log('Headers:', headers)
 }
 
 // ================================================================
@@ -2812,6 +3021,41 @@ function convertExtractedToTabular(extractedValues) {
   return [row]
 }
 
+function updateExtractedValue(key, value) {
+  extractedValues.value[key] = value
+  console.log(`Updated ${key}:`, value)
+}
+
+function clearExtractedValue(key) {
+  extractedValues.value[key] = 'N/A'
+  console.log(`Cleared ${key}`)
+}
+
+// NEW: Load worksheet statuses from session
+async function loadWorksheetStatuses() {
+  if (!activeSession.value?.id) return
+  
+  try {
+    const worksheets = await sessionManager.getAllWorksheets(activeSession.value.id)
+    worksheetStatuses.value = {}
+    for (const [name, data] of Object.entries(worksheets)) {
+      worksheetStatuses.value[name] = data.status || 'saved'
+    }
+    console.log('Loaded worksheet statuses:', worksheetStatuses.value)
+  } catch (err) {
+    console.error('Failed to load worksheet statuses:', err)
+  }
+}
+
+// NEW: Mark current worksheet as saved
+function markWorksheetAsSaved() {
+  const worksheetName = currentSheetName.value
+  if (worksheetName) {
+    worksheetStatuses.value[worksheetName] = 'saved'
+    console.log('Marked worksheet as saved:', worksheetName)
+  }
+}
+
 function findMatchingRequiredColumn(column, requiredColumns) {
   const lowerColumn = column.toLowerCase()
   return requiredColumns.find(req =>
@@ -2964,6 +3208,18 @@ function closeInstrumentExcelPopup() {
   showInstrumentExcelPopup.value = false
 }
 
+function continueWorkingOnCurrent() {
+  // Navigate to upload page to access workbook
+  console.log('Navigating to upload page to continue on current sheet:', currentSheetName.value)
+  switchTab('upload')
+}
+
+function chooseAnotherSheet() {
+  // Navigate to upload page to access workbook
+  console.log('Navigating to upload page to choose another sheet')
+  switchTab('upload')
+}
+
 function sortByColumn(col) {
   if (sortColumn.value === col) {
     sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
@@ -3002,44 +3258,112 @@ function exportInstrumentSummaryExcel() {
     const wb = XLSX.utils.book_new()
     const displayCols = getDisplayColumns()
 
-    const data = rows.map(row => {
-      const obj = {}
-      displayCols.forEach(col => {
-        let val = row[col] !== undefined ? row[col] : ''
-        if (isPercentageField(col)) {
-          val = formatForExcel(val, 'percentage', col)
-        } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
-          val = formatForExcel(val, 'money', col)
-        } else {
-          val = formatForExcel(val, 'number', col)
+    // NEW: Aggregate all worksheets from session
+    let allRows = [...rows]
+    
+    // Add rows from all saved worksheets in the session
+    if (activeSession.value?.id) {
+      sessionManager.getAllWorksheets(activeSession.value.id).then(worksheets => {
+        console.log('Aggregating data from worksheets:', Object.keys(worksheets))
+        
+        for (const [worksheetName, worksheetData] of Object.entries(worksheets)) {
+          if (worksheetData.instrumentSummary && worksheetData.instrumentSummary.rows) {
+            // Add worksheet name to each row if not present
+            const worksheetRows = worksheetData.instrumentSummary.rows.map(row => ({
+              ...row,
+              Worksheet: worksheetName
+            }))
+            allRows = [...allRows, ...worksheetRows]
+          }
         }
-        obj[col] = val
+        
+        console.log('Total rows after aggregation:', allRows.length)
+        
+        // Create Excel with aggregated data
+        const data = allRows.map(row => {
+          const obj = {}
+          displayCols.forEach(col => {
+            let val = row[col] !== undefined ? row[col] : ''
+            if (isPercentageField(col)) {
+              val = formatForExcel(val, 'percentage', col)
+            } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
+              val = formatForExcel(val, 'money', col)
+            } else {
+              val = formatForExcel(val, 'number', col)
+            }
+            obj[col] = val
+          })
+          return obj
+        })
+        const ws1 = XLSX.utils.json_to_sheet(data)
+        XLSX.utils.book_append_sheet(wb, ws1, 'Instruments')
+
+        const analytics = computeAnalytics(allRows)
+        const analyticsRows = Object.entries(analytics).map(([key, value]) => {
+          let formattedValue = value
+          if (isPercentageField(key)) {
+            formattedValue = formatForExcel(value, 'percentage', key)
+          } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('interest')) {
+            formattedValue = formatForExcel(value, 'money', key)
+          } else {
+            formattedValue = formatForExcel(value, 'number', key)
+          }
+          return { Metric: key, Value: formattedValue }
+        })
+        const ws2 = XLSX.utils.json_to_sheet(analyticsRows)
+        XLSX.utils.book_append_sheet(wb, ws2, 'Analytics')
+
+        XLSX.writeFile(wb, `instrument_summary_${Date.now()}.xlsx`)
+      }).catch(err => {
+        console.error('Failed to aggregate worksheets:', err)
+        // Fallback to current rows only
+        exportCurrentRowsOnly(wb, displayCols, rows)
       })
-      return obj
-    })
-    const ws1 = XLSX.utils.json_to_sheet(data)
-    XLSX.utils.book_append_sheet(wb, ws1, 'Instruments')
-
-    const analytics = computeAnalytics(rows)
-    const analyticsRows = Object.entries(analytics).map(([key, value]) => {
-      let formattedValue = value
-      if (isPercentageField(key)) {
-        formattedValue = formatForExcel(value, 'percentage', key)
-      } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('interest')) {
-        formattedValue = formatForExcel(value, 'money', key)
-      } else {
-        formattedValue = formatForExcel(value, 'number', key)
-      }
-      return { Metric: key, Value: formattedValue }
-    })
-    const ws2 = XLSX.utils.json_to_sheet(analyticsRows)
-    XLSX.utils.book_append_sheet(wb, ws2, 'Analytics')
-
-    XLSX.writeFile(wb, `instrument_summary_${Date.now()}.xlsx`)
+    } else {
+      // No session, export current rows only
+      exportCurrentRowsOnly(wb, displayCols, rows)
+    }
   } catch (e) {
     console.error(e)
     showSnackbar('Failed to export Excel: ' + e.message, 'error')
   }
+}
+
+function exportCurrentRowsOnly(wb, displayCols, rows) {
+  const data = rows.map(row => {
+    const obj = {}
+    displayCols.forEach(col => {
+      let val = row[col] !== undefined ? row[col] : ''
+      if (isPercentageField(col)) {
+        val = formatForExcel(val, 'percentage', col)
+      } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
+        val = formatForExcel(val, 'money', col)
+      } else {
+        val = formatForExcel(val, 'number', col)
+      }
+      obj[col] = val
+    })
+    return obj
+  })
+  const ws1 = XLSX.utils.json_to_sheet(data)
+  XLSX.utils.book_append_sheet(wb, ws1, 'Instruments')
+
+  const analytics = computeAnalytics(rows)
+  const analyticsRows = Object.entries(analytics).map(([key, value]) => {
+    let formattedValue = value
+    if (isPercentageField(key)) {
+      formattedValue = formatForExcel(value, 'percentage', key)
+    } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('interest')) {
+      formattedValue = formatForExcel(value, 'money', key)
+    } else {
+      formattedValue = formatForExcel(value, 'number', key)
+    }
+    return { Metric: key, Value: formattedValue }
+  })
+  const ws2 = XLSX.utils.json_to_sheet(analyticsRows)
+  XLSX.utils.book_append_sheet(wb, ws2, 'Analytics')
+
+  XLSX.writeFile(wb, `instrument_summary_${Date.now()}.xlsx`)
 }
 
 function openWorkflowPopup(row, idx) {
@@ -3511,6 +3835,7 @@ async function calculateMetrics() {
   console.log('🔍 Sending data to backend:', {
     instrumentType: instrumentType.value,
     rowCount: cleanedData.value.length,
+    sheetType: sheetType.value,
     sampleRow: cleanedData.value[0],
     columns: Object.keys(cleanedData.value[0] || {}),
     sessionId: activeSession.value?.id
@@ -3568,8 +3893,10 @@ async function calculateMetrics() {
 
           const agg = computeAggregate(mergedRows)
           const uniqueNames = new Set(mergedRows.map(r => r['Instrument Name']))
-          agg.instrumentCount = uniqueNames.size
+          // For single-instrument mode (multi-table combined), force count to 1
+          agg.instrumentCount = sheetType.value === 'single' ? 1 : uniqueNames.size
           console.log('🔍 Computed aggregate:', agg)
+          console.log('🔍 Instrument count set to:', agg.instrumentCount, '(sheetType:', sheetType.value + ')')
 
           allCalculations.value = agg
           selectedCalculations.value = agg
@@ -3624,8 +3951,10 @@ async function calculateMetrics() {
 
           const agg = computeAggregate(instrumentSummary.value.rows)
           const uniqueNames = new Set(instrumentSummary.value.rows.map(r => r['Instrument Name']))
-          agg.instrumentCount = uniqueNames.size
+          // For single-instrument mode, force count to 1
+          agg.instrumentCount = sheetType.value === 'single' ? 1 : uniqueNames.size
           console.log('🔍 Computed aggregate:', agg)
+          console.log('🔍 Instrument count set to:', agg.instrumentCount, '(sheetType:', sheetType.value + ')')
 
           allCalculations.value = agg
           selectedCalculations.value = agg
@@ -4278,6 +4607,7 @@ async function saveToSession() {
   console.log('=== saveToSession START ===')
   console.log('Session ID:', activeSession.value?.id)
   console.log('Current version count BEFORE save:', activeSession.value?.version_count)
+  console.log('Current worksheet:', currentSheetName.value)
   
   if (!activeSession.value || !activeSession.value.id) {
     isSavingVersion = false
@@ -4287,6 +4617,7 @@ async function saveToSession() {
   }
 
   const sid = activeSession.value.id
+  const worksheetName = currentSheetName.value || 'Unknown'
 
   try {
     // First, fetch the ACTUAL current version count from database
@@ -4317,8 +4648,33 @@ async function saveToSession() {
       formulas: formulas.value,
       uploadedFile: uploadedFile.value?.name || null,
       cleaningStats: cleaningStats.value,
-      sessionSavedAt: new Date().toISOString()
+      sessionSavedAt: new Date().toISOString(),
+      instrumentType: instrumentType.value,
+      sheetType: sheetType.value
     }
+
+    // NEW: Save worksheet data to session (for multi-worksheet support)
+    console.log('Saving worksheet data for:', worksheetName)
+    const worksheetData = {
+      worksheetName,
+      workbookName: uploadedFile.value?.name || 'Workbook',
+      instrumentType: instrumentType.value,
+      sheetType: sheetType.value,
+      rawData: rawData.value,
+      cleanedData: cleanedData.value,
+      calculations: calculations.value,
+      allCalculations: allCalculations.value,
+      selectedCalculations: selectedCalculations.value,
+      columnMapping: columnMapping.value,
+      instrumentSummary: instrumentSummary.value,
+      extractedValues: extractedValues.value,
+      timestamp: Date.now()
+    }
+    await sessionManager.saveWorksheetData(sid, worksheetName, worksheetData)
+    console.log('Worksheet data saved successfully')
+    
+    // Mark current worksheet as saved
+    markWorksheetAsSaved()
 
     // Step 1: Save workflow data (NO version creation)
     console.log('Step 1: Saving workflow data...')
@@ -4603,6 +4959,32 @@ const reportPreviewData = computed(() => {
     { key: 'bonds', label: 'Bonds' },
     { key: 'tbills', label: 'T-Bills' }
   ]
+  
+  // NEW: Aggregate data from all worksheets in session
+  let allSummaryRows = [...(instrumentSummary.value.rows || [])]
+  
+  // Add rows from all saved worksheets in the session
+  if (activeSession.value?.id) {
+    sessionManager.getAllWorksheets(activeSession.value.id).then(worksheets => {
+      console.log('Aggregating report data from worksheets:', Object.keys(worksheets))
+      
+      for (const [worksheetName, worksheetData] of Object.entries(worksheets)) {
+        if (worksheetData.instrumentSummary && worksheetData.instrumentSummary.rows) {
+          // Add worksheet name to each row if not present
+          const worksheetRows = worksheetData.instrumentSummary.rows.map(row => ({
+            ...row,
+            Worksheet: worksheetName
+          }))
+          allSummaryRows = [...allSummaryRows, ...worksheetRows]
+        }
+      }
+      
+      console.log('Total rows after aggregation for report:', allSummaryRows.length)
+    }).catch(err => {
+      console.error('Failed to aggregate worksheets for report:', err)
+    })
+  }
+  
   for (const type of instrumentTypes) {
     const key = type.key
     const selected = selectedInstruments.value[key]
@@ -4613,8 +4995,10 @@ const reportPreviewData = computed(() => {
       }
     }
   }
-  if (instrumentsData.length === 0 && instrumentSummary.value.rows.length > 0) {
-    const summaryRows = instrumentSummary.value.rows
+  
+  // Use aggregated summary rows if no instrument data found
+  if (instrumentsData.length === 0 && allSummaryRows.length > 0) {
+    const summaryRows = allSummaryRows
     const grouped = {}
     summaryRows.forEach(row => {
       const type = row['Instrument Type'] || 'unknown'
@@ -5480,6 +5864,29 @@ onBeforeUnmount(() => {
 .missing-fields-warning p { margin: 0 0 8px 0; font-weight: 600; color: #E65100; font-size: 14px; }
 .missing-fields-warning ul { margin: 0; padding-left: 20px; }
 .missing-fields-warning li { color: #E65100; font-size: 13px; margin-bottom: 4px; }
+
+.multi-table-summary { padding: 12px 16px; background: #e8f5e9; border-radius: 8px; border-left: 4px solid #4CAF50; margin-bottom: 16px; font-size: 14px; color: #2E7D32; }
+
+.multi-instruments-list { display: flex; flex-direction: column; gap: 16px; max-height: 400px; overflow-y: auto; }
+
+.multi-instrument-item { padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
+
+.multi-instrument-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e0e0e0; }
+
+.table-name-badge { background: #0B2044; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+
+.multi-instrument-fields { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+
+.multi-detected-field-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-radius: 6px; border-left: 3px solid #4CAF50; }
+
+.multi-detected-field-label { font-weight: 600; color: #0B2044; font-size: 13px; }
+
+.multi-detected-field-value { font-weight: 700; color: #2E7D32; font-size: 14px; }
+
+.multi-missing-fields { padding: 8px 12px; background: #FFF3E0; border-radius: 6px; border-left: 3px solid #FF9800; font-size: 12px; }
+
+.multi-missing-fields .missing-label { font-weight: 600; color: #E65100; margin-right: 6px; }
+
 .saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }
 .saved-mappings-popup-body { padding: 20px 24px; }
 .saved-mappings-list { display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto; }
@@ -5500,6 +5907,60 @@ onBeforeUnmount(() => {
 .btn-close-dialog:hover { background: #f0f0f0; color: #0B2044; }
 .excel-dialog-content { padding: 0; height: calc(100vh - 140px); }
 .required-columns { margin: 20px 0; }
+
+.value-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  background: white;
+  transition: border-color 0.2s;
+}
+
+.value-input:focus {
+  outline: none;
+  border-color: #0B2044;
+  box-shadow: 0 0 0 2px rgba(11, 32, 68, 0.1);
+}
+
+.value-input.placeholder {
+  color: #999;
+  font-style: italic;
+}
+
+.btn-clear-value {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.btn-clear-value:hover {
+  opacity: 1;
+}
+
+.row-value {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
 .required-columns h4 { color: #0B2044; font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .required-columns h4::before { content: '📋'; font-size: 18px; }
 

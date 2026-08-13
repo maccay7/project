@@ -24,7 +24,9 @@ class SessionManager {
         version_count: m.version_count || 0,
         total_value: m.total_value || 0,
         instrumentWorkflow: null,
-        versions: null
+        versions: null,
+        worksheets: m.worksheets || {},
+        workbookName: m.workbookName || null
       }))
     } catch {
       this.sessions = []
@@ -42,7 +44,9 @@ class SessionManager {
       created_at: s.created_at || s.date,
       instrument_count: s.instrument_count || 0,
       version_count: s.version_count || 0,
-      total_value: s.total_value || 0
+      total_value: s.total_value || 0,
+      worksheets: s.worksheets || {},
+      workbookName: s.workbookName || null
     }))
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(metadata))
@@ -99,6 +103,8 @@ class SessionManager {
           total_value: data.total_value || 0,
           instrumentWorkflow: data.instrument_workflows || {},
           versions: data.versions || [],
+          worksheets: data.worksheets || {},
+          workbookName: data.workbookName || null
         }
         const idx = this.sessions.findIndex(s => s.id === mapped.id)
         if (idx !== -1) {
@@ -172,6 +178,8 @@ class SessionManager {
 
     const existingVersions = this.sessions[idx].versions || []
     const existingWorkflows = this.sessions[idx].instrumentWorkflow || {}
+    const existingWorksheets = this.sessions[idx].worksheets || {}
+    const existingWorkbookName = this.sessions[idx].workbookName || null
     this.sessions[idx] = { ...this.sessions[idx], ...updates, timestamp: Date.now() }
     
     if (!updates.versions) {
@@ -179,6 +187,12 @@ class SessionManager {
     }
     if (!updates.instrumentWorkflow) {
       this.sessions[idx].instrumentWorkflow = existingWorkflows
+    }
+    if (!updates.worksheets) {
+      this.sessions[idx].worksheets = existingWorksheets
+    }
+    if (!updates.workbookName) {
+      this.sessions[idx].workbookName = existingWorkbookName
     }
     this.saveCache()
 
@@ -193,6 +207,8 @@ class SessionManager {
         versions: this.sessions[idx].versions || [],
         instrument_count: this.sessions[idx].instrument_count || 0,
         version_count: this.sessions[idx].version_count || 0,
+        worksheets: this.sessions[idx].worksheets || {},
+        workbookName: this.sessions[idx].workbookName || null
       })
     } catch (err) {
       console.error('Failed to update session on backend:', err)
@@ -247,6 +263,50 @@ class SessionManager {
     }
 
     await this.getSession(sessionId)
+  }
+
+  // NEW: Save worksheet data to session
+  async saveWorksheetData(sessionId, worksheetName, worksheetData) {
+    const session = await this.getSession(sessionId)
+    if (!session) return
+
+    // Initialize worksheets structure if not exists
+    const worksheets = session.worksheets || {}
+    
+    // Save/update worksheet data
+    worksheets[worksheetName] = {
+      ...worksheetData,
+      timestamp: Date.now(),
+      status: 'saved'
+    }
+
+    // Update session
+    await this.updateSession(sessionId, {
+      worksheets,
+      workbookName: worksheetData.workbookName || session.workbookName || 'Workbook'
+    })
+
+    console.log('Saved worksheet data:', worksheetName, 'to session:', sessionId)
+  }
+
+  // NEW: Get worksheet data from session
+  async getWorksheetData(sessionId, worksheetName) {
+    const session = await this.getSession(sessionId)
+    if (!session || !session.worksheets) return null
+    return session.worksheets[worksheetName] || null
+  }
+
+  // NEW: Get all worksheets from session
+  async getAllWorksheets(sessionId) {
+    const session = await this.getSession(sessionId)
+    if (!session || !session.worksheets) return {}
+    return session.worksheets
+  }
+
+  // NEW: Get worksheet status
+  async getWorksheetStatus(sessionId, worksheetName) {
+    const data = await this.getWorksheetData(sessionId, worksheetName)
+    return data ? data.status : null
   }
 
   async getInstrumentWorkflow(sessionId, instrumentKey) {

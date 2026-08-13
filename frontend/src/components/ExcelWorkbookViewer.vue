@@ -78,6 +78,9 @@
         <v-icon size="16" class="sheet-icon">mdi-table</v-icon>
         {{ sheet.name }}
         <span v-if="sheet.total_rows" class="sheet-row-count">({{ sheet.total_rows }} rows)</span>
+        <span v-if="worksheetStatuses[sheet.name] === 'saved'" class="sheet-status-badge saved">
+          <v-icon size="12">mdi-check-circle</v-icon>
+        </span>
       </div>
     </div>
 
@@ -87,14 +90,47 @@
         <v-icon size="16" class="table-icon">mdi-table-large</v-icon>
         <span>Detected Tables ({{ detectedTables.length }})</span>
       </div>
+      <div class="table-mode-toggle">
+        <button 
+          class="mode-toggle-btn" 
+          :class="{ active: !isMultiTableMode }"
+          @click="isMultiTableMode = false"
+        >
+          Single Table
+        </button>
+        <button 
+          class="mode-toggle-btn" 
+          :class="{ active: isMultiTableMode }"
+          @click="isMultiTableMode = true"
+        >
+          Multi-Table Select
+        </button>
+      </div>
       <div class="table-buttons">
         <button
           v-for="(table, index) in detectedTables"
           :key="index"
           class="table-select-btn"
-          @click="selectTable(table)"
+          :class="{ 
+            'table-selected': isMultiTableMode && selectedTables.has(index),
+            'table-isolated': !isMultiTableMode && selectedTable === table
+          }"
+          @click="isMultiTableMode ? toggleTableSelection(index, table) : selectTable(table)"
         >
+          <span v-if="isMultiTableMode" class="table-checkbox">
+            {{ selectedTables.has(index) ? '✓' : '○' }}
+          </span>
           {{ table.name }} (Row {{ table.startRow + 1 }} - {{ table.endRow + 1 }})
+        </button>
+      </div>
+      <div v-if="isMultiTableMode && selectedTables.size > 0" class="multi-table-actions">
+        <button class="btn-auto-detect-multi" @click="autoDetectSelectedTables">
+          <v-icon size="16">mdi-magnify</v-icon>
+          Auto Detect Selected Tables ({{ selectedTables.size }})
+        </button>
+        <button class="btn-clear-selection" @click="clearTableSelection">
+          <v-icon size="16">mdi-close</v-icon>
+          Clear Selection
         </button>
       </div>
     </div>
@@ -233,10 +269,14 @@ const props = defineProps({
   instrumentType: {
     type: String,
     default: 'money-market'
+  },
+  worksheetStatuses: {
+    type: Object,
+    default: () => ({})
   }
 })
 
-const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated'])
+const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect'])
 
 // ===== STATE =====
 const sheets = ref([])
@@ -254,6 +294,8 @@ const selectedTable = ref(null)
 const isTableIsolationMode = ref(false)
 const isSingleInstrumentSheet = ref(false)
 const extractedPreviewValues = ref({})
+const selectedTables = ref(new Set()) // For multi-table selection
+const isMultiTableMode = ref(false)
 
 // ===== COMPUTED =====
 const activeSheet = computed(() => sheets.value[activeSheetIndex.value] || null)
@@ -651,6 +693,62 @@ function exitTableIsolation() {
   isTableIsolationMode.value = false
 }
 
+function toggleTableSelection(index, table) {
+  if (selectedTables.value.has(index)) {
+    selectedTables.value.delete(index)
+  } else {
+    selectedTables.value.add(index)
+  }
+}
+
+function clearTableSelection() {
+  selectedTables.value.clear()
+}
+
+function autoDetectSelectedTables() {
+  if (selectedTables.value.size === 0) {
+    alert('Please select at least one table')
+    return
+  }
+
+  const selectedTableData = []
+  for (const index of selectedTables.value) {
+    const table = detectedTables.value[index]
+    if (table && activeSheet.value && activeSheet.value.fullData) {
+      const tableData = {
+        tableIndex: index,
+        tableName: table.name,
+        sheetName: activeSheet.value.name,
+        range: {
+          startRow: table.startRow,
+          endRow: table.endRow,
+          startCol: table.startCol,
+          endCol: table.endCol
+        },
+        data: []
+      }
+
+      // Extract table data
+      for (let row = table.startRow; row <= table.endRow; row++) {
+        if (activeSheet.value.fullData[row]) {
+          tableData.data.push(
+            activeSheet.value.fullData[row].slice(table.startCol, table.endCol + 1)
+          )
+        }
+      }
+
+      selectedTableData.push(tableData)
+    }
+  }
+
+  // Emit to parent for auto-detection
+  emit('multi-table-detect', {
+    sheetName: activeSheet.value.name,
+    tables: selectedTableData,
+    instrumentType: props.instrumentType
+  })
+}
+
 function formatFieldName(key) {
   const fieldMapping = {
     faceValue: 'Face Value',
@@ -1033,6 +1131,19 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
   margin-left: 4px;
 }
 
+.sheet-status-badge {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.sheet-status-badge.saved {
+  background-color: #4CAF50;
+  color: white;
+}
+
 .table-detection-panel {
   display: flex;
   flex-direction: column;
@@ -1056,26 +1167,117 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
   color: #0B2044;
 }
 
-.table-buttons {
+.table-mode-toggle {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 4px;
 }
 
-.table-select-btn {
-  padding: 4px 12px;
-  background: #fff;
-  border: 1px solid #0B2044;
+.mode-toggle-btn {
+  flex: 1;
+  padding: 6px 12px;
+  background: #e0e0e0;
+  border: 1px solid #c0c0c0;
   border-radius: 4px;
   cursor: pointer;
   font-size: 11px;
-  color: #0B2044;
+  color: #333;
+  transition: all 0.2s;
+}
+
+.mode-toggle-btn:hover {
+  background: #d0d0d0;
+}
+
+.mode-toggle-btn.active {
+  background: #0B2044;
+  color: white;
+  border-color: #0B2044;
+}
+
+.table-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.table-select-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: white;
+  border: 1px solid #c0c0c0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #333;
   transition: all 0.2s;
 }
 
 .table-select-btn:hover {
+  background: #f0f0f0;
+  border-color: #0B2044;
+}
+
+.table-select-btn.table-selected {
+  background: #e8f0fe;
+  border-color: #0B2044;
+  color: #0B2044;
+  font-weight: 500;
+}
+
+.table-select-btn.table-isolated {
+  background: #d4edda;
+  border-color: #28a745;
+  color: #155724;
+}
+
+.table-checkbox {
+  font-weight: bold;
+  color: #0B2044;
+}
+
+.multi-table-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn-auto-detect-multi {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
   background: #0B2044;
-  color: #fff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.btn-auto-detect-multi:hover {
+  background: #1a3a6e;
+}
+
+.btn-clear-selection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #f0f0f0;
+  color: #666;
+  border: 1px solid #c0c0c0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.2s;
+}
+
+.btn-clear-selection:hover {
+  background: #e0e0e0;
 }
 
 .table-isolation-header {

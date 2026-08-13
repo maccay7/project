@@ -149,74 +149,114 @@ function isDateLike(value) {
  * @param {string} sheetName - Name of the sheet to analyze
  * @param {Array} requiredColumns - Array of required column names for the instrument
  * @param {string} instrumentType - Type of instrument (bonds, money-market, treasury-bills)
+ * @param {Object} tableRange - Optional table boundaries {startRow, endRow, startCol, endCol}
+ * @param {Array} tableData - Optional pre-extracted table data (2D array)
  * @returns {Object} Detected fields, currencies, and missing fields
  */
-export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumns, instrumentType) {
+export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumns, instrumentType, tableRange = null, tableData = null) {
   // Parse workbook from buffer
   console.log('=== autoDetectInstrumentFields Started ===')
   console.log('Sheet Name:', sheetName)
   console.log('Instrument Type:', instrumentType)
   console.log('Required Columns:', requiredColumns)
+  console.log('Table Range:', tableRange)
+  console.log('Table Data Provided:', !!tableData)
 
   if (!fileBuffer || !sheetName) {
     throw new Error('File buffer and sheet name are required')
   }
 
-  const workbook = XLSX.read(fileBuffer, { type: 'array', cellStyles: true, cellFormula: true, cellDates: true, cellNF: true })
-  const worksheet = workbook.Sheets[sheetName]
+  let data = []
   
-  if (!worksheet) {
-    console.error('Worksheet not found:', sheetName)
-    return { fields: {}, currencies: [], missingFields: requiredColumns }
-  }
-
-  // Get the full range of the worksheet - expand to capture all data
-  let range
-  if (worksheet['!ref']) {
-    range = XLSX.utils.decode_range(worksheet['!ref'])
+  // If tableData is provided, use it directly (for multi-table detection)
+  if (tableData && Array.isArray(tableData) && tableData.length > 0) {
+    console.log('Using provided table data:', tableData.length, 'rows')
+    console.log('Table data sample:', tableData.slice(0, 3))
+    data = tableData
   } else {
-    // If no ref defined, scan the entire sheet up to reasonable limits
-    range = { s: { r: 0, c: 0 }, e: { r: 1000, c: 100 } }
-  }
-  
-  // Expand range to capture all data by scanning for actual content
-  let maxRow = 0
-  let maxCol = 0
-  for (const cellAddress in worksheet) {
-    if (cellAddress.startsWith('!')) continue
-    const cellRef = XLSX.utils.decode_cell(cellAddress)
-    if (cellRef.r > maxRow) maxRow = cellRef.r
-    if (cellRef.c > maxCol) maxCol = cellRef.c
-  }
-  
-  // Use the expanded range if it's larger than the defined range
-  if (maxRow > range.e.r) range.e.r = maxRow
-  if (maxCol > range.e.c) range.e.c = maxCol
-  
-  console.log('Worksheet Range:', worksheet['!ref'], 'Expanded to:', XLSX.utils.encode_range(range))
-  console.log('Rows:', range.e.r + 1, 'Cols:', range.e.c + 1)
-
-  // Convert worksheet to 2D array for scanning
-  const data = []
-  for (let R = range.s.r; R <= range.e.r; R++) {
-    const row = []
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
-      const cell = worksheet[cellAddress]
-      if (cell) {
-        row.push(cell.w ?? cell.v ?? '')
-      } else {
-        row.push('')
-      }
+    // Otherwise, parse the entire worksheet (for single-table detection)
+    const workbook = XLSX.read(fileBuffer, { type: 'array', cellStyles: true, cellFormula: true, cellDates: true, cellNF: true })
+    const worksheet = workbook.Sheets[sheetName]
+    
+    if (!worksheet) {
+      console.error('Worksheet not found:', sheetName)
+      return { fields: {}, currencies: [], missingFields: requiredColumns }
     }
-    data.push(row)
+
+    // Get the full range of the worksheet - expand to capture all data
+    let range
+    if (worksheet['!ref']) {
+      range = XLSX.utils.decode_range(worksheet['!ref'])
+    } else {
+      // If no ref defined, scan the entire sheet up to reasonable limits
+      range = { s: { r: 0, c: 0 }, e: { r: 1000, c: 100 } }
+    }
+    
+    // Expand range to capture all data by scanning for actual content
+    let maxRow = 0
+    let maxCol = 0
+    for (const cellAddress in worksheet) {
+      if (cellAddress.startsWith('!')) continue
+      const cellRef = XLSX.utils.decode_cell(cellAddress)
+      if (cellRef.r > maxRow) maxRow = cellRef.r
+      if (cellRef.c > maxCol) maxCol = cellRef.c
+    }
+    
+    // Use the expanded range if it's larger than the defined range
+    if (maxRow > range.e.r) range.e.r = maxRow
+    if (maxCol > range.e.c) range.e.c = maxCol
+    
+    console.log('Worksheet Range:', worksheet['!ref'], 'Expanded to:', XLSX.utils.encode_range(range))
+    console.log('Rows:', range.e.r + 1, 'Cols:', range.e.c + 1)
+
+    // Convert worksheet to 2D array for scanning
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      const row = []
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
+        const cell = worksheet[cellAddress]
+        if (cell) {
+          row.push(cell.w ?? cell.v ?? '')
+        } else {
+          row.push('')
+        }
+      }
+      data.push(row)
+    }
   }
   
   console.log('Extracted Data Dimensions:', data.length, 'rows x', data[0]?.length || 0, 'cols')
   console.log('Sample Data (first 3 rows):', data.slice(0, 3))
 
   // Detect table boundaries for single-instrument detection
-  const tableBoundaries = detectTableBoundaries(data)
+  // If tableRange is provided (multi-table mode), use it directly
+  let tableBoundaries
+  if (tableRange) {
+    // When tableData is provided, the data is already extracted as a 0-based array
+    // So we need to adjust boundaries to be relative to the table data (0-based)
+    if (tableData) {
+      tableBoundaries = {
+        startRow: 0,
+        endRow: data.length - 1,
+        startCol: 0,
+        endCol: data[0]?.length - 1 || 0
+      }
+      console.log('Using relative table boundaries for multi-table detection:', tableBoundaries)
+    } else {
+      // When no tableData, use absolute coordinates (single-table mode with range)
+      tableBoundaries = {
+        startRow: tableRange.startRow,
+        endRow: tableRange.endRow,
+        startCol: tableRange.startCol,
+        endCol: tableRange.endCol
+      }
+      console.log('Using provided table range for single-table detection:', tableBoundaries)
+    }
+  } else {
+    // Otherwise, detect boundaries from the data (single-table mode)
+    tableBoundaries = detectTableBoundaries(data)
+  }
+  
   const tableOrientation = detectTableOrientation(data, tableBoundaries)
   
   console.log('=== SINGLE INSTRUMENT DETECTION CONTEXT ===')
@@ -1152,19 +1192,36 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   console.log('Total detected fields:', Object.keys(detectedFields).length)
   console.log('Missing fields:', requiredColumns.filter(col => !detectedFields[col]))
 
-  // CRITICAL: For single-instrument detection, instrument name MUST come from worksheet name
-  // Never use detected Instrument Name, Bond Name, T-Bill Name, Security, etc. from cells
+  // CRITICAL: Instrument name handling
+  // For single-instrument detection (no tableData provided), instrument name MUST come from worksheet name
+  // For multi-table detection (tableData provided), use detected "Instrument" field or table name
   if (requiredColumns.includes('Instrument Name') || requiredColumns.includes('BondName') || requiredColumns.includes('TBillName')) {
     const instrumentNameField = requiredColumns.includes('Instrument Name') ? 'Instrument Name' : 
                                 requiredColumns.includes('BondName') ? 'BondName' : 'TBillName'
     
-    // Force instrument name to be the worksheet name
-    detectedFields[instrumentNameField] = {
-      value: sheetName,
-      location: 'Worksheet Name',
-      confidence: 1.0
+    if (tableData) {
+      // Multi-table mode: use detected Instrument field if available, otherwise use a placeholder
+      if (detectedFields['Instrument']) {
+        detectedFields[instrumentNameField] = detectedFields['Instrument']
+      } else if (detectedFields['Counterparty']) {
+        detectedFields[instrumentNameField] = detectedFields['Counterparty']
+      } else {
+        // Fallback to a generic name based on table position
+        detectedFields[instrumentNameField] = {
+          value: 'Instrument',
+          location: 'N/A',
+          confidence: 0.5
+        }
+      }
+    } else {
+      // Single-table mode: Force instrument name to be the worksheet name
+      detectedFields[instrumentNameField] = {
+        value: sheetName,
+        location: 'Worksheet Name',
+        confidence: 1.0
+      }
+      console.log(`FORCED: ${instrumentNameField} = "${sheetName}" (from worksheet name)`)
     }
-    console.log(`FORCED: ${instrumentNameField} = "${sheetName}" (from worksheet name)`)
   }
 
   // Convert detected fields to simple value format for backward compatibility
