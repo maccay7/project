@@ -1236,6 +1236,13 @@ def calculations_routes(app):
             print(f"DEBUG Money Market endpoint: first row sample = {data[0]}")
         
         try:
+            # Detect instruments from Instrument column BEFORE normalization (to preserve original names)
+            instrument_detection = detect_instruments_from_data(data)
+            print(f"DEBUG Money Market endpoint: instrument_detection = {instrument_detection}")
+            
+            # Store original data for extracting instrument names before normalization
+            original_data = data.copy() if data else []
+            
             # Apply column mapping if provided
             if column_mapping and data:
                 from routes.mapping import apply_column_mapping
@@ -1253,12 +1260,33 @@ def calculations_routes(app):
             if data and len(data) > 0:
                 result = calculate_data(data, 'money-market')
                 attach_fred_to_calculation(result, 'money-market', maturity, country, currency)
+                
+                # Extract instrument names from ORIGINAL data (before normalization) for single-instrument case
+                instrument_names = []
+                instrument_column = instrument_detection.get('instrument_column')
+                if instrument_column:
+                    for row in original_data:
+                        inst_name = row.get(instrument_column)
+                        if inst_name and str(inst_name).strip() not in instrument_names:
+                            instrument_names.append(str(inst_name).strip())
+                
+                print(f"🔍 Extracted instrument names for money-market: {instrument_names}")
+                
+                # Set instrument_count to actual unique instrument count
+                result['instrumentCount'] = len(instrument_names) if instrument_names else 1
+                
                 # Save calculation asynchronously - don't block response
                 try:
-                    save_calculation('money-market', data, result, dataset_id, session_id, sheet_name, section_id)
+                    save_calculation('money-market', data, result, dataset_id, session_id, sheet_name, section_id, instrument_names)
                 except Exception as save_error:
                     print(f"⚠️ Failed to save calculation to database (non-blocking): {save_error}")
-                return jsonify({'success': True, 'instrument_type': 'money-market', 'data': result})
+                
+                return jsonify({
+                    'success': True, 
+                    'instrument_type': 'money-market', 
+                    'data': result,
+                    'instrument_names': instrument_names
+                })
             else:
                 # Fall back to old single-instrument calculation
                 results = calculate_money_market(inputs, benchmark_yield, inflation_rate)
@@ -1299,6 +1327,13 @@ def calculations_routes(app):
             return jsonify({'success': False, 'message': 'No data provided'}), 400
         
         try:
+            # Detect instruments from Instrument column BEFORE normalization (to preserve original names)
+            instrument_detection = detect_instruments_from_data(data)
+            print(f"DEBUG Comprehensive endpoint: instrument_detection = {instrument_detection}")
+            
+            # Store original data for extracting instrument names before normalization
+            original_data = data.copy() if data else []
+            
             # Apply column mapping if provided
             if column_mapping and data:
                 from routes.mapping import apply_column_mapping
@@ -1311,9 +1346,6 @@ def calculations_routes(app):
                 normalized_data = [normalize_row(row) for row in data]
                 print(f"Applied semantic normalization to {len(normalized_data)} rows")
                 data = normalized_data
-            
-            # Detect instruments from Instrument column (multi-instrument support)
-            instrument_detection = detect_instruments_from_data(data)
             
             if instrument_detection['is_multi_instrument']:
                 # Multi-instrument data - split and calculate each type separately
@@ -1332,14 +1364,33 @@ def calculations_routes(app):
                         result = calculate_data(inst_data, inst_type)
                         attach_fred_to_calculation(result, inst_type, maturity, country, currency)
                         
-                        # Save each instrument calculation separately
-                        calc_id = save_calculation(inst_type, inst_data, result, dataset_id, session_id, sheet_name, section_id)
+                        # Extract actual instrument names from ORIGINAL data (before normalization) for this instrument type
+                        instrument_names = []
+                        if instrument_column:
+                            # Find rows in original data that match this instrument type
+                            for row in original_data:
+                                inst_value = row.get(instrument_column)
+                                if inst_value:
+                                    normalized_inst = normalize_instrument_type(str(inst_value).strip())
+                                    if normalized_inst == inst_type:
+                                        inst_name = str(inst_value).strip()
+                                        if inst_name not in instrument_names:
+                                            instrument_names.append(inst_name)
+                        
+                        print(f"🔍 Extracted instrument names for {inst_type}: {instrument_names}")
+                        
+                        # Save each instrument calculation separately with actual instrument names
+                        calc_id = save_calculation(inst_type, inst_data, result, dataset_id, session_id, sheet_name, section_id, instrument_names)
+                        
+                        # Set instrument_count to the actual number of unique instruments from the column
+                        result['instrumentCount'] = len(instrument_names) if instrument_names else 1
                         
                         all_results[inst_type] = {
                             'data': result,
                             'calculation_id': calc_id,
                             'row_count': len(inst_data),
-                            'instrument_count': result.get('instrumentCount', 1)
+                            'instrument_count': len(instrument_names) if instrument_names else 1,
+                            'instrument_names': instrument_names
                         }
                         calculation_count += 1
                 
@@ -1377,7 +1428,21 @@ def calculations_routes(app):
                 result = calculate_data(data, instrument_type)
                 attach_fred_to_calculation(result, instrument_type, maturity, country, currency)
                 
-                save_calculation(instrument_type, data, result, dataset_id, session_id, sheet_name, section_id)
+                # Extract instrument names from ORIGINAL data (before normalization) for single-instrument case
+                instrument_names = []
+                instrument_column = instrument_detection.get('instrument_column')
+                if instrument_column:
+                    for row in original_data:
+                        inst_name = row.get(instrument_column)
+                        if inst_name and str(inst_name).strip() not in instrument_names:
+                            instrument_names.append(str(inst_name).strip())
+                
+                print(f"🔍 Extracted instrument names for comprehensive single-instrument case: {instrument_names}")
+                
+                # Set instrument_count to actual unique instrument count
+                result['instrumentCount'] = len(instrument_names) if instrument_names else 1
+                
+                save_calculation(instrument_type, data, result, dataset_id, session_id, sheet_name, section_id, instrument_names)
                 
                 instrument_summary = generate_instrument_summary(session_id, instrument_type) if session_id else {'columns': [], 'rows': []}
                 portfolio_summary = generate_portfolio_summary(session_id) if session_id else {'columns': [], 'rows': [], 'portfolio_total': 0}
