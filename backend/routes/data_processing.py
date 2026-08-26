@@ -91,8 +91,14 @@ def extract_labelled_values(sheet):
     return pairs
 
 def parse_intelligent_excel(file_path, instrument_type):
+    """
+    Parse Excel file with intelligent field detection.
+    NO MOCK OR FALLBACK DATA - returns actual data only.
+    """
     workbook = openpyxl.load_workbook(file_path, data_only=True)
     all_rows = []
+    warnings = []
+    
     required_mapping = {
         'money-market': {
             'Rate': ['rate', 'interest rate', 'yield'],
@@ -112,6 +118,7 @@ def parse_intelligent_excel(file_path, instrument_type):
         }
     }
     mapping = required_mapping.get(instrument_type, {})
+    
     for sheet_name in workbook.sheetnames:
         sheet = workbook[sheet_name]
         table = extract_table_from_sheet(sheet)
@@ -126,6 +133,21 @@ def parse_intelligent_excel(file_path, instrument_type):
                     for k, v in labels.items():
                         if k not in row:
                             row[k] = v
+    
+    if not all_rows:
+        warnings.append("No data found in Excel file")
+        workbook.close()
+        return {
+            'sheets': [],
+            'metadata': {
+                'sheet_names': workbook.sheetnames,
+                'sheet_count': len(workbook.sheetnames),
+                'total_rows': 0,
+                'total_columns': 0
+            },
+            'warnings': warnings
+        }
+    
     mapped_rows = []
     for row in all_rows:
         new_row = {}
@@ -139,7 +161,14 @@ def parse_intelligent_excel(file_path, instrument_type):
                         if any(term in col.lower() for term in search_terms):
                             found = val
                             break
-            new_row[req_col] = found if found is not None else ''
+            # NO DEFAULT - use None if not found
+            new_row[req_col] = found if found is not None else None
+        
+        # Preserve unmapped columns
+        for key, value in row.items():
+            if key not in mapping:
+                new_row[key] = value
+        
         mapped_rows.append(new_row)
     
     workbook.close()
@@ -158,10 +187,14 @@ def parse_intelligent_excel(file_path, instrument_type):
             'total_rows': len(mapped_rows),
             'total_columns': len(mapping.keys()) if mapping else 0
         },
-        'warnings': []
+        'warnings': warnings
     }
 
 def clean_data(data, cleaning_options):
+    """
+    Clean data based on options.
+    NO MOCK OR FALLBACK DATA - only applies requested cleaning operations.
+    """
     if not data or not isinstance(data, list):
         return {'cleaned_data': [], 'stats': {}}
     df = pd.DataFrame(data)
@@ -172,26 +205,88 @@ def clean_data(data, cleaning_options):
         'filled_missing_text': 0,
         'removed_missing_rows': 0,
         'trimmed_whitespace': 0,
+        'formatted_dates': 0,
         'final_rows': original_rows
     }
+    
     if cleaning_options.get('removeDuplicates', True):
         before = len(df)
         df = df.drop_duplicates()
         stats['removed_duplicates'] = before - len(df)
-    if cleaning_options.get('fillMissingText', True):
+    
+    # NO DEFAULT FILLING - only fill if explicitly requested
+    if cleaning_options.get('fillMissingValues', False):
         text_cols = df.select_dtypes(include=['object']).columns
         for col in text_cols:
             filled = df[col].fillna('').count()
             stats['filled_missing_text'] += filled
-    if cleaning_options.get('dropRowsWithMissing', False):
+    
+    if cleaning_options.get('removeEmptyRows', False):
         before = len(df)
         df = df.dropna()
         stats['removed_missing_rows'] = before - len(df)
+    
     if cleaning_options.get('trimWhitespace', True):
         text_cols = df.select_dtypes(include=['object']).columns
         for col in text_cols:
             df[col] = df[col].astype(str).str.strip()
             stats['trimmed_whitespace'] = len(df)
+    
+    # Format dates if requested
+    if cleaning_options.get('formatDates', False):
+        date_format = cleaning_options.get('dateFormat', 'YYYY-MM-DD')
+        date_columns = df.select_dtypes(include=['object']).columns
+        date_keywords = ['date', 'Date', 'DATE', 'time', 'Time', 'TIME']
+        
+        for col in date_columns:
+            if any(kw in str(col) for kw in date_keywords):
+                try:
+                    # Try to parse dates and format them
+                    def format_date(value):
+                        if pd.isna(value) or value == '' or str(value).lower() == 'nan':
+                            return value
+                        try:
+                            # Try common date formats
+                            for fmt in ['%Y-%m-%d', '%d-%m-%Y', '%m-%d-%Y', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', '%d-%m-%y', '%m-%d-%y', '%Y%m%d']:
+                                try:
+                                    parsed = pd.to_datetime(value, format=fmt, errors='coerce')
+                                    if pd.notna(parsed):
+                                        break
+                                except:
+                                    continue
+                            else:
+                                # If no format worked, try pandas auto-detection
+                                parsed = pd.to_datetime(value, errors='coerce')
+                            
+                            if pd.notna(parsed):
+                                # Format according to selected format
+                                if date_format == 'YYYY-MM-DD':
+                                    return parsed.strftime('%Y-%m-%d')
+                                elif date_format == 'DD-MM-YYYY':
+                                    return parsed.strftime('%d-%m-%Y')
+                                elif date_format == 'MM-DD-YYYY':
+                                    return parsed.strftime('%m-%d-%Y')
+                                elif date_format == 'DD/MM/YYYY':
+                                    return parsed.strftime('%d/%m/%Y')
+                                elif date_format == 'MM/DD/YYYY':
+                                    return parsed.strftime('%m/%d/%Y')
+                                elif date_format == 'YYYY/MM/DD':
+                                    return parsed.strftime('%Y/%m/%d')
+                                elif date_format == 'DD-MM-YY':
+                                    return parsed.strftime('%d-%m-%y')
+                                elif date_format == 'MM-DD-YY':
+                                    return parsed.strftime('%m-%d-%y')
+                                else:
+                                    return parsed.strftime('%Y-%m-%d')
+                            return value
+                        except:
+                            return value
+                    
+                    df[col] = df[col].apply(format_date)
+                    stats['formatted_dates'] = len(df)
+                except Exception as e:
+                    print(f"Error formatting date column {col}: {e}")
+    
     cleaned_data = df.to_dict('records')
     stats['final_rows'] = len(cleaned_data)
     return {'cleaned_data': cleaned_data, 'stats': stats}
