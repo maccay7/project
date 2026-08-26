@@ -35,6 +35,10 @@
           </template>
           <v-list-item-title class="text-error">Logout</v-list-item-title>
         </v-list-item>
+
+        <div class="sidebar-footer">
+          <span class="footer-text">@duracapital2026</span>
+        </div>
       </template>
     </v-navigation-drawer>
 
@@ -237,6 +241,21 @@ const handleLogout = () => {
 
 .logout-item:hover {
   background: rgba(244, 67, 54, 0.1);
+}
+
+.sidebar-footer {
+  padding: 16px;
+  text-align: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 8px;
+}
+
+.footer-text {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-transform: none;
 }
 
 .app-header {

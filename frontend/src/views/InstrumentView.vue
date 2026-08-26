@@ -197,16 +197,30 @@
                     <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">×</button>
                   </v-card-title>
                   <v-card-text class="saved-mappings-popup-body">
-                    <div v-if="!Object.keys(savedTemplates).length" class="empty-state">
+                    <!-- Save New Mapping Section -->
+                    <div class="save-section">
+                      <div class="save-row">
+                        <input 
+                          v-model="newTemplateName" 
+                          class="template-input" 
+                          placeholder="Enter mapping name..." 
+                          @keyup.enter="saveCurrentMappingAsTemplate"
+                        />
+                        <button class="btn-primary" @click="saveCurrentMappingAsTemplate">Save Mapping</button>
+                      </div>
+                    </div>
+
+                    <!-- Saved Mappings List -->
+                    <div v-if="!savedTemplates.length" class="empty-state">
                       <p>No saved mappings yet.</p>
                     </div>
                     <div v-else class="saved-mappings-list">
-                      <div v-for="(template, name) in savedTemplates" :key="name" class="saved-mapping-item">
-                        <div class="mapping-name">{{ name }}</div>
-                        <div class="mapping-meta">Saved: {{ new Date(template.savedAt).toLocaleDateString() }}</div>
+                      <div v-for="template in savedTemplates" :key="template.id" class="saved-mapping-item">
+                        <div class="mapping-name">{{ template.name }}</div>
+                        <div class="mapping-meta">Saved: {{ new Date(template.created_at).toLocaleDateString() }}</div>
                         <div class="mapping-actions">
-                          <button class="btn-secondary small" @click="loadMapping(template)">Load</button>
-                          <button class="btn-secondary small danger" @click="deleteMapping(name)">Delete</button>
+                          <button class="btn-secondary small" @click="loadTemplateFromPopup(template.id)">Load</button>
+                          <button class="btn-secondary small danger" @click="deleteTemplateFromPopup(template.id)">Delete</button>
                         </div>
                       </div>
                     </div>
@@ -433,7 +447,11 @@
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.trimWhitespace"> Trim whitespace</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.convertToNumbers"> Convert text numbers to numeric</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeOutliers"> Remove outliers (3σ)</label>
-                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeDates"> Standardize dates to YYYY-MM-DD</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeDates"> Standardize dates to selected format:
+                        <select v-model="selectedDateFormat" class="date-format-select-inline" :disabled="!cleaningOptions.standardizeDates">
+                          <option v-for="format in dateFormatOptions" :key="format.value" :value="format.value">{{ format.label }}</option>
+                        </select>
+                      </label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeSpecialChars"> Remove special characters</label>
                       <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.changeCase"> Change text case:
                         <select v-model="cleaningOptions.caseType"><option value="none">None</option><option value="upper">UPPER</option><option value="lower">lower</option><option value="title">Title</option></select>
@@ -1074,6 +1092,7 @@ import FixedLayout from '@/components/FixedLayout.vue'
 import * as XLSX from 'xlsx'
 import api from '@/services/api.js'
 import sessionManager from '@/services/sessionManager.js'
+import mappingTemplateManager from '@/services/mappingTemplateManager.js'
 import { useFredMarket } from '@/composables/useFredMarket'
 import { useWorksheetWorkflow } from '@/composables/useWorksheetWorkflow.js'
 import ExcelViewer from '@/components/ExcelViewer.vue'
@@ -1340,9 +1359,10 @@ function showSnackbar(message, color = 'error', timeout = 4000) {
   }
 }
 
-const savedTemplates = ref({})
-const selectedTemplate = ref('')
+const savedTemplates = ref([])
+const selectedTemplate = ref(null)
 const newTemplateName = ref('')
+const currentMappingTemplateId = ref(null)
 
 const cleaningOptions = ref({
   removeDuplicates: true, fillMissingText: false, dropRowsWithMissing: false, trimWhitespace: true,
@@ -1351,6 +1371,19 @@ const cleaningOptions = ref({
   removeColumnsAllMissing: false, capOutliers: false, removeRowsSpecificColumnEmpty: false,
   specificColumn: '', standardizeNumericRange: false, removeEmptyRows: false, fillForward: true, fillBackward: false
 })
+
+// Date format options
+const dateFormatOptions = ref([
+  { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
+  { value: 'DD-MM-YYYY', label: 'DD-MM-YYYY' },
+  { value: 'MM-DD-YYYY', label: 'MM-DD-YYYY' },
+  { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
+  { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
+  { value: 'YYYY/MM/DD', label: 'YYYY/MM/DD' },
+  { value: 'DD-MM-YY', label: 'DD-MM-YY' },
+  { value: 'MM-DD-YY', label: 'MM-DD-YY' }
+])
+const selectedDateFormat = ref('YYYY-MM-DD')
 
 const selectedInstrumentType = computed(() => instrumentLabel.value)
 const instrumentSummary = ref({ columns: [], rows: [] })
@@ -1371,10 +1404,12 @@ const showExcelDialog = ref(false)
 const excelData = ref([])
 const excelColumns = ref([])
 const excelDialogTitle = ref('')
+const showInstrumentResultsTable = ref(false) // Toggle for showing individual instrument results table
 
 const showWorkbookViewer = ref(false)
 const workbookSheets = ref([])
 const currentSheetName = ref('')
+const selectedSectionId = ref('') // Track selected section/table ID for traceability
 const singleInstrumentExtractedValues = ref({})
 const isolatedTableData = ref(null)
 const autoDetectedFields = ref({})
@@ -1567,7 +1602,22 @@ const benchmarkYield = computed(() => {
 })
 
 function getDisplayColumns() {
-  const exclude = ['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet']
+  const exclude = [
+    '_raw', '_source', 'index', '__v', 
+    'instrument_name', 'instrument_type', 
+    'Worksheet', 'worksheet',
+    // Raw backend field names to hide
+    'discount_yield', 'effective_yield', 'interest_earned', 
+    '_row_index', 'term_days', 'total_value',
+    'total_interest', 'avg_rate', 'weighted_avg_rate',
+    'avg_days_to_maturity', 'total_principal', 'annual_yield',
+    'effective_annual_rate', 'instrument_count', 'fred_benchmark',
+    'coupon_rate', 'coupon_payment', 'accrued_interest',
+    'clean_price', 'dirty_price', 'yield_to_maturity',
+    'discount_rate', 'investment_yield', 'maturity_value',
+    'present_value', 'purchase_price', 'issue_price',
+    'days_to_maturity', 'face_value', 'principal'
+  ]
   const cols = instrumentSummary.value.columns.filter(c => !exclude.includes(c))
   const seen = new Set()
   return cols.filter(c => {
@@ -2441,19 +2491,50 @@ function updateColumnMapping(newMapping) {
   debouncedSave()
 }
 
-function saveFinalMapping() {
+async function saveFinalMapping() {
   const mappingKey = `mapping_${instrumentType.value}_${uploadedFile.value?.name || 'default'}`
   localStorage.setItem(mappingKey, JSON.stringify(columnMapping.value))
 
-  const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'}`
-  savedTemplates.value[newTemplateName.value] = {
-    columnMapping: columnMapping.value,
-    requiredColumns: requiredColumns.value,
-    fileColumns: fileColumns.value,
-    savedAt: new Date().toISOString()
+  // If there's a current mapping template ID, update it instead of creating a new one
+  if (currentMappingTemplateId.value) {
+    try {
+      const result = await mappingTemplateManager.updateTemplate(currentMappingTemplateId.value, {
+        columnMapping: columnMapping.value,
+        fileColumns: fileColumns.value
+      })
+      if (result) {
+        await loadSavedTemplates()
+        showSnackbar('Mapping updated successfully', 'success')
+      } else {
+        showSnackbar('Failed to update mapping')
+      }
+    } catch (e) {
+      console.error('Error updating template:', e)
+      showSnackbar('Error updating mapping')
+    }
+  } else {
+    // Create a new template with auto-generated name
+    const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'}`
+    try {
+      const result = await mappingTemplateManager.saveTemplate(
+        templateName,
+        instrumentType.value,
+        columnMapping.value,
+        requiredColumns.value,
+        fileColumns.value
+      )
+      if (result) {
+        currentMappingTemplateId.value = result.id
+        await loadSavedTemplates()
+        showSnackbar('Mapping saved successfully', 'success')
+      } else {
+        showSnackbar('Failed to save mapping')
+      }
+    } catch (e) {
+      console.error('Error saving template:', e)
+      showSnackbar('Error saving mapping')
+    }
   }
-  saveTemplates()
-  newTemplateName.value = ''
   debouncedSave()
 }
 
@@ -3705,8 +3786,54 @@ function applyCleaning() {
     }
     if (cleaningOptions.value.standardizeDates) {
       let standardized = 0
-      data = data.map(row => { Object.keys(row).forEach(k => { if (k.toLowerCase().includes('date') && row[k]) { const d = new Date(row[k]); if (!isNaN(d)) { row[k] = d.toISOString().split('T')[0]; standardized++ } } }); return row })
-      if (standardized > 0) operations.push(`Standardized ${standardized} date values`)
+      const format = selectedDateFormat.value || 'YYYY-MM-DD'
+      console.log('Standardizing dates with format:', format)
+      console.log('selectedDateFormat.value:', selectedDateFormat.value)
+      data = data.map(row => { 
+        Object.keys(row).forEach(k => { 
+          if (k.toLowerCase().includes('date') && row[k]) { 
+            const d = new Date(row[k]); 
+            console.log('Processing date column:', k, 'value:', row[k], 'parsed:', d)
+            if (!isNaN(d)) { 
+              // Format according to selected format
+              let formattedDate = ''
+              if (format === 'YYYY-MM-DD') {
+                formattedDate = d.toISOString().split('T')[0]
+              } else if (format === 'DD-MM-YYYY') {
+                formattedDate = d.toLocaleDateString('en-GB').replace(/\//g, '-')
+              } else if (format === 'MM-DD-YYYY') {
+                formattedDate = d.toLocaleDateString('en-US').replace(/\//g, '-')
+              } else if (format === 'DD/MM/YYYY') {
+                formattedDate = d.toLocaleDateString('en-GB')
+              } else if (format === 'MM/DD/YYYY') {
+                formattedDate = d.toLocaleDateString('en-US')
+              } else if (format === 'YYYY/MM/DD') {
+                const year = d.getFullYear()
+                const month = String(d.getMonth() + 1).padStart(2, '0')
+                const day = String(d.getDate()).padStart(2, '0')
+                formattedDate = `${year}/${month}/${day}`
+              } else if (format === 'DD-MM-YY') {
+                const year = String(d.getFullYear()).slice(-2)
+                const month = String(d.getMonth() + 1).padStart(2, '0')
+                const day = String(d.getDate()).padStart(2, '0')
+                formattedDate = `${day}-${month}-${year}`
+              } else if (format === 'MM-DD-YY') {
+                const year = String(d.getFullYear()).slice(-2)
+                const month = String(d.getMonth() + 1).padStart(2, '0')
+                const day = String(d.getDate()).padStart(2, '0')
+                formattedDate = `${month}-${day}-${year}`
+              } else {
+                formattedDate = d.toISOString().split('T')[0]
+              }
+              console.log('Formatted date:', formattedDate)
+              row[k] = formattedDate
+              standardized++ 
+            } 
+          } 
+        }); 
+        return row 
+      })
+      if (standardized > 0) operations.push(`Standardized ${standardized} date values to ${format}`)
     }
     if (cleaningOptions.value.removeSpecialChars) {
       data = data.map(row => { Object.keys(row).forEach(k => { if (typeof row[k] === 'string') row[k] = row[k].replace(/[^a-zA-Z0-9\s]/g, '') }); return row })
@@ -3822,13 +3949,32 @@ async function continueAfterCleaning() {
 async function calculateMetrics() {
   if (!cleanedData.value.length) {
     console.warn('No cleaned data to calculate')
-    // Try to use rawData as fallback
-    if (rawData.value.length) {
-      console.log('Using rawData as fallback for calculations')
-      cleanedData.value = JSON.parse(JSON.stringify(rawData.value))
-    } else {
-      return
+    showSnackbar('No data available for calculation. Please clean the data first.', 'error')
+    return
+  }
+
+  // Validate required fields before sending to backend
+  const requiredFields = requiredColumns.value[instrumentType.value] || []
+  const missingFields = []
+  
+  for (const field of requiredFields) {
+    const mappedColumn = columnMapping.value[field]
+    if (!mappedColumn) {
+      missingFields.push(field)
+      continue
     }
+    
+    // Check if the column exists in cleaned data
+    const hasColumn = cleanedData.value.some(row => row.hasOwnProperty(mappedColumn))
+    if (!hasColumn) {
+      missingFields.push(field)
+    }
+  }
+  
+  if (missingFields.length > 0) {
+    console.error('❌ Missing required fields:', missingFields)
+    showSnackbar(`Missing required fields: ${missingFields.join(', ')}. Please complete the mapping before calculating.`, 'error')
+    return
   }
 
   // Log the data being sent for debugging
@@ -3849,20 +3995,56 @@ async function calculateMetrics() {
         country: effectiveCountry.value,
         currency: effectiveCurrency.value,
         maturity: effectiveMaturity.value,
-        manualInputs: manualInputs.value
+        manualInputs: manualInputs.value,
+        sheet_name: currentSheetName.value,
+        section_id: selectedSectionId.value
       },
       null,
       activeSession.value?.id
     )
     
-      console.log('🔍 Backend response:', response)
-      console.log('🔍 Response success:', response?.success)
-      console.log('🔍 Response data:', response?.data)
-      console.log('🔍 Response message:', response?.message)
-      
-      if (response?.success && response?.data) {
+    console.log('🔍 Backend response:', response)
+    console.log('🔍 Response success:', response?.success)
+    console.log('🔍 Response data:', response?.data)
+    console.log('🔍 Response message:', response?.message)
+    console.log('🔍 Is multi-instrument:', response?.is_multi_instrument)
+    
+    if (response?.success) {
+      // Handle multi-instrument response
+      if (response?.is_multi_instrument) {
+        console.log('🔍 Multi-instrument response detected')
+        console.log('🔍 Instrument detection:', response?.instrument_detection)
+        console.log('🔍 Results:', response?.results)
+        
+        // Use the backend-generated summaries (source of truth)
+        if (response?.instrument_summary) {
+          instrumentSummary.value = response.instrument_summary
+          console.log('🔍 Set instrumentSummary from backend:', instrumentSummary.value)
+        }
+        
+        if (response?.portfolio_summary) {
+          portfolioSummary.value = response.portfolio_summary
+          console.log('🔍 Set portfolioSummary from backend:', portfolioSummary.value)
+        }
+        
+        // For display, use the first instrument's data or aggregate
+        const results = response?.results || {}
+        const firstInstType = Object.keys(results)[0]
+        if (firstInstType && results[firstInstType]) {
+          calculations.value = results[firstInstType].data
+          allCalculations.value = results[firstInstType].data
+          selectedCalculations.value = results[firstInstType].data
+          console.log('🔍 Set calculations from first instrument:', firstInstType)
+        }
+      } 
+      // Handle single-instrument response
+      else if (response?.data) {
         calculations.value = response.data
         console.log('✅ Set calculations.value:', calculations.value)
+
+        // Use instrument_names from backend if available
+        const backendInstrumentNames = response?.instrument_names || []
+        console.log('🔍 Backend instrument names:', backendInstrumentNames)
 
         // Extract calculations array
         const calcArray = response.data.calculations || []
@@ -3870,29 +4052,23 @@ async function calculateMetrics() {
         console.log('🔍 Calculations array:', calcArray)
         
         if (calcArray.length) {
-          // Multiple instruments
+          // Multiple instruments - show ONLY current selection results with real instrument names
           console.log('🔍 Processing multiple instruments')
-          const rows = calcArray.map(calc => ({
-            'Instrument Name': calc.instrument_name || 'Instrument',
+          const rows = calcArray.map((calc, idx) => ({
+            'Instrument Name': backendInstrumentNames[idx] || calc.instrument_name || 'Instrument',
             'Instrument Type': instrumentType.value,
             ...calc,
             'Worksheet': currentSheetName.value || 'Calculated'
           }))
 
-          const existingRows = instrumentSummary.value.rows || []
-          const mergedRows = [...existingRows]
-          rows.forEach(newRow => {
-            const id = newRow['Instrument Name'] + '_' + (newRow['Worksheet'] || '')
-            const exists = mergedRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
-            if (!exists) mergedRows.push(newRow)
-          })
+          // Replace instrument summary with current selection only - do NOT accumulate
           const allCols = new Set()
-          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-          instrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
-          console.log('🔍 Updated instrumentSummary:', instrumentSummary.value)
+          rows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+          instrumentSummary.value = { columns: Array.from(allCols), rows: rows }
+          console.log('🔍 Updated instrumentSummary with current selection only:', instrumentSummary.value)
 
-          const agg = computeAggregate(mergedRows)
-          const uniqueNames = new Set(mergedRows.map(r => r['Instrument Name']))
+          const agg = computeAggregate(rows)
+          const uniqueNames = new Set(rows.map(r => r['Instrument Name']))
           // For single-instrument mode (multi-table combined), force count to 1
           agg.instrumentCount = sheetType.value === 'single' ? 1 : uniqueNames.size
           console.log('🔍 Computed aggregate:', agg)
@@ -3902,12 +4078,42 @@ async function calculateMetrics() {
           selectedCalculations.value = agg
           console.log('🔍 Set allCalculations.value:', allCalculations.value)
           console.log('🔍 Set selectedCalculations.value:', selectedCalculations.value)
+
+          // Update portfolio summary with current selection aggregates
+          const portfolioRow = {
+            'Portfolio Name': currentSheetName.value || 'Current Portfolio',
+            'Instrument Type': instrumentType.value,
+            'Total Value': agg.totalValue || 0,
+            'Number of Instruments': agg.instrumentCount || 0,
+            'Average Rate': agg.avgRate || 0,
+            'Weighted Average Rate': agg.weightedAvgRate || 0,
+            'Total Interest': agg.totalInterest || 0,
+            'Interest Earned': agg.interestEarned || 0,
+            'Annual Yield': agg.annualYield || 0,
+            'Effective Annual Rate': agg.effectiveAnnualRate || 0,
+            'Average Days to Maturity': agg.avgDaysToMaturity || 0,
+            'Total Principal': agg.totalPrincipal || 0
+          }
+          
+          // Add FRED benchmark if available
+          if (response.data.fred?.benchmark_rate) {
+            portfolioRow['FRED Benchmark'] = response.data.fred.benchmark_rate
+            portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market || 0
+          }
+          
+          const portfolioCols = new Set()
+          Object.keys(portfolioRow).forEach(k => portfolioCols.add(k))
+          portfolioSummary.value = { columns: Array.from(portfolioCols), rows: [portfolioRow] }
+          console.log(' Updated portfolioSummary with current selection only:', portfolioSummary.value)
         } else {
-          // Single instrument case - use aggregated values directly
+          // Single instrument case - show ONLY current selection results with real instrument names
           console.log('🔍 Processing single instrument case')
-          const instrumentName = columnMapping.value['Instrument Name']
-            ? (cleanedData.value[0]?.[columnMapping.value['Instrument Name']] || instrumentLabel.value)
-            : instrumentLabel.value
+          // Use backend instrument names if available, otherwise fall back to column mapping
+          const instrumentName = backendInstrumentNames.length > 0 
+            ? backendInstrumentNames[0]
+            : (columnMapping.value['Instrument Name']
+              ? (cleanedData.value[0]?.[columnMapping.value['Instrument Name']] || instrumentLabel.value)
+              : instrumentLabel.value)
 
           const summaryRow = {
             'Instrument Name': instrumentName,
@@ -3938,28 +4144,49 @@ async function calculateMetrics() {
           }
           console.log('🔍 Created summaryRow:', summaryRow)
 
-          const existingRows = instrumentSummary.value.rows || []
-          const id = summaryRow['Instrument Name'] + '_' + (summaryRow['Worksheet'] || '')
-          const exists = existingRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
-          if (!exists) {
-            instrumentSummary.value.rows.push(summaryRow)
-            const allCols = new Set()
-            instrumentSummary.value.rows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-            instrumentSummary.value.columns = Array.from(allCols)
-          }
-          console.log('🔍 Updated instrumentSummary:', instrumentSummary.value)
+          // Replace instrument summary with current selection only - do NOT accumulate
+          const allCols = new Set()
+          Object.keys(summaryRow).forEach(k => allCols.add(k))
+          instrumentSummary.value = { columns: Array.from(allCols), rows: [summaryRow] }
+          console.log('🔍 Updated instrumentSummary with current selection only:', instrumentSummary.value)
 
-          const agg = computeAggregate(instrumentSummary.value.rows)
-          const uniqueNames = new Set(instrumentSummary.value.rows.map(r => r['Instrument Name']))
-          // For single-instrument mode, force count to 1
-          agg.instrumentCount = sheetType.value === 'single' ? 1 : uniqueNames.size
+          const agg = computeAggregate([summaryRow])
+          // Use the actual instrument count from backend (which now reflects unique instruments from column)
+          agg.instrumentCount = response.data.instrumentCount || 1
           console.log('🔍 Computed aggregate:', agg)
-          console.log('🔍 Instrument count set to:', agg.instrumentCount, '(sheetType:', sheetType.value + ')')
+          console.log('🔍 Instrument count set to:', agg.instrumentCount, '(from backend instrumentCount)')
 
           allCalculations.value = agg
           selectedCalculations.value = agg
           console.log('🔍 Set allCalculations.value:', allCalculations.value)
           console.log('🔍 Set selectedCalculations.value:', selectedCalculations.value)
+
+          // Update portfolio summary with current selection aggregates
+          const portfolioRow = {
+            'Portfolio Name': currentSheetName.value || 'Current Portfolio',
+            'Instrument Type': instrumentType.value,
+            'Total Value': agg.totalValue || 0,
+            'Number of Instruments': agg.instrumentCount || 0,
+            'Average Rate': agg.avgRate || 0,
+            'Weighted Average Rate': agg.weightedAvgRate || 0,
+            'Total Interest': agg.totalInterest || 0,
+            'Interest Earned': agg.interestEarned || 0,
+            'Annual Yield': agg.annualYield || 0,
+            'Effective Annual Rate': agg.effectiveAnnualRate || 0,
+            'Average Days to Maturity': agg.avgDaysToMaturity || 0,
+            'Total Principal': agg.totalPrincipal || 0
+          }
+          
+          // Add FRED benchmark if available
+          if (response.data.fred?.benchmark_rate) {
+            portfolioRow['FRED Benchmark'] = response.data.fred.benchmark_rate
+            portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market || 0
+          }
+          
+          const portfolioCols = new Set()
+          Object.keys(portfolioRow).forEach(k => portfolioCols.add(k))
+          portfolioSummary.value = { columns: Array.from(portfolioCols), rows: [portfolioRow] }
+          console.log('🔍 Updated portfolioSummary with current selection only:', portfolioSummary.value)
         }
 
         console.log('🔍 Final state:', {
@@ -3976,12 +4203,13 @@ async function calculateMetrics() {
         console.error('❌ Full response:', response)
         showSnackbar('Calculation failed: ' + errorMsg, 'error')
       }
-    } catch (err) {
-      console.error('❌ Error calling backend calculation:', err)
-      console.error('❌ Error details:', err.message)
-      console.error('❌ Error stack:', err.stack)
-      showSnackbar('Error calculating metrics: ' + (err.message || 'Unknown error'), 'error')
     }
+  } catch (err) {
+    console.error('❌ Error calling backend calculation:', err)
+    console.error('❌ Error details:', err.message)
+    console.error('❌ Error stack:', err.stack)
+    showSnackbar('Error calculating metrics: ' + (err.message || 'Unknown error'), 'error')
+  }
   await enrichCalculationsWithFred()
   debouncedSave()
   forceUpdate.value++
@@ -4362,66 +4590,116 @@ async function enrichCalculationsWithFred() {
   }
 }
 
-function loadSavedTemplates() {
-  const key = `${instrumentType.value}_mapping_templates`
-  const saved = localStorage.getItem(key)
-  savedTemplates.value = saved ? JSON.parse(saved) : {}
+async function loadSavedTemplates() {
+  try {
+    console.log('Loading templates for instrument type:', instrumentType.value)
+    const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
+    console.log('Loaded templates:', templates)
+    savedTemplates.value = templates || []
+  } catch (e) {
+    console.error('Error loading saved templates:', e)
+    savedTemplates.value = []
+  }
 }
 
-function saveTemplates() {
-  const key = `${instrumentType.value}_mapping_templates`
-  localStorage.setItem(key, JSON.stringify(savedTemplates.value))
+async function saveTemplates() {
+  // No-op - templates are saved individually via API
 }
 
-function saveCurrentMappingAsTemplate() {
-  if (!newTemplateName.value) {
+async function saveCurrentMappingAsTemplate() {
+  console.log('saveCurrentMappingAsTemplate called')
+  console.log('newTemplateName:', newTemplateName.value)
+  console.log('columnMapping:', columnMapping.value)
+  console.log('requiredColumns:', requiredColumns.value)
+  
+  if (!newTemplateName.value || !newTemplateName.value.trim()) {
+    showSnackbar('Please enter a template name')
     return
   }
-  const hasAnyMapping = requiredColumns.value.some(col => columnMapping.value[col])
-  if (!hasAnyMapping) {
-    return
+  
+  // Temporarily remove strict validation to test if that's the issue
+  // const hasAnyMapping = Object.keys(columnMapping.value).some(key => columnMapping.value[key])
+  // console.log('hasAnyMapping:', hasAnyMapping)
+  // if (!hasAnyMapping) {
+  //   showSnackbar('Please map at least one column before saving')
+  //   return
+  // }
+
+  try {
+    console.log('Calling mappingTemplateManager.saveTemplate')
+    const result = await mappingTemplateManager.saveTemplate(
+      newTemplateName.value.trim(),
+      instrumentType.value,
+      columnMapping.value,
+      requiredColumns.value,
+      fileColumns.value
+    )
+    console.log('Save result:', result)
+    if (result) {
+      currentMappingTemplateId.value = result.id
+      await loadSavedTemplates()
+      newTemplateName.value = ''
+      showSnackbar('Mapping saved successfully', 'success')
+    } else {
+      showSnackbar('Failed to save mapping')
+    }
+  } catch (e) {
+    console.error('Error saving template:', e)
+    showSnackbar('Error saving mapping: ' + e.message)
   }
-  savedTemplates.value[newTemplateName.value] = {
-    columnMapping: columnMapping.value,
-    requiredColumns: requiredColumns.value,
-    fileColumns: fileColumns.value,
-    savedAt: new Date().toISOString()
-  }
-  saveTemplates()
-  newTemplateName.value = ''
 }
 
-function applyTemplate() {
-  if (!selectedTemplate.value) return
-  const template = savedTemplates.value[selectedTemplate.value]
+async function applyTemplate(templateId) {
+  if (!templateId) return
+  try {
+    const template = await mappingTemplateManager.getTemplate(templateId)
+    if (!template) {
+      showSnackbar('Failed to load template')
+      return
+    }
+    columnMapping.value = { ...template.column_mapping }
+    currentMappingTemplateId.value = template.id
+    applyCurrentMapping()
+    debouncedSave()
+    forceUpdate.value++
+    showSnackbar('Mapping loaded successfully', 'success')
+  } catch (e) {
+    console.error('Error loading template:', e)
+    showSnackbar('Error loading mapping')
+  }
+}
+
+async function deleteTemplate(templateId) {
+  if (!templateId) return
+  const template = savedTemplates.value.find(t => t.id === templateId)
   if (!template) return
-  columnMapping.value = { ...template.mapping }
-  applyCurrentMapping()
-  debouncedSave()
-  forceUpdate.value++
-}
-
-function deleteTemplate() {
-  if (!selectedTemplate.value) return
-  if (confirm(`Delete template "${selectedTemplate.value}"?`)) {
-    delete savedTemplates.value[selectedTemplate.value]
-    saveTemplates()
-    selectedTemplate.value = ''
+  
+  if (confirm(`Delete template "${template.name}"?`)) {
+    try {
+      const success = await mappingTemplateManager.deleteTemplate(templateId)
+      if (success) {
+        await loadSavedTemplates()
+        if (currentMappingTemplateId.value === templateId) {
+          currentMappingTemplateId.value = null
+        }
+        showSnackbar('Mapping deleted successfully', 'success')
+      } else {
+        showSnackbar('Failed to delete mapping')
+      }
+    } catch (e) {
+      console.error('Error deleting template:', e)
+      showSnackbar('Error deleting mapping')
+    }
   }
 }
 
-function loadTemplateFromPopup(name) {
-  selectedTemplate.value = name
-  applyTemplate()
+async function loadTemplateFromPopup(templateId) {
+  await applyTemplate(templateId)
   showSavedMappingsDialog.value = false
 }
 
-function deleteTemplateFromPopup(name) {
-  if (confirm(`Delete template "${name}"?`)) {
-    delete savedTemplates.value[name]
-    saveTemplates()
-    if (selectedTemplate.value === name) selectedTemplate.value = ''
-  }
+async function deleteTemplateFromPopup(templateId) {
+  await deleteTemplate(templateId)
 }
 
 function selectInstrumentFromPopup(index) {
@@ -5579,6 +5857,10 @@ watch(() => activeTab.value, async (newTab) => {
     if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
     await fetchYieldCurve()
   }
+}, { deep: true })
+
+watch(() => instrumentType.value, async () => {
+  await loadSavedTemplates()
 })
 
 watch(yieldCurveData, async () => {
@@ -5681,7 +5963,7 @@ onMounted(async () => {
   }
   await checkAndReset()
   loadUploadHistory()
-  loadSavedTemplates()
+  await loadSavedTemplates()
   window.addEventListener('storage', () => checkAndReset())
   await loadFilterOptions()
   if (!effectiveMaturity.value) {
@@ -5711,55 +5993,6 @@ const handleSessionRestored = async (event) => {
     forceUpdate.value++
   }
 }
-
-onMounted(async () => {
-  const qSid = route.query.session
-  if (qSid) {
-    const s = await sessionManager.getSession(String(qSid))
-    if (s) {
-      activeSession.value = s
-      sessionManager.setActiveSession(s)
-    }
-  }
-  if (!activeSession.value) {
-    const current = sessionManager.getActiveSession()
-    if (current) activeSession.value = current
-  }
-  if (!activeSession.value) {
-    const storedSession = localStorage.getItem('activeSession')
-    if (storedSession) {
-      try {
-        const parsed = JSON.parse(storedSession)
-        activeSession.value = parsed
-        sessionManager.setActiveSession(parsed)
-      } catch (e) {
-        console.error('Failed to parse stored session:', e)
-      }
-    }
-  }
-  await checkAndReset()
-  loadUploadHistory()
-  loadSavedTemplates()
-  window.addEventListener('storage', () => checkAndReset())
-  await loadFilterOptions()
-  if (!effectiveMaturity.value) {
-    const def = config.value.defaultMaturity
-    selectedMaturityOption.value = def
-    fredFilters.value.maturity = def
-  }
-  if (Object.keys(allCalculations.value).length) enrichCalculationsWithFred()
-  if (!allCalculations.value.totalValue && activeSession.value) await loadSavedData()
-  if (cleanedData.value.length) await calculateMetrics()
-  debouncedSave()
-
-  window.addEventListener('session-restored', handleSessionRestored)
-
-  if (instrumentSummary.value.rows.length && !allCalculations.value.totalValue) {
-    allCalculations.value = computeAggregate(instrumentSummary.value.rows)
-    selectedCalculations.value = allCalculations.value
-    calculations.value = allCalculations.value
-  }
-})
 
 onBeforeUnmount(() => {
   window.removeEventListener('storage', () => checkAndReset())
@@ -5827,22 +6060,29 @@ onBeforeUnmount(() => {
 .dropdown-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; }
 .mapping-select { flex: 1; padding: 8px 36px 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
 .mapping-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.2); }
-.saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }
-.save-section { margin-bottom: 20px; }
-.save-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.save-row .template-input { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; min-width: 150px; }
-.saved-list { max-height: 300px; overflow-y: auto; border-top: 1px solid #e8ecf1; padding-top: 12px; }
-.saved-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #eee; flex-wrap: wrap; gap: 8px; }
-.template-info { display: flex; flex-direction: column; gap: 2px; }
-.template-name { font-weight: 600; color: #0B2044; }
-.template-timestamp { font-size: 12px; color: #999; }
-.template-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.btn-secondary.small, .btn-danger.small { padding: 4px 10px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer; }
-.btn-secondary.small { background: #e0e0e0; color: #333; }
-.btn-secondary.small:hover { background: #c0c0c0; }
-.btn-danger.small { background: #f44336; color: white; }
-.btn-danger.small:hover { background: #d32f2f; }
-.empty-saved { text-align: center; color: #999; padding: 20px 0; }
+.saved-mappings-popup-title { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; padding: 20px 24px; font-size: 18px; font-weight: 700; }
+.saved-mappings-popup-body { padding: 24px; background: #f8f9ff; }
+.save-section { margin-bottom: 24px; padding: 16px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.save-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.save-row .template-input { flex: 1; padding: 12px 16px; border: 2px solid #e8ecf1; border-radius: 8px; font-size: 14px; min-width: 200px; transition: all 0.3s; }
+.save-row .template-input:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.1); }
+.save-row .template-input::placeholder { color: #999; }
+.saved-mappings-list { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.saved-mappings-list::-webkit-scrollbar { width: 6px; }
+.saved-mappings-list::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+.saved-mappings-list::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+.saved-mappings-list::-webkit-scrollbar-thumb:hover { background: #a1a1a1; }
+.saved-mapping-item { background: white; border-radius: 12px; padding: 16px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); transition: all 0.3s; border-left: 4px solid #0B2044; }
+.saved-mapping-item:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+.mapping-name { font-size: 16px; font-weight: 700; color: #0B2044; margin-bottom: 4px; }
+.mapping-meta { font-size: 13px; color: #666; margin-bottom: 12px; }
+.mapping-actions { display: flex; gap: 10px; align-items: center; }
+.btn-secondary.small { background: linear-gradient(135deg, #e0e0e0, #c0c0c0); color: #333; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all 0.3s; }
+.btn-secondary.small:hover { background: linear-gradient(135deg, #c0c0c0, #a0a0a0); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.btn-secondary.small.danger { background: linear-gradient(135deg, #f44336, #d32f2f); color: white; }
+.btn-secondary.small.danger:hover { background: linear-gradient(135deg, #d32f2f, #c62828); }
+.empty-state { text-align: center; padding: 40px 20px; color: #999; }
+.empty-state p { font-size: 15px; margin: 0; }
 .excel-dialog-title-no-logo { background: #f5f5f5; color: #0B2044; padding: 12px 24px; display: flex; align-items: center; border-bottom: 2px solid #d0d0d0; }
 .excel-dialog-title-no-logo span { font-weight: 600; font-size: 18px; }
 .btn-work-on-sheet { background: #0B2044; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 12px; }
@@ -6001,6 +6241,12 @@ onBeforeUnmount(() => {
 .option-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 8px; border-radius: 4px; transition: background 0.1s; flex-wrap: wrap; }
 .option-checkbox:hover { background: #f0f0f0; }
 .option-checkbox select, .option-checkbox input[type="text"] { margin-left: 4px; padding: 2px 6px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
+.date-format-dropdown { margin-left: 24px; margin-top: 8px; margin-bottom: 8px; display: block; }
+.date-format-select { padding: 6px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; background: white; cursor: pointer; min-width: 200px; display: block; }
+.date-format-select-inline { margin-left: 8px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; background: white; cursor: pointer; min-width: 120px; }
+.date-format-select-inline:disabled { background: #f5f5f5; cursor: not-allowed; opacity: 0.6; }
+.date-format-select:disabled { background: #f5f5f5; cursor: not-allowed; opacity: 0.6; }
+.date-format-select:focus, .date-format-select-inline:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.1); }
 .cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; flex-wrap: wrap; }
 .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin-bottom: 30px; }
 .summary-card { background: linear-gradient(135deg, #1B5E20, #4CAF50); padding: 20px; border-radius: 16px; color: white; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s; }

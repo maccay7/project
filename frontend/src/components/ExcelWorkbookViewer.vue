@@ -1,10 +1,23 @@
 <template>
-  <div class="excel-workbook-viewer">
+  <div class="excel-workbook-viewer" :style="{ height: viewerHeight + 'px' }">
+    <!-- Resize handle -->
+    <div class="resize-handle" @mousedown="startResize"></div>
     <!-- Header with logo and formula bar -->
     <div class="viewer-header">
       <div class="header-left">
         <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
         <span class="excel-filename">{{ fileName || 'Excel Workbook' }}</span>
+      </div>
+      <!-- Currency selection -->
+      <div v-if="availableCurrencies.length > 0" class="currency-selector">
+        <label class="currency-label">💰 Currency:</label>
+        <select v-model="selectedCurrency" @change="emitCurrencyChange" class="currency-select">
+          <option :value="null">-- All Currencies --</option>
+          <option v-for="currency in availableCurrencies" :key="currency" :value="currency">
+            {{ currency }}
+          </option>
+        </select>
+        <span v-if="selectedCurrency" class="selected-currency-badge">{{ selectedCurrency }}</span>
       </div>
       <!-- Formula bar -->
       <div class="formula-bar">
@@ -31,6 +44,7 @@
             :style="{ width: getColumnWidth(index) }"
           >
             {{ col }}
+            <div class="column-resize-handle" @mousedown="startColumnResize(index, $event)"></div>
           </div>
         </div>
 
@@ -40,10 +54,16 @@
             v-for="(row, rowIndex) in visibleRows"
             :key="rowIndex"
             class="excel-row"
+            :class="{
+              'row-selected': isRowInRange(rowIndex),
+              'row-selecting': isRowSelectionMode
+            }"
+            @click="handleRowClick(rowIndex)"
           >
             <!-- Row header (number) -->
             <div class="excel-header-cell excel-row-header" :style="{ height: getRowHeight(rowIndex) }">
               {{ rowIndex + 1 }}
+              <div class="row-resize-handle" @mousedown.stop="startRowResize(rowIndex, $event)"></div>
             </div>
             <!-- Cells -->
             <div class="excel-cells-container">
@@ -88,22 +108,29 @@
     <div v-if="detectedTables.length > 0 && !isTableIsolationMode" class="table-detection-panel">
       <div class="table-detection-header">
         <v-icon size="16" class="table-icon">mdi-table-large</v-icon>
-        <span>Detected Tables ({{ detectedTables.length }})</span>
+        <span>Detected Tables, Sections & Values ({{ detectedTables.length }})</span>
       </div>
       <div class="table-mode-toggle">
         <button 
           class="mode-toggle-btn" 
-          :class="{ active: !isMultiTableMode }"
-          @click="isMultiTableMode = false"
+          :class="{ active: !isMultiTableMode && !isRowSelectionMode }"
+          @click="isMultiTableMode = false; isRowSelectionMode = false"
         >
           Single Table
         </button>
         <button 
           class="mode-toggle-btn" 
           :class="{ active: isMultiTableMode }"
-          @click="isMultiTableMode = true"
+          @click="isMultiTableMode = true; isRowSelectionMode = false"
         >
           Multi-Table Select
+        </button>
+        <button 
+          class="mode-toggle-btn" 
+          :class="{ active: isRowSelectionMode }"
+          @click="isRowSelectionMode = true; isMultiTableMode = false"
+        >
+          Select Rows
         </button>
       </div>
       <div class="table-buttons">
@@ -120,6 +147,9 @@
           <span v-if="isMultiTableMode" class="table-checkbox">
             {{ selectedTables.has(index) ? '✓' : '○' }}
           </span>
+          <v-icon v-if="table.type === 'table'" size="12" class="type-icon">mdi-table</v-icon>
+          <v-icon v-else-if="table.type === 'section'" size="12" class="type-icon">mdi-text-box</v-icon>
+          <v-icon v-else-if="table.type === 'values'" size="12" class="type-icon">mdi-chart-bar</v-icon>
           {{ table.name }} (Row {{ table.startRow + 1 }} - {{ table.endRow + 1 }})
         </button>
       </div>
@@ -129,6 +159,16 @@
           Auto Detect Selected Tables ({{ selectedTables.size }})
         </button>
         <button class="btn-clear-selection" @click="clearTableSelection">
+          <v-icon size="16">mdi-close</v-icon>
+          Clear Selection
+        </button>
+      </div>
+      <div v-if="isRowSelectionMode && selectedRowRange.start >= 0" class="multi-table-actions">
+        <button class="btn-auto-detect-multi" @click="createCustomTableFromRows">
+          <v-icon size="16">mdi-table-plus</v-icon>
+          Create Table from Rows {{ selectedRowRange.start + 1 }} - {{ selectedRowRange.end + 1 }}
+        </button>
+        <button class="btn-clear-selection" @click="clearRowSelection">
           <v-icon size="16">mdi-close</v-icon>
           Clear Selection
         </button>
@@ -194,15 +234,35 @@ const FINANCIAL_SYNONYMS = {
   country: ['country', 'nation', 'jurisdiction', 'region', 'market']
 }
 
-function extractValuesIntelligently(data, instrumentType) {
+function extractValuesIntelligently(data, instrumentType, currencyFilter = null) {
   const requiredFields = getRequiredFieldMappings(instrumentType)
   let extracted = extractSingleInstrumentValues(data, requiredFields)
+
+  // Filter data by currency if specified
+  let filteredData = data
+  if (currencyFilter) {
+    filteredData = data.filter(row => {
+      if (!row) return false
+      return Object.values(row).some(val => {
+        if (typeof val === 'string') {
+          return val.toUpperCase().includes(currencyFilter.toUpperCase())
+        }
+        return false
+      })
+    })
+    // If no data matches currency, use original data
+    if (filteredData.length === 0) {
+      filteredData = data
+    }
+  }
 
   const fieldKeys = Object.keys(requiredFields)
   for (const field of fieldKeys) {
     if (!extracted[field] || extracted[field] === '') {
       const synonyms = FINANCIAL_SYNONYMS[field] || [field]
-      for (const row of data) {
+      
+      // Search in filtered data first
+      for (const row of filteredData) {
         if (!row || typeof row !== 'object') continue
         for (const [key, value] of Object.entries(row)) {
           if (value === undefined || value === null || value === '') continue
@@ -217,13 +277,32 @@ function extractValuesIntelligently(data, instrumentType) {
         }
         if (extracted[field]) break
       }
+      
+      // If still not found, search in entire original data (scattered values)
+      if (!extracted[field] || extracted[field] === '') {
+        for (const row of data) {
+          if (!row || typeof row !== 'object') continue
+          for (const [key, value] of Object.entries(row)) {
+            if (value === undefined || value === null || value === '') continue
+            const keyLower = key.toLowerCase()
+            const matched = synonyms.some(syn => 
+              keyLower.includes(syn.toLowerCase()) || syn.toLowerCase().includes(keyLower)
+            )
+            if (matched) {
+              extracted[field] = value
+              break
+            }
+          }
+          if (extracted[field]) break
+        }
+      }
     }
   }
 
   if (!extracted.instrumentName || extracted.instrumentName === '') {
-    const nameCol = detectInstrumentNameColumn(data)
+    const nameCol = detectInstrumentNameColumn(filteredData)
     if (nameCol && nameCol.columnName) {
-      const names = extractInstrumentNames(data, nameCol.columnName)
+      const names = extractInstrumentNames(filteredData, nameCol.columnName)
       if (names && names.length > 0) {
         extracted.instrumentName = names[0]
       }
@@ -276,7 +355,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect'])
+const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'currency-change'])
 
 // ===== STATE =====
 const sheets = ref([])
@@ -296,6 +375,28 @@ const isSingleInstrumentSheet = ref(false)
 const extractedPreviewValues = ref({})
 const selectedTables = ref(new Set()) // For multi-table selection
 const isMultiTableMode = ref(false)
+
+// Currency selection
+const selectedCurrency = ref(null)
+const availableCurrencies = ref([])
+
+// Viewer resize
+const viewerHeight = ref(600)
+const isResizing = ref(false)
+const resizeStartY = ref(0)
+const resizeStartHeight = ref(0)
+
+// Column/row resize
+const resizingColumn = ref(-1)
+const resizingRow = ref(-1)
+const resizeStartX = ref(0)
+const columnWidths = ref({})
+const rowHeights = ref({})
+
+// Custom row selection for manual table creation
+const isSelectingRows = ref(false)
+const selectedRowRange = ref({ start: -1, end: -1 })
+const isRowSelectionMode = ref(false)
 
 // ===== COMPUTED =====
 const activeSheet = computed(() => sheets.value[activeSheetIndex.value] || null)
@@ -317,11 +418,113 @@ function getColumnHeaders(count) {
 }
 
 function getColumnWidth(index) {
-  return '100px'
+  return (columnWidths.value[index] || 100) + 'px'
 }
 
 function getRowHeight(index) {
-  return '25px'
+  return (rowHeights.value[index] || 30) + 'px'
+}
+
+function startColumnResize(colIndex, e) {
+  resizingColumn.value = colIndex
+  resizeStartX.value = e.clientX
+  e.preventDefault()
+  document.addEventListener('mousemove', onColumnResize)
+  document.addEventListener('mouseup', stopColumnResize)
+}
+
+function onColumnResize(e) {
+  if (resizingColumn.value === -1) return
+  const deltaX = e.clientX - resizeStartX.value
+  const currentWidth = columnWidths.value[resizingColumn.value] || 100
+  const newWidth = Math.max(50, currentWidth + deltaX)
+  columnWidths.value[resizingColumn.value] = newWidth
+  resizeStartX.value = e.clientX
+}
+
+function stopColumnResize() {
+  resizingColumn.value = -1
+  document.removeEventListener('mousemove', onColumnResize)
+  document.removeEventListener('mouseup', stopColumnResize)
+}
+
+function startRowResize(rowIndex, e) {
+  resizingRow.value = rowIndex
+  resizeStartY.value = e.clientY
+  e.preventDefault()
+  document.addEventListener('mousemove', onRowResize)
+  document.addEventListener('mouseup', stopRowResize)
+}
+
+function onRowResize(e) {
+  if (resizingRow.value === -1) return
+  const deltaY = e.clientY - resizeStartY.value
+  const currentHeight = rowHeights.value[resizingRow.value] || 30
+  const newHeight = Math.max(20, currentHeight + deltaY)
+  rowHeights.value[resizingRow.value] = newHeight
+  resizeStartY.value = e.clientY
+}
+
+function stopRowResize() {
+  resizingRow.value = -1
+  document.removeEventListener('mousemove', onRowResize)
+  document.removeEventListener('mouseup', stopRowResize)
+}
+
+function handleRowClick(rowIndex) {
+  if (!isRowSelectionMode.value) return
+  
+  if (selectedRowRange.value.start === -1) {
+    // First click - set start
+    selectedRowRange.value.start = rowIndex
+    selectedRowRange.value.end = rowIndex
+  } else {
+    // Second click - set end (ensure start <= end)
+    selectedRowRange.value.end = rowIndex
+    if (selectedRowRange.value.start > selectedRowRange.value.end) {
+      const temp = selectedRowRange.value.start
+      selectedRowRange.value.start = selectedRowRange.value.end
+      selectedRowRange.value.end = temp
+    }
+  }
+}
+
+function isRowInRange(rowIndex) {
+  if (selectedRowRange.value.start === -1) return false
+  const start = Math.min(selectedRowRange.value.start, selectedRowRange.value.end)
+  const end = Math.max(selectedRowRange.value.start, selectedRowRange.value.end)
+  return rowIndex >= start && rowIndex <= end
+}
+
+function clearRowSelection() {
+  selectedRowRange.value = { start: -1, end: -1 }
+}
+
+function createCustomTableFromRows() {
+  if (selectedRowRange.value.start === -1 || selectedRowRange.value.end === -1) {
+    alert('Please select rows first')
+    return
+  }
+  
+  const startRow = Math.min(selectedRowRange.value.start, selectedRowRange.value.end)
+  const endRow = Math.max(selectedRowRange.value.start, selectedRowRange.value.end)
+  
+  if (!activeSheet.value || !activeSheet.value.fullData) return
+  
+  // Create custom table from selected rows
+  const customTable = {
+    startRow: startRow,
+    endRow: endRow,
+    startCol: 0,
+    endCol: activeSheet.value.fullData[0]?.length - 1 || 0,
+    headerRow: startRow,
+    type: 'custom',
+    name: `Custom Table (Rows ${startRow + 1} - ${endRow + 1})`
+  }
+  
+  selectTable(customTable)
+  clearRowSelection()
+  isRowSelectionMode.value = false
 }
 
 function formatCellValue(cell) {
@@ -397,23 +600,24 @@ function getCellStyle(row, col) {
     fontSize: '13px'
   }
 
-  // Check if cell is in a detected table
+  // Check if cell is in a detected table - ONLY highlight header rows
   for (const table of detectedTables.value) {
     if (row >= table.startRow && row <= table.endRow &&
         col >= table.startCol && col <= table.endCol) {
-      styles.backgroundColor = '#f8f9fa'
-      styles.border = '1px solid #dee2e6'
-      // Highlight header row
-      if (row === table.startRow) {
-        styles.backgroundColor = '#e3f2fd'
+      // Only highlight actual header row (not just startRow)
+      const headerRowToUse = table.headerRow !== undefined ? table.headerRow : table.startRow
+      if (row === headerRowToUse) {
+        styles.backgroundColor = 'rgba(227, 242, 253, 0.3)'
         styles.fontWeight = '600'
         styles.color = '#0d47a1'
+        styles.borderBottom = '2px solid #0d47a1'
       }
+      // No highlighting for body cells
       break
     }
   }
 
-  // Check merged ranges
+  // Check merged ranges - use very transparent highlighting to avoid obscuring content
   for (const range of mergedRanges.value) {
     if (row >= range.min_row && row <= range.max_row &&
         col >= range.min_col && col <= range.max_col) {
@@ -423,8 +627,10 @@ function getCellStyle(row, col) {
         const rowspan = range.max_row - range.min_row + 1
         styles.width = `calc(${getColumnWidth(col)} * ${colspan})`
         styles.height = `calc(${getRowHeight(row)} * ${rowspan})`
-        styles.backgroundColor = '#f0f4ff'
-        styles.border = '1px solid #0B2044'
+        // Use very transparent background to avoid band effect
+        styles.backgroundColor = 'rgba(240, 244, 255, 0.08)'
+        // Use thinner border to avoid band effect
+        styles.border = '1px solid rgba(11, 32, 68, 0.15)'
         styles.zIndex = 2
         styles.position = 'relative'
       } else {
@@ -451,11 +657,16 @@ function selectCell(rowIndex, colIndex, cell) {
   // Get cell reference (e.g., "A1", "B2")
   const cellRef = getCellReference(rowIndex, colIndex)
   
-  // Check if cell has a formula
+  // Check if cell has a formula - show formula in formula bar
   if (cellFormulas.value.has(cellRef)) {
     selectedCellFormula.value = cellFormulas.value.get(cellRef)
   } else {
-    selectedCellFormula.value = formatCellValue(cell)
+    // Check if cell is an object with formula property
+    if (cell && typeof cell === 'object' && cell.f) {
+      selectedCellFormula.value = cell.f
+    } else {
+      selectedCellFormula.value = formatCellValue(cell)
+    }
   }
 }
 
@@ -517,16 +728,24 @@ function loadSheetData() {
       isSingleInstrumentSheet.value = detection.type === 'single'
       
       if (isSingleInstrumentSheet.value) {
-        const extracted = extractValuesIntelligently(sheet.data, props.instrumentType)
+        const extracted = extractValuesIntelligently(sheet.data, props.instrumentType, selectedCurrency.value)
         extractedPreviewValues.value = extracted
         // Emit extracted values to parent
         emit('single-instrument-extracted', {
           sheetName: sheet.name,
-          extractedValues: extracted
+          extractedValues: extracted,
+          selectedCurrency: selectedCurrency.value
         })
       } else {
         extractedPreviewValues.value = {}
       }
+    }
+    
+    // Detect currencies from full data
+    if (sheet.fullData && sheet.fullData.length > 0) {
+      availableCurrencies.value = detectCurrencies(sheet.fullData)
+    } else {
+      availableCurrencies.value = []
     }
   } else {
     visibleRows.value = []
@@ -573,17 +792,76 @@ function extractFormulas(sheet) {
   }
 }
 
+function detectCurrencies(data) {
+  const currencySet = new Set()
+  const currencyPatterns = [
+    /\b(USD|EUR|GBP|JPY|CNY|ZWG|ZAR|AUD|CAD|CHF|INR|BRL|RUB|KRW|SGD|HKD|NOK|SEK|DKK|MXN|TRY|PLN|THB|IDR|MYR|PHP|VND|CZK|HUF|RON|BGN|HRK|RSD|UAH|ILS|SAR|AED|QAR|KWD|BHD|OMR|JOD|LBP|EGP|NGN|KES|GHS|ZMW|BWP|NAD|SZL|LSL|MZN|AOA|CDF|BIF|DJF|ERN|ETB|KMF|MGA|MWK|MUR|RWF|SCR|SOS|TZS|UGX|XAF|XOF|XPF)\b/i,
+    /\$|€|£|¥|₹|₽|₩|₫|฿|RM|₱|₫|₪|₺|zł|₫/i
+  ]
+  
+  data.forEach(row => {
+    if (!row) return
+    row.forEach(cell => {
+      if (typeof cell === 'string') {
+        for (const pattern of currencyPatterns) {
+          const match = cell.match(pattern)
+          if (match) {
+            const currency = match[0].toUpperCase()
+            if (currency === '$') currencySet.add('USD')
+            else if (currency === '€') currencySet.add('EUR')
+            else if (currency === '£') currencySet.add('GBP')
+            else if (currency === '¥') currencySet.add('JPY')
+            else currencySet.add(currency)
+          }
+        }
+      }
+    })
+  })
+  return Array.from(currencySet).sort()
+}
+
+function emitCurrencyChange() {
+  emit('currency-change', selectedCurrency.value)
+}
+
+function startResize(e) {
+  isResizing.value = true
+  resizeStartY.value = e.clientY
+  resizeStartHeight.value = viewerHeight.value
+  document.addEventListener('mousemove', onResize)
+  document.addEventListener('mouseup', stopResize)
+}
+
+function onResize(e) {
+  if (!isResizing.value) return
+  const deltaY = e.clientY - resizeStartY.value
+  const newHeight = resizeStartHeight.value + deltaY
+  // Limit height between 300px and 90vh
+  if (newHeight >= 300 && newHeight <= window.innerHeight * 0.9) {
+    viewerHeight.value = newHeight
+  }
+}
+
+function stopResize() {
+  isResizing.value = false
+  document.removeEventListener('mousemove', onResize)
+  document.removeEventListener('mouseup', stopResize)
+}
+
 function detectTables() {
   detectedTables.value = []
   const data = visibleRows.value
   if (!data || data.length === 0) return
 
-  // Simple table detection: find contiguous regions with headers
+  // Detect tables: look for structured data with headers
+  // Very lenient detection to catch all tables for highlighting
   let inTable = false
   let tableStartRow = -1
   let tableStartCol = -1
   let tableEndRow = -1
   let tableEndCol = -1
+  let headerRow = -1
+  let consecutiveEmptyRows = 0
 
   for (let row = 0; row < data.length; row++) {
     const rowData = data[row]
@@ -592,6 +870,7 @@ function detectTables() {
     let nonEmptyCount = 0
     let firstNonEmptyCol = -1
     let lastNonEmptyCol = -1
+    let isLikelyHeader = false
 
     for (let col = 0; col < rowData.length; col++) {
       const cell = rowData[col]
@@ -599,11 +878,22 @@ function detectTables() {
         nonEmptyCount++
         if (firstNonEmptyCol === -1) firstNonEmptyCol = col
         lastNonEmptyCol = col
+        // Check if cell looks like a header (short text, not number)
+        if (typeof cell === 'string' && cell.length < 50 && !cell.match(/^\d+$/)) {
+          isLikelyHeader = true
+        }
       }
     }
 
-    // If row has multiple non-empty cells, it could be part of a table
-    if (nonEmptyCount >= 2) {
+    // Track consecutive empty rows
+    if (nonEmptyCount === 0) {
+      consecutiveEmptyRows++
+    } else {
+      consecutiveEmptyRows = 0
+    }
+
+    // If row has ANY data, it could be part of a table
+    if (nonEmptyCount >= 1) {
       if (!inTable) {
         // Start of a new table
         inTable = true
@@ -611,21 +901,24 @@ function detectTables() {
         tableStartCol = firstNonEmptyCol
         tableEndRow = row
         tableEndCol = lastNonEmptyCol
+        headerRow = row
       } else {
         // Continue table
         tableEndRow = row
         tableEndCol = Math.max(tableEndCol, lastNonEmptyCol)
         tableStartCol = Math.min(tableStartCol, firstNonEmptyCol)
       }
-    } else if (inTable && nonEmptyCount === 0) {
-      // Empty row ends the table
+    } else if (inTable && consecutiveEmptyRows >= 1) {
+      // Even 1 empty row ends the table to separate tables for highlighting
       inTable = false
-      if (tableEndRow - tableStartRow >= 1) {
+      if (tableEndRow - tableStartRow >= 0) {
         detectedTables.value.push({
           startRow: tableStartRow,
           endRow: tableEndRow,
           startCol: tableStartCol,
           endCol: tableEndCol,
+          headerRow: headerRow,
+          type: 'table',
           name: `Table ${detectedTables.value.length + 1}`
         })
       }
@@ -633,14 +926,210 @@ function detectTables() {
   }
 
   // Add the last table if we ended while in one
-  if (inTable && tableEndRow - tableStartRow >= 1) {
+  if (inTable && tableEndRow - tableStartRow >= 0) {
     detectedTables.value.push({
       startRow: tableStartRow,
       endRow: tableEndRow,
       startCol: tableStartCol,
       endCol: tableEndCol,
+      headerRow: headerRow,
+      type: 'table',
       name: `Table ${detectedTables.value.length + 1}`
     })
+  }
+
+  // Detect sections (areas that might not be structured tables)
+  detectSections(data)
+  
+  // Disabled: detectScatteredValues was creating fake Value Areas from individual rows
+  // Only detect actual tables and sections, not individual cells
+  // detectScatteredValues(data)
+}
+
+function detectSections(data) {
+  if (!data || data.length === 0) return
+
+  // Detect sections: areas with data that might contain tables
+  // More lenient to detect tables within sections while avoiding fake Value Areas
+  
+  let inSection = false
+  let sectionStartRow = -1
+  let sectionStartCol = -1
+  let sectionEndRow = -1
+  let sectionEndCol = -1
+  let sectionName = ''
+  let consecutiveEmptyRows = 0
+
+  for (let row = 0; row < data.length; row++) {
+    const rowData = data[row]
+    if (!rowData) continue
+
+    let nonEmptyCount = 0
+    let firstNonEmptyCol = -1
+    let lastNonEmptyCol = -1
+    let rowContent = ''
+
+    for (let col = 0; col < rowData.length; col++) {
+      const cell = rowData[col]
+      if (cell !== null && cell !== undefined && cell !== '') {
+        nonEmptyCount++
+        if (firstNonEmptyCol === -1) firstNonEmptyCol = col
+        lastNonEmptyCol = col
+        if (typeof cell === 'string') {
+          rowContent += cell + ' '
+        }
+      }
+    }
+
+    // Track consecutive empty rows
+    if (nonEmptyCount === 0) {
+      consecutiveEmptyRows++
+    } else {
+      consecutiveEmptyRows = 0
+    }
+
+    // Detect sections with at least 2 columns
+    if (nonEmptyCount >= 2 && !inSection) {
+      inSection = true
+      sectionStartRow = row
+      sectionStartCol = firstNonEmptyCol
+      sectionEndRow = row
+      sectionEndCol = lastNonEmptyCol
+      sectionName = rowContent.trim().substring(0, 30) || `Section ${detectedTables.value.length + 1}`
+    } else if (inSection && nonEmptyCount >= 1) {
+      // Continue section
+      sectionEndRow = row
+      sectionEndCol = Math.max(sectionEndCol, lastNonEmptyCol)
+      sectionStartCol = Math.min(sectionStartCol, firstNonEmptyCol)
+    } else if (inSection && consecutiveEmptyRows >= 3) {
+      // Multiple consecutive empty rows end the section
+      inSection = false
+      // Only add section if it has at least 2 rows
+      if (sectionEndRow - sectionStartRow >= 1) {
+        detectedTables.value.push({
+          startRow: sectionStartRow,
+          endRow: sectionEndRow,
+          startCol: sectionStartCol,
+          endCol: sectionEndCol,
+          headerRow: sectionStartRow,
+          type: 'section',
+          name: sectionName
+        })
+      }
+    }
+  }
+
+  // Add last section if still in one and has at least 2 rows
+  if (inSection && sectionEndRow - sectionStartRow >= 1) {
+    detectedTables.value.push({
+      startRow: sectionStartRow,
+      endRow: sectionEndRow,
+      startCol: sectionStartCol,
+      endCol: sectionEndCol,
+      headerRow: sectionStartRow,
+      type: 'section',
+      name: sectionName
+    })
+  }
+
+  // Disabled: detectScatteredValues was creating fake Value Areas from individual rows
+  // Only detect actual tables and sections, not individual cells
+  // detectScatteredValues(data)
+}
+
+function detectScatteredValues(data) {
+  if (!data || data.length === 0) return
+
+  // Find individual cells with important values (monetary, dates, percentages, etc.)
+  const importantCells = []
+  
+  for (let row = 0; row < data.length; row++) {
+    const rowData = data[row]
+    if (!rowData) continue
+
+    for (let col = 0; col < rowData.length; col++) {
+      const cell = rowData[col]
+      if (cell === null || cell === undefined || cell === '') continue
+
+      // Check if cell contains important data
+      const isMonetary = typeof cell === 'string' && (cell.match(/\$|€|£|¥|USD|EUR|GBP|ZWG/i) || cell.match(/\d+[,.]\d+/))
+      const isPercentage = typeof cell === 'string' && cell.match(/\d+%|\d+\.\d+%/)
+      const isDate = typeof cell === 'string' && cell.match(/\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4}/)
+      const isNumber = typeof cell === 'number'
+      const isLongText = typeof cell === 'string' && cell.length > 20
+
+      if (isMonetary || isPercentage || isDate || isNumber || isLongText) {
+        importantCells.push({
+          row,
+          col,
+          value: cell,
+          type: isMonetary ? 'monetary' : isPercentage ? 'percentage' : isDate ? 'date' : isNumber ? 'number' : 'text'
+        })
+      }
+    }
+  }
+
+  // Group nearby important cells into value areas
+  if (importantCells.length > 0) {
+    let currentArea = null
+    
+    for (const cell of importantCells) {
+      if (!currentArea) {
+        currentArea = {
+          startRow: cell.row,
+          endRow: cell.row,
+          startCol: cell.col,
+          endCol: cell.col,
+          cells: [cell]
+        }
+      } else {
+        // Check if this cell is close to the current area
+        const rowDiff = Math.abs(cell.row - currentArea.endRow)
+        const colDiff = Math.abs(cell.col - currentArea.endCol)
+        
+        if (rowDiff <= 2 && colDiff <= 3) {
+          // Extend current area
+          currentArea.endRow = Math.max(currentArea.endRow, cell.row)
+          currentArea.endCol = Math.max(currentArea.endCol, cell.col)
+          currentArea.startRow = Math.min(currentArea.startRow, cell.row)
+          currentArea.startCol = Math.min(currentArea.startCol, cell.col)
+          currentArea.cells.push(cell)
+        } else {
+          // Save current area and start new one
+          if (currentArea.cells.length >= 1) {
+            detectedTables.value.push({
+              startRow: currentArea.startRow,
+              endRow: currentArea.endRow,
+              startCol: currentArea.startCol,
+              endCol: currentArea.endCol,
+              headerRow: currentArea.startRow,
+              type: 'values',
+              name: `Value Area ${detectedTables.value.length + 1}`
+            })
+          }
+          currentArea = {
+            startRow: cell.row,
+            endRow: cell.row,
+            startCol: cell.col,
+            endCol: cell.col,
+            cells: [cell]
+          }
+        }
+      }
+    }
+    
+    // Add the last area
+    if (currentArea && currentArea.cells.length >= 1) {
+      detectedTables.value.push({
+        startRow: currentArea.startRow,
+        endRow: currentArea.endRow,
+        startCol: currentArea.startCol,
+        endCol: currentArea.endCol,
+        headerRow: currentArea.startRow,
+        type: 'values',
+        name: `Value Area ${detectedTables.value.length + 1}`
+      })
+    }
   }
 }
 
@@ -648,19 +1137,20 @@ function selectTable(table) {
   selectedTable.value = table
   isTableIsolationMode.value = true
   
-  // Convert isolated table data to JSON format for mapping
+  // Convert isolated table/section data to JSON format for mapping
   if (activeSheet.value && activeSheet.value.fullData) {
     const isolatedData = []
     const headers = []
     
-    // Extract headers from the first row of the table
+    // Extract headers from the header row of the table/section
+    const headerRowIndex = table.headerRow !== undefined ? table.headerRow : table.startRow
     for (let col = table.startCol; col <= table.endCol; col++) {
-      const headerCell = activeSheet.value.fullData[table.startRow]?.[col]
+      const headerCell = activeSheet.value.fullData[headerRowIndex]?.[col]
       headers.push(headerCell || `Column ${col}`)
     }
     
     // Extract data rows (skip header row)
-    for (let row = table.startRow + 1; row <= table.endRow; row++) {
+    for (let row = headerRowIndex + 1; row <= table.endRow; row++) {
       const rowData = {}
       for (let col = table.startCol; col <= table.endCol; col++) {
         const cellValue = activeSheet.value.fullData[row]?.[col]
@@ -672,18 +1162,21 @@ function selectTable(table) {
       }
     }
     
-    // Emit the isolated table data for mapping
+    // Emit the isolated table/section data for mapping
     emit('table-isolated', {
       sheetName: activeSheet.value.name,
       tableName: table.name,
+      type: table.type || 'table',
       data: isolatedData,
       headers: headers,
       tableRange: {
         startRow: table.startRow,
         endRow: table.endRow,
         startCol: table.startCol,
-        endCol: table.endCol
-      }
+        endCol: table.endCol,
+        headerRow: headerRowIndex
+      },
+      selectedCurrency: selectedCurrency.value
     })
   }
 }
@@ -856,8 +1349,8 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
       let fullData = []
       let totalRows = 0
       let totalColumns = 0
-      let maxRows = 100
-      let maxCols = 50
+      let maxRows = 500
+      let maxCols = 100
       
       if (ref) {
         const range = XLSX.utils.decode_range(ref)
@@ -867,14 +1360,14 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         console.log(`ExcelWorkbookViewer: Sheet "${sheetName}" has ${totalRows} rows, ${totalColumns} columns`)
         
         // Skip sheets that are too large to prevent hanging
-        if (totalRows > 10000 || totalColumns > 1000) {
+        if (totalRows > 50000 || totalColumns > 500) {
           console.log(`ExcelWorkbookViewer: Skipping sheet "${sheetName}" - too large (${totalRows} rows x ${totalColumns} columns)`)
           continue
         }
         
-        // Limit to 100 rows and 50 columns for viewer to prevent hang
-        maxRows = Math.min(100, totalRows)
-        maxCols = Math.min(50, totalColumns)
+        // Limit to reasonable size for display to prevent browser hanging
+        maxRows = Math.min(500, totalRows)
+        maxCols = Math.min(100, totalColumns)
         console.log(`ExcelWorkbookViewer: Loading ${maxRows} rows x ${maxCols} columns for display`)
         
         for (let R = range.s.r; R < range.s.r + maxRows; R++) {
@@ -906,11 +1399,10 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         }
       }
       
-      // Get JSON data for detection - limit to same range as fullData
+      // Get JSON data for detection - use full range
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
         defval: '', 
-        raw: false,
-        range: maxRows
+        raw: false
       })
       
       loadedSheets.push({
@@ -939,12 +1431,11 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
 .excel-workbook-viewer {
   display: flex;
   flex-direction: column;
-  height: 100%;
   background: #fff;
   border: 1px solid #e0e0e0;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   font-size: 13px;
-  overflow: hidden;
+  position: relative;
 }
 
 .viewer-header {
@@ -1014,7 +1505,7 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
 
 .excel-grid-container {
   display: grid;
-  grid-template-rows: 25px 1fr;
+  grid-template-rows: 30px 1fr;
   min-width: 100%;
   min-height: 100%;
 }
@@ -1026,6 +1517,7 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
   z-index: 10;
   background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
   border-bottom: 1px solid #d0d0d0;
+  min-height: 30px;
 }
 
 .excel-rows-container {
@@ -1035,7 +1527,7 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
 
 .excel-row {
   display: flex;
-  min-height: 25px;
+  min-height: 30px;
   border-bottom: 1px solid #e0e0e0;
 }
 
@@ -1065,6 +1557,21 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
 .excel-column-header {
   flex-shrink: 0;
   border-right: 1px solid #c0c0c0;
+  position: relative;
+}
+
+.column-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.column-resize-handle:hover {
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .excel-row-header {
@@ -1072,6 +1579,33 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
   flex-shrink: 0;
   border-right: 1px solid #c0c0c0;
   border-bottom: 1px solid #e0e0e0;
+  position: relative;
+}
+
+.row-resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: row-resize;
+  background: transparent;
+}
+
+.row-resize-handle:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.row-selected {
+  background-color: rgba(227, 242, 253, 0.3) !important;
+}
+
+.row-selecting {
+  cursor: pointer;
+}
+
+.row-selecting:hover {
+  background-color: rgba(227, 242, 253, 0.15);
 }
 
 .excel-cell {
@@ -1364,8 +1898,59 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
 }
 
 .preview-value {
-  font-size: 11px;
+  font-size: 12px;
   color: #333;
-  font-weight: 500;
+}
+
+/* Currency selector styles */
+.currency-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: #f0f4ff;
+  border-radius: 4px;
+  margin: 0 12px;
+}
+
+.currency-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0B2044;
+}
+
+.currency-select {
+  padding: 4px 8px;
+  border: 1px solid #0B2044;
+  border-radius: 4px;
+  font-size: 12px;
+  background: white;
+  color: #0B2044;
+  min-width: 120px;
+}
+
+.selected-currency-badge {
+  padding: 2px 8px;
+  background: #0B2044;
+  color: white;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: linear-gradient(to bottom, transparent, #e0e0e0);
+  cursor: ns-resize;
+  border-top: 1px solid #d0d0d0;
+  z-index: 100;
+}
+
+.resize-handle:hover {
+  background: linear-gradient(to bottom, transparent, #c0c0c0);
 }
 </style>

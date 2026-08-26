@@ -1,26 +1,63 @@
 <template>
   <div class="excel-viewer" :class="{ 'has-mapping': showMappingControls }">
-    <!-- Mapping controls (unchanged) -->
+    <!-- Currency selection -->
+    <div v-if="availableCurrencies.length > 0" class="currency-controls">
+      <label class="currency-label">💰 Currency:</label>
+      <select v-model="selectedCurrency" @change="emitCurrencyChange" class="currency-select">
+        <option :value="null">-- All Currencies --</option>
+        <option v-for="currency in availableCurrencies" :key="currency" :value="currency">
+          {{ currency }}
+        </option>
+      </select>
+      <span v-if="selectedCurrency" class="selected-currency-badge">{{ selectedCurrency }}</span>
+    </div>
+
+    <!-- Mapping controls (enhanced with dynamic detection) -->
     <div v-if="showMappingControls" class="mapping-controls">
       <div class="mapping-header">
         <span class="mapping-title">📊 Column Mapping</span>
-        <button class="btn-toggle-mapping" @click="toggleMappingMode">
-          {{ mappingMode === 'manual' ? 'Use Auto' : 'Manual Mapping' }}
-        </button>
+        <div class="mapping-actions">
+          <button class="btn-toggle-mapping" @click="toggleMappingMode">
+            {{ mappingMode === 'manual' ? 'Use Auto' : 'Manual Mapping' }}
+          </button>
+          <button v-if="mappingMode === 'manual'" class="btn-auto-suggest" @click="requestAutoMapping">
+            Auto-Suggest
+          </button>
+        </div>
       </div>
+      
+      <!-- Mapping validation status -->
+      <div v-if="mappingValidation" class="mapping-validation">
+        <div :class="['validation-badge', mappingValidation.is_valid ? 'valid' : 'invalid']">
+          {{ mappingValidation.is_valid ? '✓ Valid' : '⚠ Incomplete' }}
+        </div>
+        <div v-if="!mappingValidation.is_valid && mappingValidation.missing_fields.length" class="missing-fields">
+          Missing: {{ mappingValidation.missing_fields.join(', ') }}
+        </div>
+        <div v-if="mappingValidation.warnings.length" class="mapping-warnings">
+          {{ mappingValidation.warnings.length }} warning(s)
+        </div>
+      </div>
+      
       <div v-if="mappingMode === 'manual'" class="mapping-grid">
-        <div v-for="reqCol in requiredColumns" :key="reqCol" class="mapping-row">
-          <label>{{ reqCol }}</label>
-          <select v-model="localColumnMapping[reqCol]" @change="emitMappingUpdate">
+        <div v-for="mapping in displayMappings" :key="mapping.target_field" class="mapping-row">
+          <label>
+            {{ mapping.target_field }}
+            <span v-if="mapping.confidence" class="confidence-badge" :class="getConfidenceClass(mapping.confidence)">
+              {{ Math.round(mapping.confidence * 100) }}%
+            </span>
+          </label>
+          <select v-model="localColumnMapping[mapping.target_field]" @change="emitMappingUpdate">
             <option :value="null">-- Select --</option>
             <option v-for="fileCol in availableFileColumns" :key="fileCol" :value="fileCol">
               {{ fileCol }}
             </option>
           </select>
+          <span v-if="mapping.semantic_category" class="semantic-tag">{{ mapping.semantic_category }}</span>
         </div>
       </div>
       <div v-else class="auto-mapping-info">
-        <p>Auto‑mapping active – columns are matched by name.</p>
+        <p>Auto‑mapping active – columns are matched by semantic similarity.</p>
       </div>
     </div>
 
@@ -110,8 +147,12 @@ export default {
     defaultMappedMode: { type: Boolean, default: false },
     // Required columns for mapping (if controls shown)
     requiredColumns: { type: Array, default: () => [] },
+    // Mapping validation from backend
+    mappingValidation: { type: Object, default: () => null },
+    // Suggested mappings with confidence scores
+    suggestedMappings: { type: Object, default: () => ({}) },
   },
-  emits: ['data-update', 'mapping-update'],
+  emits: ['data-update', 'mapping-update', 'request-auto-mapping', 'currency-change'],
   setup(props, { emit }) {
     // ------------------------------------------------------------
     // Internal data and state
@@ -143,6 +184,38 @@ export default {
     // Mapping mode (only if controls shown)
     const mappingMode = ref(props.defaultMappedMode ? 'auto' : 'manual')
     const localColumnMapping = ref({ ...props.columnMapping })
+
+    // Currency selection
+    const selectedCurrency = ref(null)
+    const availableCurrencies = ref([])
+
+    // Display mappings with confidence scores
+    const displayMappings = computed(() => {
+      const mappings = []
+      for (const [targetField, sourceField] of Object.entries(props.suggestedMappings)) {
+        const mapping = {
+          target_field: targetField,
+          source_field: sourceField.source_field || null,
+          confidence: sourceField.confidence || 0,
+          semantic_category: sourceField.semantic_category || null
+        }
+        mappings.push(mapping)
+      }
+      // Also include any required columns not in suggested mappings
+      if (props.requiredColumns) {
+        for (const reqCol of props.requiredColumns) {
+          if (!mappings.find(m => m.target_field === reqCol)) {
+            mappings.push({
+              target_field: reqCol,
+              source_field: null,
+              confidence: 0,
+              semantic_category: null
+            })
+          }
+        }
+      }
+      return mappings
+    })
 
     // ------------------------------------------------------------
     // Computed
@@ -510,12 +583,48 @@ export default {
     // We'll adjust template later. For now, we'll keep the existing template and add row resizer rows.
 
     // ------------------------------------------------------------
+    // Currency detection
+    // ------------------------------------------------------------
+    function detectCurrencies(data) {
+      const currencySet = new Set()
+      const currencyPatterns = [
+        /\b(USD|EUR|GBP|JPY|CNY|ZWG|ZAR|AUD|CAD|CHF|INR|BRL|RUB|KRW|SGD|HKD|NOK|SEK|DKK|MXN|TRY|PLN|THB|IDR|MYR|PHP|VND|CZK|HUF|RON|BGN|HRK|RSD|UAH|ILS|SAR|AED|QAR|KWD|BHD|OMR|JOD|LBP|EGP|NGN|KES|GHS|ZMW|BWP|NAD|SZL|LSL|MZN|AOA|CDF|BIF|DJF|ERN|ETB|KMF|MGA|MWK|MUR|RWF|SCR|SOS|TZS|UGX|XAF|XOF|XPF)\b/i,
+        /\$|€|£|¥|₹|₽|₩|₫|฿|RM|₱|₫|₪|₺|zł|₫/i
+      ]
+      
+      data.forEach(row => {
+        Object.values(row).forEach(val => {
+          if (typeof val === 'string') {
+            for (const pattern of currencyPatterns) {
+              const match = val.match(pattern)
+              if (match) {
+                const currency = match[0].toUpperCase()
+                if (currency === '$') currencySet.add('USD')
+                else if (currency === '€') currencySet.add('EUR')
+                else if (currency === '£') currencySet.add('GBP')
+                else if (currency === '¥') currencySet.add('JPY')
+                else currencySet.add(currency)
+              }
+            }
+          }
+        })
+      })
+      return Array.from(currencySet).sort()
+    }
+
+    function emitCurrencyChange() {
+      emit('currency-change', selectedCurrency.value)
+    }
+
+    // ------------------------------------------------------------
     // Watch for prop changes
     // ------------------------------------------------------------
     watch(
       () => props.data,
       (newData) => {
         internalData.value = newData.map(row => ({ ...row })) // shallow copy
+        // Detect currencies
+        availableCurrencies.value = detectCurrencies(newData)
         // If headers not provided, derive from first row
         if (!props.headers || props.headers.length === 0) {
           if (newData.length) {
@@ -590,7 +699,7 @@ export default {
       internalData,
       internalHeaders,
       displayData,
-      displayHeaders,
+      displayMappings,
       selectedCell,
       selectedRange,
       editingCell,
@@ -603,6 +712,8 @@ export default {
       scrollLeft,
       mappingMode,
       localColumnMapping,
+      selectedCurrency,
+      availableCurrencies,
       defaultColumnWidth,
       defaultRowHeight,
       tableStyle,
@@ -634,8 +745,21 @@ export default {
       handleScroll,
       toggleMappingMode,
       emitMappingUpdate,
+      emitCurrencyChange,
     }
   },
+
+  methods: {
+    getConfidenceClass(confidence) {
+      if (confidence >= 0.8) return 'high'
+      if (confidence >= 0.5) return 'medium'
+      return 'low'
+    },
+
+    requestAutoMapping() {
+      this.$emit('request-auto-mapping')
+    }
+  }
 }
 </script>
 
@@ -651,7 +775,7 @@ export default {
 
 .excel-table-wrapper {
   overflow: auto;
-  max-height: 500px; /* can be adjusted via parent */
+  max-height: 600px; /* increased for better preview */
   width: 100%;
   position: relative;
 }
@@ -768,7 +892,7 @@ export default {
   justify-content: space-between;
 }
 
-/* Mapping controls (unchanged) */
+/* Mapping controls (enhanced) */
 .mapping-controls {
   padding: 12px;
   background: #f8f9ff;
@@ -787,45 +911,163 @@ export default {
   color: #0B2044;
 }
 
-.btn-toggle-mapping {
-  background: #0B2044;
-  color: white;
-  border: none;
-  padding: 4px 12px;
+.mapping-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-toggle-mapping,
+.btn-auto-suggest {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #0B2044;
+  background: white;
+  color: #0B2044;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 12px;
+  transition: background 0.2s;
+}
+
+.btn-toggle-mapping:hover,
+.btn-auto-suggest:hover {
+  background: #0B2044;
+  color: white;
+}
+
+.mapping-validation {
+  padding: 8px;
+  background: white;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.validation-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.validation-badge.valid {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.validation-badge.invalid {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.missing-fields {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #c62828;
+}
+
+.mapping-warnings {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #f57c00;
 }
 
 .mapping-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 6px 12px;
-  margin-top: 8px;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .mapping-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  display: contents;
 }
 
 .mapping-row label {
-  min-width: 80px;
-  font-weight: 500;
+  font-size: 12px;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.mapping-row select {
-  flex: 1;
-  padding: 2px 4px;
-  border: 1px solid #ccc;
+.confidence-badge {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.confidence-badge.high {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.confidence-badge.medium {
+  background: #fff3e0;
+  color: #ef6c00;
+}
+
+.confidence-badge.low {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.semantic-tag {
+  font-size: 10px;
+  padding: 1px 4px;
+  background: #e3f2fd;
+  color: #1565c0;
   border-radius: 4px;
 }
 
+.mapping-row select {
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+  background: white;
+}
+
 .auto-mapping-info {
+  padding: 8px;
+  background: white;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #666;
+}
+
+/* Currency controls */
+.currency-controls {
+  padding: 10px 12px;
+  background: #f0f4ff;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.currency-label {
   font-size: 13px;
-  color: #555;
-  padding: 4px 0;
+  font-weight: 600;
+  color: #0B2044;
+}
+
+.currency-select {
+  padding: 4px 8px;
+  border: 1px solid #0B2044;
+  border-radius: 4px;
+ font-size: 12px;
+  background: white;
+  color: #0B2044;
+}
+
+.selected-currency-badge {
+  padding: 2px 8px;
+  background: #0B2044;
+  color: white;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
 }
 </style>

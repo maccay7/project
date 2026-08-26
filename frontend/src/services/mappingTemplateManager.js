@@ -1,11 +1,11 @@
 // Mapping Template Manager - Persist mapping configurations with full CRUD via backend API
-import api from './api.js'
+import { mappingTemplatesAPI } from './api.js'
 
 export const mappingTemplateManager = {
   // Get all mapping templates
   async getAllTemplates() {
     try {
-      const response = await api.callAPI('/mapping-templates', 'GET')
+      const response = await mappingTemplatesAPI.getAll()
       if (response.success) {
         return response.data || []
       }
@@ -19,7 +19,7 @@ export const mappingTemplateManager = {
   // Get templates for a specific instrument type
   async getTemplatesByInstrument(instrumentType) {
     try {
-      const response = await api.callAPI(`/mapping-templates?instrument_type=${instrumentType}`, 'GET')
+      const response = await mappingTemplatesAPI.getByInstrument(instrumentType)
       if (response.success) {
         return response.data || []
       }
@@ -33,7 +33,7 @@ export const mappingTemplateManager = {
   // Get a specific template by ID
   async getTemplate(id) {
     try {
-      const response = await api.callAPI(`/mapping-templates/${id}`, 'GET')
+      const response = await mappingTemplatesAPI.get(id)
       if (response.success) {
         return response.data
       }
@@ -47,16 +47,19 @@ export const mappingTemplateManager = {
   // Save a new mapping template
   async saveTemplate(name, instrumentType, columnMapping, requiredColumns, fileColumns) {
     try {
-      const response = await api.callAPI('/mapping-templates', 'POST', {
+      console.log('saveTemplate called with:', { name, instrumentType, columnMapping, requiredColumns, fileColumns })
+      const response = await mappingTemplatesAPI.create({
         name: name.trim(),
         instrument_type: instrumentType,
         column_mapping: columnMapping,
         required_columns: requiredColumns,
         file_columns: fileColumns
       })
+      console.log('API response:', response)
       if (response.success) {
         return response.data
       }
+      console.log('API response was not successful')
       return null
     } catch (e) {
       console.error('Error saving mapping template:', e)
@@ -72,9 +75,7 @@ export const mappingTemplateManager = {
   // Rename a template
   async renameTemplate(id, newName) {
     try {
-      const response = await api.callAPI(`/mapping-templates/${id}`, 'PUT', {
-        name: newName.trim()
-      })
+      const response = await mappingTemplatesAPI.update(id, { name: newName.trim() })
       if (response.success) {
         return response.data
       }
@@ -93,7 +94,7 @@ export const mappingTemplateManager = {
       if (updates.fileColumns !== undefined) payload.file_columns = updates.fileColumns
       if (updates.name !== undefined) payload.name = updates.name
       
-      const response = await api.callAPI(`/mapping-templates/${id}`, 'PUT', payload)
+      const response = await mappingTemplatesAPI.update(id, payload)
       if (response.success) {
         return response.data
       }
@@ -107,7 +108,7 @@ export const mappingTemplateManager = {
   // Delete a template
   async deleteTemplate(id) {
     try {
-      const response = await api.callAPI(`/mapping-templates/${id}`, 'DELETE')
+      const response = await mappingTemplatesAPI.delete(id)
       return response.success
     } catch (e) {
       console.error('Error deleting mapping template:', e)

@@ -99,15 +99,18 @@
         </v-card-text>
       </v-card>
 
-      <!-- Excel Viewer (basic, without mapping controls) -->
+      <!-- Excel Viewer (with mapping controls) -->
 <ExcelViewer
   :data="rawData.slice(0, 500)"
   :headers="uploadPreviewHeaders"
   :show-mapping-controls="true"
   :column-mapping="columnMapping"
   :available-file-columns="fileColumns"
+  :mapping-validation="mappingValidation"
+  :suggested-mappings="suggestedMapping"
   @data-update="onRawExcelUpdate"
   @mapping-update="updateColumnMapping"
+  @request-auto-mapping="suggestMapping"
 />
 
       <!-- Dataset Info -->
@@ -193,6 +196,20 @@ const sheetNames = ref([])
 const selectedSheet = ref(null)
 const showSheetSelection = ref(false)
 
+// Instrument detection and mapping
+const instrumentDetection = ref(null)
+const suggestedMapping = ref({})
+const mappingValidation = ref(null)
+const dependencyValidation = ref(null)
+const showMappingDialog = ref(false)
+const selectedInstrumentType = ref('money-market')
+const columnMapping = ref({})
+const fileColumns = ref([])
+
+// Raw data for Excel viewer
+const rawData = ref([])
+const uploadPreviewHeaders = ref([])
+
 const hasFile = computed(() => uploadedFile.value !== null)
 const hasData = computed(() => dataset.value.length > 0)
 
@@ -263,6 +280,13 @@ async function uploadFile(file) {
     
     dataset.value = parsed
     headers.value = Object.keys(parsed[0] || {})
+    rawData.value = parsed
+    uploadPreviewHeaders.value = headers.value
+    fileColumns.value = headers.value
+    
+    // Detect instrument type and count
+    await detectInstrumentType(parsed)
+    
     showPreview.value = true
     // Auto-save prompt after successful load
     const name = file.name.replace(/\.[^/.]+$/, '')
@@ -305,6 +329,13 @@ async function confirmSheetSelection() {
     
     dataset.value = data
     headers.value = Object.keys(data[0] || {})
+    rawData.value = data
+    uploadPreviewHeaders.value = headers.value
+    fileColumns.value = headers.value
+    
+    // Detect instrument type and count
+    await detectInstrumentType(data)
+    
     showPreview.value = true
     showSheetSelection.value = false
     
@@ -330,6 +361,90 @@ async function loadExcel() {
     return
   }
   await uploadFile(uploadedFile.value)
+}
+
+// ---------- Instrument Detection and Mapping ----------
+async function detectInstrumentType(data) {
+  try {
+    const response = await fetch('http://localhost:5000/api/detect-instrument', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data })
+    })
+    const result = await response.json()
+    if (result.success) {
+      instrumentDetection.value = result.data
+      selectedInstrumentType.value = result.data.instrument_type || 'money-market'
+      
+      // Get suggested mapping
+      await suggestMapping()
+      
+      // Validate dependencies
+      await validateDependencies()
+    }
+  } catch (err) {
+    console.error('Instrument detection error:', err)
+  }
+}
+
+async function suggestMapping() {
+  try {
+    const response = await fetch('http://localhost:5000/api/suggest-mapping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_fields: fileColumns.value,
+        instrument_type: selectedInstrumentType.value
+      })
+    })
+    const result = await response.json()
+    if (result.success) {
+      suggestedMapping.value = result.data.mappings
+      mappingValidation.value = result.data.validation
+      
+      // Auto-apply mapping if validation passes
+      if (result.data.validation.is_valid) {
+        columnMapping.value = suggestedMapping.value
+      } else {
+        showMappingDialog.value = true
+      }
+    }
+  } catch (err) {
+    console.error('Mapping suggestion error:', err)
+  }
+}
+
+async function validateDependencies() {
+  try {
+    const availableFields = {}
+    fileColumns.value.forEach(field => {
+      availableFields[field] = dataset.value[0]?.[field] || null
+    })
+    
+    const response = await fetch('http://localhost:5000/api/validate-dependencies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        available_fields: availableFields,
+        instrument_type: selectedInstrumentType.value
+      })
+    })
+    const result = await response.json()
+    if (result.success) {
+      dependencyValidation.value = result.data
+    }
+  } catch (err) {
+    console.error('Dependency validation error:', err)
+  }
+}
+
+function updateColumnMapping(mapping) {
+  columnMapping.value = mapping
+}
+
+function onRawExcelUpdate(data) {
+  rawData.value = data
+  dataset.value = data
 }
 
 // ---------- Dataset persistence (via datasetAPI) ----------

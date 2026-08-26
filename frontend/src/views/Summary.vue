@@ -1,6 +1,7 @@
 <template>
   <FixedLayout>
     <div class="summary-page">
+      <!-- Page header -->
       <div class="page-header hero-header">
         <div>
           <h1>Portfolio Summary</h1>
@@ -31,7 +32,7 @@
         </div>
       </div>
 
-      <!-- Descriptive Analytics (KPI Cards) -->
+      <!-- Descriptive Analytics -->
       <div class="analytics-section" style="margin-bottom: 24px;">
         <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
           <i class="fas fa-chart-line" style="color: #1a4d8f; margin-right: 8px;"></i> Descriptive Analytics
@@ -152,179 +153,183 @@
         <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
         <button class="btn-primary" @click="goToReport">Continue to Report →</button>
       </div>
-    </div>
 
-    <!-- ===== MODALS ===== -->
+      <!-- ===== MODALS ===== -->
 
-    <!-- Detail Modal (View as Excel) – White Header with Logo -->
-    <v-dialog v-model="detailModalVisible" max-width="90%" fullscreen hide-overlay>
-      <v-card>
-        <v-card-title class="excel-dialog-title-white">
-          <div class="header-left">
-            <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
-            <div class="header-title">
-              <h4>{{ selectedInst?.name || 'Instrument' }} – Detailed View</h4>
-              <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+      <!-- Detail Modal -->
+      <v-dialog v-model="detailModalVisible" max-width="90%" fullscreen hide-overlay>
+        <v-card>
+          <v-card-title class="excel-dialog-title-white">
+            <div class="header-left">
+              <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+              <div class="header-title">
+                <h4>{{ selectedInst?.name || 'Instrument' }} – Detailed View</h4>
+                <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+              </div>
             </div>
-          </div>
-          <v-spacer></v-spacer>
-          <button class="btn-close-dialog" @click="detailModalVisible = false">
-            <v-icon>mdi-close</v-icon>
-          </button>
-        </v-card-title>
-        <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
-          <div class="excel-table-wrapper">
-            <table class="excel-table">
-              <thead>
-                <tr>
-                  <th v-for="header in selectedInst?.detailHeaders || []" :key="header">{{ header }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(row, idx) in selectedInst?.details || []" :key="idx">
-                  <td v-for="header in selectedInst?.detailHeaders || []" :key="header">{{ row[header] }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </v-card-text>
-        <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
-          <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
-          <v-spacer></v-spacer>
-          <button class="btn-secondary" @click="detailModalVisible = false">Close</button>
-        </div>
-      </v-card>
-    </v-dialog>
-
-    <!-- Combined Modal (View Portfolio as Excel) – White Header with Logo -->
-    <v-dialog v-model="combinedModalVisible" max-width="90%" fullscreen hide-overlay>
-      <v-card>
-        <v-card-title class="excel-dialog-title-white">
-          <div class="header-left">
-            <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
-            <div class="header-title">
-              <h4>Portfolio – Combined Excel View</h4>
-              <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
-            </div>
-          </div>
-          <v-spacer></v-spacer>
-          <button class="btn-close-dialog" @click="combinedModalVisible = false">
-            <v-icon>mdi-close</v-icon>
-          </button>
-        </v-card-title>
-        <v-card-text class="combined-excel-body">
-          <!-- Summary Section -->
-          <div class="combined-section">
-            <h4 class="combined-section-title">Summary</h4>
+            <v-spacer></v-spacer>
+            <button class="btn-close-dialog" @click="detailModalVisible = false">
+              <v-icon>mdi-close</v-icon>
+            </button>
+          </v-card-title>
+          <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
             <div class="excel-table-wrapper">
               <table class="excel-table">
                 <thead>
                   <tr>
-                    <th @click="sortByColumn('name')" class="sortable-header">
-                      <span>Instrument</span>
-                      <span class="sort-indicator" v-if="sortColumn === 'name'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                    </th>
-                    <th @click="sortByColumn('faceValue')" class="sortable-header">
-                      <span>Face Value ($)</span>
-                      <span class="sort-indicator" v-if="sortColumn === 'faceValue'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                    </th>
-                    <th @click="sortByColumn('value')" class="sortable-header">
-                      <span>Calculated Value ($)</span>
-                      <span class="sort-indicator" v-if="sortColumn === 'value'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                    </th>
-                    <th @click="sortByColumn('difference')" class="sortable-header">
-                      <span>Difference ($)</span>
-                      <span class="sort-indicator" v-if="sortColumn === 'difference'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                    </th>
-                    <th @click="sortByColumn('count')" class="sortable-header">
-                      <span>Count</span>
-                      <span class="sort-indicator" v-if="sortColumn === 'count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                    </th>
-                    <th @click="sortByColumn('avgRate')" class="sortable-header">
-                      <span>Avg Rate (%)</span>
-                      <span class="sort-indicator" v-if="sortColumn === 'avgRate'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                    </th>
-                    <th @click="sortByColumn('fredBench')" class="sortable-header">
-                      <span>FRED Benchmark (%)</span>
-                      <span class="sort-indicator" v-if="sortColumn === 'fredBench'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                    </th>
-                    <th>Status</th>
+                    <th v-for="header in selectedInst?.detailHeaders || []" :key="header">{{ header }}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="inst in sortedInstruments" :key="inst.id">
-                    <td><strong>{{ inst.name }}</strong></td>
-                    <td>${{ formatNumber(inst.faceValue || 0) }}</td>
-                    <td>${{ formatNumber(inst.value) }}</td>
-                    <td>${{ formatNumber(inst.difference || 0) }}</td>
-                    <td>{{ inst.count }}</td>
-                    <td>{{ inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate : '—' }}</td>
-                    <td>{{ inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench : '—' }}</td>
-                    <td><span class="status-badge small" :class="inst.statusClass">{{ inst.statusText }}</span></td>
+                  <tr v-for="(row, idx) in selectedInst?.details || []" :key="idx">
+                    <td v-for="header in selectedInst?.detailHeaders || []" :key="header">{{ row[header] }}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
+          </v-card-text>
+          <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
+            <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
+            <v-spacer></v-spacer>
+            <button class="btn-secondary" @click="detailModalVisible = false">Close</button>
           </div>
+        </v-card>
+      </v-dialog>
 
-          <!-- Detailed sections for each instrument -->
-          <div v-for="inst in filteredDetails" :key="inst.id" class="combined-section">
-            <h4 class="combined-section-title">
-              {{ inst.name }} – Details ({{ inst.details.length }} rows)
-              <span v-if="!inst.details.length" class="empty-note">(no data)</span>
-            </h4>
-            <div v-if="inst.details.length" class="excel-table-wrapper">
-              <table class="excel-table">
-                <thead>
-                  <tr>
-                    <th v-for="header in inst.detailHeaders" :key="header">{{ header }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, idx) in inst.details" :key="idx">
-                    <td v-for="header in inst.detailHeaders" :key="header">{{ row[header] }}</td>
-                  </tr>
-                </tbody>
-              </table>
+      <!-- Combined Modal -->
+      <v-dialog v-model="combinedModalVisible" max-width="90%" fullscreen hide-overlay>
+        <v-card>
+          <v-card-title class="excel-dialog-title-white">
+            <div class="header-left">
+              <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+              <div class="header-title">
+                <h4>Portfolio – Combined Excel View</h4>
+                <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+              </div>
             </div>
-            <div v-else class="empty-placeholder">No data available for this instrument.</div>
-          </div>
-        </v-card-text>
-        <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
-          <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
-          <v-spacer></v-spacer>
-          <button class="btn-secondary" @click="combinedModalVisible = false">Close</button>
-        </div>
-      </v-card>
-    </v-dialog>
+            <v-spacer></v-spacer>
+            <button class="btn-close-dialog" @click="combinedModalVisible = false">
+              <v-icon>mdi-close</v-icon>
+            </button>
+          </v-card-title>
+          <v-card-text class="combined-excel-body">
+            <!-- Summary Table -->
+            <div class="combined-section">
+              <h4 class="combined-section-title">Summary</h4>
+              <div class="excel-table-wrapper">
+                <table class="excel-table">
+                  <thead>
+                    <tr>
+                      <th @click="sortByColumn('name')" class="sortable-header">
+                        <span>Instrument</span>
+                        <span class="sort-indicator" v-if="sortColumn === 'name'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                      </th>
+                      <th @click="sortByColumn('faceValue')" class="sortable-header">
+                        <span>Face Value ($)</span>
+                        <span class="sort-indicator" v-if="sortColumn === 'faceValue'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                      </th>
+                      <th @click="sortByColumn('value')" class="sortable-header">
+                        <span>Calculated Value ($)</span>
+                        <span class="sort-indicator" v-if="sortColumn === 'value'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                      </th>
+                      <th @click="sortByColumn('difference')" class="sortable-header">
+                        <span>Difference ($)</span>
+                        <span class="sort-indicator" v-if="sortColumn === 'difference'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                      </th>
+                      <th @click="sortByColumn('count')" class="sortable-header">
+                        <span>Count</span>
+                        <span class="sort-indicator" v-if="sortColumn === 'count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                      </th>
+                      <th @click="sortByColumn('avgRate')" class="sortable-header">
+                        <span>Avg Rate (%)</span>
+                        <span class="sort-indicator" v-if="sortColumn === 'avgRate'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                      </th>
+                      <th @click="sortByColumn('fredBench')" class="sortable-header">
+                        <span>FRED Benchmark (%)</span>
+                        <span class="sort-indicator" v-if="sortColumn === 'fredBench'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                      </th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="inst in sortedInstruments" :key="inst.id">
+                      <td><strong>{{ inst.name }}</strong></td>
+                      <td>${{ formatNumber(inst.faceValue || 0) }}</td>
+                      <td>${{ formatNumber(inst.value) }}</td>
+                      <td>${{ formatNumber(inst.difference || 0) }}</td>
+                      <td>{{ inst.count }}</td>
+                      <td>{{ inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate : '—' }}</td>
+                      <td>{{ inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench : '—' }}</td>
+                      <td><span class="status-badge small" :class="inst.statusClass">{{ inst.statusText }}</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-    <!-- Export Dialog -->
-    <v-dialog v-model="showExportDialog" max-width="500px">
-      <v-card>
-        <v-card-title>Select instruments to export</v-card-title>
-        <v-card-text>
-          <div class="export-instrument-select">
-            <label v-for="inst in instruments" :key="inst.id" class="export-checkbox">
-              <input type="checkbox" v-model="selectedExportInstruments[inst.id]" />
-              {{ inst.name }}
-              <span v-if="!inst.completed" class="warning-badge">(no data)</span>
-            </label>
+            <!-- Details for each instrument -->
+            <div v-for="inst in filteredDetails" :key="inst.id" class="combined-section">
+              <h4 class="combined-section-title">
+                {{ inst.name }} – Details ({{ inst.details.length }} rows)
+                <span v-if="!inst.details.length" class="empty-note">(no data)</span>
+              </h4>
+              <div v-if="inst.details.length" class="excel-table-wrapper">
+                <table class="excel-table">
+                  <thead>
+                    <tr>
+                      <th v-for="header in inst.detailHeaders" :key="header">{{ header }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, idx) in inst.details" :key="idx">
+                      <td v-for="header in inst.detailHeaders" :key="header">{{ row[header] }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div v-else class="empty-placeholder">No data available for this instrument.</div>
+            </div>
+          </v-card-text>
+          <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
+            <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
+            <v-spacer></v-spacer>
+            <button class="btn-secondary" @click="combinedModalVisible = false">Close</button>
           </div>
-        </v-card-text>
-        <v-card-actions>
-          <button class="btn-secondary" @click="showExportDialog = false">Cancel</button>
-          <button class="btn-primary" @click="exportToExcel">Export</button>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+        </v-card>
+      </v-dialog>
+
+      <!-- Export Dialog -->
+      <v-dialog v-model="showExportDialog" max-width="500px">
+        <v-card>
+          <v-card-title>Select instruments to export</v-card-title>
+          <v-card-text>
+            <div class="export-instrument-select">
+              <label class="export-checkbox portfolio-option">
+                <input type="checkbox" v-model="downloadPortfolioOption" />
+                Portfolio Excel
+              </label>
+              <label v-for="inst in instruments" :key="inst.id" class="export-checkbox">
+                <input type="checkbox" v-model="selectedExportInstruments[inst.id]" />
+                {{ inst.name }}
+                <span v-if="!inst.completed" class="warning-badge">(no data)</span>
+              </label>
+            </div>
+          </v-card-text>
+          <v-card-actions>
+            <button class="btn-secondary" @click="showExportDialog = false">Cancel</button>
+            <button class="btn-primary" @click="exportToExcel">Export</button>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+    </div> <!-- /summary-page -->
   </FixedLayout>
 </template>
 
 <script setup>
 // ================================================================
 // FULL IMPLEMENTATION – ALL FIXES APPLIED
-// Fixed: loading instrument summaries, descriptive analytics,
-// breakdown, allocation, deduplicated columns.
+// Fixed: closing div, lifecycle hooks (onBeforeUnmount moved out)
 // ================================================================
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
@@ -343,13 +348,14 @@ const selectedInst = ref(null)
 const combinedModalVisible = ref(false)
 const showExportDialog = ref(false)
 const selectedExportInstruments = ref({})
+const downloadPortfolioOption = ref(false)
 const sortColumn = ref('')
 const sortOrder = ref('asc')
 const loading = ref(false)
 const error = ref('')
 
 // ================================================================
-// Deduplicate headers (remove instrument_name, instrument_type, suffixes, Worksheet)
+// Helper: getUniqueHeaders
 // ================================================================
 function getUniqueHeaders(headers) {
   const exclude = ['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet']
@@ -365,7 +371,7 @@ function getUniqueHeaders(headers) {
 }
 
 // ================================================================
-// computeAggregate – supports both Title Case and snake_case
+// computeAggregate – robust aggregation
 // ================================================================
 function computeAggregate(rows) {
   const agg = {
@@ -457,7 +463,7 @@ function computeAggregate(rows) {
 }
 
 // ================================================================
-// Descriptive Analytics – robust field mapping
+// Descriptive Analytics
 // ================================================================
 const analyticsData = computed(() => {
   const allDetails = instrumentsWithDetails.value.flatMap(inst => inst.details || [])
@@ -489,7 +495,6 @@ const analyticsData = computed(() => {
   }
   for (const [k, v] of Object.entries(stats)) {
     if (typeof v === 'number') {
-      // Check if this is a time field (days, months, years, maturity, duration, term, week, time)
       const isTimeField = k.toLowerCase().includes('day') || k.toLowerCase().includes('maturity') || k.toLowerCase().includes('duration') || k.toLowerCase().includes('term') || k.toLowerCase().includes('month') || k.toLowerCase().includes('year') || k.toLowerCase().includes('week') || k.toLowerCase().includes('time')
       if (isTimeField) {
         stats[k] = Math.round(v).toLocaleString()
@@ -501,7 +506,7 @@ const analyticsData = computed(() => {
   return stats
 })
 
-// ---- Existing computed ----
+// ---- Computed totals ----
 const totalFaceValue = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.faceValue || 0), 0))
 const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
 const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
@@ -578,6 +583,31 @@ function openCombinedModal() {
   combinedModalVisible.value = true
 }
 
+// ---- Excel helpers ----
+function isPercentageField(col) {
+  const lowerCol = col.toLowerCase()
+  return lowerCol.includes('rate') || lowerCol.includes('yield') || lowerCol.includes('discount') || lowerCol.includes('coupon')
+}
+
+function formatForExcel(value, type = 'number', key = '') {
+  if (value === null || value === undefined || value === '') return ''
+  const num = parseFloat(value)
+  if (isNaN(num)) return value
+
+  const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
+  if (isTimeField) {
+    return Math.round(num)
+  }
+
+  if (type === 'percentage') {
+    return Math.round(num * 100) / 100
+  } else if (type === 'money') {
+    return Math.round(num * 100) / 100
+  }
+  return num
+}
+
+// ---- Export functions ----
 function exportCombinedExcel() {
   const workbook = XLSX.utils.book_new()
   const valuationDate = new Date().toISOString().split('T')[0]
@@ -645,38 +675,98 @@ function exportCombinedExcel() {
   combinedModalVisible.value = false
 }
 
-// ================================================================
-// isPercentageField helper
-// ================================================================
-function isPercentageField(col) {
-  const lowerCol = col.toLowerCase()
-  return lowerCol.includes('rate') || lowerCol.includes('yield') || lowerCol.includes('discount') || lowerCol.includes('coupon')
+function downloadPortfolioExcel() {
+  const hasSelection = Object.values(selectedExportInstruments.value).some(v => v === true)
+  if (!hasSelection) {
+    instruments.value.forEach(inst => {
+      if (inst.completed || inst.value > 0) {
+        selectedExportInstruments.value[inst.id] = true
+      }
+    })
+  }
+  exportCombinedExcel()
+  showExportDialog.value = false
+}
+
+function exportToExcel() {
+  if (!activeSession.value) { alert('No active session'); return }
+  const toExport = instruments.value.filter(inst => selectedExportInstruments.value[inst.id])
+  if (toExport.length === 0 && !downloadPortfolioOption.value) { alert('No instruments selected for export'); return }
+
+  const workbook = XLSX.utils.book_new()
+  const valuationDate = new Date().toISOString().split('T')[0]
+
+  const summaryRows = []
+  summaryRows.push(['', '', '', ''])
+  summaryRows.push(['DuraCapital', '', '', ''])
+  summaryRows.push(['Portfolio Summary', '', '', ''])
+  summaryRows.push([`Session: ${activeSession.value.name}`, '', '', ''])
+  summaryRows.push([`Valuation Date: ${valuationDate}`, '', '', ''])
+  summaryRows.push(['', '', '', ''])
+  summaryRows.push([
+    'Instrument Name',
+    'Face Value ($)',
+    'Calculated Value ($)',
+    'Difference ($)',
+    'Count',
+    'Avg Rate (%)',
+    'FRED Benchmark (%)',
+    'Status'
+  ])
+  toExport.forEach(inst => {
+    summaryRows.push([
+      inst.name,
+      formatForExcel(inst.faceValue, 'money'),
+      formatForExcel(inst.value, 'money'),
+      formatForExcel((inst.faceValue || 0) - inst.value, 'money'),
+      inst.count,
+      inst.avgRate !== null ? formatForExcel(inst.avgRate, 'percentage') : '—',
+      inst.fredBench !== null ? formatForExcel(inst.fredBench, 'percentage') : '—',
+      inst.statusText
+    ])
+  })
+  summaryRows.push([
+    'TOTAL',
+    formatForExcel(totalFaceValue.value, 'money'),
+    formatForExcel(grandTotal.value, 'money'),
+    formatForExcel(totalFaceValue.value - grandTotal.value, 'money'),
+    totalInstruments.value,
+    '',
+    '',
+    ''
+  ])
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows)
+  summarySheet['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 18 }, { wch: 14 }]
+  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
+
+  for (const inst of toExport) {
+    const instDetails = instrumentsWithDetails.value.find(d => d.id === inst.id)
+    if (instDetails?.details && instDetails.details.length) {
+      const headers = getUniqueHeaders(instDetails.detailHeaders)
+      const detailData = [
+        [`${inst.name} – Detailed Instruments`],
+        [`Session: ${activeSession.value.name}`],
+        [`Valuation Date: ${valuationDate}`],
+        [],
+        headers,
+        ...instDetails.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))
+      ]
+      const sheet = XLSX.utils.aoa_to_sheet(detailData)
+      sheet['!cols'] = headers.map(() => ({ wch: 16 }))
+      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
+    }
+  }
+
+  XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name}_${valuationDate}.xlsx`)
+
+  if (downloadPortfolioOption.value) {
+    downloadPortfolioExcel()
+  }
+  showExportDialog.value = false
 }
 
 // ================================================================
-// formatForExcel – prevents 500% errors
-// ================================================================
-function formatForExcel(value, type = 'number', key = '') {
-  if (value === null || value === undefined || value === '') return ''
-  const num = parseFloat(value)
-  if (isNaN(num)) return value
-  
-  // Round time fields to whole numbers
-  const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
-  if (isTimeField) {
-    return Math.round(num)
-  }
-  
-  if (type === 'percentage') {
-    return Math.round(num * 100) / 100
-  } else if (type === 'money') {
-    return Math.round(num * 100) / 100
-  }
-  return num
-}
-
-// ================================================================
-// loadSummary – correctly merge all instruments, deduplicate headers
+// loadSummary – main data loader
 // ================================================================
 async function loadSummary() {
   loading.value = true
@@ -710,13 +800,10 @@ async function loadSummary() {
     const wf = await sessionManager.getInstrumentWorkflow(sid, 'money-market')
     const summary = wf?.instrumentSummary || { rows: [], columns: [] }
 
-    // Only show rows from instruments that have been worked on (have data)
     const allSummaryRows = [...summary.rows]
     for (const type of ['bonds', 'tbills']) {
       const wfType = await sessionManager.getInstrumentWorkflow(sid, type)
-      // Only include if the workflow has actual data (not empty)
       if (wfType?.instrumentSummary?.rows && wfType.instrumentSummary.rows.length > 0) {
-        // Check if this instrument has been worked on (has cleanedData, calculations, or rawData)
         const hasData = wfType.cleanedData?.length > 0 || wfType.calculations?.totalValue > 0 || wfType.rawData?.length > 0
         if (hasData) {
           wfType.instrumentSummary.rows.forEach(row => {
@@ -841,102 +928,31 @@ async function loadSummary() {
   }
 }
 
-function exportToExcel() {
-  if (!activeSession.value) { alert('No active session'); return }
-  const toExport = instruments.value.filter(inst => selectedExportInstruments.value[inst.id])
-  if (toExport.length === 0) { alert('No instruments selected for export'); return }
+// ================================================================
+// LIFECYCLE HOOKS (FIXED: onBeforeUnmount moved to top level)
+// ================================================================
 
-  const workbook = XLSX.utils.book_new()
-  const valuationDate = new Date().toISOString().split('T')[0]
-
-  const summaryRows = []
-  summaryRows.push(['', '', '', ''])
-  summaryRows.push(['DuraCapital', '', '', ''])
-  summaryRows.push(['Portfolio Summary', '', '', ''])
-  summaryRows.push([`Session: ${activeSession.value.name}`, '', '', ''])
-  summaryRows.push([`Valuation Date: ${valuationDate}`, '', '', ''])
-  summaryRows.push(['', '', '', ''])
-  summaryRows.push([
-    'Instrument Name',
-    'Face Value ($)',
-    'Calculated Value ($)',
-    'Difference ($)',
-    'Count',
-    'Avg Rate (%)',
-    'FRED Benchmark (%)',
-    'Status'
-  ])
-  toExport.forEach(inst => {
-    summaryRows.push([
-      inst.name,
-      formatForExcel(inst.faceValue, 'money'),
-      formatForExcel(inst.value, 'money'),
-      formatForExcel((inst.faceValue || 0) - inst.value, 'money'),
-      inst.count,
-      inst.avgRate !== null ? formatForExcel(inst.avgRate, 'percentage') : '—',
-      inst.fredBench !== null ? formatForExcel(inst.fredBench, 'percentage') : '—',
-      inst.statusText
-    ])
-  })
-  summaryRows.push([
-    'TOTAL',
-    formatForExcel(totalFaceValue.value, 'money'),
-    formatForExcel(grandTotal.value, 'money'),
-    formatForExcel(totalFaceValue.value - grandTotal.value, 'money'),
-    totalInstruments.value,
-    '',
-    '',
-    ''
-  ])
-  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows)
-  summarySheet['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 18 }, { wch: 14 }]
-  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
-
-  for (const inst of instrumentsWithDetails.value) {
-    if (selectedExportInstruments.value[inst.id] && inst.details && inst.details.length) {
-      const headers = getUniqueHeaders(inst.detailHeaders)
-      const detailData = [
-        [`${inst.name} – Detailed Instruments`],
-        [`Session: ${activeSession.value.name}`],
-        [`Valuation Date: ${valuationDate}`],
-        [],
-        headers,
-        ...inst.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))
-      ]
-      const sheet = XLSX.utils.aoa_to_sheet(detailData)
-      sheet['!cols'] = headers.map(() => ({ wch: 16 }))
-      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
-    }
+const handleSessionUpdate = async (event) => {
+  const { sessionId } = event.detail || {}
+  if (sessionId && activeSession.value?.id === sessionId) {
+    await loadSummary()
+  } else if (!sessionId) {
+    await loadSummary()
   }
-
-  XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name}_${valuationDate}.xlsx`)
-  showExportDialog.value = false
 }
 
-// ================================================================
-// LIFECYCLE
-// ================================================================
 onMounted(async () => {
   await loadSummary()
-
-  const handleSessionUpdate = async (event) => {
-    const { sessionId } = event.detail || {}
-    if (sessionId && activeSession.value?.id === sessionId) {
-      await loadSummary()
-    } else if (!sessionId) {
-      await loadSummary()
-    }
-  }
-
   window.addEventListener('session-updated', handleSessionUpdate)
+})
 
-  onBeforeUnmount(() => {
-    window.removeEventListener('session-updated', handleSessionUpdate)
-  })
+onBeforeUnmount(() => {
+  window.removeEventListener('session-updated', handleSessionUpdate)
 })
 </script>
 
 <style scoped>
+/* Your existing styles remain unchanged */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }

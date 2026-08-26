@@ -15,7 +15,6 @@
 
     <div class="dashboard-title">
       <h1>Dashboard</h1>
-      <!-- Refresh button removed as requested -->
     </div>
 
     <!-- Two-column: Recent Sessions + Create Session -->
@@ -162,7 +161,6 @@
                   <div class="version-entry-badge" :class="ver.changeTypeClass">{{ ver.changeType || 'Saved' }}</div>
                 </div>
                 <div class="version-entry-details">
-                  <!-- 🔥 Display Instrument and Change separately -->
                   <div class="version-entry-row" style="margin-bottom: 4px;">
                     <span class="label">Instrument</span>
                     <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.instrumentType || '—' }}</span>
@@ -171,7 +169,6 @@
                     <span class="label">Change</span>
                     <span class="value" style="font-weight:600; color:#0B2044;">{{ ver.changeSummary || 'No description' }}</span>
                   </div>
-                  <!-- Additional info if available -->
                   <div class="version-entry-row" v-if="ver.modifiedInstruments && ver.modifiedInstruments.length">
                     <span class="label">Modified</span>
                     <span class="value fields-tags">
@@ -329,8 +326,10 @@
 
 <script setup>
 // ================================================================
-// ✅ FULL IMPLEMENTATION – ALL FIXES APPLIED
-// Fixed: version fetching, change summary display, instrument count.
+// ✅ FIXED: Instrument count is now persisted to the session.
+// When a session is loaded, we compute count from versions and
+// update the session's instrument_count in the backend.
+// Switching sessions now shows the correct persisted count.
 // ================================================================
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
@@ -372,7 +371,7 @@ const changePasswordLoading = ref(false)
 const changePasswordError = ref('')
 const changePasswordSuccess = ref('')
 
-// ---- Snackbar notification system ----
+// ---- Snackbar ----
 const snackbar = ref({
   show: false,
   message: '',
@@ -389,7 +388,7 @@ function showSnackbar(message, color = 'error', timeout = 4000) {
   }
 }
 
-// ---- Instruments data ----
+// ---- Instruments ----
 const instruments = [
   { id: 'money-market', name: 'Money Market', description: 'Short-term debt instruments', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)' },
   { id: 'bonds', name: 'Bonds', description: 'Fixed income securities', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
@@ -408,9 +407,8 @@ const inProgressSessions = computed(() => sessions.value.filter(s => s.status ==
 
 const backendKpiData = ref(null)
 const kpiStats = computed(() => {
-  // Calculate total instruments valued across all sessions
+  // Count unique instruments from versions across all sessions (using stored instrument_count)
   const totalInstrumentsValued = sessions.value.reduce((sum, s) => sum + (s.instrument_count || 0), 0)
-  // Calculate total versions across all sessions
   const totalVersions = sessions.value.reduce((sum, s) => sum + (s.version_count || 0), 0)
   
   if (backendKpiData.value) {
@@ -432,7 +430,17 @@ const activeInstrumentCount = computed(() => {
   return activeSession.value.instrument_count || 0
 })
 
-// ---- 🔥 FIX: filteredVersions uses actual versions from API ----
+// ---- Helper to count unique instrument types from versions ----
+function getUniqueInstrumentCount(versions) {
+  if (!versions || !versions.length) return 0
+  const types = new Set()
+  for (const v of versions) {
+    if (v.instrumentType) types.add(v.instrumentType)
+  }
+  return Math.min(types.size, 3) // Cap at 3
+}
+
+// ---- Filtered versions for modal ----
 const filteredVersions = computed(() => {
   const versions = selectedSessionForVersions.value?.versions || []
   const q = versionSearchQuery.value.toLowerCase()
@@ -453,18 +461,111 @@ const formatCurrency = (val) => {
 }
 
 function getInstrumentCount(session) {
-  return session?.instrument_count || 0
+  return session.instrument_count || 0
 }
 
-// ---- Refresh Dashboard from backend ----
+// ---- Update session instrument count in backend ----
+async function updateSessionInstrumentCount(sessionId, count) {
+  try {
+    await sessionManager.updateSession(sessionId, { instrument_count: count })
+    // Update local session object
+    const session = sessions.value.find(s => s.id === sessionId)
+    if (session) {
+      session.instrument_count = count
+    }
+    if (activeSession.value?.id === sessionId) {
+      activeSession.value.instrument_count = count
+    }
+  } catch (e) {
+    console.warn('Failed to update session instrument count:', e)
+  }
+}
+
+// ---- Refresh a single session (fetch latest data, versions, and update count) ----
+async function refreshSession(sessionId) {
+  try {
+    const session = await sessionManager.getSession(sessionId)
+    if (!session) return
+
+    // Fetch versions from API
+    let versions = []
+    let totalCount = 0
+    try {
+      const res = await api.versionAPI.getVersions(sessionId)
+      if (res && res.success) {
+        totalCount = res.total || 0
+        if (res.data && res.data.length > 0) {
+          const sortedData = [...res.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
+          versions = sortedData.map(v => ({
+            id: v.id,
+            versionNumber: v.versionNumber,
+            timestamp: v.timestamp || v.created_at,
+            changeSummary: v.changeSummary || v.change_summary || 'No description',
+            instrumentType: v.instrumentType || v.instrument_type || 'General',
+            changeType: v.changeType || 'Saved',
+            changeTypeClass: v.changeTypeClass || 'badge-saved',
+            modifiedInstruments: v.modifiedInstruments || [],
+            fieldsChanged: v.fieldsChanged || []
+          }))
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch versions for session:', sessionId, e)
+    }
+
+    const newCount = getUniqueInstrumentCount(versions)
+
+    // Build enriched session object
+    const enriched = {
+      ...session,
+      versions: versions,
+      version_count: totalCount || session.version_count || 0,
+      instrument_count: newCount
+    }
+
+    // Update local sessions array
+    const idx = sessions.value.findIndex(s => s.id === sessionId)
+    if (idx !== -1) {
+      sessions.value[idx] = enriched
+    }
+
+    // If this is the active session, update it
+    if (activeSession.value?.id === sessionId) {
+      activeSession.value = enriched
+    }
+
+    // Persist the instrument count if it changed (or if it was previously missing)
+    const storedCount = session.instrument_count || 0
+    if (storedCount !== newCount) {
+      await updateSessionInstrumentCount(sessionId, newCount)
+    }
+
+    return enriched
+  } catch (error) {
+    console.error('Failed to refresh session:', error)
+  }
+}
+
+// ---- Refresh full dashboard ----
 async function refreshDashboard() {
   try {
     const backendSessions = await sessionManager.getAllSessions()
-    sessions.value = backendSessions.map(s => ({
-      ...s,
-      version_count: s.version_count || 0,
-      instrument_count: Math.min(s.instrument_count || 0, 3)
-    }))
+    // We will not fetch versions for all sessions here, only when they are loaded/clicked.
+    // But we should preserve any previously loaded versions and counts.
+    // For now, just merge with existing data.
+    const existingMap = {}
+    sessions.value.forEach(s => { existingMap[s.id] = s })
+    const newSessions = backendSessions.map(s => {
+      const existing = existingMap[s.id]
+      return {
+        ...s,
+        versions: existing?.versions || [],
+        version_count: s.version_count || 0,
+        instrument_count: s.instrument_count || 0 // use stored count, will be updated on load
+      }
+    })
+    sessions.value = newSessions
+
     if (activeSession.value) {
       const updated = sessions.value.find(s => s.id === activeSession.value.id)
       if (updated) {
@@ -479,57 +580,22 @@ async function refreshDashboard() {
   }
 }
 
-async function refreshSession(sessionId) {
+// ---- Load an existing session (with versions) ----
+async function loadExistingSession(sessionId) {
   try {
-    const session = await sessionManager.getSession(sessionId)
-    if (session) {
-      // Fetch versions from API
-      let versions = []
-      let totalCount = 0
-      try {
-        const res = await api.versionAPI.getVersions(sessionId)
-        if (res && res.success) {
-          // Use total from backend response for version count
-          totalCount = res.total || 0
-          if (res.data && res.data.length > 0) {
-            // Sort by version_number descending since backend no longer sorts
-            const sortedData = [...res.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
-            versions = sortedData.map(v => ({
-              id: v.id,
-              versionNumber: v.versionNumber,
-              timestamp: v.timestamp || v.created_at,
-              changeSummary: v.changeSummary || v.change_summary || 'No description',
-              instrumentType: v.instrumentType || v.instrument_type || 'General',
-              changeType: v.changeType || 'Saved',
-              changeTypeClass: v.changeTypeClass || 'badge-saved',
-              modifiedInstruments: v.modifiedInstruments || [],
-              fieldsChanged: v.fieldsChanged || []
-            }))
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to fetch versions for session:', sessionId, e)
-      }
-      const enriched = {
-        ...session,
-        versions: versions,
-        version_count: totalCount || session.version_count || 0,
-        instrument_count: Math.min(session.instrument_count || 0, 3)
-      }
-      const idx = sessions.value.findIndex(s => s.id === sessionId)
-      if (idx !== -1) {
-        sessions.value[idx] = enriched
-      }
-      if (activeSession.value?.id === sessionId) {
-        activeSession.value = enriched
-      }
+    // First, refresh the session to get latest versions and count
+    const enriched = await refreshSession(sessionId)
+    if (enriched) {
+      activeSession.value = enriched
+      sessionManager.setActiveSession(enriched)
+      localStorage.setItem(ACTIVE_KEY, sessionId)
     }
-  } catch (error) {
-    console.error('Failed to refresh session:', error)
+  } catch (err) {
+    showSnackbar('Error loading session: ' + err.message, 'error')
   }
 }
 
-// ---- Session CRUD (using sessionManager) ----
+// ---- Session CRUD ----
 async function createNewSession() {
   if (!newSessionName.value.trim()) return
   try {
@@ -544,40 +610,6 @@ async function createNewSession() {
     newSessionName.value = ''
   } catch (err) {
     showSnackbar('Failed to create session: ' + err.message, 'error')
-  }
-}
-
-async function loadExistingSession(sessionId) {
-  try {
-    const session = await sessionManager.getSession(sessionId)
-    if (session) {
-      // Fetch versions
-      let versions = []
-      try {
-        const res = await api.versionAPI.getVersions(sessionId)
-        if (res && res.success && res.data) {
-          versions = res.data.map(v => ({
-            id: v.id,
-            versionNumber: v.versionNumber,
-            timestamp: v.timestamp || v.created_at,
-            changeSummary: v.changeSummary || v.change_summary || 'No description',
-            instrumentType: v.instrumentType || v.instrument_type || 'General',
-            changeType: v.changeType || 'Saved',
-            changeTypeClass: v.changeTypeClass || 'badge-saved',
-            modifiedInstruments: v.modifiedInstruments || [],
-            fieldsChanged: v.fieldsChanged || []
-          }))
-        }
-      } catch (e) {}
-      session.versions = versions
-      session.version_count = versions.length
-      activeSession.value = session
-      sessionManager.setActiveSession(session)
-      localStorage.setItem(ACTIVE_KEY, session.id)
-      await refreshDashboard()
-    }
-  } catch (err) {
-    showSnackbar('Error loading session: ' + err.message, 'error')
   }
 }
 
@@ -611,51 +643,13 @@ async function deleteSession(sessionId) {
   }
 }
 
-// ---- Version history modal ----
+// ---- Version modal ----
 async function openVersionModal(sessionId) {
   try {
-    const session = await sessionManager.getSession(sessionId)
-    if (session) {
-      // Fetch versions from API
-      let versions = []
-      try {
-        const res = await api.versionAPI.getVersions(sessionId)
-        console.log('Versions API response:', res)
-        if (res && res.success) {
-          // Use total from backend response for version count
-          const totalCount = res.total || 0
-          if (res.data && res.data.length > 0) {
-            // Sort by version_number descending since backend no longer sorts
-            const sortedData = [...res.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
-            versions = sortedData.map(v => ({
-              id: v.id,
-              versionNumber: v.versionNumber,
-              timestamp: v.timestamp || v.created_at,
-              changeSummary: v.changeSummary || v.change_summary || 'No description',
-              instrumentType: v.instrumentType || v.instrument_type || 'General',
-              changeType: v.changeType || 'Saved',
-              changeTypeClass: v.changeTypeClass || 'badge-saved',
-              modifiedInstruments: v.modifiedInstruments || [],
-              fieldsChanged: v.fieldsChanged || []
-            }))
-          }
-          console.log('Mapped versions:', versions.length)
-          console.log('Total versions from backend:', totalCount)
-          // Update session versions and count
-          session.versions = versions
-          session.version_count = totalCount
-          await sessionManager.updateSession(sessionId, { versions, version_count: totalCount })
-        }
-      } catch (e) {
-        console.warn('Failed to fetch versions:', e)
-        // Fallback to existing
-        versions = session.versions || []
-      }
-      console.log('Setting selectedSessionForVersions with versions:', versions.length)
-      selectedSessionForVersions.value = {
-        ...session,
-        versions: versions
-      }
+    // Ensure we have the latest versions
+    const enriched = await refreshSession(sessionId)
+    if (enriched) {
+      selectedSessionForVersions.value = enriched
       versionSearchQuery.value = ''
       versionDialogVisible.value = true
     }
@@ -666,25 +660,20 @@ async function openVersionModal(sessionId) {
 
 async function restoreVersion(sessionId, index) {
   try {
-    const session = await sessionManager.getSession(sessionId)
+    const session = selectedSessionForVersions.value
     if (!session || !session.versions || !session.versions[index]) {
       showSnackbar('Version not found', 'error')
       return
     }
-    
     const version = session.versions[index]
     if (!confirm(`Restore session to version ${version.versionNumber} from ${new Date(version.timestamp).toLocaleString()}?\n\nThis will replace all current data with the saved version.`)) {
       return
     }
-    
-    // Restore the version data
     const response = await api.versionAPI.restoreVersion(sessionId, version.id)
     if (response && response.success) {
       versionDialogVisible.value = false
       await refreshSession(sessionId)
       await refreshDashboard()
-      
-      // Dispatch event to notify InstrumentView to reload data
       window.dispatchEvent(new CustomEvent('session-restored', {
         detail: { sessionId, versionId: version.id }
       }))
@@ -699,21 +688,17 @@ async function restoreVersion(sessionId, index) {
 
 async function deleteVersion(sessionId, versionId, index) {
   try {
-    const session = await sessionManager.getSession(sessionId)
+    const session = selectedSessionForVersions.value
     if (!session || !session.versions || !session.versions[index]) {
       showSnackbar('Version not found', 'error')
       return
     }
-    
     const version = session.versions[index]
     if (!confirm(`Delete version ${version.versionNumber} from ${new Date(version.timestamp).toLocaleString()}?\n\nThis action cannot be undone.`)) {
       return
     }
-    
-    // Delete the version
     const response = await api.versionAPI.deleteVersion(versionId)
     if (response && response.success) {
-      // Refresh versions list
       await openVersionModal(sessionId)
       await refreshSession(sessionId)
       await refreshDashboard()
@@ -729,77 +714,28 @@ async function deleteVersion(sessionId, versionId, index) {
 // ---- Session instruments modal ----
 async function openInstrumentModal(sessionId) {
   try {
-    const session = await sessionManager.getSession(sessionId)
-    if (session) {
-      selectedSessionForInstruments.value = session
-      
-      // Fetch fresh version count from backend
-      let totalCount = session.version_count || 0
-      try {
-        const res = await api.versionAPI.getVersions(sessionId)
-        if (res && res.success) {
-          totalCount = res.total || 0
-        }
-      } catch (e) {
-        console.warn('Failed to fetch version count:', e)
+    // Ensure we have latest versions
+    const enriched = await refreshSession(sessionId)
+    if (!enriched) return
+
+    // Build instrument list from versions (unique instrument types)
+    const instrumentMap = new Map()
+    const versions = enriched.versions || []
+    for (const v of versions) {
+      const type = v.instrumentType || 'Unknown'
+      if (!instrumentMap.has(type)) {
+        instrumentMap.set(type, {
+          instrument_type: type,
+          instrument_name: type.charAt(0).toUpperCase() + type.slice(1).replace('-', ' '),
+          status: 'Saved',
+          saved_at: v.timestamp,
+          version_count: enriched.version_count
+        })
       }
-      
-      const instruments = []
-      const workflows = session.instrumentWorkflow || {}
-      const instrumentKeys = ['money-market', 'bonds', 'tbills']
-      
-      // Count actual instruments with data (matching backend logic)
-      let instrumentCount = 0
-      for (const key of instrumentKeys) {
-        const wf = workflows[key]
-        if (wf && (
-          (wf.cleanedData && wf.cleanedData.length > 0) ||
-          (wf.rawData && wf.rawData.length > 0) ||
-          (wf.data && wf.data.length > 0) ||
-          (wf.calculations && wf.calculations.totalValue && wf.calculations.totalValue > 0) ||
-          (wf.instrumentSummary && wf.instrumentSummary.rows && wf.instrumentSummary.rows.length > 0)
-        )) {
-          instrumentCount++
-          let instrumentName = wf.instrumentName || key
-          if (instrumentName.includes('.')) instrumentName = instrumentName.split('.')[0]
-          instruments.push({
-            instrument_type: key,
-            instrument_name: instrumentName || 'Unnamed',
-            status: 'Saved',
-            saved_at: wf.sessionSavedAt || session.updated_at || Date.now(),
-            version_count: totalCount, // Use session's total version count
-            has_data: true
-          })
-        }
-      }
-      
-      // Update session instrument count
-      if (instrumentCount !== session.instrument_count) {
-        sessionManager.updateSession(sessionId, { instrument_count: instrumentCount })
-        session.instrument_count = instrumentCount
-      }
-      
-      // Fallback to versions if no workflow data
-      if (instruments.length === 0 && totalCount > 0) {
-        const existingVersions = session.versions || []
-        const seen = new Set()
-        for (const v of existingVersions) {
-          if (v.instrumentType && !seen.has(v.instrumentType)) {
-            seen.add(v.instrumentType)
-            instruments.push({
-              instrument_type: v.instrumentType,
-              instrument_name: v.instrumentType,
-              status: 'Saved',
-              saved_at: v.timestamp,
-              version_count: totalCount
-            })
-          }
-        }
-      }
-      
-      sessionInstruments.value = instruments
-      instrumentDialogVisible.value = true
     }
+    sessionInstruments.value = Array.from(instrumentMap.values())
+    selectedSessionForInstruments.value = enriched
+    instrumentDialogVisible.value = true
   } catch (err) {
     console.error('Error loading instruments:', err)
     showSnackbar('Error loading instruments: ' + err.message, 'error')
@@ -895,7 +831,7 @@ async function handleLogout() {
   router.push('/login')
 }
 
-// ---- Functions ----
+// ---- Fetch backend KPI ----
 async function fetchBackendKPI() {
   try {
     const response = await api.dashboardAPI.getKPI()
@@ -911,44 +847,24 @@ async function fetchBackendKPI() {
   }
 }
 
-// ===== 🔥 FIX: handleSessionUpdate at root scope =====
+// ---- Event handler for session updates ----
 const handleSessionUpdate = async (event) => {
   const { sessionId, versionCount, instrumentCount } = event.detail || {}
   if (sessionId) {
-    // Update the specific session
+    // Refresh the session (this will fetch versions and update count)
     await refreshSession(sessionId)
-    // If we have a versionCount, update the active session immediately
+    // If we have versionCount, update the version_count as well (if needed)
     if (versionCount !== undefined && activeSession.value?.id === sessionId) {
       activeSession.value.version_count = versionCount
     }
-    if (instrumentCount !== undefined && activeSession.value?.id === sessionId) {
-      activeSession.value.instrument_count = instrumentCount
-    }
-    // Also update selectedSessionForVersions if it matches
+    // Update the modal if it's open for this session
     if (selectedSessionForVersions.value?.id === sessionId) {
-      // Fetch updated versions for the dialog
-      try {
-        const versionsRes = await api.versionAPI.getVersions(sessionId)
-        if (versionsRes && versionsRes.success && versionsRes.data) {
-          const versions = versionsRes.data.map(v => ({
-            id: v.id,
-            versionNumber: v.versionNumber,
-            timestamp: v.timestamp || v.created_at,
-            changeSummary: v.changeSummary || v.change_summary || 'No description',
-            instrumentType: v.instrumentType || v.instrument_type || 'General',
-            changeType: v.changeType || 'Saved',
-            changeTypeClass: v.changeTypeClass || 'badge-saved',
-            modifiedInstruments: v.modifiedInstruments || [],
-            fieldsChanged: v.fieldsChanged || []
-          }))
-          selectedSessionForVersions.value.versions = versions
-          selectedSessionForVersions.value.version_count = versions.length
-        }
-      } catch (e) {
-        console.warn('Failed to update versions in dialog:', e)
+      const updated = await refreshSession(sessionId)
+      if (updated) {
+        selectedSessionForVersions.value = updated
       }
     }
-    // Refresh the dashboard to ensure everything is consistent
+    // Refresh dashboard to update the list
     await refreshDashboard()
   } else {
     await refreshDashboard()
@@ -969,53 +885,28 @@ onMounted(async () => {
 
   let activeId = localStorage.getItem(ACTIVE_KEY)
   if (activeId) {
-    const session = sessions.value.find(s => s.id === activeId)
-    if (session) {
-      // Fetch versions
-      let versions = []
-      try {
-        const res = await api.versionAPI.getVersions(activeId)
-        if (res && res.success && res.data) {
-          versions = res.data.map(v => ({
-            id: v.id,
-            versionNumber: v.versionNumber,
-            timestamp: v.timestamp || v.created_at,
-            changeSummary: v.changeSummary || v.change_summary || 'No description',
-            instrumentType: v.instrumentType || v.instrument_type || 'General',
-            changeType: v.changeType || 'Saved',
-            changeTypeClass: v.changeTypeClass || 'badge-saved',
-            modifiedInstruments: v.modifiedInstruments || [],
-            fieldsChanged: v.fieldsChanged || []
-          }))
-        }
-      } catch (e) {}
-      session.versions = versions
-      session.version_count = versions.length
-      activeSession.value = session
-      sessionManager.setActiveSession(session)
-    } else {
-      localStorage.removeItem(ACTIVE_KEY)
-      activeId = null
-    }
+    // Load the active session with versions
+    await loadExistingSession(activeId)
   }
 
   if (!activeSession.value && sessions.value.length) {
     activeSession.value = sessions.value[0]
     sessionManager.setActiveSession(activeSession.value)
     localStorage.setItem(ACTIVE_KEY, activeSession.value.id)
+    // Load its versions and update count
+    await loadExistingSession(activeSession.value.id)
   }
 
   window.addEventListener('session-updated', handleSessionUpdate)
 })
 
-// ===== 🔥 FIX: onBeforeUnmount at root scope =====
 onBeforeUnmount(() => {
   window.removeEventListener('session-updated', handleSessionUpdate)
 })
 </script>
 
 <style scoped>
-/* your existing styles – unchanged */
+/* (your existing styles remain unchanged) */
 .dashboard { min-height: 100vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px 40px; }
 .top-navbar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: white; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); z-index: 1000; }
 .logo-placeholder { display: flex; align-items: center; }

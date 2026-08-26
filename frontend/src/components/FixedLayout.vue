@@ -42,6 +42,11 @@
             <span class="nav-label">{{ item.name }}</span>
           </div>
         </div>
+
+        <!-- Footer -->
+        <div class="sidebar-footer">
+          <span class="footer-text">@duracapital2026</span>
+        </div>
       </div>
     </aside>
 
@@ -232,6 +237,22 @@ watch(() => route.path, (newPath) => {
 .nav-label {
   flex: 1;
   white-space: nowrap;
+}
+
+/* Sidebar Footer */
+.sidebar-footer {
+  padding: 16px;
+  text-align: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 8px;
+}
+
+.footer-text {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  text-transform: none;
 }
 
 /* Scrollbar for sidebar */

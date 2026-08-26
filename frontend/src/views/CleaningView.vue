@@ -95,6 +95,21 @@
                       <div><strong>{{ opt.label }}</strong><div class="desc">{{ opt.desc }}</div></div>
                     </template>
                   </v-checkbox>
+                  
+                  <!-- Date Format Dropdown -->
+                  <div v-if="cleaningOptions.find(o => o.key === 'formatDates')?.value" class="date-format-section">
+                    <label class="date-format-label">Select Date Format:</label>
+                    <v-select
+                      v-model="selectedDateFormat"
+                      :items="dateFormatOptions"
+                      item-title="label"
+                      item-value="value"
+                      density="compact"
+                      variant="outlined"
+                      color="#0B2A44"
+                      class="date-format-select"
+                    ></v-select>
+                  </div>
                 </div>
                 <v-progress-linear v-if="isCleaning" indeterminate color="#0B2A44" class="mt-3" />
                 <v-btn color="#0B2A44" :disabled="!hasAnyOption" :loading="isCleaning" @click="startCleaning">
@@ -212,9 +227,22 @@ const cleaningOptions = ref([
   { key: 'removeEmptyRows', label: 'Remove Empty Rows', desc: 'Delete rows with no data', value: true },
   { key: 'trimWhitespace', label: 'Trim Whitespace', desc: 'Remove extra spaces', value: true },
   { key: 'standardizeText', label: 'Standardize Text', desc: 'Fix text case', value: false },
-  { key: 'formatDates', label: 'Format Dates', desc: 'Convert to YYYY-MM-DD', value: false },
+  { key: 'formatDates', label: 'Format Dates', desc: 'Convert dates to selected format', value: false },
   { key: 'standardizeCurrency', label: 'Standardize Currency', desc: 'Format currency values', value: false }
 ])
+
+// Date format options
+const dateFormatOptions = ref([
+  { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
+  { value: 'DD-MM-YYYY', label: 'DD-MM-YYYY' },
+  { value: 'MM-DD-YYYY', label: 'MM-DD-YYYY' },
+  { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
+  { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
+  { value: 'YYYY/MM/DD', label: 'YYYY/MM/DD' },
+  { value: 'DD-MM-YY', label: 'DD-MM-YY' },
+  { value: 'MM-DD-YY', label: 'MM-DD-YY' }
+])
+const selectedDateFormat = ref('YYYY-MM-DD')
 
 const hasAnyOption = computed(() => cleaningOptions.value.some(o => o.value))
 
@@ -325,6 +353,11 @@ async function startCleaning() {
     const options = {}
     cleaningOptions.value.forEach(opt => { if (opt.value) options[opt.key] = true })
     
+    // Add date format if formatDates is enabled
+    if (options.formatDates) {
+      options.dateFormat = selectedDateFormat.value
+    }
+    
     const response = await dataAPI.clean(dataset.value.data, options)
     
     if (response.success) {
@@ -418,6 +451,9 @@ onMounted(() => {
 .desc { font-size: 12px; color: #666; margin-top: 4px; }
 .v-checkbox { margin-bottom: 12px; padding: 8px; border-radius: 6px; }
 .v-checkbox:hover { background: rgba(11,42,68,0.03); }
+.date-format-section { margin-top: 16px; padding: 12px; background: rgba(11,42,68,0.03); border-radius: 8px; border-left: 3px solid #0B2A44; }
+.date-format-label { display: block; font-weight: 600; color: #0B2A44; margin-bottom: 8px; font-size: 14px; }
+.date-format-select { margin-top: 8px; }
 .result-item { display: flex; justify-content: space-between; padding: 12px; background: rgba(11,42,68,0.03); border-radius: 8px; margin-bottom: 8px; }
 .result-item span:first-child { color: #666; font-weight: 500; }
 .result-item span:last-child { color: #0B2A44; font-weight: 700; }
