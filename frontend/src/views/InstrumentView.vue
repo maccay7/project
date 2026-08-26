@@ -4069,9 +4069,12 @@ async function calculateMetrics() {
 
           const agg = computeAggregate(rows)
           const uniqueNames = new Set(rows.map(r => r['Instrument Name']))
+          // Use backend instrument_count if available, otherwise compute from unique names
           // For single-instrument mode (multi-table combined), force count to 1
-          agg.instrumentCount = sheetType.value === 'single' ? 1 : uniqueNames.size
+          agg.instrumentCount = response.data.instrument_count || (sheetType.value === 'single' ? 1 : uniqueNames.size)
           console.log('🔍 Computed aggregate:', agg)
+          console.log('🔍 Backend instrument_count:', response.data.instrument_count)
+          console.log('🔍 Unique names count:', uniqueNames.size)
           console.log('🔍 Instrument count set to:', agg.instrumentCount, '(sheetType:', sheetType.value + ')')
 
           allCalculations.value = agg
