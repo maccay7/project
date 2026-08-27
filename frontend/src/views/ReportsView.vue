@@ -185,6 +185,10 @@ async function loadSummaryData(sessionId, instrumentType) {
     } catch (e) {}
   }
   const wf = await sessionManager.getInstrumentWorkflow(sessionId, instrumentType)
+  // Prioritize completedInstrumentSummary for full session reports
+  if (wf && wf.completedInstrumentSummary && wf.completedInstrumentSummary.rows && wf.completedInstrumentSummary.rows.length) {
+    return wf.completedInstrumentSummary
+  }
   if (wf && wf.cleanedData && wf.cleanedData.length) {
     return { rows: wf.cleanedData, columns: Object.keys(wf.cleanedData[0] || {}) }
   }

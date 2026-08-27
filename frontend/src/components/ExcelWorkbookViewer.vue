@@ -113,24 +113,17 @@
       <div class="table-mode-toggle">
         <button 
           class="mode-toggle-btn" 
-          :class="{ active: !isMultiTableMode && !isRowSelectionMode }"
-          @click="isMultiTableMode = false; isRowSelectionMode = false"
+          :class="{ active: !isMultiTableMode }"
+          @click="isMultiTableMode = false"
         >
           Single Table
         </button>
         <button 
           class="mode-toggle-btn" 
           :class="{ active: isMultiTableMode }"
-          @click="isMultiTableMode = true; isRowSelectionMode = false"
+          @click="isMultiTableMode = true"
         >
           Multi-Table Select
-        </button>
-        <button 
-          class="mode-toggle-btn" 
-          :class="{ active: isRowSelectionMode }"
-          @click="isRowSelectionMode = true; isMultiTableMode = false"
-        >
-          Select Rows
         </button>
       </div>
       <div class="table-buttons">
@@ -159,16 +152,6 @@
           Auto Detect Selected Tables ({{ selectedTables.size }})
         </button>
         <button class="btn-clear-selection" @click="clearTableSelection">
-          <v-icon size="16">mdi-close</v-icon>
-          Clear Selection
-        </button>
-      </div>
-      <div v-if="isRowSelectionMode && selectedRowRange.start >= 0" class="multi-table-actions">
-        <button class="btn-auto-detect-multi" @click="createCustomTableFromRows">
-          <v-icon size="16">mdi-table-plus</v-icon>
-          Create Table from Rows {{ selectedRowRange.start + 1 }} - {{ selectedRowRange.end + 1 }}
-        </button>
-        <button class="btn-clear-selection" @click="clearRowSelection">
           <v-icon size="16">mdi-close</v-icon>
           Clear Selection
         </button>
@@ -355,7 +338,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'currency-change'])
+const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'currency-change', 'workbook-loaded'])
 
 // ===== STATE =====
 const sheets = ref([])
@@ -853,97 +836,332 @@ function detectTables() {
   const data = visibleRows.value
   if (!data || data.length === 0) return
 
-  // Detect tables: look for structured data with headers
-  // Very lenient detection to catch all tables for highlighting
-  let inTable = false
-  let tableStartRow = -1
-  let tableStartCol = -1
-  let tableEndRow = -1
-  let tableEndCol = -1
-  let headerRow = -1
-  let consecutiveEmptyRows = 0
+  // Enhanced content-based structure detection
+  const structures = analyzeWorksheetStructure(data)
+  
+  // Convert detected structures to the expected format
+  structures.forEach(structure => {
+    detectedTables.value.push({
+      startRow: structure.startRow,
+      endRow: structure.endRow,
+      startCol: structure.startCol,
+      endCol: structure.endCol,
+      headerRow: structure.headerRow,
+      type: structure.type,
+      name: structure.name
+    })
+  })
+}
 
+function analyzeWorksheetStructure(data) {
+  const structures = []
+  
+  // Step 1: Analyze each cell to classify its content type
+  const cellAnalysis = analyzeCellContent(data)
+  
+  // Step 2: Detect label-value pairs (vertical and horizontal)
+  const labelValuePairs = detectLabelValuePairs(data, cellAnalysis)
+  
+  // Step 3: Detect tables with headers based on content patterns
+  const tables = detectContentBasedTables(data, cellAnalysis)
+  
+  // Step 4: Detect sections (areas with related content)
+  const sections = detectContentSections(data, cellAnalysis)
+  
+  // Step 5: Merge and prioritize structures
+  const mergedStructures = mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data)
+  
+  return mergedStructures
+}
+
+function analyzeCellContent(data) {
+  const analysis = []
+  
   for (let row = 0; row < data.length; row++) {
-    const rowData = data[row]
-    if (!rowData) continue
-
-    let nonEmptyCount = 0
-    let firstNonEmptyCol = -1
-    let lastNonEmptyCol = -1
-    let isLikelyHeader = false
-
-    for (let col = 0; col < rowData.length; col++) {
-      const cell = rowData[col]
-      if (cell !== null && cell !== undefined && cell !== '') {
-        nonEmptyCount++
-        if (firstNonEmptyCol === -1) firstNonEmptyCol = col
-        lastNonEmptyCol = col
-        // Check if cell looks like a header (short text, not number)
-        if (typeof cell === 'string' && cell.length < 50 && !cell.match(/^\d+$/)) {
-          isLikelyHeader = true
-        }
-      }
+    const rowAnalysis = []
+    for (let col = 0; col < (data[row]?.length || 0); col++) {
+      const cell = data[row][col]
+      rowAnalysis.push(classifyCellContent(cell, row, col))
     }
+    analysis.push(rowAnalysis)
+  }
+  
+  return analysis
+}
 
-    // Track consecutive empty rows
-    if (nonEmptyCount === 0) {
-      consecutiveEmptyRows++
-    } else {
-      consecutiveEmptyRows = 0
-    }
+function classifyCellContent(cell, row, col) {
+  if (cell === null || cell === undefined || cell === '') {
+    return { type: 'empty', isHeader: false, isLabel: false, isData: false }
+  }
+  
+  const text = String(cell).trim()
+  const isNumeric = /^[\d\,\.\-\$%]+$/.test(text)
+  const isDate = /^\d{4}-\d{2}-\d{2}/.test(text) || /^\d{2}\/\d{2}\/\d{4}/.test(text) || /^\d{2}-\d{2}-\d{4}/.test(text)
+  const isPercentage = /%$/.test(text)
+  
+  // Check if it looks like a header based on content
+  const headerKeywords = ['name', 'date', 'rate', 'value', 'amount', 'price', 'yield', 'coupon', 'maturity', 'issue', 'principal', 'face', 'discount', 'interest', 'term', 'tenor', 'frequency', 'currency', 'country', 'instrument', 'bond', 'bill', 'security']
+  const isHeaderKeyword = headerKeywords.some(keyword => text.toLowerCase().includes(keyword))
+  const isShortText = text.length < 50 && !isNumeric && !isDate
+  const isHeader = isShortText && (isHeaderKeyword || /^[A-Z]/.test(text))
+  
+  // Check if it looks like a label
+  const labelPatterns = [/^(.+?)\s*[:=]\s*$/, /^(.+?)\s*$/]
+  const isLabel = isShortText && (labelPatterns.some(pattern => pattern.test(text)) || isHeaderKeyword)
+  
+  // Check if it's data
+  const isData = isNumeric || isDate || isPercentage || (!isHeader && !isLabel && text.length > 0)
+  
+  return {
+    type: isNumeric ? 'numeric' : isDate ? 'date' : isPercentage ? 'percentage' : 'text',
+    isHeader,
+    isLabel,
+    isData,
+    text,
+    length: text.length
+  }
+}
 
-    // If row has ANY data, it could be part of a table
-    if (nonEmptyCount >= 1) {
-      if (!inTable) {
-        // Start of a new table
-        inTable = true
-        tableStartRow = row
-        tableStartCol = firstNonEmptyCol
-        tableEndRow = row
-        tableEndCol = lastNonEmptyCol
-        headerRow = row
-      } else {
-        // Continue table
-        tableEndRow = row
-        tableEndCol = Math.max(tableEndCol, lastNonEmptyCol)
-        tableStartCol = Math.min(tableStartCol, firstNonEmptyCol)
-      }
-    } else if (inTable && consecutiveEmptyRows >= 1) {
-      // Even 1 empty row ends the table to separate tables for highlighting
-      inTable = false
-      if (tableEndRow - tableStartRow >= 0) {
-        detectedTables.value.push({
-          startRow: tableStartRow,
-          endRow: tableEndRow,
-          startCol: tableStartCol,
-          endCol: tableEndCol,
-          headerRow: headerRow,
-          type: 'table',
-          name: `Table ${detectedTables.value.length + 1}`
+function detectLabelValuePairs(data, cellAnalysis) {
+  const pairs = []
+  
+  // Detect vertical label-value pairs (label in row N, value in row N+1)
+  for (let row = 0; row < data.length - 1; row++) {
+    for (let col = 0; col < (data[row]?.length || 0); col++) {
+      const currentCell = cellAnalysis[row][col]
+      const nextCell = cellAnalysis[row + 1][col]
+      
+      if (currentCell.isLabel && nextCell.isData) {
+        pairs.push({
+          startRow: row,
+          endRow: row + 1,
+          startCol: col,
+          endCol: col,
+          headerRow: row,
+          type: 'values',
+          name: `${data[row][col]}: ${data[row + 1][col]}`.substring(0, 30)
         })
       }
     }
   }
+  
+  // Detect horizontal label-value pairs (label in col N, value in col N+1)
+  for (let row = 0; row < data.length; row++) {
+    for (let col = 0; col < (data[row]?.length - 1); col++) {
+      const currentCell = cellAnalysis[row][col]
+      const nextCell = cellAnalysis[row][col + 1]
+      
+      if (currentCell.isLabel && nextCell.isData) {
+        pairs.push({
+          startRow: row,
+          endRow: row,
+          startCol: col,
+          endCol: col + 1,
+          headerRow: row,
+          type: 'values',
+          name: `${data[row][col]}: ${data[row][col + 1]}`.substring(0, 30)
+        })
+      }
+    }
+  }
+  
+  return pairs
+}
 
-  // Add the last table if we ended while in one
-  if (inTable && tableEndRow - tableStartRow >= 0) {
-    detectedTables.value.push({
-      startRow: tableStartRow,
-      endRow: tableEndRow,
-      startCol: tableStartCol,
-      endCol: tableEndCol,
-      headerRow: headerRow,
-      type: 'table',
-      name: `Table ${detectedTables.value.length + 1}`
+function detectContentBasedTables(data, cellAnalysis) {
+  const tables = []
+  
+  // Look for rows that could be headers based on content
+  const potentialHeaderRows = []
+  for (let row = 0; row < data.length; row++) {
+    let headerCount = 0
+    let totalCells = 0
+    
+    for (let col = 0; col < (data[row]?.length || 0); col++) {
+      if (cellAnalysis[row][col].type !== 'empty') {
+        totalCells++
+        if (cellAnalysis[row][col].isHeader) {
+          headerCount++
+        }
+      }
+    }
+    
+    // If more than 50% of non-empty cells look like headers, consider it a header row
+    if (totalCells >= 2 && headerCount / totalCells >= 0.5) {
+      potentialHeaderRows.push(row)
+    }
+  }
+  
+  // For each potential header row, find the extent of the table
+  for (const headerRow of potentialHeaderRows) {
+    let startCol = -1
+    let endCol = -1
+    
+    // Find the column range of the header
+    for (let col = 0; col < (data[headerRow]?.length || 0); col++) {
+      if (cellAnalysis[headerRow][col].type !== 'empty') {
+        if (startCol === -1) startCol = col
+        endCol = col
+      }
+    }
+    
+    if (startCol === -1) continue
+    
+    // Find the end of the table (look for data rows below)
+    let endRow = headerRow
+    let consecutiveEmptyRows = 0
+    
+    for (let row = headerRow + 1; row < data.length; row++) {
+      let hasData = false
+      
+      for (let col = startCol; col <= endCol; col++) {
+        if (cellAnalysis[row][col]?.type !== 'empty') {
+          hasData = true
+          break
+        }
+      }
+      
+      if (hasData) {
+        endRow = row
+        consecutiveEmptyRows = 0
+      } else {
+        consecutiveEmptyRows++
+        if (consecutiveEmptyRows >= 2) break
+      }
+    }
+    
+    // Only add if we have at least one data row
+    if (endRow > headerRow) {
+      tables.push({
+        startRow: headerRow,
+        endRow: endRow,
+        startCol: startCol,
+        endCol: endCol,
+        headerRow: headerRow,
+        type: 'table',
+        name: `Table ${tables.length + 1}`
+      })
+    }
+  }
+  
+  return tables
+}
+
+function detectContentSections(data, cellAnalysis) {
+  const sections = []
+  
+  // Detect contiguous areas of content that aren't tables
+  let inSection = false
+  let sectionStartRow = -1
+  let sectionStartCol = -1
+  let sectionEndRow = -1
+  let sectionEndCol = -1
+  let consecutiveEmptyRows = 0
+  
+  for (let row = 0; row < data.length; row++) {
+    let hasContent = false
+    let firstNonEmptyCol = -1
+    let lastNonEmptyCol = -1
+    
+    for (let col = 0; col < (data[row]?.length || 0); col++) {
+      if (cellAnalysis[row][col].type !== 'empty') {
+        hasContent = true
+        if (firstNonEmptyCol === -1) firstNonEmptyCol = col
+        lastNonEmptyCol = col
+      }
+    }
+    
+    if (hasContent) {
+      if (!inSection) {
+        inSection = true
+        sectionStartRow = row
+        sectionStartCol = firstNonEmptyCol
+        sectionEndRow = row
+        sectionEndCol = lastNonEmptyCol
+      } else {
+        sectionEndRow = row
+        sectionEndCol = Math.max(sectionEndCol, lastNonEmptyCol)
+        sectionStartCol = Math.min(sectionStartCol, firstNonEmptyCol)
+      }
+      consecutiveEmptyRows = 0
+    } else {
+      consecutiveEmptyRows++
+      if (inSection && consecutiveEmptyRows >= 2) {
+        // End of section
+        if (sectionEndRow - sectionStartRow >= 1) {
+          sections.push({
+            startRow: sectionStartRow,
+            endRow: sectionEndRow,
+            startCol: sectionStartCol,
+            endCol: sectionEndCol,
+            headerRow: sectionStartRow,
+            type: 'section',
+            name: `Section ${sections.length + 1}`
+          })
+        }
+        inSection = false
+      }
+    }
+  }
+  
+  // Add final section if still in one
+  if (inSection && sectionEndRow - sectionStartRow >= 1) {
+    sections.push({
+      startRow: sectionStartRow,
+      endRow: sectionEndRow,
+      startCol: sectionStartCol,
+      endCol: sectionEndCol,
+      headerRow: sectionStartRow,
+      type: 'section',
+      name: `Section ${sections.length + 1}`
     })
   }
-
-  // Detect sections (areas that might not be structured tables)
-  detectSections(data)
   
-  // Disabled: detectScatteredValues was creating fake Value Areas from individual rows
-  // Only detect actual tables and sections, not individual cells
-  // detectScatteredValues(data)
+  return sections
+}
+
+function mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data) {
+  const allStructures = [...labelValuePairs, ...tables, ...sections]
+  
+  // Sort by size (larger structures first) to prioritize tables over individual pairs
+  allStructures.sort((a, b) => {
+    const aSize = (a.endRow - a.startRow + 1) * (a.endCol - a.startCol + 1)
+    const bSize = (b.endRow - b.startRow + 1) * (b.endCol - b.startCol + 1)
+    return bSize - aSize
+  })
+  
+  // Remove overlapping structures (keep larger ones)
+  const nonOverlapping = []
+  const occupied = new Set()
+  
+  for (const structure of allStructures) {
+    let overlaps = false
+    
+    for (let row = structure.startRow; row <= structure.endRow; row++) {
+      for (let col = structure.startCol; col <= structure.endCol; col++) {
+        const key = `${row},${col}`
+        if (occupied.has(key)) {
+          overlaps = true
+          break
+        }
+      }
+      if (overlaps) break
+    }
+    
+    if (!overlaps) {
+      nonOverlapping.push(structure)
+      for (let row = structure.startRow; row <= structure.endRow; row++) {
+        for (let col = structure.startCol; col <= structure.endCol; col++) {
+          occupied.add(`${row},${col}`)
+        }
+      }
+    }
+  }
+  
+  // Sort by row position for display order
+  nonOverlapping.sort((a, b) => a.startRow - b.startRow)
+  
+  return nonOverlapping
 }
 
 function detectSections(data) {
@@ -1284,6 +1502,9 @@ watch(() => props.workbookData, (newData) => {
     console.log('ExcelWorkbookViewer: sheets loaded', sheets.value.length, 'sheets')
     console.log('ExcelWorkbookViewer: fileBuffer present?', !!newData.fileBuffer)
     console.log('ExcelWorkbookViewer: first sheet has fullData?', !!newData.sheets[0]?.fullData)
+    
+    // Emit workbook-loaded event with file name
+    emit('workbook-loaded', props.fileName)
     
     // If sheets don't have fullData, parse from fileBuffer
     if (newData.fileBuffer && (!newData.sheets[0]?.fullData || newData.sheets[0]?.fullData?.length === 0)) {

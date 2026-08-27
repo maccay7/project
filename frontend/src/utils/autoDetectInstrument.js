@@ -627,59 +627,31 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
 
   // Helper function to calculate confidence score
   function calculateConfidence(label, matchedVariation, value, fieldName) {
-    let score = 0.5 // Base score
+    let score = 0.3 // Base score (lowered from 0.5)
     
     const dateFields = ['Date', 'Issue Date', 'Maturity Date', 'Valuation Date', 'Trade Date', 'Settlement Date', 'MaturityDate']
     
     // Exact match gets higher score
     if (label.toLowerCase() === matchedVariation.toLowerCase()) {
-      score += 0.3
+      score += 0.2
     }
     
     // Value looks valid (not empty, not just whitespace)
     if (value && String(value).trim() !== '') {
-      score += 0.1
+      score += 0.2
     }
     
-    // Value validation based on field type
+    // Value validation based on field type (made more lenient)
     if (isValidValueForField(fieldName, value)) {
-      score += 0.3
-    } else {
-      // Heavy penalty for invalid values
-      score -= 0.5
-    }
-    
-    // Penalize if value looks like text for numeric fields
-    if (isNumericField(fieldName) && isNaN(parseFloat(String(value).replace(/[%,\s]/g, '')))) {
-      score -= 0.4
-    }
-    
-    // Penalize if value looks like number for text fields
-    if (isTextField(fieldName) && !isNaN(parseFloat(value)) && String(value).length <= 5) {
-      score -= 0.3
+      score += 0.2
     }
     
     // Bonus for values that look like actual data (not headings)
     if (!isTableHeading(value)) {
-      score += 0.2
+      score += 0.1
     }
     
-    // Bonus for numeric fields with proper formatting (%, commas, decimals)
-    if (isNumericField(fieldName)) {
-      const strValue = String(value)
-      if (strValue.includes('%') || strValue.includes(',') || strValue.includes('.')) {
-        score += 0.1
-      }
-    }
-    
-    // Bonus for date fields with proper date format
-    if (dateFields.includes(fieldName)) {
-      if (!isNaN(Date.parse(value)) || /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(value)) {
-        score += 0.2
-      }
-    }
-    
-    return Math.max(0, Math.min(score, 1.0))
+    return Math.max(0.1, Math.min(score, 1.0))
   }
 
   // Helper function to check if a value is a table heading (should not be used as data value)
@@ -735,58 +707,17 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     const textFields = ['Instrument', 'Instrument Name', 'Bond Name', 'Issuer', 'Counterparty', 'Currency']
     
     if (numericFields.includes(fieldName)) {
-      // CRITICAL: Reject dates for numeric fields
-      if (isDateLike(value)) {
-        console.log(`Rejected "${fieldName}": "${value}" (is a date, not a number)`)
-        return false
-      }
-      
-      // CRITICAL: Reject text values for numeric fields (e.g., "Semi-annually" for InterestRate)
+      // Made more lenient - just check if it can be parsed as a number
       const strValue = String(value).trim()
-      // Allow currency symbols ($, €, £, etc.) for Amount field
-      const currencySymbolRegex = fieldName === 'Amount' ? /[%,\s$€£¥₹]/g : /[%,\s]/g
+      const currencySymbolRegex = /[%,\s$€£¥₹]/g
       const numericValue = strValue.replace(currencySymbolRegex, '')
       
-      // If after removing symbols and spaces, it's still not a number, reject it
-      if (isNaN(parseFloat(numericValue))) {
-        console.log(`Rejected "${fieldName}": "${value}" (is text, not a number)`)
-        return false
+      // Allow any numeric value, even if it looks like a date or text
+      if (!isNaN(parseFloat(numericValue))) {
+        return true
       }
       
-      const parsedValue = parseFloat(numericValue)
-      
-      // CRITICAL: Realistic range validation for specific numeric fields
-      if (fieldName === 'InterestRate' || fieldName === 'Interest Rate' || fieldName === 'Coupon Rate' || fieldName === 'CouponRate' || fieldName === 'Rate' || fieldName === 'Discount Rate' || fieldName === 'DiscountRate' || fieldName === 'Yield') {
-        // Rates should be between 0 and 100 (or 0 and 1 if expressed as decimal)
-        if (parsedValue < 0 || parsedValue > 100) {
-          console.log(`Rejected "${fieldName}": "${value}" (value ${parsedValue} is outside realistic rate range 0-100)`)
-          return false
-        }
-      }
-      
-      if (fieldName === 'Price') {
-        // Price should NOT be a percentage (rates are percentages, prices are currency amounts)
-        if (strValue.includes('%')) {
-          console.log(`Rejected "${fieldName}": "${value}" (is a percentage, not a price)`)
-          return false
-        }
-        // Price should be a reasonable currency amount (not too small like 7.5, not too large like billions)
-        if (parsedValue < 1 || parsedValue > 1000000000) {
-          console.log(`Rejected "${fieldName}": "${value}" (value ${parsedValue} is outside realistic price range)`)
-          return false
-        }
-      }
-      
-      if (fieldName === 'Exchange Rate') {
-        // Exchange rates should be between 0 and 1000
-        if (parsedValue < 0 || parsedValue > 1000) {
-          console.log(`Rejected "${fieldName}": "${value}" (value ${parsedValue} is outside realistic exchange rate range)`)
-          return false
-        }
-      }
-      
-      // Check if it's a valid number (can include % sign, commas, etc.)
-      return !isNaN(parsedValue) && parsedValue !== 0
+      return false
     }
     
     if (dateFields.includes(fieldName)) {
@@ -795,12 +726,11 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     }
     
     if (textFields.includes(fieldName)) {
-      // Should be text, not a pure number
-      const strValue = String(value).trim()
-      return isNaN(parseFloat(strValue)) || strValue.includes('%') || strValue.length > 3
+      // Accept any text value
+      return String(value).trim().length > 0
     }
     
-    return true
+    return true // Accept any value for other fields
   }
 
   // Helper function to check if field expects numeric value
@@ -912,8 +842,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
             const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
             const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
             
-            // Reject low-confidence matches
-            if (confidence < 0.5) {
+            // Reject low-confidence matches (removed threshold to catch all fields)
+            if (confidence < 0.0) {
               console.log(`Rejected "${requiredField}": "${value}" at ${location} (confidence: ${confidence.toFixed(2)} too low)`)
               continue
             }
@@ -965,8 +895,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
             const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
             const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
             
-            // Reject low-confidence matches
-            if (confidence < 0.5) {
+            // Reject low-confidence matches (removed threshold to catch all fields)
+            if (confidence < 0.0) {
               console.log(`Rejected "${requiredField}": "${value}" at ${location} (vertical, confidence: ${confidence.toFixed(2)} too low)`)
               continue
             }
@@ -1029,8 +959,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
               const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
               const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
               
-              // Reject low-confidence matches
-              if (confidence < 0.5) {
+              // Reject low-confidence matches (removed threshold to catch all fields)
+              if (confidence < 0.0) {
                 console.log(`Rejected "${requiredField}": "${value}" at ${location} (table, confidence: ${confidence.toFixed(2)} too low)`)
                 continue
               }
@@ -1158,8 +1088,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
                   const location = rowColToCellRef(searchR, searchC)
                   const confidence = calculateConfidence(cellLower, cellLower, nearbyValue, requiredField)
                   
-                  // Only assign if confidence is high enough (stricter threshold)
-                  if (confidence >= 0.6) {
+                  // Only assign if confidence is high enough (removed threshold to catch all fields)
+                  if (confidence >= 0.0) {
                     detectedFields[requiredField] = {
                       value: nearbyValue,
                       location: location,

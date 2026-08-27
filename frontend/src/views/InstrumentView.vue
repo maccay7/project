@@ -254,7 +254,7 @@
                         <div class="multi-instrument-fields">
                           <div v-for="(value, field) in instrument.fields" :key="field" class="multi-detected-field-item">
                             <span class="multi-detected-field-label">{{ field }}:</span>
-                            <span class="multi-detected-field-value">{{ formatDetectedValue(field, value) }}</span>
+                            <span class="multi-detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
                           </div>
                         </div>
                         <div v-if="instrument.missingFields.length > 0" class="multi-missing-fields">
@@ -298,7 +298,7 @@
                     <div class="detected-fields-list">
                       <div v-for="(value, field) in autoDetectedFields" :key="field" class="detected-field-item">
                         <span class="detected-field-label">{{ field }}:</span>
-                        <span class="detected-field-value">{{ formatDetectedValue(field, value) }}</span>
+                        <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
                         <span v-if="autoDetectedFieldsWithMetadata[field]" class="detected-field-location">
                           @ {{ autoDetectedFieldsWithMetadata[field].location }}
                           ({{ (autoDetectedFieldsWithMetadata[field].confidence * 100).toFixed(0) }}%)
@@ -346,6 +346,7 @@
                       @single-instrument-extracted="handleSingleInstrumentExtracted"
                       @table-isolated="handleTableIsolated"
                       @multi-table-detect="handleMultiTableDetect"
+                      @workbook-loaded="handleWorkbookLoaded"
                     />
                   </v-card-text>
                   <div class="popup-footer">
@@ -577,6 +578,43 @@
                   <small v-if="allCalculations.fred.note" class="fred-meta">{{ allCalculations.fred.note }}</small>
                 </div>
 
+                <!-- Field Detection Results -->
+                <div v-if="fieldDetectionResults.summary && fieldDetectionResults.summary.total_fields_detected > 0" class="field-detection-card">
+                  <div class="field-detection-header">
+                    <v-icon small>mdi-magnify</v-icon>
+                    Field Detection Results
+                    <button class="btn-toggle-detection" @click="showFieldDetection = !showFieldDetection">
+                      {{ showFieldDetection ? 'Hide' : 'Show Details' }}
+                    </button>
+                  </div>
+                  <div class="detection-summary">
+                    <span class="detection-stat">
+                      <strong>{{ fieldDetectionResults.summary.total_fields_detected }}</strong> fields detected
+                    </span>
+                    <span class="detection-stat input">
+                      <strong>{{ fieldDetectionResults.summary.input_fields }}</strong> inputs
+                    </span>
+                    <span class="detection-stat existing">
+                      <strong>{{ fieldDetectionResults.summary.existing_fields }}</strong> existing values
+                    </span>
+                    <span class="detection-stat derived">
+                      <strong>{{ fieldDetectionResults.summary.derived_fields }}</strong> derived
+                    </span>
+                    <span class="detection-stat missing">
+                      <strong>{{ fieldDetectionResults.summary.missing_fields }}</strong> missing
+                    </span>
+                  </div>
+                  <div v-if="showFieldDetection" class="detection-details">
+                    <div v-for="(field, fieldName) in fieldDetectionResults.detected_fields" :key="fieldName" class="detection-field-item">
+                      <span class="field-name">{{ fieldName }}</span>
+                      <span class="field-value">{{ field.value !== null ? field.value : 'N/A' }}</span>
+                      <span class="field-type" :class="field.value_type">{{ field.value_type }}</span>
+                      <span class="field-source">{{ field.source }}</span>
+                      <span class="field-confidence">{{ Math.round(field.confidence * 100) }}%</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div class="calculations-section">
                   <h3>{{ instrumentLabel }} Calculations</h3>
                   <div class="calculations-grid">
@@ -763,100 +801,241 @@
               <v-icon>mdi-file-document-outline</v-icon> {{ instrumentLabel }} – Executive Summary
             </v-card-title>
             <v-card-text>
-              <div v-if="!instrumentSummary.rows.length" class="empty-state">
+              <div v-if="!instrumentSummary.rows.length && !completedInstrumentSummary.rows.length" class="empty-state">
                 <p>No summary data available. Please run calculations first.</p>
               </div>
               <div v-else>
-                <div class="analytics-section" style="margin-bottom: 24px;">
-                  <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
-                    <i class="fas fa-chart-line" style="color: #1a4d8f; margin-right: 8px;"></i> Descriptive Analytics
-                  </h3>
-                  <div class="analytics-cards">
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">{{ descriptiveAnalytics['Number of Records'] || '0' }}</div>
-                        <div class="kpi-title">Number of Instruments</div>
+                <!-- Summary Tabs -->
+                <div class="summary-tabs">
+                  <button 
+                    class="summary-tab" 
+                    :class="{ active: activeSummaryTab === 'current' }"
+                    @click="activeSummaryTab = 'current'"
+                    :disabled="!instrumentSummary.rows.length"
+                  >
+                    <v-icon size="16">mdi-file</v-icon>
+                    Current Summary
+                    <span class="tab-count">{{ instrumentSummary.rows.length }}</span>
+                  </button>
+                  <button 
+                    class="summary-tab" 
+                    :class="{ active: activeSummaryTab === 'previous' }"
+                    @click="activeSummaryTab = 'previous'"
+                    :disabled="!completedInstrumentSummary.rows.length"
+                  >
+                    <v-icon size="16">mdi-history</v-icon>
+                    Previous Summaries
+                    <span class="tab-count">{{ completedInstrumentSummary.rows.length }}</span>
+                  </button>
+                  <button 
+                    class="summary-tab" 
+                    :class="{ active: activeSummaryTab === 'all' }"
+                    @click="activeSummaryTab = 'all'"
+                    :disabled="!instrumentSummary.rows.length && !completedInstrumentSummary.rows.length"
+                  >
+                    <v-icon size="16">mdi-view-list</v-icon>
+                    View All
+                    <span class="tab-count">{{ instrumentSummary.rows.length + completedInstrumentSummary.rows.length }}</span>
+                  </button>
+                </div>
+
+                <!-- Current Summary Section -->
+                <div v-if="activeSummaryTab === 'current' || activeSummaryTab === 'all'" class="summary-section">
+                  <div v-if="instrumentSummary.rows.length" class="section-header">
+                    <h3>
+                      <v-icon size="20" style="color: #4CAF50;">mdi-file</v-icon>
+                      Current Selection Summary
+                      <span class="worksheet-badge">{{ currentSheetName || 'Current' }}</span>
+                    </h3>
+                    <button class="btn-secondary btn-sm" @click="viewInstrumentSummaryExcel">
+                      <v-icon size="14">mdi-table-large</v-icon> View Excel
+                    </button>
+                  </div>
+                  
+                  <div v-if="instrumentSummary.rows.length" class="analytics-section" style="margin-bottom: 24px;">
+                    <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
+                      <i class="fas fa-chart-line" style="color: #1a4d8f; margin-right: 8px;"></i> Descriptive Analytics
+                    </h3>
+                    <div class="analytics-cards">
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Number of Records'] || '0' }}</div>
+                          <div class="kpi-title">Number of Instruments</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">${{ descriptiveAnalytics['Total Face Value'] || '0.00' }}</div>
+                          <div class="kpi-title">Total Face Value</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Yield'] || '0.00' }}%</div>
+                          <div class="kpi-title">Weighted Avg Yield</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Maturity'] || '0.00' }}</div>
+                          <div class="kpi-title">Weighted Avg Maturity</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Average Rate'] || '0.00' }}%</div>
+                          <div class="kpi-title">Average Rate</div>
+                        </div>
                       </div>
                     </div>
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">${{ descriptiveAnalytics['Total Face Value'] || '0.00' }}</div>
-                        <div class="kpi-title">Total Face Value</div>
+                  </div>
+
+                  <div v-if="instrumentSummary.rows.length" class="quality-control-section" style="margin-bottom: 24px;">
+                    <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
+                      <i class="fas fa-check-circle" style="color: #1a4d8f; margin-right: 8px;"></i> Quality Control
+                    </h3>
+                    <div class="quality-cards">
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.completeness || 0 }}%</div>
+                          <div class="kpi-title">Data Completeness</div>
+                        </div>
                       </div>
-                    </div>
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Yield'] || '0.00' }}%</div>
-                        <div class="kpi-title">Weighted Avg Yield</div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.columnsMapped || 0 }} / {{ requiredColumns.length }}</div>
+                          <div class="kpi-title">Columns Mapped</div>
+                        </div>
                       </div>
-                    </div>
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Maturity'] || '0.00' }}</div>
-                        <div class="kpi-title">Weighted Avg Maturity</div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.rowsProcessed || 0 }}</div>
+                          <div class="kpi-title">Rows Processed</div>
+                        </div>
                       </div>
-                    </div>
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">{{ descriptiveAnalytics['Average Rate'] || '0.00' }}%</div>
-                        <div class="kpi-title">Average Rate</div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.duplicatesRemoved || 0 }}</div>
+                          <div class="kpi-title">Duplicates Removed</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.missingValuesFixed || 0 }}</div>
+                          <div class="kpi-title">Missing Values Fixed</div>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div class="quality-control-section" style="margin-bottom: 24px;">
-                  <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
-                    <i class="fas fa-check-circle" style="color: #1a4d8f; margin-right: 8px;"></i> Quality Control
-                  </h3>
-                  <div class="quality-cards">
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">{{ dataQualitySummary.completeness || 0 }}%</div>
-                        <div class="kpi-title">Data Completeness</div>
+                <!-- Previous Summaries Section -->
+                <div v-if="activeSummaryTab === 'previous' || activeSummaryTab === 'all'" class="summary-section">
+                  <div v-if="completedInstrumentSummary.rows.length" class="section-header">
+                    <h3>
+                      <v-icon size="20" style="color: #2196F3;">mdi-history</v-icon>
+                      Previous Summaries (All Completed)
+                      <span class="worksheet-badge">{{ completedInstrumentSummary.rows.length }} records</span>
+                    </h3>
+                    <div style="display: flex; gap: 10px;">
+                      <button class="btn-secondary btn-sm" @click="viewPreviousSummariesExcel">
+                        <v-icon size="14">mdi-table-large</v-icon> View Excel
+                      </button>
+                      <button class="btn-secondary btn-sm" @click="exportSummary">
+                        <v-icon size="14">mdi-download</v-icon> Export All
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div v-if="completedInstrumentSummary.rows.length" class="previous-summaries-list">
+                    <div class="summary-item-card" v-for="(row, idx) in completedInstrumentSummary.rows.slice(0, 10)" :key="idx">
+                      <div class="summary-item-header">
+                        <span class="summary-item-name">{{ row['Instrument Name'] || row['instrument_name'] || `Record ${idx + 1}` }}</span>
+                        <span class="summary-item-worksheet">{{ row['Worksheet'] || row['worksheet'] || 'Unknown' }}</span>
+                      </div>
+                      <div class="summary-item-details">
+                        <div class="summary-detail">
+                          <span class="detail-label">Type:</span>
+                          <span class="detail-value">{{ row['Instrument Type'] || row['instrument_type'] || 'N/A' }}</span>
+                        </div>
+                        <div class="summary-detail">
+                          <span class="detail-label">Value:</span>
+                          <span class="detail-value">${{ formatNumber(row['Total Value'] || row['total_value'] || 0) }}</span>
+                        </div>
+                        <div class="summary-detail">
+                          <span class="detail-label">Rate:</span>
+                          <span class="detail-value">{{ formatNumber(row['Average Rate'] || row['average_rate'] || 0) }}%</span>
+                        </div>
                       </div>
                     </div>
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">{{ dataQualitySummary.columnsMapped || 0 }} / {{ requiredColumns.length }}</div>
-                        <div class="kpi-title">Columns Mapped</div>
-                      </div>
-                    </div>
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">{{ dataQualitySummary.rowsProcessed || 0 }}</div>
-                        <div class="kpi-title">Rows Processed</div>
-                      </div>
-                    </div>
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">{{ dataQualitySummary.duplicatesRemoved || 0 }}</div>
-                        <div class="kpi-title">Duplicates Removed</div>
-                      </div>
-                    </div>
-                    <div class="kpi-card simple-kpi">
-                      <div class="kpi-top-bar"></div>
-                      <div class="kpi-info">
-                        <div class="kpi-value">{{ dataQualitySummary.missingValuesFixed || 0 }}</div>
-                        <div class="kpi-title">Missing Values Fixed</div>
-                      </div>
+                    <div v-if="completedInstrumentSummary.rows.length > 10" class="show-more-indicator">
+                      ... and {{ completedInstrumentSummary.rows.length - 10 }} more records
                     </div>
                   </div>
                 </div>
 
-                <div class="summary-report">
+                <div class="summary-report" v-if="activeSummaryTab === 'current'">
                   <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
                     <button class="btn-primary" @click="viewInstrumentSummaryExcel" style="font-size: 18px; padding: 16px 40px;">
-                      📊 View Instrument Summary Excel
+                      📊 View Current Summary Excel
+                    </button>
+                  </div>
+                  <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <h4 style="margin-bottom: 15px; color: #0B2044;">Continue Working</h4>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                      <button class="btn-secondary" @click="continueWorkingOnCurrent" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-pencil</v-icon>
+                        Continue on Current Sheet
+                      </button>
+                      <button class="btn-primary" @click="chooseAnotherSheet" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-table-multiple</v-icon>
+                        Choose Another Sheet
+                      </button>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 13px; color: #666;">
+                      Current worksheet: <strong>{{ currentSheetName || 'Not selected' }}</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div class="summary-report" v-if="activeSummaryTab === 'previous'">
+                  <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
+                    <button class="btn-primary" @click="exportSummary" style="font-size: 18px; padding: 16px 40px;">
+                      📥 Export All Previous Summaries
+                    </button>
+                  </div>
+                  <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <h4 style="margin-bottom: 15px; color: #0B2044;">Continue Working</h4>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                      <button class="btn-secondary" @click="continueWorkingOnCurrent" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-pencil</v-icon>
+                        Continue on Current Sheet
+                      </button>
+                      <button class="btn-primary" @click="chooseAnotherSheet" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-table-multiple</v-icon>
+                        Choose Another Sheet
+                      </button>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 13px; color: #666;">
+                      Current worksheet: <strong>{{ currentSheetName || 'Not selected' }}</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div class="summary-report" v-if="activeSummaryTab === 'all'">
+                  <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
+                    <button class="btn-primary" @click="exportSummary" style="font-size: 18px; padding: 16px 40px;">
+                      📊 Export All Summaries (Current + Previous)
                     </button>
                   </div>
                   <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
@@ -1325,6 +1504,7 @@ const showInstrumentExcelPopup = ref(false)
 const showWorkflowPopup = ref(false)
 const showDetectionSuccess = ref(false)
 const showMultiTableDetectionSuccess = ref(false)
+const excelPopupMode = ref('current') // 'current' or 'previous'
 const multiTableDetectionResults = ref([])
 const selectedWorkflowInstrument = ref(null)
 const selectedWorkflowIndex = ref(0)
@@ -1387,7 +1567,12 @@ const selectedDateFormat = ref('YYYY-MM-DD')
 
 const selectedInstrumentType = computed(() => instrumentLabel.value)
 const instrumentSummary = ref({ columns: [], rows: [] })
+const completedInstrumentSummary = ref({ columns: [], rows: [] })
 const portfolioSummary = ref({ columns: [], rows: [] })
+const completedPortfolioSummary = ref({ columns: [], rows: [] })
+const fieldDetectionResults = ref({ detected_fields: {}, summary: {} })
+const showFieldDetection = ref(false)
+const activeSummaryTab = ref('current')
 const selectedCalculationInstrument = ref(-1)
 const currentlyViewingInstrument = ref(null)
 const showAllCalculationsPopup = ref(false)
@@ -1395,6 +1580,7 @@ const sheetType = ref('multi')
 const extractedValues = ref({})
 const worksheetStatus = ref({})
 const uploadHistory = ref([])
+const currentWorkbookName = ref('') // Track current workbook name
 
 const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
 const reportPreviewDialog = ref(false)
@@ -1634,7 +1820,19 @@ const instrumentSummaryColumnsForDisplay = computed(() => getDisplayColumns())
 const instrumentSearchQuery = ref('')
 
 const sortedInstrumentSummaryRows = computed(() => {
-  let rows = instrumentSummary.value.rows
+  let rows = []
+  
+  if (excelPopupMode.value === 'current') {
+    // Show current summary + same-workbook previous summaries
+    rows = [...instrumentSummary.value.rows]
+    const sameWorkbookPrevious = (completedInstrumentSummary.value.rows || []).filter(
+      row => row['Workbook'] === currentWorkbookName.value
+    )
+    rows = [...rows, ...sameWorkbookPrevious]
+  } else {
+    // Show all previous summaries
+    rows = completedInstrumentSummary.value.rows || []
+  }
   
   // Apply search filter
   if (instrumentSearchQuery.value) {
@@ -2295,6 +2493,18 @@ function handleWorksheetSelect(sheetName) {
   if (result.success) {
     currentSheetName.value = sheetName
     worksheetSelected.value = true
+    
+    // Clear current processing data and current display only (preserve completed history)
+    cleanedData.value = []
+    calculations.value = {}
+    allCalculations.value = {}
+    selectedCalculations.value = {}
+    columnMapping.value = {}
+    instrumentSummary.value = { columns: [], rows: [] }  // Current display cleared
+    portfolioSummary.value = { columns: [], rows: [] }  // Current display cleared
+    fieldDetectionResults.value = { detected_fields: {}, summary: {} }  // Clear detection results
+    // completedInstrumentSummary and completedPortfolioSummary are preserved
+    
     const sheet = workbookSheets.value.find(s => s.name === sheetName)
     if (sheet) {
       // Load preview data (100 rows) instead of full data
@@ -2318,6 +2528,17 @@ function handleSheetSelectedFromViewer(sheetName) {
   console.log('Sheet selected from viewer:', sheetName)
   currentSheetName.value = sheetName
   worksheetSelected.value = true
+  
+  // Clear current processing data and current display only (preserve completed history)
+  cleanedData.value = []
+  calculations.value = {}
+  allCalculations.value = {}
+  selectedCalculations.value = {}
+  columnMapping.value = {}
+  instrumentSummary.value = { columns: [], rows: [] }  // Current display cleared
+  portfolioSummary.value = { columns: [], rows: [] }  // Current display cleared
+  fieldDetectionResults.value = { detected_fields: {}, summary: {} }  // Clear detection results
+  // completedInstrumentSummary and completedPortfolioSummary are preserved
 }
 
 // ================================================================
@@ -2334,6 +2555,17 @@ function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
 // ================================================================
 function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }) {
   console.log('Table isolated for mapping:', sheetName, tableName, tableRange)
+  
+  // Clear current processing data and current display only (preserve completed history)
+  cleanedData.value = []
+  calculations.value = {}
+  allCalculations.value = {}
+  selectedCalculations.value = {}
+  columnMapping.value = {}
+  instrumentSummary.value = { columns: [], rows: [] }  // Current display cleared
+  portfolioSummary.value = { columns: [], rows: [] }  // Current display cleared
+  fieldDetectionResults.value = { detected_fields: {}, summary: {} }  // Clear detection results
+  // completedInstrumentSummary and completedPortfolioSummary are preserved
   
   isolatedTableData.value = {
     sheetName,
@@ -2364,6 +2596,17 @@ function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }
 async function handleWorkOnSheet(sheetName) {
   fileLoading.value = true
   uploadError.value = ''
+  
+  // Clear current processing data and current display only (preserve completed history)
+  cleanedData.value = []
+  calculations.value = {}
+  allCalculations.value = {}
+  selectedCalculations.value = {}
+  columnMapping.value = {}
+  instrumentSummary.value = { columns: [], rows: [] }  // Current display cleared
+  portfolioSummary.value = { columns: [], rows: [] }  // Current display cleared
+  fieldDetectionResults.value = { detected_fields: {}, summary: {} }  // Clear detection results
+  // completedInstrumentSummary and completedPortfolioSummary are preserved
 
   try {
     const result = await worksheetWorkflow.processWorksheet(
@@ -2865,7 +3108,7 @@ function useMultiTableDetectedFields() {
     // Merge all fields from this table into the combined object
     for (const [key, fieldObj] of Object.entries(instrument.fields)) {
       // Extract the actual value from the field object (which has { value, location, confidence })
-      const actualValue = fieldObj?.value || fieldObj
+      const actualValue = typeof fieldObj === 'object' && fieldObj !== null ? fieldObj.value : fieldObj
       // If field already exists, keep the first one (or could merge differently based on requirements)
       if (!combinedFields[key]) {
         combinedFields[key] = actualValue
@@ -2951,7 +3194,13 @@ function useDetectedFields() {
   showWorkbookViewer.value = false
   
   // Convert detected fields to the format expected by the preview
-  extractedValues.value = autoDetectedFields.value
+  // Extract actual values from field objects (which have { value, location, confidence })
+  const extractedValues = {}
+  for (const [key, value] of Object.entries(autoDetectedFields.value)) {
+    extractedValues[key] = typeof value === 'object' && value !== null ? value.value : value
+  }
+  
+  extractedValues.value = extractedValues
   
   // Add selected currency to extracted values if detected
   if (selectedCurrency.value) {
@@ -2960,7 +3209,7 @@ function useDetectedFields() {
   
   // Create a single-row dataset for the preview
   const previewRow = {}
-  for (const [key, value] of Object.entries(autoDetectedFields.value)) {
+  for (const [key, value] of Object.entries(extractedValues)) {
     previewRow[key] = value
   }
   
@@ -3254,35 +3503,100 @@ function calculateTotal(field) {
 }
 
 function exportSummary() {
-  const allData = instrumentSummary.value.rows
-  if (!allData.length) { return }
+  // Create Excel with both current selection and accumulated history
+  const currentData = instrumentSummary.value.rows || []
+  const completedData = completedInstrumentSummary.value.rows || []
+  
+  if (!currentData.length && !completedData.length) { return }
 
-  const displayCols = getDisplayColumns()
-  const data = allData.map(row => {
-    const obj = {}
-    displayCols.forEach(col => {
-      const value = row[col]
-      if (typeof value === 'number' && !isNaN(value)) {
-        const rounded = Math.round(value * 100) / 100
-        obj[col] = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      } else {
-        obj[col] = value
-      }
-    })
-    return obj
-  })
-
-  const ws = XLSX.utils.json_to_sheet(data)
+  // Get all available columns from both datasets
+  const allColumns = new Set()
+  currentData.forEach(row => Object.keys(row).forEach(k => allColumns.add(k)))
+  completedData.forEach(row => Object.keys(row).forEach(k => allColumns.add(k)))
+  const displayCols = Array.from(allColumns)
+  
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Instrument Summary')
+  
+  // Sheet 1: Current Selection Summary
+  if (currentData.length) {
+    const currentSheetData = currentData.map(row => {
+      const obj = {}
+      displayCols.forEach(col => {
+        const value = row[col]
+        if (typeof value === 'number' && !isNaN(value)) {
+          const rounded = Math.round(value * 100) / 100
+          obj[col] = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        } else {
+          obj[col] = value
+        }
+      })
+      return obj
+    })
+    
+    const wsCurrent = XLSX.utils.json_to_sheet(currentSheetData)
+    XLSX.utils.book_append_sheet(wb, wsCurrent, 'Current Selection')
+  }
+  
+  // Sheet 2: All Completed History (accumulated from all previous selections)
+  if (completedData.length) {
+    const completedSheetData = completedData.map(row => {
+      const obj = {}
+      displayCols.forEach(col => {
+        const value = row[col]
+        if (typeof value === 'number' && !isNaN(value)) {
+          const rounded = Math.round(value * 100) / 100
+          obj[col] = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        } else {
+          obj[col] = value
+        }
+      })
+      return obj
+    })
+    
+    const wsCompleted = XLSX.utils.json_to_sheet(completedSheetData)
+    XLSX.utils.book_append_sheet(wb, wsCompleted, 'All Completed History')
+  }
+  
+  // Sheet 3: Summary Info
+  const summaryInfo = [
+    ['Instrument Summary Export'],
+    ['Export Date', new Date().toLocaleString()],
+    ['Current Sheet', currentSheetName.value || 'N/A'],
+    [''],
+    ['Current Selection Records', currentData.length],
+    ['Total Completed Records', completedData.length],
+    ['Total Columns', displayCols.length],
+    [''],
+    ['Note: "Current Selection" shows results from the current worksheet/section only.'],
+    ['"All Completed History" shows accumulated results from all processed selections.'],
+    ['All calculated fields from the Calculations page are included.']
+  ]
+  const wsInfo = XLSX.utils.aoa_to_sheet(summaryInfo)
+  XLSX.utils.book_append_sheet(wb, wsInfo, 'Summary Info')
+  
   XLSX.writeFile(wb, `instrument_summary_${new Date().toISOString().split('T')[0]}.xlsx`)
 }
 
 function viewInstrumentSummaryExcel() {
+  excelPopupMode.value = 'current'
   showInstrumentExcelPopup.value = true
   sortColumn.value = ''
   sortOrder.value = 'asc'
   console.log('Opening Instrument Summary Excel popup')
+  console.log('Current workbook:', currentWorkbookName.value)
+}
+
+function viewPreviousSummariesExcel() {
+  excelPopupMode.value = 'previous'
+  showInstrumentExcelPopup.value = true
+  sortColumn.value = ''
+  sortOrder.value = 'asc'
+  console.log('Opening Previous Summaries Excel popup')
+}
+
+function handleWorkbookLoaded(fileName) {
+  console.log('Workbook loaded:', fileName)
+  currentWorkbookName.value = fileName || 'Unknown'
 }
 
 function closeInstrumentExcelPopup() {
@@ -3292,12 +3606,26 @@ function closeInstrumentExcelPopup() {
 function continueWorkingOnCurrent() {
   // Navigate to upload page to access workbook
   console.log('Navigating to upload page to continue on current sheet:', currentSheetName.value)
+  // Clear current processing data but preserve completed results
+  cleanedData.value = []
+  calculations.value = {}
+  allCalculations.value = {}
+  selectedCalculations.value = {}
+  instrumentSummary.value = { columns: [], rows: [] }
+  portfolioSummary.value = { columns: [], rows: [] }
   switchTab('upload')
 }
 
 function chooseAnotherSheet() {
   // Navigate to upload page to access workbook
   console.log('Navigating to upload page to choose another sheet')
+  // Clear current processing data but preserve completed results
+  cleanedData.value = []
+  calculations.value = {}
+  allCalculations.value = {}
+  selectedCalculations.value = {}
+  instrumentSummary.value = { columns: [], rows: [] }
+  portfolioSummary.value = { columns: [], rows: [] }
   switchTab('upload')
 }
 
@@ -3576,13 +3904,15 @@ function openInstrumentDataExcel() {
 }
 
 function downloadCalculatedInstrumentsExcel() {
-  if (!instrumentSummary.value.rows.length) {
+  // Use completed summary to include all accumulated results
+  const summaryRows = completedInstrumentSummary.value.rows || instrumentSummary.value.rows
+  if (!summaryRows.length) {
     return
   }
 
   const workbook = XLSX.utils.book_new()
   const columns = instrumentSummaryColumnsForDisplay.value
-  const rows = sortedInstrumentSummaryRows.value
+  const rows = summaryRows
 
   // Create header row
   const data = [columns]
@@ -4018,13 +4348,55 @@ async function calculateMetrics() {
         
         // Use the backend-generated summaries (source of truth)
         if (response?.instrument_summary) {
+          // Current display shows ONLY current selection results
           instrumentSummary.value = response.instrument_summary
-          console.log('🔍 Set instrumentSummary from backend:', instrumentSummary.value)
+          
+          // Accumulate current results into completed history with workbook tracking
+          const currentRows = response.instrument_summary.rows || []
+          const existingRows = completedInstrumentSummary.value.rows || []
+          
+          // Add workbook name to current rows if not present
+          const currentRowsWithWorkbook = currentRows.map(row => ({
+            ...row,
+            'Workbook': currentWorkbookName.value || 'Unknown',
+            'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
+          }))
+          
+          // Add workbook name to existing rows if not present
+          const existingRowsWithWorkbook = existingRows.map(row => ({
+            ...row,
+            'Workbook': row['Workbook'] || 'Unknown',
+            'Worksheet': row['Worksheet'] || row['worksheet'] || 'Unknown'
+          }))
+          
+          const mergedRows = [...existingRowsWithWorkbook, ...currentRowsWithWorkbook]
+          
+          const allCols = new Set()
+          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+          
+          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          
+          console.log('🔍 Current instrumentSummary (display):', instrumentSummary.value)
+          console.log('🔍 Completed instrumentSummary (history):', completedInstrumentSummary.value)
+          console.log('🔍 Total completed rows:', mergedRows.length)
         }
         
         if (response?.portfolio_summary) {
+          // Current display shows ONLY current selection results
           portfolioSummary.value = response.portfolio_summary
-          console.log('🔍 Set portfolioSummary from backend:', portfolioSummary.value)
+          
+          // Accumulate current portfolio results into completed history
+          const currentRows = response.portfolio_summary.rows || []
+          const existingRows = completedPortfolioSummary.value.rows || []
+          const mergedRows = [...existingRows, ...currentRows]
+          
+          const allCols = new Set()
+          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+          
+          completedPortfolioSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          
+          console.log('🔍 Current portfolioSummary (display):', portfolioSummary.value)
+          console.log('🔍 Completed portfolioSummary (history):', completedPortfolioSummary.value)
         }
         
         // For display, use the first instrument's data or aggregate
@@ -4041,6 +4413,12 @@ async function calculateMetrics() {
       else if (response?.data) {
         calculations.value = response.data
         console.log('✅ Set calculations.value:', calculations.value)
+
+        // Store field detection results from backend
+        if (response.data?.field_detection) {
+          fieldDetectionResults.value = response.data.field_detection
+          console.log('🔍 Field detection results:', fieldDetectionResults.value)
+        }
 
         // Use instrument_names from backend if available
         const backendInstrumentNames = response?.instrument_names || []
@@ -4061,11 +4439,36 @@ async function calculateMetrics() {
             'Worksheet': currentSheetName.value || 'Calculated'
           }))
 
-          // Replace instrument summary with current selection only - do NOT accumulate
+          // Current display shows ONLY current selection results
+          const currentCols = new Set()
+          rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
+          instrumentSummary.value = { columns: Array.from(currentCols), rows: rows }
+          
+          // Accumulate current results into completed history with workbook tracking
+          const existingRows = completedInstrumentSummary.value.rows || []
+          const rowsWithWorkbook = rows.map(row => ({
+            ...row,
+            'Workbook': currentWorkbookName.value || 'Unknown',
+            'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
+          }))
+          
+          // Add workbook name to existing rows if not present
+          const existingRowsWithWorkbook = existingRows.map(row => ({
+            ...row,
+            'Workbook': row['Workbook'] || 'Unknown',
+            'Worksheet': row['Worksheet'] || row['worksheet'] || 'Unknown'
+          }))
+          
+          const mergedRows = [...existingRowsWithWorkbook, ...rowsWithWorkbook]
+          
           const allCols = new Set()
-          rows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-          instrumentSummary.value = { columns: Array.from(allCols), rows: rows }
-          console.log('🔍 Updated instrumentSummary with current selection only:', instrumentSummary.value)
+          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+          
+          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          
+          console.log('🔍 Current instrumentSummary (display):', instrumentSummary.value)
+          console.log('🔍 Completed instrumentSummary (history):', completedInstrumentSummary.value)
+          console.log('🔍 Total completed rows:', mergedRows.length)
 
           const agg = computeAggregate(rows)
           const uniqueNames = new Set(rows.map(r => r['Instrument Name']))
@@ -4104,10 +4507,22 @@ async function calculateMetrics() {
             portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market || 0
           }
           
+          // Current display shows ONLY current selection results
+          const currentPortfolioCols = new Set()
+          Object.keys(portfolioRow).forEach(k => currentPortfolioCols.add(k))
+          portfolioSummary.value = { columns: Array.from(currentPortfolioCols), rows: [portfolioRow] }
+          
+          // Accumulate portfolio results into completed history
+          const existingPortfolioRows = completedPortfolioSummary.value.rows || []
+          const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
+          
           const portfolioCols = new Set()
-          Object.keys(portfolioRow).forEach(k => portfolioCols.add(k))
-          portfolioSummary.value = { columns: Array.from(portfolioCols), rows: [portfolioRow] }
-          console.log(' Updated portfolioSummary with current selection only:', portfolioSummary.value)
+          mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => portfolioCols.add(k)))
+          
+          completedPortfolioSummary.value = { columns: Array.from(portfolioCols), rows: mergedPortfolioRows }
+          
+          console.log('🔍 Current portfolioSummary (display):', portfolioSummary.value)
+          console.log('🔍 Completed portfolioSummary (history):', completedPortfolioSummary.value)
         } else {
           // Single instrument case - show ONLY current selection results with real instrument names
           console.log('🔍 Processing single instrument case')
@@ -4147,11 +4562,23 @@ async function calculateMetrics() {
           }
           console.log('🔍 Created summaryRow:', summaryRow)
 
-          // Replace instrument summary with current selection only - do NOT accumulate
+          // Current display shows ONLY current selection results
+          const currentCols = new Set()
+          Object.keys(summaryRow).forEach(k => currentCols.add(k))
+          instrumentSummary.value = { columns: Array.from(currentCols), rows: [summaryRow] }
+          
+          // Accumulate current results into completed history
+          const existingRows = completedInstrumentSummary.value.rows || []
+          const mergedRows = [...existingRows, summaryRow]
+          
           const allCols = new Set()
-          Object.keys(summaryRow).forEach(k => allCols.add(k))
-          instrumentSummary.value = { columns: Array.from(allCols), rows: [summaryRow] }
-          console.log('🔍 Updated instrumentSummary with current selection only:', instrumentSummary.value)
+          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+          
+          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          
+          console.log('🔍 Current instrumentSummary (display):', instrumentSummary.value)
+          console.log('🔍 Completed instrumentSummary (history):', completedInstrumentSummary.value)
+          console.log('🔍 Total completed rows:', mergedRows.length)
 
           const agg = computeAggregate([summaryRow])
           // Use the actual instrument count from backend (which now reflects unique instruments from column)
@@ -4186,10 +4613,22 @@ async function calculateMetrics() {
             portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market || 0
           }
           
+          // Current display shows ONLY current selection results
+          const currentPortfolioCols = new Set()
+          Object.keys(portfolioRow).forEach(k => currentPortfolioCols.add(k))
+          portfolioSummary.value = { columns: Array.from(currentPortfolioCols), rows: [portfolioRow] }
+          
+          // Accumulate portfolio results into completed history
+          const existingPortfolioRows = completedPortfolioSummary.value.rows || []
+          const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
+          
           const portfolioCols = new Set()
-          Object.keys(portfolioRow).forEach(k => portfolioCols.add(k))
-          portfolioSummary.value = { columns: Array.from(portfolioCols), rows: [portfolioRow] }
-          console.log('🔍 Updated portfolioSummary with current selection only:', portfolioSummary.value)
+          mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => portfolioCols.add(k)))
+          
+          completedPortfolioSummary.value = { columns: Array.from(portfolioCols), rows: mergedPortfolioRows }
+          
+          console.log('🔍 Current portfolioSummary (display):', portfolioSummary.value)
+          console.log('🔍 Completed portfolioSummary (history):', completedPortfolioSummary.value)
         }
 
         console.log('🔍 Final state:', {
@@ -4777,7 +5216,8 @@ function closeAllCalculationsPopup() {
 }
 
 function exportAllCalculations() {
-  const allData = instrumentSummary.value.rows
+  // Use completed summary to include all accumulated results
+  const allData = completedInstrumentSummary.value.rows || instrumentSummary.value.rows
   if (!allData.length) { return }
 
   const displayCols = getDisplayColumns()
@@ -5101,6 +5541,8 @@ function saveSessionData(explicitSave = false) {
     workbookSheets: workbookSheets.value,
     instrumentSummary: instrumentSummary.value,
     portfolioSummary: portfolioSummary.value,
+    completedInstrumentSummary: completedInstrumentSummary.value,
+    completedPortfolioSummary: completedPortfolioSummary.value,
     yieldCurveData: yieldCurveData.value,
     fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
     uploadedFile: uploadedFile.value?.name || null,
@@ -5139,6 +5581,9 @@ async function loadSavedData() {
       workbookSheets.value = wf.workbookSheets || []
       instrumentSummary.value = wf.instrumentSummary || { rows: [], columns: [] }
       portfolioSummary.value = wf.portfolioSummary || { rows: [], columns: [] }
+      // Load completed summaries if available
+      completedInstrumentSummary.value = wf.completedInstrumentSummary || { rows: [], columns: [] }
+      completedPortfolioSummary.value = wf.completedPortfolioSummary || { rows: [], columns: [] }
       yieldCurveData.value = wf.yieldCurveData || []
       manualInputs.value = wf.manualInputs || {}
       formulas.value = wf.formulas || {}
@@ -6395,6 +6840,55 @@ onBeforeUnmount(() => {
 .summary-worksheet-selector { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
 .summary-worksheet-selector label { font-weight: 600; color: #0B2044; }
 .summary-worksheet-selector select { padding: 8px 12px; border-radius: 6px; border: 1px solid #ccc; background: white; font-size: 14px; min-width: 200px; }
+
+.field-detection-card { margin-top: 20px; padding: 16px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; }
+.field-detection-header { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #0B2044; margin-bottom: 12px; }
+.btn-toggle-detection { margin-left: auto; background: #0B2044; color: white; border: none; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+.detection-summary { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px; }
+.detection-stat { font-size: 13px; color: #333; }
+.detection-stat strong { color: #0B2044; }
+.detection-stat.input strong { color: #4CAF50; }
+.detection-stat.existing strong { color: #2196F3; }
+.detection-stat.derived strong { color: #FF9800; }
+.detection-stat.missing strong { color: #f44336; }
+.detection-details { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e8ecf1; }
+.detection-field-item { display: grid; grid-template-columns: 2fr 1.5fr 1fr 1.5fr 0.8fr; gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 12px; align-items: center; }
+.detection-field-item:last-child { border-bottom: none; }
+.field-name { font-weight: 600; color: #0B2044; }
+.field-value { color: #333; }
+.field-type { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.field-type.input { background: #e8f5e9; color: #4CAF50; }
+.field-type.existing { background: #e3f2fd; color: #2196F3; }
+.field-type.derived { background: #fff3e0; color: #FF9800; }
+.field-type.missing { background: #ffebee; color: #f44336; }
+.field-source { color: #666; font-size: 11px; }
+.field-confidence { font-weight: 600; color: #0B2044; text-align: right; }
+
+.summary-tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 2px solid #e8ecf1; padding-bottom: 16px; }
+.summary-tab { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border: none; background: #f5f5f5; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #666; }
+.summary-tab:hover:not(:disabled) { background: #e8ecf1; color: #0B2044; }
+.summary-tab.active { background: #0B2044; color: white; }
+.summary-tab:disabled { opacity: 0.4; cursor: not-allowed; }
+.tab-count { background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+.summary-tab.active .tab-count { background: rgba(255,255,255,0.3); }
+
+.summary-section { margin-bottom: 32px; padding: 20px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #e8ecf1; }
+.section-header h3 { display: flex; align-items: center; gap: 10px; margin: 0; color: #0B2044; font-size: 18px; font-weight: 600; }
+.worksheet-badge { background: #4CAF50; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-left: 12px; }
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+
+.previous-summaries-list { display: flex; flex-direction: column; gap: 12px; }
+.summary-item-card { background: white; padding: 16px; border-radius: 8px; border: 1px solid #e8ecf1; transition: all 0.2s; }
+.summary-item-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #0B2044; }
+.summary-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.summary-item-name { font-weight: 600; color: #0B2044; font-size: 15px; }
+.summary-item-worksheet { background: #e3f2fd; color: #1976D2; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+.summary-item-details { display: flex; gap: 20px; flex-wrap: wrap; }
+.summary-detail { display: flex; align-items: center; gap: 6px; }
+.detail-label { font-size: 13px; color: #666; font-weight: 500; }
+.detail-value { font-size: 14px; color: #0B2044; font-weight: 600; }
+.show-more-indicator { text-align: center; padding: 12px; color: #666; font-style: italic; font-size: 13px; }
 
 .analytics-pills { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; margin: 12px 0; }
 .analytics-pill { flex: 1; min-width: 160px; background: #f8faff; padding: 14px 20px; border-radius: 12px; border: 1px solid #edf0f6; text-align: center; transition: transform 0.2s, box-shadow 0.2s; }

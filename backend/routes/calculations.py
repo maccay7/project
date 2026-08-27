@@ -10,6 +10,7 @@ from calculations.money_market import calculate_money_market
 from utils.field_mapping_engine import create_field_mapping_engine, InstrumentType
 from utils.calculation_dependencies import create_calculation_dependency_engine
 from utils.instrument_detection import create_instrument_detector
+from utils.enhanced_field_detector import create_enhanced_field_detector
 
 
 def normalize_instrument_type(instrument_type):
@@ -744,7 +745,54 @@ def calculations_routes(app):
             print(f"🔍 Processing {len(data)} rows for calculation")
             print(f"🔍 Data sample: {data[0] if data else 'No data'}")
             
-            result = calculate_data(data, inst_type)
+            # Use enhanced field detector to scan entire data
+            print(f"🔍 Running enhanced field detection for {inst_type}")
+            detector = create_enhanced_field_detector()
+            detected_fields = detector.detect_fields(data, inst_type)
+            detection_summary = detector.get_detection_summary(detected_fields)
+            print(f"🔍 Detection summary: {detection_summary}")
+            
+            # Convert detected fields to normalized format for calculation
+            # Map detected fields to expected input format
+            normalized_data = []
+            for row in data:
+                normalized_row = {}
+                # First, copy all original fields
+                for key, value in row.items():
+                    if value is not None and value != '':
+                        normalized_row[key] = value
+                
+                # Then, add detected fields with their values
+                for field_name, detection in detected_fields.items():
+                    if detection.value is not None and detection.value_type.name != 'MISSING':
+                        # Use the detected value if it's not already in the row
+                        if field_name not in normalized_row:
+                            normalized_row[field_name] = detection.value
+                
+                normalized_data.append(normalized_row)
+            
+            print(f"🔍 Normalized data sample: {normalized_data[0] if normalized_data else 'No data'}")
+            
+            result = calculate_data(normalized_data, inst_type)
+            
+            # Add detection results to response for frontend
+            # Convert DetectedField objects to serializable format
+            detection_results = {}
+            for field_name, detection in detected_fields.items():
+                detection_results[field_name] = {
+                    'value': detection.value,
+                    'value_type': detection.value_type.value,
+                    'source': detection.source,
+                    'confidence': detection.confidence,
+                    'row': detection.row,
+                    'col': detection.col,
+                    'raw_label': detection.raw_label
+                }
+            
+            result['field_detection'] = {
+                'detected_fields': detection_results,
+                'summary': detection_summary
+            }
             print(f"✅ Calculation result: {result}")
             
             attach_fred_to_calculation(result, inst_type, maturity, country, currency)
