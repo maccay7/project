@@ -146,12 +146,17 @@ def sessions_routes(app):
             return jsonify({'success': False, 'message': 'DB error'}), 500
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute(''''
+            cursor.execute('''
                 SELECT session_id as id, name, status, versions, instrument_workflows, payload, 
                        instrument_count, version_count, created_at, updated_at
                 FROM ui_sessions WHERE session_id = %s LIMIT 1
             ''', (session_id,))
             row = cursor.fetchone()
+            
+            if not row:
+                cursor.close()
+                conn.close()
+                return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
             
             # 🔥 Ensure version_count is accurate from history table (before closing connection)
             try:
@@ -171,9 +176,6 @@ def sessions_routes(app):
             
             cursor.close()
             conn.close()
-            
-            if not row:
-                return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
             
             versions = []
             if row.get('versions'):

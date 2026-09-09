@@ -9,6 +9,7 @@ import tempfile
 import os
 import sys
 from utils.excel_parser import parse_full_workbook
+from utils.enhanced_field_detector import EnhancedFieldDetector
 
 def create_processed_data_table():
     conn = get_db()
@@ -587,3 +588,36 @@ def data_processing_routes(app):
                 }
             }
         })
+
+    @app.route('/api/data-processing/detect-currencies', methods=['POST'])
+    def detect_currencies_endpoint():
+        """
+        Detect currencies from data with context-aware validation.
+        Uses ISO 4217 currency codes and validates context to avoid false positives.
+        """
+        try:
+            payload = request.get_json()
+            data = payload.get('data', [])
+            table_range = payload.get('table_range')  # Optional: {'startRow', 'endRow', 'startCol', 'endCol'}
+            
+            if not data or not isinstance(data, list):
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid data: data must be a non-empty list'
+                }), 400
+            
+            # Use the enhanced field detector for currency detection
+            detector = EnhancedFieldDetector()
+            detected_currencies = detector.detect_currencies(data, table_range)
+            
+            return jsonify({
+                'success': True,
+                'currencies': detected_currencies,
+                'count': len(detected_currencies)
+            })
+        except Exception as e:
+            print(f"Error detecting currencies: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500

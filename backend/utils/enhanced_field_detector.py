@@ -23,6 +23,38 @@ from enum import Enum
 import re
 from datetime import datetime
 
+# ISO 4217 Currency Codes - Valid currency codes for validation
+ISO_CURRENCY_CODES = {
+    'USD', 'EUR', 'GBP', 'JPY', 'CNY', 'ZAR', 'AUD', 'CAD', 'CHF', 'INR', 'BRL',
+    'RUB', 'KRW', 'SGD', 'HKD', 'NOK', 'SEK', 'DKK', 'MXN', 'TRY', 'PLN', 'THB',
+    'IDR', 'MYR', 'PHP', 'VND', 'CZK', 'HUF', 'RON', 'BGN', 'HRK', 'RSD', 'UAH',
+    'ILS', 'SAR', 'AED', 'QAR', 'KWD', 'BHD', 'OMR', 'JOD', 'LBP', 'EGP', 'NGN',
+    'KES', 'GHS', 'ZMW', 'BWP', 'NAD', 'SZL', 'LSL', 'MZN', 'AOA', 'CDF', 'BIF',
+    'DJF', 'ERN', 'ETB', 'KMF', 'MGA', 'MWK', 'MUR', 'RWF', 'SCR', 'SOS', 'TZS',
+    'UGX', 'XAF', 'XOF', 'XPF', 'ZWG', 'BND', 'FJD', 'PGK', 'SBD', 'TOP', 'VUV',
+    'WST', 'ALL', 'AMD', 'AZN', 'BYN', 'GEL', 'KGS', 'KZT', 'MDL', 'RUB', 'TJS',
+    'TMT', 'UZS', 'AFN', 'BHD', 'IQD', 'IRR', 'KWD', 'LBP', 'OMR', 'QAR', 'SAR',
+    'SYP', 'AED', 'EGP', 'ILS', 'JOD', 'LBP', 'DZD', 'MAD', 'TND', 'LYD'
+}
+
+# Currency symbols mapping to ISO codes
+CURRENCY_SYMBOLS = {
+    '$': 'USD',
+    '€': 'EUR',
+    '£': 'GBP',
+    '¥': 'JPY',
+    '₹': 'INR',
+    '₽': 'RUB',
+    '₩': 'KRW',
+    '₫': 'VND',
+    '฿': 'THB',
+    'RM': 'MYR',
+    '₱': 'PHP',
+    '₪': 'ILS',
+    '₺': 'TRY',
+    'zł': 'PLN'
+}
+
 
 class ValueType(Enum):
     """Classification of detected field values."""
@@ -57,6 +89,7 @@ class EnhancedFieldDetector:
     - Recognizes existing calculated values
     - Classifies values by type (input, existing, derived, missing)
     - Provides confidence scores for detections
+    - Detects currencies with context-aware validation
     """
     
     def __init__(self):
@@ -69,10 +102,14 @@ class EnhancedFieldDetector:
         self.currency_pattern = re.compile(r'^[\$\€\£\¥]?[\d\,\.\-]+[\$\€\£\¥]?$')
         self.date_pattern = re.compile(
             r'^\d{4}[-/]\d{1,2}[-/]\d{1,2}$|'  # YYYY-MM-DD or YYYY/MM/DD
-            r'^\d{1,2}[-/]\d{1,2}[-/]\d{4}$|'  # DD-MM-YYYY or DD/MM/YYYY
+            r'^\d{1,2}[-/]\d{1,2}[-/]\d{4}$|'  # DD-MM-DD or DD/MM/YYYY
             r'^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$|'  # DD Mon YYYY
             r'^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$'  # Mon DD, YYYY
         )
+        
+        # Currency-specific patterns (ISO codes and symbols)
+        self.iso_currency_pattern = re.compile(r'\b[A-Z]{3}\b')  # 3-letter codes
+        self.currency_symbol_pattern = re.compile(r'[\$\€\£\¥₹₽₩₫฿RM₱₪₺zł]')
         
         # Fields that typically indicate calculated values
         self.calculated_field_patterns = [
@@ -81,6 +118,188 @@ class EnhancedFieldDetector:
             'future value', 'fv', 'dirty price', 'clean price', 'yield',
             'duration', 'convexity', 'accrued', 'discount'
         ]
+        
+        # Fields that are NOT currencies (to avoid false positives)
+        self.non_currency_fields = {
+            'counterpart', 'counterparty', 'bank', 'institution', 'company',
+            'issuer', 'borrower', 'lender', 'investor', 'holder', 'owner',
+            'manager', 'administrator', 'operator', 'user', 'client', 'customer',
+            'supplier', 'vendor', 'partner', 'affiliate', 'subsidiary', 'parent',
+            'entity', 'organization', 'corporation', 'firm', 'business', 'enterprise',
+            'instrument', 'security', 'bond', 'bill', 'note', 'certificate',
+            'description', 'notes', 'comment', 'reference', 'id', 'number',
+            'type', 'category', 'status', 'class', 'group', 'sector', 'industry',
+            'region', 'location', 'address', 'contact', 'phone', 'email', 'website',
+            'link', 'url', 'source', 'origin', 'destination', 'route', 'path'
+        }
+    
+    def detect_fields(self, data: List[Dict], instrument_type: str = 'money-market') -> Dict[str, DetectedField]:
+        """
+        Detect all financial fields from the entire dataset.
+        
+        Args:
+            data: List of data rows (dictionaries)
+            instrument_type: Type of instrument ('money-market', 'tbills', 'bonds')
+            
+        Returns:
+            Dictionary mapping field names to DetectedField objects
+        """
+        if not data or not isinstance(data, list):
+            return {}
+        
+        detected_fields = {}
+        
+        # Step 0: Analyze worksheet structure to understand data organization
+        structure_analysis = self._analyze_worksheet_structure(data)
+        
+        # Step 1: Detect from column headers (traditional approach)
+        header_detections = self._detect_from_headers(data, structure_analysis)
+        detected_fields.update(header_detections)
+        
+        # Step 2: Detect from label/value pairs (vertical orientation)
+        label_value_detections = self._detect_from_label_value_pairs(data, structure_analysis)
+        # Merge with existing, keeping higher confidence
+        for field_name, detection in label_value_detections.items():
+            if field_name not in detected_fields or detection.confidence > detected_fields[field_name].confidence:
+                detected_fields[field_name] = detection
+        
+        # Step 3: Detect from nearby labels and values
+        nearby_detections = self._detect_from_nearby_labels(data, structure_analysis)
+        for field_name, detection in nearby_detections.items():
+            if field_name not in detected_fields or detection.confidence > detected_fields[field_name].confidence:
+                detected_fields[field_name] = detection
+        
+        # Step 4: Detect from value patterns (numeric, date, percentage)
+        pattern_detections = self._detect_from_value_patterns(data, detected_fields)
+        for field_name, detection in pattern_detections.items():
+            if field_name not in detected_fields or detection.confidence > detected_fields[field_name].confidence:
+                detected_fields[field_name] = detection
+        
+        # Step 5: Classify detected values
+        detected_fields = self._classify_values(detected_fields, data)
+        
+        # Step 6: Identify missing required fields
+        required_fields = self._get_required_fields(instrument_type)
+        for field in required_fields:
+            if field not in detected_fields:
+                detected_fields[field] = DetectedField(
+                    field_name=field,
+                    value=None,
+                    value_type=ValueType.MISSING,
+                    source='not_detected',
+                    confidence=0.0,
+                    row=-1,
+                    col=-1
+                )
+        
+        return detected_fields
+    
+    def detect_currencies(self, data: List[Dict[str, Any]], table_range: Optional[Dict[str, int]] = None) -> List[str]:
+        """
+        Detect genuine currencies from the data with context-aware validation.
+        
+        Args:
+            data: The data rows to scan
+            table_range: Optional range to restrict detection to specific table/section
+                        {'startRow', 'endRow', 'startCol', 'endCol'}
+        
+        Returns:
+            List of detected currency codes (ISO 4217 format), sorted alphabetically
+        """
+        detected_currencies = set()
+        
+        # If table_range is provided, only scan that range
+        if table_range:
+            start_row = table_range.get('startRow', 0)
+            end_row = table_range.get('endRow', len(data))
+            data = data[start_row:end_row + 1]
+        
+        # First pass: Find currency-related field labels
+        currency_field_indices = set()
+        for row_idx, row in enumerate(data):
+            if not isinstance(row, dict):
+                continue
+            for col_idx, (key, value) in enumerate(row.items()):
+                key_lower = str(key).lower()
+                # Check if this is a currency field label
+                if key_lower in self.field_synonyms.get('currency', []):
+                    currency_field_indices.add(col_idx)
+        
+        # Second pass: Scan values for currency codes with context validation
+        for row_idx, row in enumerate(data):
+            if not isinstance(row, dict):
+                continue
+            
+            for col_idx, (key, value) in enumerate(row.items()):
+                key_lower = str(key).lower()
+                
+                # Skip if this is a non-currency field
+                if key_lower in self.non_currency_fields:
+                    continue
+                
+                # Check value for currency codes
+                if isinstance(value, str):
+                    value_upper = value.upper().strip()
+                    
+                    # Check for ISO currency codes (3 letters)
+                    if len(value_upper) == 3 and value_upper in ISO_CURRENCY_CODES:
+                        # Validate context: should be in a currency field or associated with numeric values
+                        if self._is_valid_currency_context(row, key, value_upper, col_idx in currency_field_indices):
+                            detected_currencies.add(value_upper)
+                    
+                    # Check for currency symbols
+                    for symbol, iso_code in CURRENCY_SYMBOLS.items():
+                        if symbol in value:
+                            # Validate context
+                            if self._is_valid_currency_context(row, key, iso_code, col_idx in currency_field_indices):
+                                detected_currencies.add(iso_code)
+        
+        return sorted(list(detected_currencies))
+    
+    def _is_valid_currency_context(self, row: Dict[str, Any], field_name: str, 
+                                  currency_code: str, is_currency_field: bool) -> bool:
+        """
+        Validate that a detected currency is in a valid context.
+        
+        This prevents false positives like "Counterpart" being detected as a currency.
+        
+        Args:
+            row: The data row
+            field_name: The field name containing the currency value
+            currency_code: The detected currency code
+            is_currency_field: Whether the field is labeled as a currency field
+        
+        Returns:
+            True if the currency is in a valid context, False otherwise
+        """
+        # If it's explicitly a currency field, it's valid
+        if is_currency_field:
+            return True
+        
+        # Check if the field name contains currency-related terms
+        field_lower = str(field_name).lower()
+        currency_related_terms = ['currency', 'ccy', 'denomination', 'curr', 'base currency']
+        if any(term in field_lower for term in currency_related_terms):
+            return True
+        
+        # Check if the value is associated with a numeric amount (same row)
+        # This handles cases like "USD" appearing next to a value
+        for key, value in row.items():
+            if isinstance(value, (int, float)) or (isinstance(value, str) and self.numeric_pattern.match(value)):
+                # If there's a numeric value in the same row, the currency might be valid
+                # But only if the field name suggests it's related
+                key_lower = str(key).lower()
+                if any(term in key_lower for term in ['amount', 'value', 'price', 'principal', 'face', 'notional']):
+                    return True
+        
+        # If the currency code appears as a standalone value (not part of a longer text)
+        # and the field name is not a known non-currency field
+        if field_lower not in self.non_currency_fields:
+            # Check if it's a very short, clean match (exact 3-letter code)
+            if len(str(currency_code)) == 3 and currency_code in ISO_CURRENCY_CODES:
+                return True
+        
+        return False
     
     def _build_field_synonyms(self) -> Dict[str, List[str]]:
         """Build comprehensive synonym database for all financial fields."""
