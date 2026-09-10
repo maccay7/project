@@ -503,9 +503,12 @@ async function loadDataset(idx) {
   const ds = savedDatasets.value[idx]
   if (!ds) return
   try {
+    console.log('🔍 Loading dataset from history:', ds.id, ds.name)
     const res = await datasetAPI.load(ds.id)
+    console.log('🔍 Load response:', res)
     if (res && res.success) {
       const data = res.data || {}
+      console.log('🔍 Loaded data:', data)
       if (data.data && data.data.length) {
         dataset.value = data.data
         headers.value = data.headers || Object.keys(data.data[0] || {})
@@ -513,13 +516,16 @@ async function loadDataset(idx) {
         selectedDatasetId.value = data.id
         selectedDatasetName.value = data.name
         showPreview.value = true
+        console.log('✅ Dataset loaded successfully, history item preserved')
       } else {
         alert('Dataset has no data')
       }
+    } else {
+      alert('Failed to load dataset: ' + (res?.message || 'Unknown error'))
     }
   } catch (err) {
     console.error('Load dataset error', err)
-    alert('Failed to load dataset')
+    alert('Failed to load dataset: ' + err.message)
   }
 }
 

@@ -8,17 +8,6 @@
         <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
         <span class="excel-filename">{{ fileName || 'Excel Workbook' }}</span>
       </div>
-      <!-- Currency selection -->
-      <div v-if="availableCurrencies.length > 0" class="currency-selector">
-        <label class="currency-label">💰 Currency:</label>
-        <select v-model="selectedCurrency" @change="emitCurrencyChange" class="currency-select">
-          <option :value="null">-- All Currencies --</option>
-          <option v-for="currency in availableCurrencies" :key="currency" :value="currency">
-            {{ currency }}
-          </option>
-        </select>
-        <span v-if="selectedCurrency" class="selected-currency-badge">{{ selectedCurrency }}</span>
-      </div>
       <!-- Formula bar -->
       <div class="formula-bar">
         <div class="formula-bar-label">fx</div>

@@ -286,23 +286,42 @@
                       ({{ detectedInstrumentType }})
                     </div>
                     
-                    <!-- Currency Selection if multiple currencies detected -->
-                    <div v-if="detectedCurrencies.length > 1" class="currency-selection-section">
+                    <!-- Currency Selection if currencies detected -->
+                    <div v-if="detectedCurrencies.length > 0" class="currency-selection-section">
                       <label class="currency-label">Select Currency:</label>
                       <select v-model="selectedCurrency" class="currency-select">
-                        <option value="">-- Select Currency --</option>
+                        <option value="">-- All Currencies --</option>
                         <option v-for="currency in detectedCurrencies" :key="currency" :value="currency">{{ currency }}</option>
+                        <option value="custom">-- Custom (type below) --</option>
                       </select>
+                      <div v-if="selectedCurrency === 'custom'" class="custom-currency-input-wrapper">
+                        <input 
+                          v-model="customCurrency" 
+                          placeholder="e.g., ZWG" 
+                          class="custom-currency-field"
+                          maxlength="3"
+                          @input="handleCustomCurrencyInput"
+                        />
+                        <span class="currency-code-badge">{{ customCurrency.length }}/3</span>
+                      </div>
+                      <div v-if="selectedCurrency && selectedCurrency !== 'custom'" class="selected-currency-info">
+                        Filtering for: <strong>{{ selectedCurrency }}</strong>
+                      </div>
+                      <div v-else-if="selectedCurrency === 'custom' && customCurrency" class="selected-currency-info">
+                        Filtering for custom currency: <strong>{{ customCurrency.toUpperCase() }}</strong>
+                      </div>
+                      <div v-else class="selected-currency-info">
+                        Showing all detected currencies
+                      </div>
                     </div>
                     
                     <div class="detected-fields-list">
                       <div v-for="(value, field) in autoDetectedFields" :key="field" class="detected-field-item">
                         <span class="detected-field-label">{{ field }}:</span>
                         <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                        <span v-if="autoDetectedFieldsWithMetadata[field]" class="detected-field-location">
-                          @ {{ autoDetectedFieldsWithMetadata[field].location }}
-                          ({{ (autoDetectedFieldsWithMetadata[field].confidence * 100).toFixed(0) }}%)
-                        </span>
+                      </div>
+                      <div v-if="detectedCurrencies.length > 1 && selectedCurrency" class="currency-filter-info">
+                        <em>Note: Showing fields for {{ selectedCurrency }} only. Select "All Currencies" to see all detected fields.</em>
                       </div>
                     </div>
                     
@@ -473,6 +492,56 @@
                   </div>
                   <div class="cleaning-buttons">
                     <button class="btn-primary" @click="applyCleaning">Clean Data</button>
+                  </div>
+                </div>
+
+                <!-- ===== NEW: Detected Values for Single Instrument ===== -->
+                <div v-if="sheetType === 'single' && Object.keys(autoDetectedFields).length > 0" class="detected-values-section">
+                  <h3>Detected Values (Single Instrument)</h3>
+                  <p class="section-hint">Review the values detected by Auto Detection. Exclude values you don't want to use for calculations.</p>
+                  
+                  <div class="detected-values-table">
+                    <div class="table-header">
+                      <span class="header-field">Field</span>
+                      <span class="header-value">Extracted Value</span>
+                      <span class="header-status">Status</span>
+                      <span class="header-action">Action</span>
+                    </div>
+                    <div v-for="(value, key) in autoDetectedFields" :key="key" class="table-row" :class="{ 'row-excluded': excludedDetectedFields.has(key) }">
+                      <span class="row-field">{{ key }}</span>
+                      <div class="row-value">
+                        <span class="value-display">{{ formatDetectedValue(key, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                      </div>
+                      <span class="row-status" :class="{ 'status-excluded': excludedDetectedFields.has(key), 'status-included': !excludedDetectedFields.has(key) }">
+                        {{ excludedDetectedFields.has(key) ? 'Excluded' : 'Included' }}
+                      </span>
+                      <div class="row-action">
+                        <button 
+                          class="btn-toggle-exclude" 
+                          @click="toggleExcludeField(key)"
+                          :class="{ 'btn-exclude': !excludedDetectedFields.has(key), 'btn-include': excludedDetectedFields.has(key) }"
+                        >
+                          {{ excludedDetectedFields.has(key) ? 'Include' : 'Exclude' }}
+                        </button>
+                      </div>
+                    </div>
+                    <!-- Display currency separately if it was selected but not in autoDetectedFields -->
+                    <div v-if="selectedCurrency && !autoDetectedFields['Currency']" class="table-row">
+                      <span class="row-field">Currency</span>
+                      <div class="row-value">
+                        <span class="value-display">{{ selectedCurrency === 'custom' ? customCurrency?.toUpperCase() : selectedCurrency }}</span>
+                      </div>
+                      <span class="row-status status-included">Included</span>
+                      <div class="row-action">
+                        <button class="btn-toggle-exclude btn-exclude" @click="toggleExcludeField('Currency')">Exclude</button>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="detected-values-summary">
+                    <span class="summary-text">
+                      {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) - excludedDetectedFields.size }} of {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) }} values included for calculations
+                    </span>
                   </div>
                 </div>
                 <div v-if="cleanedData.length" class="preview-section">
@@ -821,21 +890,21 @@
                     class="summary-tab" 
                     :class="{ active: activeSummaryTab === 'previous' }"
                     @click="activeSummaryTab = 'previous'"
-                    :disabled="!completedInstrumentSummary.rows.length"
+                    :disabled="!currentWorkbookPreviousSummaries.length"
                   >
                     <v-icon size="16">mdi-history</v-icon>
                     Previous Summaries
-                    <span class="tab-count">{{ completedInstrumentSummary.rows.length }}</span>
+                    <span class="tab-count">{{ currentWorkbookPreviousSummaries.length }}</span>
                   </button>
                   <button 
                     class="summary-tab" 
                     :class="{ active: activeSummaryTab === 'all' }"
                     @click="activeSummaryTab = 'all'"
-                    :disabled="!instrumentSummary.rows.length && !completedInstrumentSummary.rows.length"
+                    :disabled="!instrumentSummary.rows.length && !currentWorkbookPreviousSummaries.length"
                   >
                     <v-icon size="16">mdi-view-list</v-icon>
                     View All
-                    <span class="tab-count">{{ instrumentSummary.rows.length + completedInstrumentSummary.rows.length }}</span>
+                    <span class="tab-count">{{ instrumentSummary.rows.length + currentWorkbookPreviousSummaries.length }}</span>
                   </button>
                 </div>
 
@@ -941,11 +1010,11 @@
 
                 <!-- Previous Summaries Section -->
                 <div v-if="activeSummaryTab === 'previous' || activeSummaryTab === 'all'" class="summary-section">
-                  <div v-if="completedInstrumentSummary.rows.length" class="section-header">
+                  <div v-if="currentWorkbookPreviousSummaries.length" class="section-header">
                     <h3>
                       <v-icon size="20" style="color: #2196F3;">mdi-history</v-icon>
-                      Previous Summaries (All Completed)
-                      <span class="worksheet-badge">{{ completedInstrumentSummary.rows.length }} records</span>
+                      Previous Summaries (Current Workbook)
+                      <span class="worksheet-badge">{{ currentWorkbookPreviousSummaries.length }} records</span>
                     </h3>
                     <div style="display: flex; gap: 10px;">
                       <button class="btn-secondary btn-sm" @click="viewPreviousSummariesExcel">
@@ -957,30 +1026,36 @@
                     </div>
                   </div>
                   
-                  <div v-if="completedInstrumentSummary.rows.length" class="previous-summaries-list">
-                    <div class="summary-item-card" v-for="(row, idx) in completedInstrumentSummary.rows.slice(0, 10)" :key="idx">
-                      <div class="summary-item-header">
-                        <span class="summary-item-name">{{ row['Instrument Name'] || row['instrument_name'] || `Record ${idx + 1}` }}</span>
-                        <span class="summary-item-worksheet">{{ row['Worksheet'] || row['worksheet'] || 'Unknown' }}</span>
-                      </div>
-                      <div class="summary-item-details">
-                        <div class="summary-detail">
-                          <span class="detail-label">Type:</span>
-                          <span class="detail-value">{{ row['Instrument Type'] || row['instrument_type'] || 'N/A' }}</span>
-                        </div>
-                        <div class="summary-detail">
-                          <span class="detail-label">Value:</span>
-                          <span class="detail-value">${{ formatNumber(row['Total Value'] || row['total_value'] || 0) }}</span>
-                        </div>
-                        <div class="summary-detail">
-                          <span class="detail-label">Rate:</span>
-                          <span class="detail-value">{{ formatNumber(row['Average Rate'] || row['average_rate'] || 0) }}%</span>
-                        </div>
-                      </div>
+                  <!-- Excel-style table display for previous summaries -->
+                  <div v-if="currentWorkbookPreviousSummaries.length" class="excel-table-container" style="margin-top: 20px;">
+                    <table class="excel-table">
+                      <thead>
+                        <tr>
+                          <th>Instrument Name</th>
+                          <th>Worksheet</th>
+                          <th>Instrument Type</th>
+                          <th>Total Value</th>
+                          <th>Average Rate</th>
+                          <th>Workbook</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(row, idx) in currentWorkbookPreviousSummaries.slice(0, 20)" :key="idx">
+                          <td>{{ row['Instrument Name'] || row['instrument_name'] || `Record ${idx + 1}` }}</td>
+                          <td>{{ row['Worksheet'] || row['worksheet'] || 'Unknown' }}</td>
+                          <td>{{ row['Instrument Type'] || row['instrument_type'] || 'N/A' }}</td>
+                          <td>${{ formatNumber(row['Total Value'] || row['total_value'] || 0) }}</td>
+                          <td>{{ formatNumber(row['Average Rate'] || row['average_rate'] || 0) }}%</td>
+                          <td>{{ row['Workbook'] || 'Unknown' }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div v-if="currentWorkbookPreviousSummaries.length > 20" class="show-more-indicator" style="padding: 10px; text-align: center; color: #666;">
+                      ... and {{ currentWorkbookPreviousSummaries.length - 20 }} more records (click View Excel to see all)
                     </div>
-                    <div v-if="completedInstrumentSummary.rows.length > 10" class="show-more-indicator">
-                      ... and {{ completedInstrumentSummary.rows.length - 10 }} more records
-                    </div>
+                  </div>
+                  <div v-else class="empty-state">
+                    <p>No previous summaries for current workbook.</p>
                   </div>
                 </div>
 
@@ -1504,6 +1579,7 @@ const showInstrumentExcelPopup = ref(false)
 const showWorkflowPopup = ref(false)
 const showDetectionSuccess = ref(false)
 const showMultiTableDetectionSuccess = ref(false)
+const customCurrency = ref('')
 const excelPopupMode = ref('current') // 'current' or 'previous'
 const multiTableDetectionResults = ref([])
 const selectedWorkflowInstrument = ref(null)
@@ -1603,6 +1679,8 @@ const autoDetectedFieldsWithMetadata = ref({})
 const detectedCurrencies = ref([])
 const detectedInstrumentType = ref('') // Store instrument type at detection time
 const selectedCurrency = ref('')
+const isDetecting = ref(false) // Prevent duplicate detection requests
+const excludedDetectedFields = ref(new Set()) // Track excluded detected fields for cleaning
 
 const showModalViewer = ref(false)
 const viewerFileData = ref(null)
@@ -1632,6 +1710,34 @@ const descriptiveAnalytics = computed(() => {
   const rows = currentSummaryRows.value
   if (!rows.length) return {}
 
+  // Use backend aggregate data if available (backend is single source of truth)
+  if (allCalculations.value && (allCalculations.value.totalValue !== undefined || allCalculations.value.instrumentCount !== undefined)) {
+    const stats = {}
+    stats['Number of Records'] = allCalculations.value.instrumentCount || rows.length
+    stats['Total Face Value'] = allCalculations.value.totalValue || 0
+    stats['Weighted Average Yield'] = allCalculations.value.avgRate || allCalculations.value.weightedAvgRate || 0
+    stats['Weighted Average Maturity'] = allCalculations.value.avgDaysToMaturity || 0
+    stats['Average Rate'] = allCalculations.value.avgRate || 0
+    
+    console.log('🔍 Using backend data for descriptiveAnalytics:', stats)
+    
+    // Format the stats
+    for (const [k, v] of Object.entries(stats)) {
+      if (typeof v === 'number') {
+        const isTimeField = k.toLowerCase().includes('day') || k.toLowerCase().includes('maturity') || k.toLowerCase().includes('duration') || k.toLowerCase().includes('term') || k.toLowerCase().includes('month') || k.toLowerCase().includes('year') || k.toLowerCase().includes('week') || k.toLowerCase().includes('time')
+        if (isTimeField) {
+          stats[k] = Math.round(v).toLocaleString()
+        } else {
+          stats[k] = v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        }
+      }
+    }
+    return stats
+  }
+
+  // Fallback to frontend calculation only if backend data not available
+  console.warn('⚠️ No backend aggregate data available, using frontend fallback for descriptiveAnalytics')
+  
   const getValue = (row) => parseFloat(row['Total Value'] ?? row['total_value'] ?? row['Calculated Value'] ?? row['calculated_value'] ?? row['Value'] ?? row['value'] ?? 0)
   const getYield = (row) => parseFloat(row['Yield'] ?? row['yield'] ?? row['Rate'] ?? row['rate'] ?? row['Interest Rate'] ?? row['interest_rate'] ?? row['Coupon Rate'] ?? row['coupon_rate'] ?? row['Discount Rate'] ?? row['discount_rate'] ?? 0)
   const getMaturity = (row) => parseFloat(row['Days to Maturity'] ?? row['days_to_maturity'] ?? row['Term'] ?? row['term'] ?? row['Maturity'] ?? row['maturity'] ?? 0)
@@ -1856,6 +1962,14 @@ const sortedInstrumentSummaryRows = computed(() => {
     valB = String(valB || '')
     return sortOrder.value === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
   })
+})
+
+// Filter completed summaries to show only current workbook
+const currentWorkbookPreviousSummaries = computed(() => {
+  if (!currentWorkbookName.value || !completedInstrumentSummary.value.rows) return []
+  return completedInstrumentSummary.value.rows.filter(
+    row => row['Workbook'] === currentWorkbookName.value
+  )
 })
 
 const calculationFields = computed(() => {
@@ -2253,6 +2367,11 @@ function processInstrumentData(sheetName, data, instrumentType) {
   mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
   instrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
 
+  // DEPRECATED: This function uses frontend calculations and should not be used
+  // The system now relies on backend calculations via calculateMetrics()
+  // If this function is still called, it should be replaced with backend-based logic
+  console.warn('processInstrumentData uses deprecated frontend calculations. Use backend calculateMetrics instead.')
+  
   const agg = computeAggregate(mergedRows)
   const uniqueNames = new Set(mergedRows.map(r => r['Instrument Name']))
   agg.instrumentCount = uniqueNames.size
@@ -2425,6 +2544,18 @@ async function readFileData(file) {
     console.log('Result error:', result.error)
 
     if (result.success) {
+      // CRITICAL: Clear ALL state AFTER successful upload to prevent stale data
+      autoDetectedFields.value = {}
+      autoDetectedFieldsWithMetadata.value = {}
+      detectedCurrencies.value = []
+      detectedInstrumentType.value = ''
+      selectedCurrency.value = ''
+      customCurrency.value = ''
+      excludedDetectedFields.value.clear()
+      showDetectionSuccess.value = false
+      showMultiTableDetectionSuccess.value = false
+      multiTableDetectionResults.value = []
+
       workbookSheets.value = worksheetWorkflow.workbookSheets.value
       worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
       originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
@@ -2438,6 +2569,7 @@ async function readFileData(file) {
       console.log('UI condition check:', worksheetWorkflow.workbookSheets.value.length > 0 && !worksheetSelected.value)
       console.log('originalFileBuffer.value set:', !!originalFileBuffer.value)
       console.log('originalFileBuffer.value byteLength:', originalFileBuffer.value?.byteLength || 0)
+      console.log('originalFileBuffer.value first 20 bytes:', originalFileBuffer.value ? Array.from(new Uint8Array(originalFileBuffer.value.slice(0, 20))) : 'N/A')
 
       worksheetSelected.value = false
       currentSheetName.value = ''
@@ -2538,6 +2670,17 @@ function handleSheetSelectedFromViewer(sheetName) {
   instrumentSummary.value = { columns: [], rows: [] }  // Current display cleared
   portfolioSummary.value = { columns: [], rows: [] }  // Current display cleared
   fieldDetectionResults.value = { detected_fields: {}, summary: {} }  // Clear detection results
+  
+  // Clear auto-detection state to prevent cross-contamination
+  autoDetectedFields.value = {}
+  autoDetectedFieldsWithMetadata.value = {}
+  detectedCurrencies.value = []
+  detectedInstrumentType.value = ''
+  selectedCurrency.value = ''
+  customCurrency.value = ''
+  excludedDetectedFields.value.clear()
+  showDetectionSuccess.value = false
+  
   // completedInstrumentSummary and completedPortfolioSummary are preserved
 }
 
@@ -2565,6 +2708,17 @@ function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }
   instrumentSummary.value = { columns: [], rows: [] }  // Current display cleared
   portfolioSummary.value = { columns: [], rows: [] }  // Current display cleared
   fieldDetectionResults.value = { detected_fields: {}, summary: {} }  // Clear detection results
+  
+  // Clear auto-detection state to prevent cross-contamination
+  autoDetectedFields.value = {}
+  autoDetectedFieldsWithMetadata.value = {}
+  detectedCurrencies.value = []
+  detectedInstrumentType.value = ''
+  selectedCurrency.value = ''
+  customCurrency.value = ''
+  excludedDetectedFields.value.clear()
+  showDetectionSuccess.value = false
+  
   // completedInstrumentSummary and completedPortfolioSummary are preserved
   
   isolatedTableData.value = {
@@ -2970,6 +3124,22 @@ async function autoDetectSingleInstrument() {
     return
   }
 
+  // Prevent duplicate detection requests
+  if (isDetecting.value) {
+    console.log('Detection already in progress, ignoring duplicate request')
+    return
+  }
+  isDetecting.value = true
+
+  // Clear previous detection state to prevent cross-contamination
+  autoDetectedFields.value = {}
+  autoDetectedFieldsWithMetadata.value = {}
+  detectedCurrencies.value = []
+  detectedInstrumentType.value = ''
+  selectedCurrency.value = ''
+  excludedDetectedFields.value.clear()
+  showDetectionSuccess.value = false
+
   console.log('=== Auto Detect Started ===')
   console.log('Current Sheet:', currentSheetName.value)
   console.log('Instrument Type from page:', instrumentType.value)
@@ -2982,7 +3152,10 @@ async function autoDetectSingleInstrument() {
       originalFileBuffer.value,
       currentSheetName.value,
       requiredColumns.value,
-      instrumentType.value
+      instrumentType.value,
+      null,
+      null,
+      selectedCurrency.value === 'custom' ? customCurrency.value : null
     )
 
     console.log('=== Detection Result ===')
@@ -2990,6 +3163,12 @@ async function autoDetectSingleInstrument() {
     console.log('Detected Fields with Metadata:', detectionResult.fieldsWithMetadata)
     console.log('Detected Currencies:', detectionResult.currencies)
     console.log('Missing Fields:', detectionResult.missingFields)
+    
+    // CRITICAL: Log all detected values for debugging
+    console.log('=== ALL DETECTED VALUES FROM BACKEND ===')
+    for (const [field, value] of Object.entries(detectionResult.fields)) {
+      console.log(`Field: "${field}" | Value: "${value}"`)
+    }
 
     if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
       autoDetectedFields.value = detectionResult.fields
@@ -2997,24 +3176,31 @@ async function autoDetectSingleInstrument() {
       detectedCurrencies.value = detectionResult.currencies || []
       detectedInstrumentType.value = instrumentType.value // Store instrument type at detection time
       
+      console.log('=== AUTO DETECTED FIELDS SET IN FRONTEND ===')
+      console.log('autoDetectedFields.value:', autoDetectedFields.value)
+      
       // Auto-select first currency if only one detected
       if (detectedCurrencies.value.length === 1) {
         selectedCurrency.value = detectedCurrencies.value[0]
       } else if (detectedCurrencies.value.length > 1) {
-        selectedCurrency.value = ''
+        selectedCurrency.value = '' // Default to "All Currencies" for multiple currencies
+      } else {
+        selectedCurrency.value = '' // No currencies detected
       }
       
       showDetectionSuccess.value = true
-  console.log('=== POPUP OPENING ===')
-  console.log('instrumentType.value at popup:', instrumentType.value)
-  console.log('detectedInstrumentType.value:', detectedInstrumentType.value)
-  console.log('instrumentType object:', instrumentType)
+      console.log('=== POPUP OPENING ===')
+      console.log('instrumentType.value at popup:', instrumentType.value)
+      console.log('detectedInstrumentType.value:', detectedInstrumentType.value)
+      console.log('instrumentType object:', instrumentType)
     } else {
       alert('Auto Detect could not identify required fields. Please try manual entry.')
     }
   } catch (error) {
     console.error('Auto Detect error:', error)
     alert('Auto Detect failed: ' + error.message)
+  } finally {
+    isDetecting.value = false
   }
 }
 
@@ -3027,67 +3213,88 @@ async function handleMultiTableDetect(event) {
   console.log('Number of tables:', event.tables.length)
   console.log('Instrument Type:', event.instrumentType)
 
-  const detectedInstruments = []
-  
-  for (const table of event.tables) {
-    console.log(`Processing table: ${table.tableName}`)
-    console.log(`Table range: Row ${table.range.startRow + 1} - ${table.range.endRow + 1}, Col ${table.range.startCol} - ${table.range.endCol}`)
-    console.log(`Table data length:`, table.data?.length)
-    console.log(`Table data sample:`, table.data?.slice(0, 3))
-    
-    try {
-      // Extract only this table's data from the full sheet
-      const tableData = table.data
-      
-      // Create a minimal worksheet structure for this table only
-      const tableWorksheet = {
-        name: table.tableName,
-        data: tableData,
-        range: table.range
-      }
-      
-      // Run auto-detection directly on the table data (not the full file buffer)
-      const detectionResult = await autoDetectInstrumentFields(
-        originalFileBuffer.value,
-        event.sheetName,
-        requiredColumns.value,
-        event.instrumentType,
-        table.range,
-        tableData // Pass the table-specific data
-      )
-
-      console.log(`Detection result for ${table.tableName}:`, detectionResult)
-
-      if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
-        detectedInstruments.push({
-          tableName: table.tableName,
-          instrumentName: detectionResult.fields.Instrument || table.tableName,
-          fields: detectionResult.fields,
-          fieldsWithMetadata: detectionResult.fieldsWithMetadata,
-          currencies: detectionResult.currencies || [],
-          missingFields: detectionResult.missingFields || [],
-          range: table.range
-        })
-      }
-    } catch (error) {
-      console.error(`Error detecting table ${table.tableName}:`, error)
-    }
+  // Prevent duplicate detection requests
+  if (isDetecting.value) {
+    console.log('Detection already in progress, ignoring duplicate request')
+    return
   }
+  isDetecting.value = true
 
-  if (detectedInstruments.length > 0) {
-    console.log('=== Multi-Table Detection Complete ===')
-    console.log('Detected instruments:', detectedInstruments.length)
+  // Clear previous detection state to prevent cross-contamination
+  autoDetectedFields.value = {}
+  autoDetectedFieldsWithMetadata.value = {}
+  detectedCurrencies.value = []
+  detectedInstrumentType.value = ''
+  selectedCurrency.value = ''
+  excludedDetectedFields.value.clear()
+  showDetectionSuccess.value = false
+
+  try {
+    const detectedInstruments = []
     
-    // Store multi-table detection results
-    multiTableDetectionResults.value = detectedInstruments
-    
-    // Show multi-table detection success popup
-    showMultiTableDetectionSuccess.value = true
-    
-    // Close workbook viewer
-    showWorkbookViewer.value = false
-  } else {
-    alert('Auto Detect could not identify required fields in any selected table. Please try manual entry.')
+    for (const table of event.tables) {
+      console.log(`Processing table: ${table.tableName}`)
+      console.log(`Table range: Row ${table.range.startRow + 1} - ${table.range.endRow + 1}, Col ${table.range.startCol} - ${table.range.endCol}`)
+      console.log(`Table data length:`, table.data?.length)
+      console.log(`Table data sample:`, table.data?.slice(0, 3))
+      
+      try {
+        // Extract only this table's data from the full sheet
+        const tableData = table.data
+        
+        // Create a minimal worksheet structure for this table only
+        const tableWorksheet = {
+          name: table.tableName,
+          data: tableData,
+          range: table.range
+        }
+        
+        // Run auto-detection directly on the table data (not the full file buffer)
+        const detectionResult = await autoDetectInstrumentFields(
+          originalFileBuffer.value,
+          event.sheetName,
+          requiredColumns.value,
+          event.instrumentType,
+          table.range,
+          tableData, // Pass the table-specific data
+          selectedCurrency.value === 'custom' ? customCurrency.value : null
+        )
+
+        console.log(`Detection result for ${table.tableName}:`, detectionResult)
+
+        if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
+          detectedInstruments.push({
+            tableName: table.tableName,
+            instrumentName: detectionResult.fields.Instrument || table.tableName,
+            fields: detectionResult.fields,
+            fieldsWithMetadata: detectionResult.fieldsWithMetadata,
+            currencies: detectionResult.currencies || [],
+            missingFields: detectionResult.missingFields || [],
+            range: table.range
+          })
+        }
+      } catch (error) {
+        console.error(`Error detecting table ${table.tableName}:`, error)
+      }
+    }
+
+    if (detectedInstruments.length > 0) {
+      console.log('=== Multi-Table Detection Complete ===')
+      console.log('Detected instruments:', detectedInstruments.length)
+      
+      // Store multi-table detection results
+      multiTableDetectionResults.value = detectedInstruments
+      
+      // Show multi-table detection success popup
+      showMultiTableDetectionSuccess.value = true
+      
+      // Close workbook viewer
+      showWorkbookViewer.value = false
+    } else {
+      alert('Auto Detect could not identify required fields in the selected sections. Please try manual entry.')
+    }
+  } finally {
+    isDetecting.value = false
   }
 }
 
@@ -3144,9 +3351,16 @@ function useMultiTableDetectedFields() {
   // Set extracted values for single-instrument display
   extractedValues.value = combinedFields
   
+  // Set autoDetectedFields for Cleaning page display
+  autoDetectedFields.value = combinedFields
+  
+  // Navigate to Cleaning tab to review detected values
+  activeTab.value = 'cleaning'
+  
   console.log('Combined table data applied to preview:', tabularData)
   console.log('Number of rows in tabularData:', tabularData.length)
   console.log('Headers:', headers)
+  console.log('Navigated to Cleaning tab for review')
 }
 
 // ================================================================
@@ -3187,6 +3401,42 @@ function formatDetectedValue(field, value) {
 }
 
 // ================================================================
+// handleCustomCurrencyInput
+// ================================================================
+async function handleCustomCurrencyInput() {
+  // Auto-uppercase the custom currency input
+  if (customCurrency.value) {
+    customCurrency.value = customCurrency.value.toUpperCase()
+  }
+  
+  // If custom currency is entered (3 letters), re-run detection with it
+  if (customCurrency.value && customCurrency.value.length === 3) {
+    console.log('Re-running detection with custom currency:', customCurrency.value)
+    
+    try {
+      const detectionResult = await autoDetectInstrumentFields(
+        originalFileBuffer.value,
+        currentSheetName.value,
+        requiredColumns.value,
+        instrumentType.value,
+        null,
+        null,
+        customCurrency.value
+      )
+      
+      if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
+        autoDetectedFields.value = detectionResult.fields
+        autoDetectedFieldsWithMetadata.value = detectionResult.fieldsWithMetadata
+        detectedCurrencies.value = detectionResult.currencies || []
+        console.log('Detection re-run successful with custom currency')
+      }
+    } catch (error) {
+      console.error('Error re-running detection with custom currency:', error)
+    }
+  }
+}
+
+// ================================================================
 // useDetectedFields
 // ================================================================
 function useDetectedFields() {
@@ -3203,8 +3453,10 @@ function useDetectedFields() {
   extractedValues.value = extractedValues
   
   // Add selected currency to extracted values if detected
-  if (selectedCurrency.value) {
+  if (selectedCurrency.value && selectedCurrency.value !== 'custom') {
     extractedValues.value['Currency'] = selectedCurrency.value
+  } else if (selectedCurrency.value === 'custom' && customCurrency.value) {
+    extractedValues.value['Currency'] = customCurrency.value.toUpperCase()
   }
   
   // Create a single-row dataset for the preview
@@ -3213,13 +3465,9 @@ function useDetectedFields() {
     previewRow[key] = value
   }
   
-  // Add currency if selected
-  if (selectedCurrency.value) {
-    previewRow['Currency'] = selectedCurrency.value
-  }
-  
   rawData.value = [previewRow]
   originalRawData.value = JSON.parse(JSON.stringify([previewRow]))
+  cleanedData.value = JSON.parse(JSON.stringify([previewRow])) // Set cleanedData for cleaning workflow
   fileColumns.value = Object.keys(previewRow)
   originalFileColumns.value = [...fileColumns.value]
   
@@ -3228,8 +3476,13 @@ function useDetectedFields() {
   sheetType.value = 'single'
   mappingApplied.value = true
   
+  // Navigate to Cleaning tab to review detected values
+  activeTab.value = 'cleaning'
+  
   console.log('Auto-detected fields applied to preview:', autoDetectedFields.value)
   console.log('Selected currency:', selectedCurrency.value)
+  console.log('Currency added to data:', previewRow['Currency'])
+  console.log('Navigated to Cleaning tab for review')
 }
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
@@ -3359,6 +3612,21 @@ function updateExtractedValue(key, value) {
 function clearExtractedValue(key) {
   extractedValues.value[key] = 'N/A'
   console.log(`Cleared ${key}`)
+}
+
+// ================================================================
+// toggleExcludeField - Toggle include/exclude state for detected fields
+// ================================================================
+function toggleExcludeField(fieldKey) {
+  if (excludedDetectedFields.value.has(fieldKey)) {
+    excludedDetectedFields.value.delete(fieldKey)
+    console.log(`Included field: ${fieldKey}`)
+  } else {
+    excludedDetectedFields.value.add(fieldKey)
+    console.log(`Excluded field: ${fieldKey}`)
+  }
+  // Force reactivity update
+  excludedDetectedFields.value = new Set(excludedDetectedFields.value)
 }
 
 // NEW: Load worksheet statuses from session
@@ -3604,29 +3872,64 @@ function closeInstrumentExcelPopup() {
 }
 
 function continueWorkingOnCurrent() {
-  // Navigate to upload page to access workbook
-  console.log('Navigating to upload page to continue on current sheet:', currentSheetName.value)
-  // Clear current processing data but preserve completed results
+  // Return to Excel Workbook View with same workbook and worksheet
+  console.log('Continue on Current Sheet - returning to workbook view:', currentSheetName.value)
+  console.log('Current workbook:', currentWorkbookName.value)
+  
+  // Reset only active workflow state - preserve completed results
   cleanedData.value = []
+  autoDetectedFields.value = {}
+  excludedDetectedFields.value = {}
   calculations.value = {}
-  allCalculations.value = {}
   selectedCalculations.value = {}
-  instrumentSummary.value = { columns: [], rows: [] }
+  // Preserve allCalculations and completedInstrumentSummary for history
+  // instrumentSummary.value = { columns: [], rows: [] } // Keep current summary for display
   portfolioSummary.value = { columns: [], rows: [] }
-  switchTab('upload')
+  
+  // Reset currency state for new processing pass
+  selectedCurrency.value = 'USD'
+  customCurrency.value = ''
+  
+  // Reset detection and mapping state
+  columnMapping.value = {}
+  mappingApplied.value = false
+  sheetType.value = 'single'
+  
+  // Show Excel Workbook View
+  showWorkbookViewer.value = true
+  activeTab.value = 'upload'
 }
 
 function chooseAnotherSheet() {
-  // Navigate to upload page to access workbook
-  console.log('Navigating to upload page to choose another sheet')
-  // Clear current processing data but preserve completed results
+  // Return to Excel Workbook View to select another worksheet
+  console.log('Choose Another Sheet - returning to workbook view')
+  console.log('Current workbook:', currentWorkbookName.value)
+  
+  // Reset only active workflow state - preserve completed results
   cleanedData.value = []
+  autoDetectedFields.value = {}
+  excludedDetectedFields.value = {}
   calculations.value = {}
-  allCalculations.value = {}
   selectedCalculations.value = {}
-  instrumentSummary.value = { columns: [], rows: [] }
+  // Preserve allCalculations and completedInstrumentSummary for history
+  // instrumentSummary.value = { columns: [], rows: [] } // Keep current summary for display
   portfolioSummary.value = { columns: [], rows: [] }
-  switchTab('upload')
+  
+  // Reset currency state for new processing pass
+  selectedCurrency.value = 'USD'
+  customCurrency.value = ''
+  
+  // Reset detection and mapping state
+  columnMapping.value = {}
+  mappingApplied.value = false
+  sheetType.value = 'single'
+  
+  // Clear current sheet selection to force user to choose new sheet
+  currentSheetName.value = ''
+  
+  // Show Excel Workbook View
+  showWorkbookViewer.value = true
+  activeTab.value = 'upload'
 }
 
 function sortByColumn(col) {
@@ -4258,6 +4561,29 @@ async function continueAfterCleaning() {
     return
   }
   
+  // For single instruments, apply excluded fields filter before continuing
+  if (sheetType.value === 'single' && excludedDetectedFields.value.size > 0) {
+    console.log('Applying excluded fields filter to cleaned data')
+    console.log('Excluded fields:', Array.from(excludedDetectedFields.value))
+    
+    // Filter out excluded columns from cleaned data
+    const filteredData = cleanedData.value.map(row => {
+      const filteredRow = {}
+      for (const [key, value] of Object.entries(row)) {
+        // Check if this field is excluded
+        const isExcluded = excludedDetectedFields.value.has(key)
+        if (!isExcluded) {
+          filteredRow[key] = value
+        }
+      }
+      return filteredRow
+    })
+    
+    // Update cleaned data with filtered version
+    cleanedData.value = filteredData
+    console.log('Filtered cleaned data:', filteredData)
+  }
+  
   // Navigate immediately, calculate metrics in background
   activeTab.value = 'calculations'
   await nextTick()
@@ -4399,14 +4725,23 @@ async function calculateMetrics() {
           console.log('🔍 Completed portfolioSummary (history):', completedPortfolioSummary.value)
         }
         
-        // For display, use the first instrument's data or aggregate
+        // For display, use the backend aggregate data if available
         const results = response?.results || {}
         const firstInstType = Object.keys(results)[0]
         if (firstInstType && results[firstInstType]) {
           calculations.value = results[firstInstType].data
-          allCalculations.value = results[firstInstType].data
-          selectedCalculations.value = results[firstInstType].data
-          console.log('🔍 Set calculations from first instrument:', firstInstType)
+          
+          // Use backend aggregate data if available, otherwise use first instrument data
+          if (response?.aggregate) {
+            allCalculations.value = response.aggregate
+            selectedCalculations.value = response.aggregate
+            console.log('🔍 Set allCalculations from backend aggregate:', response.aggregate)
+          } else {
+            // Fallback to first instrument data (should not happen in normal flow)
+            allCalculations.value = results[firstInstType].data
+            selectedCalculations.value = results[firstInstType].data
+            console.log('🔍 Set calculations from first instrument (fallback):', firstInstType)
+          }
         }
       } 
       // Handle single-instrument response
@@ -4470,15 +4805,25 @@ async function calculateMetrics() {
           console.log('🔍 Completed instrumentSummary (history):', completedInstrumentSummary.value)
           console.log('🔍 Total completed rows:', mergedRows.length)
 
-          const agg = computeAggregate(rows)
-          const uniqueNames = new Set(rows.map(r => r['Instrument Name']))
-          // Use backend instrument_count if available, otherwise compute from unique names
-          // For single-instrument mode (multi-table combined), force count to 1
-          agg.instrumentCount = response.data.instrument_count || (sheetType.value === 'single' ? 1 : uniqueNames.size)
-          console.log('🔍 Computed aggregate:', agg)
+          // Use backend-provided aggregate data instead of frontend calculation
+          // Backend should provide totalValue, instrumentCount, avgRate, etc. in the response
+          const agg = {
+            totalValue: response.data.totalValue ?? response.data.total_value ?? 0,
+            instrumentCount: response.data.instrument_count ?? response.data.instrumentCount ?? (sheetType.value === 'single' ? 1 : new Set(rows.map(r => r['Instrument Name'])).size),
+            avgRate: response.data.avgRate ?? response.data.avg_rate ?? 0,
+            weightedAvgRate: response.data.weightedAvgRate ?? response.data.weighted_avg_rate ?? 0,
+            totalInterest: response.data.totalInterest ?? response.data.total_interest ?? 0,
+            interestEarned: response.data.interestEarned ?? response.data.interest_earned ?? 0,
+            annualYield: response.data.annualYield ?? response.data.annual_yield ?? 0,
+            effectiveAnnualRate: response.data.effectiveAnnualRate ?? response.data.effective_annual_rate ?? 0,
+            avgDaysToMaturity: response.data.avgDaysToMaturity ?? response.data.avg_days_to_maturity ?? 0,
+            totalPrincipal: response.data.totalPrincipal ?? response.data.total_principal ?? 0
+          }
+          
+          console.log('🔍 Using backend aggregate data:', agg)
           console.log('🔍 Backend instrument_count:', response.data.instrument_count)
-          console.log('🔍 Unique names count:', uniqueNames.size)
-          console.log('🔍 Instrument count set to:', agg.instrumentCount, '(sheetType:', sheetType.value + ')')
+          console.log('🔍 Backend totalValue:', response.data.totalValue)
+          console.log('🔍 Backend avgRate:', response.data.avgRate)
 
           allCalculations.value = agg
           selectedCalculations.value = agg
@@ -4536,31 +4881,35 @@ async function calculateMetrics() {
           const summaryRow = {
             'Instrument Name': instrumentName,
             'Instrument Type': instrumentType.value,
-            'Total Value': response.data.totalValue || 0,
-            'total_value': response.data.totalValue || 0,
-            'Instrument Count': response.data.instrumentCount || 0,
-            'instrument_count': response.data.instrumentCount || 0,
-            'Avg Rate': response.data.avgRate || 0,
-            'avg_rate': response.data.avgRate || 0,
-            'Weighted Avg Rate': response.data.weightedAvgRate || 0,
-            'weighted_avg_rate': response.data.weightedAvgRate || 0,
-            'Total Interest': response.data.totalInterest || 0,
-            'total_interest': response.data.totalInterest || 0,
-            'Interest Earned': response.data.interestEarned || 0,
-            'interest_earned': response.data.interestEarned || 0,
-            'Annual Yield': response.data.annualYield || 0,
-            'annual_yield': response.data.annualYield || 0,
-            'Effective Annual Rate': response.data.effectiveAnnualRate || 0,
-            'effective_annual_rate': response.data.effectiveAnnualRate || 0,
-            'Avg Days to Maturity': response.data.avgDaysToMaturity || 0,
-            'avg_days_to_maturity': response.data.avgDaysToMaturity || 0,
-            'Total Principal': response.data.totalPrincipal || 0,
-            'total_principal': response.data.totalPrincipal || 0,
-            'FRED Benchmark': response.data.fred?.benchmark_rate || null,
-            'fred_benchmark': response.data.fred?.benchmark_rate || null,
+            'Total Value': response.data.totalValue ?? response.data.total_value ?? 0,
+            'total_value': response.data.totalValue ?? response.data.total_value ?? 0,
+            'Instrument Count': response.data.instrumentCount ?? response.data.instrument_count ?? 0,
+            'instrument_count': response.data.instrumentCount ?? response.data.instrument_count ?? 0,
+            'Avg Rate': response.data.avgRate ?? response.data.avg_rate ?? 0,
+            'avg_rate': response.data.avgRate ?? response.data.avg_rate ?? 0,
+            'Weighted Avg Rate': response.data.weightedAvgRate ?? response.data.weighted_avg_rate ?? 0,
+            'weighted_avg_rate': response.data.weightedAvgRate ?? response.data.weighted_avg_rate ?? 0,
+            'Total Interest': response.data.totalInterest ?? response.data.total_interest ?? 0,
+            'total_interest': response.data.totalInterest ?? response.data.total_interest ?? 0,
+            'Interest Earned': response.data.interestEarned ?? response.data.interest_earned ?? 0,
+            'interest_earned': response.data.interestEarned ?? response.data.interest_earned ?? 0,
+            'Annual Yield': response.data.annualYield ?? response.data.annual_yield ?? 0,
+            'annual_yield': response.data.annualYield ?? response.data.annual_yield ?? 0,
+            'Effective Annual Rate': response.data.effectiveAnnualRate ?? response.data.effective_annual_rate ?? 0,
+            'effective_annual_rate': response.data.effectiveAnnualRate ?? response.data.effective_annual_rate ?? 0,
+            'Avg Days to Maturity': response.data.avgDaysToMaturity ?? response.data.avg_days_to_maturity ?? 0,
+            'avg_days_to_maturity': response.data.avgDaysToMaturity ?? response.data.avg_days_to_maturity ?? 0,
+            'Total Principal': response.data.totalPrincipal ?? response.data.total_principal ?? 0,
+            'total_principal': response.data.totalPrincipal ?? response.data.total_principal ?? 0,
+            'FRED Benchmark': response.data.fred?.benchmark_rate ?? null,
+            'fred_benchmark': response.data.fred?.benchmark_rate ?? null,
             'Worksheet': currentSheetName.value || 'Calculated'
           }
           console.log('🔍 Created summaryRow:', summaryRow)
+          console.log('🔍 Backend response.data:', response.data)
+          console.log('🔍 Backend totalValue:', response.data.totalValue, response.data.total_value)
+          console.log('🔍 Backend instrumentCount:', response.data.instrumentCount, response.data.instrument_count)
+          console.log('🔍 Backend avgRate:', response.data.avgRate, response.data.avg_rate)
 
           // Current display shows ONLY current selection results
           const currentCols = new Set()
@@ -4580,11 +4929,25 @@ async function calculateMetrics() {
           console.log('🔍 Completed instrumentSummary (history):', completedInstrumentSummary.value)
           console.log('🔍 Total completed rows:', mergedRows.length)
 
-          const agg = computeAggregate([summaryRow])
-          // Use the actual instrument count from backend (which now reflects unique instruments from column)
-          agg.instrumentCount = response.data.instrumentCount || 1
-          console.log('🔍 Computed aggregate:', agg)
-          console.log('🔍 Instrument count set to:', agg.instrumentCount, '(from backend instrumentCount)')
+          // Use backend-provided aggregate data instead of frontend calculation
+          // Backend should provide totalValue, instrumentCount, avgRate, etc. in the response
+          const agg = {
+            totalValue: response.data.totalValue ?? response.data.total_value ?? 0,
+            instrumentCount: response.data.instrumentCount ?? response.data.instrument_count ?? 1,
+            avgRate: response.data.avgRate ?? response.data.avg_rate ?? 0,
+            weightedAvgRate: response.data.weightedAvgRate ?? response.data.weighted_avg_rate ?? 0,
+            totalInterest: response.data.totalInterest ?? response.data.total_interest ?? 0,
+            interestEarned: response.data.interestEarned ?? response.data.interest_earned ?? 0,
+            annualYield: response.data.annualYield ?? response.data.annual_yield ?? 0,
+            effectiveAnnualRate: response.data.effectiveAnnualRate ?? response.data.effective_annual_rate ?? 0,
+            avgDaysToMaturity: response.data.avgDaysToMaturity ?? response.data.avg_days_to_maturity ?? 0,
+            totalPrincipal: response.data.totalPrincipal ?? response.data.total_principal ?? 0
+          }
+          
+          console.log('🔍 Using backend aggregate data for single instrument:', agg)
+          console.log('🔍 Backend instrumentCount:', response.data.instrumentCount)
+          console.log('🔍 Backend totalValue:', response.data.totalValue)
+          console.log('🔍 Backend avgRate:', response.data.avgRate)
 
           allCalculations.value = agg
           selectedCalculations.value = agg
@@ -5176,10 +5539,19 @@ function loadAllInstruments() {
   if (!instrumentSummary.value.rows.length) {
     return
   }
-  const agg = computeAggregate(instrumentSummary.value.rows)
-  allCalculations.value = agg
-  selectedCalculations.value = agg
-  calculations.value = agg
+  // Use backend-provided aggregate data - backend is the single source of truth
+  // The aggregate should already be in allCalculations from the backend response
+  if (allCalculations.value.totalValue !== undefined) {
+    selectedCalculations.value = allCalculations.value
+    calculations.value = allCalculations.value
+    console.log('🔍 Using backend aggregate data for all instruments')
+  } else {
+    // This should not happen - backend should always provide aggregate data
+    console.error('❌ No backend aggregate data available in allCalculations')
+    console.error('❌ allCalculations.value:', allCalculations.value)
+    console.error('❌ instrumentSummary.value.rows:', instrumentSummary.value.rows)
+    showSnackbar('No calculation data available. Please recalculate.', 'error')
+  }
   currentlyViewingInstrument.value = null
   closeAllCalculationsPopup()
   saveSessionData()
@@ -5599,11 +5971,12 @@ async function loadSavedData() {
       if (wf.sessionSavedAt) sessionSavedAt.value = wf.sessionSavedAt
       loaded = true
 
-      if (instrumentSummary.value.rows.length && !allCalculations.value.totalValue) {
-        allCalculations.value = computeAggregate(instrumentSummary.value.rows)
-        selectedCalculations.value = allCalculations.value
-        calculations.value = allCalculations.value
-      }
+      // Removed frontend fallback calculation - rely only on backend results
+      // if (instrumentSummary.value.rows.length && !allCalculations.value.totalValue) {
+      //   allCalculations.value = computeAggregate(instrumentSummary.value.rows)
+      //   selectedCalculations.value = allCalculations.value
+      //   calculations.value = allCalculations.value
+      // }
     }
   } catch (err) {
     console.error('Failed to load saved data:', err)
@@ -6421,14 +6794,16 @@ onMounted(async () => {
   }
   if (Object.keys(allCalculations.value).length) enrichCalculationsWithFred()
   if (!allCalculations.value.totalValue && activeSession.value) await loadSavedData()
-  if (cleanedData.value.length) await calculateMetrics()
+  // Removed auto-calculation on mount to prevent duplicate calculations
+  // Calculations should only be triggered explicitly by user action
   debouncedSave()
 
-  if (instrumentSummary.value.rows.length && !allCalculations.value.totalValue) {
-    allCalculations.value = computeAggregate(instrumentSummary.value.rows)
-    selectedCalculations.value = allCalculations.value
-    calculations.value = allCalculations.value
-  }
+  // Removed frontend fallback calculation - rely only on backend results
+  // if (instrumentSummary.value.rows.length && !allCalculations.value.totalValue) {
+  //   allCalculations.value = computeAggregate(instrumentSummary.value.rows)
+  //   selectedCalculations.value = allCalculations.value
+  //   calculations.value = allCalculations.value
+  // }
 })
 
 // Listen for session-restored events from Dashboard (defined outside onMounted for cleanup)
@@ -6506,6 +6881,47 @@ onBeforeUnmount(() => {
 .mapping-row { display: flex; align-items: center; gap: 12px; }
 .required-label { width: 140px; font-weight: 600; color: #0B2044; font-size: 14px; }
 .dropdown-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; }
+
+/* Custom Currency Input Styles */
+.custom-currency-section { margin-top: 12px; padding: 12px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #9C27B0; }
+.custom-currency-label { font-size: 13px; font-weight: 600; color: #0B2044; margin-bottom: 8px; display: block; }
+.custom-currency-input-wrapper { position: relative; margin-top: 8px; }
+.custom-currency-field { width: 100%; padding: 10px 12px; padding-right: 50px; border: 2px solid #e8ecf1; border-radius: 8px; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; transition: all 0.3s; }
+.custom-currency-field:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.1); }
+.custom-currency-field::placeholder { text-transform: none; letter-spacing: normal; font-weight: 400; }
+.currency-code-badge { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #999; font-weight: 500; background: #f5f5f5; padding: 2px 6px; border-radius: 4px; }
+.custom-currency-hint { font-size: 11px; color: #666; margin-top: 6px; }
+
+/* Detected Values Section Styles */
+.detected-values-section { margin-top: 24px; padding: 20px; background: #f8f9ff; border-radius: 12px; border-left: 4px solid #4CAF50; }
+.detected-values-section h3 { font-size: 16px; font-weight: 600; color: #0B2044; margin: 0 0 8px 0; }
+.detected-values-section .section-hint { font-size: 13px; color: #666; margin: 0 0 16px 0; }
+.detected-values-table { background: white; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; }
+.detected-values-table .table-header { display: flex; background: #0B2044; color: white; font-weight: 600; font-size: 13px; }
+.detected-values-table .table-header span { padding: 12px 16px; }
+.detected-values-table .header-field { flex: 0 0 180px; }
+.detected-values-table .header-value { flex: 1; }
+.detected-values-table .header-status { flex: 0 0 100px; text-align: center; }
+.detected-values-table .header-action { flex: 0 0 100px; text-align: center; }
+.detected-values-table .table-row { display: flex; border-bottom: 1px solid #e0e0e0; transition: background 0.2s; }
+.detected-values-table .table-row:last-child { border-bottom: none; }
+.detected-values-table .table-row:hover { background: #f5f5f5; }
+.detected-values-table .table-row.row-excluded { background: #ffebee; opacity: 0.7; }
+.detected-values-table .table-row span { padding: 12px 16px; font-size: 13px; }
+.detected-values-table .row-field { flex: 0 0 180px; font-weight: 600; color: #0B2044; }
+.detected-values-table .row-value { flex: 1; display: flex; align-items: center; }
+.detected-values-table .value-display { color: #333; }
+.detected-values-table .row-status { flex: 0 0 100px; text-align: center; font-weight: 600; font-size: 12px; }
+.detected-values-table .status-included { color: #4CAF50; }
+.detected-values-table .status-excluded { color: #f44336; }
+.detected-values-table .row-action { flex: 0 0 100px; text-align: center; display: flex; justify-content: center; align-items: center; }
+.detected-values-table .btn-toggle-exclude { padding: 6px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+.detected-values-table .btn-toggle-exclude.btn-exclude { background: #f44336; color: white; }
+.detected-values-table .btn-toggle-exclude.btn-exclude:hover { background: #d32f2f; }
+.detected-values-table .btn-toggle-exclude.btn-include { background: #4CAF50; color: white; }
+.detected-values-table .btn-toggle-exclude.btn-include:hover { background: #45a049; }
+.detected-values-summary { margin-top: 12px; padding: 8px 12px; background: #e8f5e9; border-radius: 6px; }
+.detected-values-summary .summary-text { font-size: 13px; color: #2E7D32; font-weight: 500; }
 .mapping-select { flex: 1; padding: 8px 36px 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
 .mapping-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.2); }
 .saved-mappings-popup-title { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; padding: 20px 24px; font-size: 18px; font-weight: 700; }

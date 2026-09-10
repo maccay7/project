@@ -153,7 +153,7 @@ function isDateLike(value) {
  * @param {Array} tableData - Optional pre-extracted table data (2D array)
  * @returns {Object} Detected fields, currencies, and missing fields
  */
-export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumns, instrumentType, tableRange = null, tableData = null) {
+export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumns, instrumentType, tableRange = null, tableData = null, customCurrency = null) {
   // Parse workbook from buffer
   console.log('=== autoDetectInstrumentFields Started ===')
   console.log('Sheet Name:', sheetName)
@@ -161,6 +161,10 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   console.log('Required Columns:', requiredColumns)
   console.log('Table Range:', tableRange)
   console.log('Table Data Provided:', !!tableData)
+  console.log('Custom Currency:', customCurrency)
+  console.log('File Buffer Type:', fileBuffer?.constructor?.name)
+  console.log('File Buffer Length:', fileBuffer?.byteLength || 0)
+  console.log('File Buffer First 20 bytes:', fileBuffer ? Array.from(new Uint8Array(fileBuffer.slice(0, 20))) : 'N/A')
 
   if (!fileBuffer || !sheetName) {
     throw new Error('File buffer and sheet name are required')
@@ -188,8 +192,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     if (worksheet['!ref']) {
       range = XLSX.utils.decode_range(worksheet['!ref'])
     } else {
-      // If no ref defined, scan the entire sheet up to reasonable limits
-      range = { s: { r: 0, c: 0 }, e: { r: 1000, c: 100 } }
+      // If no ref defined, scan the entire sheet to find actual content boundaries
+      range = { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } }
     }
     
     // Expand range to capture all data by scanning for actual content
@@ -205,6 +209,19 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     // Use the expanded range if it's larger than the defined range
     if (maxRow > range.e.r) range.e.r = maxRow
     if (maxCol > range.e.c) range.e.c = maxCol
+    
+    // CRITICAL: Limit range for extremely large worksheets to prevent performance issues
+    // Most instrument data is in the top portion of worksheets
+    const MAX_ROWS = 1000
+    const MAX_COLS = 100
+    if (range.e.r >= MAX_ROWS) {
+      console.log(`Worksheet has ${range.e.r + 1} rows - limiting scan to first ${MAX_ROWS} rows for performance`)
+      range.e.r = MAX_ROWS - 1
+    }
+    if (range.e.c >= MAX_COLS) {
+      console.log(`Worksheet has ${range.e.c + 1} columns - limiting scan to first ${MAX_COLS} columns for performance`)
+      range.e.c = MAX_COLS - 1
+    }
     
     console.log('Worksheet Range:', worksheet['!ref'], 'Expanded to:', XLSX.utils.encode_range(range))
     console.log('Rows:', range.e.r + 1, 'Cols:', range.e.c + 1)
@@ -276,7 +293,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     'CUSIP': ['cusip', 'cusip code'],
     'Bloomberg Ticker': ['bloomberg ticker', 'bloomberg', 'bbg ticker'],
     'Reuters/Refinitiv Ticker': ['reuters ticker', 'refinitiv ticker', 'reuters'],
-    'Counterparty': ['counterparty', 'issuer', 'borrower', 'party', 'entity', 'counter party', 'nhimbe', 'client', 'customer'],
+    'Counterparty': ['counterparty', 'issuer', 'borrower', 'party', 'entity', 'counter party', 'client', 'customer'],
     'Issuer': ['issuer', 'borrower', 'counterparty', 'issuing entity', 'issuing party'],
     'Parent Company': ['parent company', 'parent', 'holding company'],
     'Issuer Country': ['issuer country', 'country of issue', 'issuing country'],
@@ -490,7 +507,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     
     // Treasury Bill-specific fields
     'T-Bill Name': ['t-bill name', 'instrument name', 'name'],
-    'TBillName': ['t-bill name', 'instrument name', 'name', 'counterparty', 'issuer', 'borrower', 'party', 'entity', 'nhimbe', 'solgas', 'glytime', 'richaw', 'centragrid', 'gzh', 'zimcampus'],
+    'TBillName': ['t-bill name', 'instrument name', 'name', 'counterparty', 'issuer', 'borrower', 'party', 'entity'],
     'T-Bill ID': ['t-bill id', 'instrument id', 'security id'],
     'Government': ['government', 'issuer'],
     'Discount Yield': ['discount yield', 'discount rate'],
@@ -630,6 +647,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     let score = 0.3 // Base score (lowered from 0.5)
     
     const dateFields = ['Date', 'Issue Date', 'Maturity Date', 'Valuation Date', 'Trade Date', 'Settlement Date', 'MaturityDate']
+    const principalFields = ['Principal', 'Face Value', 'FaceValue', 'Nominal Value', 'Notional Amount', 'Redemption Value', 'RedemptionValue']
     
     // Exact match gets higher score
     if (label.toLowerCase() === matchedVariation.toLowerCase()) {
@@ -649,6 +667,24 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     // Bonus for values that look like actual data (not headings)
     if (!isTableHeading(value)) {
       score += 0.1
+    }
+    
+    // CRITICAL: For principal/face value fields, prefer larger numeric values
+    // Small decimals like "2.00" are likely not the actual principal amount
+    if (principalFields.includes(fieldName)) {
+      const numValue = parseFloat(String(value).replace(/[%,\s$€£¥₹]/g, ''))
+      if (!isNaN(numValue)) {
+        // If the value is very small (< 1000), reduce confidence significantly
+        // Real principal amounts are typically in thousands or millions
+        if (numValue < 1000) {
+          score -= 0.3
+          console.log(`Reduced confidence for "${fieldName}": "${value}" (value too small for principal: ${numValue})`)
+        }
+        // If the value is in reasonable range for principal (> 1000), increase confidence
+        else if (numValue >= 1000) {
+          score += 0.1
+        }
+      }
     }
     
     return Math.max(0.1, Math.min(score, 1.0))
@@ -673,7 +709,11 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       'ROW', 'COLUMN', 'CELL', 'SHEET', 'WORKSHEET',
       'YES', 'NO', 'TRUE', 'FALSE', 'N/A', 'NA', 'NULL',
       'CATEGORY', 'TYPE', 'CLASS', 'GROUP', 'SECTION',
-      'INPUT', 'OUTPUT', 'RESULT', 'CALCULATION', 'FORMULA'
+      'INPUT', 'OUTPUT', 'RESULT', 'CALCULATION', 'FORMULA',
+      'PVIF', 'PV', 'COUPON DATES', 'ACCRUED INTERESTPAID', 'ACCRUED INTEREST BALANCE',
+      'REDUCING BALANCE', 'CAPITALISED BALANCE-EQUAL INSTALMENTS', 'INTEREST PAYMENT DATES',
+      'BUSINESS DESCRIPTION', 'TERM', 'DISCOUNT RATE', 'SPREAD', 'PREMIUM',
+      'BLOOMBERG', 'COUNTRY RISK PREMIUM', 'SOLAR COMPANIES CREDIT SPREAD'
     ]
     
     // Check if value matches any table heading
@@ -692,7 +732,23 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       return true
     }
     
+    // Check for mixed case with hyphens and spaces (common in table headers)
+    if (strValue.includes('-') && strValue.includes(' ')) {
+      return true
+    }
+    
     return false
+  }
+
+  // Helper function to check if value looks like a date
+  function looksLikeDate(value) {
+    const strValue = String(value).trim()
+    return !isNaN(Date.parse(strValue)) || 
+           /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(strValue) || 
+           /^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/.test(strValue) ||
+           /^[A-Za-z]{3}[-/]\d{1,2}[-/]\d{2,4}$/.test(strValue) ||
+           /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/.test(strValue) ||
+           /^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/.test(strValue)
   }
 
   // Helper function to check if value is valid for field type
@@ -707,6 +763,12 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     const textFields = ['Instrument', 'Instrument Name', 'Bond Name', 'Issuer', 'Counterparty', 'Currency']
     
     if (numericFields.includes(fieldName)) {
+      // CRITICAL: Reject dates for numeric fields (e.g., "31-Dec-24" should not be detected as Price)
+      if (looksLikeDate(value)) {
+        console.log(`Rejected "${fieldName}": "${value}" (value looks like a date, not numeric)`)
+        return false
+      }
+      
       // Made more lenient - just check if it can be parsed as a number
       const strValue = String(value).trim()
       const currencySymbolRegex = /[%,\s$€£¥₹]/g
@@ -722,7 +784,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     
     if (dateFields.includes(fieldName)) {
       // Check if value looks like a date
-      return !isNaN(Date.parse(value)) || /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(value) || /^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/.test(value)
+      return looksLikeDate(value)
     }
     
     if (textFields.includes(fieldName)) {
@@ -773,12 +835,13 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     'Exchange Rate': ['exchange rate', 'exch rate', 'fx rate', 'forex rate', 'conversion rate', 'exch', 'spot rate', 'exchangerate', 'fxrate'],
     'Amount': ['amount', 'value', 'investment amount', 'purchase amount', 'total amount'],
     'BondName': ['counterparty', 'instrument name', 'bond name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party'],
-    'TBillName': ['counterparty', 'instrument name', 't-bill name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party', 'nhimbe', 'solgas', 'glytime', 'richaw', 'centragrid', 'gzh', 'zimcampus'],
-    'Instrument': ['counterparty', 'instrument name', 'bond name', 't-bill name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party', 'nhimbe', 'solgas', 'glytime', 'richaw', 'centragrid', 'gzh', 'zimcampus'],
+    'TBillName': ['counterparty', 'instrument name', 't-bill name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party'],
+    'Instrument': ['counterparty', 'instrument name', 'bond name', 't-bill name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party'],
     'Frequency': ['frequency', 'interest pmt frequency', 'interest payment frequency', 'interest pmt fequency', 'coupon frequency', 'payment frequency', 'pmt frequency', 'annually', 'semi-annually', 'quarterly', 'monthly', 'fequency'],
     'Accrued Interest': ['accrued interest', 'interest accrued', 'accrued coupon', 'interest accrued to', 'accruedinterest'],
     'AccruedInterest': ['interest accrued', 'accrued interest', 'accrued coupon', 'interest accrued to', 'interest accrued to 30 june 2024'],
-    'Redemption Value': ['redemption value', 'maturity value', 'redemption amount', 'principal', 'face value'],
+    'Redemption Value': ['redemption value', 'maturity value', 'redemption amount', 'principal', 'face value', 'par value', 'maturity amount', 'redemption', 'principal amount'],
+    'RedemptionValue': ['redemption value', 'maturity value', 'redemption amount', 'principal', 'face value', 'par value', 'maturity amount', 'redemption', 'principal amount', 'facevalue', 'principal'],
     'Date': ['date', 'valuation date', 'pricing date', 'as of date', 'value date', 'valuationdate']
   }
 
@@ -816,6 +879,9 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   // First pass: Scan for label-value pairs within table boundaries
   // This handles the most common pattern: label in one cell, value in adjacent cell
   console.log('=== Pass 1: Horizontal label-value pairs (within table boundaries) ===')
+  console.log('Table boundaries:', tableBoundaries)
+  console.log('Data dimensions:', data.length, 'rows x', data[0]?.length || 0, 'cols')
+  
   for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
     for (let C = tableBoundaries.startCol; C < tableBoundaries.endCol; C++) {
       const label = String(data[R][C]).toLowerCase().trim()
@@ -838,14 +904,20 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
           
           // Only assign if not already detected (first match wins)
           if (!detectedFields[requiredField]) {
+            // CRITICAL: Reject dates for numeric fields before assignment
+            const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
+            if (numericFields.includes(requiredField) && looksLikeDate(value)) {
+              console.log(`Skipped "${requiredField}": "${value}" at ${rowColToCellRef(R, C + 1)} (value is a date, not numeric)`)
+              continue
+            }
+            
             const location = rowColToCellRef(R, C + 1)
             const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
             const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
             
-            // Reject low-confidence matches (removed threshold to catch all fields)
-            if (confidence < 0.0) {
-              console.log(`Rejected "${requiredField}": "${value}" at ${location} (confidence: ${confidence.toFixed(2)} too low)`)
-              continue
+            // Accept all matches regardless of confidence - log low confidence for debugging
+            if (confidence < 0.3) {
+              console.log(`Low confidence "${requiredField}": "${value}" at ${location} (confidence: ${confidence.toFixed(2)}) - ACCEPTING ANYWAY`)
             }
             
             detectedFields[requiredField] = {
@@ -891,14 +963,20 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
           
           // Only assign if not already detected
           if (!detectedFields[requiredField]) {
+            // CRITICAL: Reject dates for numeric fields before assignment
+            const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
+            if (numericFields.includes(requiredField) && looksLikeDate(value)) {
+              console.log(`Skipped "${requiredField}": "${value}" at ${rowColToCellRef(R + 1, C)} (vertical, value is a date, not numeric)`)
+              continue
+            }
+            
             const location = rowColToCellRef(R + 1, C)
             const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
             const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
             
-            // Reject low-confidence matches (removed threshold to catch all fields)
-            if (confidence < 0.0) {
-              console.log(`Rejected "${requiredField}": "${value}" at ${location} (vertical, confidence: ${confidence.toFixed(2)} too low)`)
-              continue
+            // Accept all matches regardless of confidence - log low confidence for debugging
+            if (confidence < 0.3) {
+              console.log(`Low confidence "${requiredField}": "${value}" at ${location} (vertical, confidence: ${confidence.toFixed(2)}) - ACCEPTING ANYWAY`)
             }
             
             detectedFields[requiredField] = {
@@ -955,14 +1033,20 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
             if (usedLabelValuePairs.has(pairKey)) continue
             
             if (!detectedFields[requiredField]) {
+              // CRITICAL: Reject dates for numeric fields before assignment
+              const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
+              if (numericFields.includes(requiredField) && looksLikeDate(value)) {
+                console.log(`Skipped "${requiredField}": "${value}" at ${rowColToCellRef(R + 1, C)} (table, value is a date, not numeric)`)
+                continue
+              }
+              
               const location = rowColToCellRef(R + 1, C)
               const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
               const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
               
-              // Reject low-confidence matches (removed threshold to catch all fields)
-              if (confidence < 0.0) {
-                console.log(`Rejected "${requiredField}": "${value}" at ${location} (table, confidence: ${confidence.toFixed(2)} too low)`)
-                continue
+              // Accept all matches regardless of confidence - log low confidence for debugging
+              if (confidence < 0.3) {
+                console.log(`Low confidence "${requiredField}": "${value}" at ${location} (table, confidence: ${confidence.toFixed(2)}) - ACCEPTING ANYWAY`)
               }
               
               detectedFields[requiredField] = {
@@ -986,13 +1070,112 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
 
   // Fourth pass: Scan for currency codes and exchange rates within table boundaries
   console.log('=== Pass 4: Currency codes and exchange rates (within table boundaries) ===')
+  
+  // Valid ISO 4217 currency codes - only these should be detected as currencies
+  const validCurrencyCodes = new Set([
+    'USD', 'EUR', 'GBP', 'JPY', 'CNY', 'INR', 'AUD', 'CAD', 'CHF', 'MXN',
+    'BRL', 'KRW', 'RUB', 'ZAR', 'TRY', 'SGD', 'HKD', 'NOK', 'SEK', 'DKK',
+    'PLN', 'THB', 'IDR', 'MYR', 'PHP', 'VND', 'CZK', 'HUF', 'RON', 'ILS',
+    'CLP', 'COP', 'PEN', 'ARS', 'UYU', 'BOB', 'PYG', 'CRC', 'GTQ', 'HNL',
+    'NIO', 'PAB', 'DOP', 'JMD', 'TTD', 'BBD', 'XCD', 'BZD', 'GYD', 'SRD',
+    'AWG', 'ANG', 'CUP', 'HTG', 'XAF', 'XOF', 'XPF', 'CDF', 'BIF', 'DJF',
+    'ERN', 'ETB', 'KES', 'MGF', 'MWK', 'MZN', 'RWF', 'SOS', 'TZS', 'UGX',
+    'ZMW', 'BWP', 'SZL', 'LSL', 'NAD', 'AOA', 'BGN', 'HRK', 'CYP', 'CZK',
+    'EEK', 'HUF', 'LTL', 'LVL', 'MKD', 'RON', 'RSD', 'SKK', 'SIT', 'UAH',
+    'ALL', 'BYN', 'MDL', 'RUB', 'AMD', 'AZN', 'GEL', 'KZT', 'KGS', 'TJS',
+    'TMT', 'UZS', 'AFN', 'IRR', 'IQD', 'JOD', 'KWD', 'LBP', 'OMR', 'QAR',
+    'SAR', 'SYP', 'AED', 'YER', 'BHD', 'DZD', 'EGP', 'LYD', 'MAD', 'MRU',
+    'SDG', 'TND', 'MVR', 'NPR', 'PKR', 'LKR', 'BDT', 'BTN', 'BTN', 'INR',
+    'MMK', 'BND', 'KHR', 'IDR', 'LAK', 'MYR', 'PHP', 'SGD', 'THB', 'VND',
+    'CNY', 'HKD', 'MOP', 'TWD', 'KRW', 'JPY', 'MNT', 'KPW', 'AUD', 'FJD',
+    'PGK', 'SBD', 'VUV', 'WST', 'NZD', 'TOP', 'NOK', 'SEK', 'DKK', 'ISK',
+    'CAD', 'USD', 'MXN', 'GTQ', 'BZD', 'SVC', 'NIO', 'HNL', 'CRC', 'PAB',
+    'COP', 'VEF', 'BOB', 'PYG', 'UYU', 'ARS', 'CLP', 'PEN', 'ZWL', 'ZWG'
+  ])
+  
+  // Add custom currency to valid codes if provided
+  if (customCurrency && customCurrency.length === 3) {
+    validCurrencyCodes.add(customCurrency.toUpperCase())
+    console.log(`Added custom currency "${customCurrency.toUpperCase()}" to valid currency codes`)
+  }
+  
+  // Common non-currency 3-letter words to exclude
+  const nonCurrencyWords = new Set([
+    'AND', 'BUT', 'FOR', 'NOR', 'NOT', 'NOW', 'OUT', 'PUT', 'SET', 'SHE',
+    'THE', 'TWO', 'USE', 'VIA', 'YES', 'YOU', 'ALL', 'ANY', 'ARE', 'BIG',
+    'CAN', 'DAY', 'END', 'EYE', 'FEW', 'GET', 'HAS', 'HER', 'HIS', 'HOW',
+    'ITS', 'LET', 'MAN', 'MAY', 'NEW', 'OFF', 'OLD', 'ONE', 'OUR', 'OWN',
+    'RUN', 'SAW', 'SAY', 'SEE', 'SHE', 'SIR', 'SIT', 'SIX', 'SON', 'SUN',
+    'TEN', 'THE', 'TOO', 'TRY', 'USE', 'WAR', 'WAY', 'WHO', 'WHY', 'WIN',
+    'WON', 'YES', 'YET'
+  ])
+  
   for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
     for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol; C++) {
       const cellValue = data[R][C]
       
-      // Check for currency codes (3-letter uppercase)
+      // CRITICAL: Only detect valid ISO 4217 currency codes
       if (cellValue && /^[A-Z]{3}$/.test(String(cellValue))) {
-        detectedCurrencies.add(String(cellValue))
+        const currencyCode = String(cellValue).toUpperCase()
+        
+        // Skip if it's a common non-currency word
+        if (nonCurrencyWords.has(currencyCode)) {
+          console.log(`Skipped "${currencyCode}" - common non-currency word`)
+          continue
+        }
+        
+        // Only add if it's a valid ISO currency code
+        if (validCurrencyCodes.has(currencyCode)) {
+          // Additional context check: verify this is actually being used as a currency
+          // Check if nearby cells contain currency-related labels or numeric values
+          let isCurrencyContext = false
+          
+          // Check adjacent cells for currency-related labels
+          const adjacentLabels = ['currency', 'currencies', 'money', 'cash', 'amount', 'value', 'price', 'cost', 'fee', 'charge']
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue
+              const checkR = R + dr
+              const checkC = C + dc
+              if (checkR >= 0 && checkR < data.length && checkC >= 0 && checkC < data[checkR].length) {
+                const adjacentValue = String(data[checkR][checkC]).toLowerCase()
+                if (adjacentLabels.some(label => adjacentValue.includes(label))) {
+                  isCurrencyContext = true
+                  break
+                }
+              }
+            }
+            if (isCurrencyContext) break
+          }
+          
+          // Also accept if it's near a numeric value (currency amounts)
+          if (!isCurrencyContext) {
+            for (let dr = -1; dr <= 1; dr++) {
+              for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue
+                const checkR = R + dr
+                const checkC = C + dc
+                if (checkR >= 0 && checkR < data.length && checkC >= 0 && checkC < data[checkR].length) {
+                  const adjacentValue = data[checkR][checkC]
+                  if (adjacentValue && !isNaN(parseFloat(adjacentValue))) {
+                    isCurrencyContext = true
+                    break
+                  }
+                }
+              }
+              if (isCurrencyContext) break
+            }
+          }
+          
+          if (isCurrencyContext) {
+            detectedCurrencies.add(currencyCode)
+            console.log(`Detected currency "${currencyCode}" at ${rowColToCellRef(R, C)} (valid ISO code with context)`)
+          } else {
+            console.log(`Skipped "${currencyCode}" at ${rowColToCellRef(R, C)} - valid ISO code but no currency context`)
+          }
+        } else {
+          console.log(`Skipped "${currencyCode}" at ${rowColToCellRef(R, C)} - not a valid ISO currency code`)
+        }
       }
       
       // Check if this looks like an exchange rate (decimal number)
@@ -1065,6 +1248,13 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
               if (nearbyValue && String(nearbyValue).trim() !== '') {
                 // Validate the value for this field type
                 if (isValidValueForField(requiredField, nearbyValue)) {
+                  // CRITICAL: Reject dates for numeric fields before assignment
+                  const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
+                  if (numericFields.includes(requiredField) && looksLikeDate(nearbyValue)) {
+                    console.log(`Skipped "${requiredField}": "${nearbyValue}" at ${rowColToCellRef(searchR, searchC)} (scattered, value is a date, not numeric)`)
+                    continue
+                  }
+                  
                   // CRITICAL: Check if this value is already assigned to another field
                   const valueStr = String(nearbyValue).trim()
                   let isDuplicate = false
@@ -1089,6 +1279,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
                   const confidence = calculateConfidence(cellLower, cellLower, nearbyValue, requiredField)
                   
                   // Only assign if confidence is high enough (removed threshold to catch all fields)
+                  // Accept all matches regardless of confidence
                   if (confidence >= 0.0) {
                     detectedFields[requiredField] = {
                       value: nearbyValue,
@@ -1118,9 +1309,112 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   }
   console.log('Pass 5 detected fields:', Object.keys(detectedFields))
 
+  // Pass 6: Full worksheet scan for remaining fields (outside table boundaries)
+  // This is a catch-all for fields that might be outside detected table boundaries
+  console.log('=== Pass 6: Full worksheet scan for remaining fields ===')
+  const stillMissingFields = filteredRequiredColumns.filter(col => !detectedFields[col])
+  console.log('Fields still missing after Pass 5:', stillMissingFields)
+  
+  if (stillMissingFields.length > 0) {
+    for (let R = 0; R < data.length; R++) {
+      for (let C = 0; C < (data[R]?.length || 0); C++) {
+        const label = String(data[R][C]).toLowerCase().trim()
+        
+        // Check each missing field
+        for (const requiredField of stillMissingFields) {
+          if (detectedFields[requiredField]) continue // Already detected in this pass
+          
+          const variations = fieldVariations[requiredField] || [requiredField.toLowerCase()]
+          
+          // Check if label matches any variation
+          if (labelMatchesField(label, variations)) {
+            // Search in all 8 directions for a value
+            const directions = [
+              { dr: 0, dc: 1 },   // Right
+              { dr: 1, dc: 0 },   // Down
+              { dr: 0, dc: -1 },  // Left
+              { dr: -1, dc: 0 },  // Up
+              { dr: 1, dc: 1 },   // Down-right
+              { dr: 1, dc: -1 },  // Down-left
+              { dr: -1, dc: 1 },  // Up-right
+              { dr: -1, dc: -1 }  // Up-left
+            ]
+            
+            for (const { dr, dc } of directions) {
+              const searchR = R + dr
+              const searchC = C + dc
+              
+              if (searchR >= 0 && searchR < data.length && searchC >= 0 && searchC < data[searchR].length) {
+                const nearbyValue = data[searchR][searchC]
+                if (nearbyValue && String(nearbyValue).trim() !== '') {
+                  // CRITICAL: Reject dates for numeric fields before assignment
+                  const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
+                  if (numericFields.includes(requiredField) && looksLikeDate(nearbyValue)) {
+                    console.log(`Skipped "${requiredField}": "${nearbyValue}" at ${rowColToCellRef(searchR, searchC)} (pass6, value is a date, not numeric)`)
+                    continue
+                  }
+                  
+                  // Check if this value is already assigned to another field
+                  const valueStr = String(nearbyValue).trim()
+                  let isDuplicate = false
+                  for (const [existingField, existingData] of Object.entries(detectedFields)) {
+                    if (String(existingData.value).trim() === valueStr) {
+                      isDuplicate = true
+                      break
+                    }
+                  }
+                  
+                  if (!isDuplicate) {
+                    const location = rowColToCellRef(searchR, searchC)
+                    detectedFields[requiredField] = {
+                      value: nearbyValue,
+                      location: location,
+                      confidence: 0.5 // Moderate confidence for full worksheet scan
+                    }
+                    console.log(`Detected "${requiredField}" in full worksheet scan: "${nearbyValue}" at ${location}`)
+                    
+                    // Detect currency codes
+                    if (requiredField === 'Currency' || /^[A-Z]{3}$/.test(String(nearbyValue).toUpperCase())) {
+                      detectedCurrencies.add(String(nearbyValue).toUpperCase())
+                    }
+                    break // Found a value, stop searching directions
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  console.log('Pass 6 detected fields:', Object.keys(detectedFields))
+
   console.log('=== Final Detection Results ===')
   console.log('Total detected fields:', Object.keys(detectedFields).length)
   console.log('Missing fields:', requiredColumns.filter(col => !detectedFields[col]))
+  
+  // CRITICAL: Log all detected values with their sources for debugging
+  console.log('=== ALL DETECTED VALUES WITH SOURCES ===')
+  for (const [field, data] of Object.entries(detectedFields)) {
+    console.log(`Field: "${field}" | Value: "${data.value}" | Location: "${data.location}" | Confidence: ${data.confidence.toFixed(2)}`)
+  }
+
+  // CRITICAL: Use synonym mapping to consolidate detected fields
+  // If a synonym field was detected but the primary field is required, map it
+  console.log('=== Applying Synonym Mapping ===')
+  for (const [primaryField, synonyms] of Object.entries(synonymMapping)) {
+    // Only process if the primary field is required
+    if (!requiredColumns.includes(primaryField)) continue
+    
+    // Check if any synonym was detected instead of the primary
+    for (const synonym of synonyms) {
+      if (detectedFields[synonym] && !detectedFields[primaryField]) {
+        detectedFields[primaryField] = detectedFields[synonym]
+        console.log(`Mapped synonym "${synonym}" to primary field "${primaryField}"`)
+        delete detectedFields[synonym]
+      }
+    }
+  }
 
   // CRITICAL: Instrument name handling
   // For single-instrument detection (no tableData provided), instrument name MUST come from worksheet name
@@ -1130,19 +1424,13 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
                                 requiredColumns.includes('BondName') ? 'BondName' : 'TBillName'
     
     if (tableData) {
-      // Multi-table mode: use detected Instrument field if available, otherwise use a placeholder
+      // Multi-table mode: use detected Instrument field if available, otherwise use Counterparty
       if (detectedFields['Instrument']) {
         detectedFields[instrumentNameField] = detectedFields['Instrument']
       } else if (detectedFields['Counterparty']) {
         detectedFields[instrumentNameField] = detectedFields['Counterparty']
-      } else {
-        // Fallback to a generic name based on table position
-        detectedFields[instrumentNameField] = {
-          value: 'Instrument',
-          location: 'N/A',
-          confidence: 0.5
-        }
       }
+      // If neither is detected, leave the field undetected - do NOT use fallback/mock data
     } else {
       // Single-table mode: Force instrument name to be the worksheet name
       detectedFields[instrumentNameField] = {
