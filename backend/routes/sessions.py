@@ -9,7 +9,7 @@ def create_sessions_table():
     """Create ui_sessions table if it doesn't exist."""
     conn = get_db()
     if not conn:
-        print("❌ DB connection failed – cannot create ui_sessions")
+        print("DB connection failed – cannot create ui_sessions")
         return
     try:
         cursor = conn.cursor()
@@ -32,9 +32,9 @@ def create_sessions_table():
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ ui_sessions table verified/created")
+        print("ui_sessions table verified/created")
     except Exception as e:
-        print(f"❌ Table creation error: {e}")
+        print(f"Table creation error: {e}")
         conn.close()
 
 # Create table immediately
@@ -43,7 +43,6 @@ create_sessions_table()
 
 def sessions_routes(app):
 
-    # ===== 🔥 FIXED: save_session with version_count increment =====
     @app.route('/api/sessions/save', methods=['POST', 'OPTIONS'])
     def save_session():
         if request.method == 'OPTIONS':
@@ -79,7 +78,6 @@ def sessions_routes(app):
                     instrument_count += 1
             instrument_count = min(instrument_count, 3)
         elif legacy_payload:
-            # Fallback to legacy payload structure
             instrument_count = 0
             for key in ['money-market', 'bonds', 'tbills']:
                 if legacy_payload.get(key):
@@ -119,8 +117,6 @@ def sessions_routes(app):
             ))
             conn.commit()
             
-            # 🔥 REMOVED: Version creation logic - only /api/version endpoint should create versions
-            # This endpoint only saves session data, never creates versions
             final_version_count = version_count
             
             cursor.close()
@@ -128,7 +124,7 @@ def sessions_routes(app):
             
             return jsonify({'success': True, 'session_id': session_id, 'version_count': final_version_count})
         except Exception as e:
-            print(f"❌ Save session error: {e}")
+            print(f"Save session error: {e}")
             import traceback
             traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500
@@ -158,7 +154,6 @@ def sessions_routes(app):
                 conn.close()
                 return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
             
-            # 🔥 Ensure version_count is accurate from history table (before closing connection)
             try:
                 hist_cursor = conn.cursor()
                 hist_cursor.execute('SELECT COUNT(*) as cnt FROM version_history WHERE session_id = %s', (session_id,))
@@ -172,7 +167,7 @@ def sessions_routes(app):
                     upd_cursor.close()
                 hist_cursor.close()
             except Exception as e:
-                print(f"⚠️ Failed to check version history: {e}")
+                print(f"Failed to check version history: {e}")
             
             cursor.close()
             conn.close()
@@ -214,7 +209,7 @@ def sessions_routes(app):
                 }
             })
         except Exception as e:
-            print(f"❌ Get session error: {e}")
+            print(f"Get session error: {e}")
             import traceback
             traceback.print_exc()
             return jsonify({'success': False, 'message': 'Query failed'}), 500
@@ -262,7 +257,6 @@ def sessions_routes(app):
                             instrument_count += 1
                     instrument_count = min(instrument_count, 3)
                 
-                # Use the larger version count
                 version_count = max(row.get('version_count', 0), row.get('version_count_from_history', 0))
                 
                 sessions_list.append({
@@ -277,7 +271,7 @@ def sessions_routes(app):
                 })
             return jsonify({'success': True, 'data': sessions_list})
         except Exception as e:
-            print(f"❌ List sessions error: {e}")
+            print(f"List sessions error: {e}")
             import traceback
             traceback.print_exc()
             return jsonify({'success': False, 'message': 'Query failed', 'data': []}), 200
@@ -300,13 +294,10 @@ def sessions_routes(app):
             conn.commit()
             cursor.close()
             conn.close()
-            print(f'✅ Session {session_id} and all related records deleted')
+            print(f'Session {session_id} and all related records deleted')
             return jsonify({'success': True})
         except Exception as e:
-            print(f"❌ Delete session error: {e}")
+            print(f"Delete session error: {e}")
             conn.close()
             return jsonify({'success': False, 'message': 'Delete failed'}), 500
 
-    # ===== 🔥 NEW: Endpoint to increment version count =====
-    # 🔥 REMOVED: increment-version endpoint - version_count should only be updated by create_version
-    # This endpoint was dangerous as it could increment count without creating a version

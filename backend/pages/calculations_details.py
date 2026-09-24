@@ -10,12 +10,10 @@ def safe_float(value: Any, default: float = None) -> float:
     try:
         if value is None or value == "":
             return None
-        # Handle comma-separated numbers like "914,255.27"
         if isinstance(value, str):
             value = value.replace(',', '')
         return float(value)
     except (TypeError, ValueError) as e:
-        print(f"TRACE safe_float: Failed to convert '{value}' to float: {e}")
         return None
 
 def parse_percentage(value: Any) -> float:
@@ -27,14 +25,11 @@ def parse_percentage(value: Any) -> float:
     if value is None or value == "":
         return None
     try:
-        # Handle string with % symbol
         if isinstance(value, str):
             value = value.strip()
             if value.endswith('%'):
                 value = value.rstrip('%')
         val = float(value)
-        # If value > 1, assume it's a percentage (e.g., 5.0 -> 0.05)
-        # If value <= 1, assume it's already decimal (e.g., 0.05 -> 0.05)
         if val > 1:
             return val / 100.0
         return val
@@ -52,27 +47,24 @@ def parse_date(value: Any) -> date:
     if isinstance(value, str):
         value = value.strip()
         date_formats = [
-            '%Y-%m-%d',  # ISO format
-            '%m/%d/%Y',  # MM/DD/YYYY
-            '%m/%d/%y',  # MM/DD/YY (2-digit year)
-            '%d/%m/%Y',  # DD/MM/YYYY
-            '%d/%m/%y',  # DD/MM/YY (2-digit year)
+            '%Y-%m-%d',
+            '%m/%d/%Y',
+            '%m/%d/%y',
+            '%d/%m/%Y',
+            '%d/%m/%y',
         ]
         for fmt in date_formats:
             try:
                 parsed_date = datetime.strptime(value, fmt).date()
-                # Handle 2-digit years - assume 20xx for years >= 50, 19xx for years < 50
                 if '%y' in fmt:
                     year = parsed_date.year
                     if year >= 50:
                         parsed_date = parsed_date.replace(year=1900 + year)
                     else:
                         parsed_date = parsed_date.replace(year=2000 + year)
-                print(f"TRACE parse_date: Successfully parsed '{value}' using format '{fmt}' -> {parsed_date}")
                 return parsed_date
             except ValueError:
                 continue
-        print(f"TRACE parse_date: Failed to parse '{value}' with any format")
     return None
 
 def round_money(value: Any) -> float:
@@ -99,22 +91,13 @@ def days_between(date1: date, date2: date) -> int:
     return abs((date2 - date1).days)
 
 def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Normalize row with comprehensive semantic mapping and traceability.
-    Maps source Excel columns to standardized internal fields.
-    """
     if not isinstance(row, dict):
         return {}
 
-    print(f"TRACE normalize_row: SOURCE COLUMNS = {list(row.keys())}")
-    print(f"TRACE normalize_row: SOURCE VALUES = {row}")
-
     normalized = {}
-    source_values = {}  # Preserve original source values for traceability
+    source_values = {}
 
-    # Define specific instrument field mappings (highest priority)
     specific_aliases = {
-        # Money Market Instruments
         'principal': ['principal', 'face value', 'par value', 'nominal', 'amount', 'notional', 'investment amount', 'capital', 
                       'deposit amount', 'initial investment', 'starting balance', 'facevalue', 'parvalue', 'investmentamount',
                       'depositamount', 'initialinvestment', 'startingbalance',
@@ -148,7 +131,6 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
                            'parentcompany', 'short name', 'shortname', 'instrument', 'instrument', 'instrument'],
         'classification': ['classification', 'category', 'type', 'asset class', 'assetclass'],
         
-        # T-Bills
         'face_value': ['face value', 'par value', 'redemption value', 'maturity value', 'amount', 'principal', 'nominal',
                       'facevalue', 'parvalue', 'redemptionvalue', 'maturityvalue', 'amount', 'facevalue', 'amount', 'facevalue'],
         'discount_rate': ['discount rate', 'bank discount', 'discount yield', 'rate', 't-bill rate', 'auction rate', 'discount',
@@ -158,7 +140,6 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
         'auction_date': ['auction date', 'issue date', 'start date', 'settlement date', 'trade date',
                         'auctiondate', 'issuedate', 'startdate', 'settlementdate', 'tradedate'],
         
-        # Bonds
         'coupon_rate': ['coupon rate', 'coupon', 'interest rate', 'nominal rate', 'stated rate', 'annual coupon', 'fixed rate',
                        'couponrate', 'interestrate', 'nominalrate', 'statedrate', 'annualcoupon', 'fixedrate', 'rate', 'interestrate'],
         'coupon_frequency': ['coupon frequency', 'frequency', 'payment frequency', 'period', 'semi-annual', 'quarterly', 
@@ -182,7 +163,6 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
         'inflation_rate': ['inflation', 'cpi', 'inflation rate', 'real yield proxy',
                          'inflationrate', 'realyieldproxy'],
         
-        # Common fields
         'instrument': ['instrument', 'instrument type', 'asset type', 'security type', 'instrumenttype', 'assettype', 'securitytype'],
         'currency': ['currency', 'ccy', 'iso code', 'currency code'],
         'country': ['country', 'jurisdiction', 'domicile', 'issuing country'],
@@ -192,76 +172,53 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
         'risk': ['risk', 'risk level', 'risk category', 'riskgrade', 'risklevel', 'riskcategory']
     }
 
-    # Apply specific mappings first
     for target_field, source_aliases in specific_aliases.items():
         for alias in source_aliases:
-            # Case-insensitive matching
             for source_key in row.keys():
                 if source_key.lower() == alias.lower() or alias.lower() in source_key.lower():
                     normalized[target_field] = row[source_key]
                     source_values[target_field] = {'source_column': source_key, 'raw_value': row[source_key]}
-                    print(f"TRACE normalize_row: MAPPED {target_field} <- {source_key} = {row[source_key]}")
                     break
             if target_field in normalized:
                 break
 
-    # Preserve any unmapped columns
     for key, value in row.items():
         if key not in [v for aliases in specific_aliases.values() for v in aliases]:
             normalized[key] = value
 
-    print(f"TRACE normalize_row: NORMALIZED = {normalized}")
     return normalized
-
-# ===== INSTRUMENT-SPECIFIC CALCULATION FUNCTIONS =====
 
 def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
     """
     Calculate T-Bill metrics with strict input validation.
     NO FALLBACK DEFAULTS - returns error if required fields missing.
     """
-    # Traceability logging
-    print(f"TRACE calculate_treasury_bill: Input keys = {list(item.keys())}")
     
     face = safe_float(item.get('face_value'))
     
-    # Get purchase price or current price
     purchase_price = safe_float(item.get('purchase_price'))
     current_price = safe_float(item.get('current_price'))
     
-    # If no price provided, calculate from face value and discount rate
     if purchase_price is None and current_price is None:
         face_value = safe_float(item.get('face_value'))
         discount_rate = safe_float(item.get('discount_rate'))
         term_days = safe_float(item.get('term_days'))
         
         if face_value and discount_rate and term_days:
-            # Calculate price from discount rate: Price = FaceValue * (1 - (DiscountRate * Days/360))
             current_price = face_value * (1 - (discount_rate * term_days / 360))
-            print(f"TRACE calculate_treasury_bill: Calculated current_price from discount rate: {current_price}")
         elif face_value:
-            # Default to face value if no discount rate
             current_price = face_value
-            print(f"TRACE calculate_treasury_bill: Using face value as current_price: {current_price}")
     
-    # Use current_price if purchase_price not available
     price = purchase_price if purchase_price is not None else current_price
     days = safe_float(item.get('term_days'))
     discount_rate = parse_percentage(item.get('discount_rate'))
 
-    # If no days provided, use a reasonable default for T-Bills (90 days is common)
     if days is None:
-        days = 90  # Default 90-day term for T-Bills
-        print(f"TRACE calculate_treasury_bill: Using default days = {days}")
+        days = 90
 
-    print(f"TRACE calculate_treasury_bill: face={face}, price={price}, days={days}, discount_rate={discount_rate}")
-
-    # Calculate price from discount rate if provided
     if discount_rate is not None and face is not None and days is not None and days > 0:
         price = face * (1 - (discount_rate * days / 360))
-        print(f"TRACE calculate_treasury_bill: Calculated price from discount_rate = {price}")
 
-    # Validate required fields
     if face is None:
         return {'status': 'cannot_calculate', 'error': 'Missing required field: face_value', 'instrument_type': 'tbills'}
     if price is None:
@@ -269,23 +226,26 @@ def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
     if days is None:
         return {'status': 'cannot_calculate', 'error': 'Missing required field: term_days', 'instrument_type': 'tbills'}
 
-    # Calculate days from dates if provided
-    if 'issue_date' in item and 'maturity_date' in item:
+    if 'valuation_date' in item and 'maturity_date' in item:
+        valuation_date = parse_date(item.get('valuation_date'))
+        maturity_date = parse_date(item.get('maturity_date'))
+        if valuation_date is not None and maturity_date is not None:
+            calculated_days = days_between(valuation_date, maturity_date)
+            if calculated_days > 0:
+                days = calculated_days
+    elif 'issue_date' in item and 'maturity_date' in item:
         issue_date = parse_date(item.get('issue_date'))
         maturity_date = parse_date(item.get('maturity_date'))
         if issue_date is not None and maturity_date is not None:
             calculated_days = days_between(issue_date, maturity_date)
             if calculated_days > 0:
                 days = calculated_days
-                print(f"TRACE calculate_treasury_bill: Calculated days from dates = {days}")
 
-    # Validate calculated values
     if price <= 0:
         return {'status': 'cannot_calculate', 'error': 'purchase_price must be greater than 0', 'instrument_type': 'tbills'}
     if days <= 0:
         return {'status': 'cannot_calculate', 'error': 'term_days must be greater than 0', 'instrument_type': 'tbills'}
 
-    # Calculate yields with proper validation
     discount_yield = None
     money_market_yield = None
     bond_equivalent_yield = None
@@ -299,8 +259,6 @@ def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
         bond_equivalent_yield = ((face - price) / price) * (365 / days) * 100
         holding_period_yield = ((face - price) / price) * 100
         effective_annual_yield = ((face / price) ** (365 / days) - 1) * 100
-
-    print(f"TRACE calculate_treasury_bill: Results - discount_yield={discount_yield}, money_market_yield={money_market_yield}")
 
     return {
         'instrument_type': 'tbills',
@@ -321,12 +279,9 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
     NO FALLBACK DEFAULTS - returns error if required fields missing.
     Note: item is already normalized by calculate_data, no need to normalize again.
     """
-    # Traceability logging
-    print(f"TRACE calculate_bond: Input keys = {list(item.keys())}")
     
     face = safe_float(item.get('face_value'))
     coupon_rate = parse_percentage(item.get('coupon_rate'))
-    # Try both price and current_price for compatibility
     price = safe_float(item.get('price'))
     if price is None:
         price = safe_float(item.get('current_price'))
@@ -335,38 +290,34 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
     if frequency is None:
         frequency = safe_float(item.get('coupon_frequency'))
 
-    # If no years provided, use a reasonable default for Bonds (10 years is common)
     if years is None:
-        years = 10  # Default 10-year term for Bonds
-        print(f"TRACE calculate_bond: Using default years = {years}")
+        years = 10
 
-    # If no frequency provided, use a reasonable default (2 = semi-annual)
     if frequency is None:
-        frequency = 2  # Default semi-annual coupon frequency
-        print(f"TRACE calculate_bond: Using default frequency = {frequency}")
+        frequency = 2
 
-    print(f"TRACE calculate_bond: face={face}, coupon_rate={coupon_rate}, price={price}, years={years}, frequency={frequency}")
-
-    # Validate required fields
     if face is None:
         return {'status': 'cannot_calculate', 'error': 'Missing required field: face_value', 'instrument_type': 'bonds'}
     if coupon_rate is None:
         return {'status': 'cannot_calculate', 'error': 'Missing required field: coupon_rate', 'instrument_type': 'bonds'}
     if price is None:
         return {'status': 'cannot_calculate', 'error': 'Missing required field: price or current_price', 'instrument_type': 'bonds'}
-    # years and frequency now have defaults, so no validation needed
 
-    # Calculate years from dates if provided
-    if 'issue_date' in item and 'maturity_date' in item:
+    if 'valuation_date' in item and 'maturity_date' in item:
+        valuation_date = parse_date(item.get('valuation_date'))
+        maturity_date = parse_date(item.get('maturity_date'))
+        if valuation_date is not None and maturity_date is not None:
+            calculated_days = days_between(valuation_date, maturity_date)
+            if calculated_days > 0:
+                years = calculated_days / 365.0
+    elif 'issue_date' in item and 'maturity_date' in item:
         issue_date = parse_date(item.get('issue_date'))
         maturity_date = parse_date(item.get('maturity_date'))
         if issue_date is not None and maturity_date is not None:
             calculated_days = days_between(issue_date, maturity_date)
             if calculated_days > 0:
                 years = calculated_days / 365.0
-                print(f"TRACE calculate_bond: Calculated years from dates = {years}")
 
-    # Validate calculated values
     if years <= 0:
         return {'status': 'cannot_calculate', 'error': 'years_to_maturity must be greater than 0', 'instrument_type': 'bonds'}
     if price <= 0:
@@ -378,14 +329,11 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
     coupon_per_period = annual_coupon / frequency if frequency != 0 else None
     periods = int(years * frequency) if frequency != 0 else None
 
-    # Calculate YTM with proper validation
     ytm = None
     if periods is not None and periods > 0 and (face + price) != 0:
         ytm_approx = (coupon_per_period + (face - price) / periods) / ((face + price) / 2)
         ytm = ytm_approx * frequency * 100
-        print(f"TRACE calculate_bond: Calculated YTM = {ytm}")
 
-    # Calculate duration with proper validation
     duration = years
     modified_duration = None
     if ytm is not None and ytm > 0 and frequency != 0:
@@ -401,7 +349,6 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
                     duration = max(0, numerator / denominator) / frequency
             modified_duration = duration / (1 + ytm / 100 / frequency)
 
-    # Calculate other metrics with proper validation
     current_yield = None
     if price > 0:
         current_yield = (annual_coupon / price) * 100
@@ -409,8 +356,6 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
     accrued_interest = None
     if years > 0:
         accrued_interest = annual_coupon * (years % 1)
-
-    print(f"TRACE calculate_bond: Results - ytm={ytm}, duration={duration}, current_yield={current_yield}")
 
     return {
         'instrument_type': 'bonds',
@@ -434,49 +379,32 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
     NO FALLBACK DEFAULTS - returns error if required fields missing.
     Uses normalized fields from semantic mapping layer.
     """
-    # Traceability logging
-    print(f"TRACE calculate_money_market: Input keys = {list(item.keys())}")
     
-    # Try principal from various normalized fields
     principal = safe_float(item.get('principal'))
     if principal is None:
         principal = safe_float(item.get('amount'))
     if principal is None:
         principal = safe_float(item.get('face_value'))
     
-    # Try rate from various normalized fields
     rate = parse_percentage(item.get('interest_rate'))
     if rate is None:
         rate = parse_percentage(item.get('rate'))
     
-    # Try days from various normalized fields
     days = safe_float(item.get('term_days'))
     if days is None:
         days = safe_float(item.get('days'))
     
-    # Calculate days from dates if provided
     if days is None and 'valuation_date' in item and 'maturity_date' in item:
         valuation_date = parse_date(item.get('valuation_date'))
         maturity_date = parse_date(item.get('maturity_date'))
-        print(f"TRACE calculate_money_market: valuation_date={valuation_date}, maturity_date={maturity_date}")
-        print(f"TRACE calculate_money_market: raw valuation_date='{item.get('valuation_date')}', raw maturity_date='{item.get('maturity_date')}'")
         if valuation_date is not None and maturity_date is not None:
             days = days_between(valuation_date, maturity_date)
-            print(f"TRACE calculate_money_market: Calculated days from dates = {days}")
-        else:
-            print(f"TRACE calculate_money_market: Date parsing failed - valuation_date={valuation_date}, maturity_date={maturity_date}")
     
-    # If still no days, use a reasonable default for Money Market (90 days is common)
     if days is None:
-        days = 90  # Default 90-day term for Money Market instruments
-        print(f"TRACE calculate_money_market: Using default days = {days}")
+        days = 90
     
-    # Get market value if available
     market_value = safe_float(item.get('market_value'))
-    
-    print(f"TRACE calculate_money_market: principal={principal}, rate={rate}, days={days}, market_value={market_value}")
 
-    # Validate required fields
     if principal is None:
         return {
             'status': 'cannot_calculate', 
@@ -496,7 +424,6 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
             'instrument_type': 'money-market'
         }
 
-    # Validate calculated values
     if days <= 0:
         return {
             'status': 'cannot_calculate', 
@@ -510,8 +437,9 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
             'instrument_type': 'money-market'
         }
 
-    # Calculate with proper validation
-    interest = principal * rate * (days / 360)
+    interest = None
+    if principal is not None and rate is not None and days is not None:
+        interest = principal * (rate / 100) * (days / 360)
     total_value = principal + interest
 
     discount_yield = None
@@ -522,7 +450,6 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
     if principal != 0 and days != 0:
         effective_yield = (interest / principal) * (365 / days) * 100
 
-    print(f"TRACE calculate_money_market: Results - interest={interest}, total_value={total_value}, effective_yield={effective_yield}")
 
     result = {
         'instrument_type': 'money-market',
@@ -536,19 +463,16 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
         'yield_curve_rate': round(effective_yield, 1) if effective_yield is not None else None
     }
     
-    # Add market value if available
     if market_value is not None:
         result['market_value'] = round_money(market_value)
     
     return result
 
-# ===== 🔥 FIXED: Main calculation function with proper grouping =====
-def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[str, Any]:
+def calculate_data(data: List[Dict], instrument_type: str = 'tbills', valuation_date: str = None) -> Dict[str, Any]:
     """
     Main calculation function with standardized result structure.
     Returns consistent format with status, mode, instrument_results, and aggregates.
     """
-    print(f"TRACE calculate_data: instrument_type={instrument_type}, data_length={len(data) if data else 0}")
     
     if not isinstance(data, list) or len(data) == 0:
         return {
@@ -561,7 +485,6 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             'error': 'No data provided'
         }
 
-    # ===== GROUP BY INSTRUMENT NAME =====
     instrument_name_col = None
     name_variants = ['instrument', 'name', 'bond_name', 'tbill_name', 'issuer', 'security', 'description', 'counterparty',
                      'company', 'entity', 'instrument name']
@@ -579,7 +502,6 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             if instrument_name_col:
                 break
     
-    # If still no column, try to find any column with 'name' or 'instrument'
     if not instrument_name_col and data:
         for col in first_row.keys():
             lower = col.lower()
@@ -587,7 +509,6 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
                 instrument_name_col = col
                 break
     
-    # If still none, use first column
     if not instrument_name_col and data:
         instrument_name_col = list(first_row.keys())[0]
 
@@ -611,20 +532,17 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
     unique_names = list(grouped.keys())
     instrument_count = len(unique_names)
     
-    # Determine mode based on instrument count
     mode = 'single' if instrument_count == 1 else 'multiple'
-    print(f"TRACE calculate_data: mode={mode}, instrument_count={instrument_count}")
 
-    # ===== PROCESS EACH INSTRUMENT GROUP =====
     instrument_results = []
     successful_results = []
     failed_results = []
     
     for name, rows in grouped.items():
-        # Process each row in the group individually
         for row in rows:
             norm = normalize_row(row)
-            # Normalize percentage fields
+            if valuation_date:
+                norm['valuation_date'] = valuation_date
             if 'coupon_rate' in norm:
                 norm['coupon_rate'] = parse_percentage(norm['coupon_rate'])
             if 'interest_rate' in norm:
@@ -640,7 +558,7 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
                 calc = calculate_money_market(norm)
                 rate = calc.get('effective_yield', 0)
                 value = calc.get('principal', 0)
-            else:  # tbills
+            else:
                 calc = calculate_treasury_bill(norm)
                 rate = calc.get('money_market_yield', 0)
                 value = calc.get('face_value', 0)
@@ -652,26 +570,22 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             else:
                 failed_results.append(calc)
 
-    # ===== CALCULATE AGGREGATES FROM SUCCESSFUL RESULTS =====
     aggregates = {
         'instrument_count': len(successful_results),
         'failed_count': len(failed_results)
     }
     
     if successful_results:
-        # Calculate totals based on instrument type
         if instrument_type == 'money-market':
             aggregates['total_principal'] = sum(r.get('principal', 0) for r in successful_results if r.get('principal') is not None)
             aggregates['total_interest'] = sum(r.get('interest_earned', 0) for r in successful_results if r.get('interest_earned') is not None)
             aggregates['total_value'] = sum(r.get('total_value', 0) for r in successful_results if r.get('total_value') is not None)
             
-            # Calculate weighted average rate
             principals = [r.get('principal', 0) for r in successful_results if r.get('principal') is not None]
             rates = [r.get('interest_rate', 0) for r in successful_results if r.get('interest_rate') is not None]
             if principals and sum(principals) > 0:
                 aggregates['weighted_avg_rate'] = sum(p * r for p, r in zip(principals, rates)) / sum(principals)
             
-            # Calculate average days
             days = [r.get('term_days', 0) for r in successful_results if r.get('term_days') is not None]
             if days:
                 aggregates['avg_days_to_maturity'] = sum(days) / len(days)
@@ -681,12 +595,10 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             aggregates['total_purchase_price'] = sum(r.get('purchase_price', 0) for r in successful_results if r.get('purchase_price') is not None)
             aggregates['total_discount'] = sum((r.get('face_value', 0) - r.get('purchase_price', 0)) for r in successful_results if r.get('face_value') is not None and r.get('purchase_price') is not None)
             
-            # Calculate average rates
             rates = [r.get('money_market_yield', 0) for r in successful_results if r.get('money_market_yield') is not None]
             if rates:
                 aggregates['avg_discount_rate'] = sum(rates) / len(rates)
             
-            # Calculate average days
             days = [r.get('term_days', 0) for r in successful_results if r.get('term_days') is not None]
             if days:
                 aggregates['avg_days_to_maturity'] = sum(days) / len(days)
@@ -696,19 +608,14 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
             aggregates['total_market_value'] = sum(r.get('current_price', 0) for r in successful_results if r.get('current_price') is not None)
             aggregates['total_coupon_income'] = sum(r.get('accrued_interest', 0) for r in successful_results if r.get('accrued_interest') is not None)
             
-            # Calculate average yields
             ytms = [r.get('yield_to_maturity', 0) for r in successful_results if r.get('yield_to_maturity') is not None]
             if ytms:
                 aggregates['avg_ytm'] = sum(ytms) / len(ytms)
             
-            # Calculate average duration
             durations = [r.get('duration', 0) for r in successful_results if r.get('duration') is not None]
             if durations:
                 aggregates['avg_duration'] = sum(durations) / len(durations)
 
-    print(f"TRACE calculate_data: successful={len(successful_results)}, failed={len(failed_results)}, aggregates={aggregates}")
-
-    # ===== RETURN STANDARDIZED RESULT STRUCTURE =====
     return {
         'status': 'success' if successful_results else 'cannot_calculate',
         'mode': mode,
@@ -716,5 +623,5 @@ def calculate_data(data: List[Dict], instrument_type: str = 'tbills') -> Dict[st
         'instrument_count': instrument_count,
         'instrument_results': instrument_results,
         'aggregates': aggregates,
-        'calculations': instrument_results  # Legacy compatibility
+        'calculations': instrument_results
     }

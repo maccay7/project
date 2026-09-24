@@ -79,7 +79,6 @@ class TBillsCalculator:
         results = {}
         validation_errors = []
         
-        # Extract inputs - NO DEFAULTS, use None for missing values
         face_value = inputs.get('face_value')
         discount_rate = inputs.get('discount_rate')
         purchase_price = inputs.get('purchase_price')
@@ -89,7 +88,6 @@ class TBillsCalculator:
         days_to_maturity = inputs.get('days_to_maturity')
         day_count_convention = inputs.get('day_count_convention', self.day_count_convention)
         
-        # Build available fields for validation
         available_fields = {
             'face_value': face_value,
             'discount_rate': discount_rate,
@@ -101,7 +99,6 @@ class TBillsCalculator:
             'day_count_convention': day_count_convention
         }
         
-        # Calculate days if dates provided
         if maturity_date and settlement_date:
             validation = self.dependency_engine.validate_calculation(
                 'days_to_maturity', available_fields, 'tbills'
@@ -116,29 +113,30 @@ class TBillsCalculator:
         elif days_to_maturity is not None:
             results['days_to_maturity'] = days_to_maturity
         else:
-            # NO DEFAULT - report missing dependency
             validation_errors.append("Cannot calculate days to maturity: missing settlement_date and maturity_date")
             results['days_to_maturity'] = None
         
-        # Calculate days since issue
         if issue_date and settlement_date:
             days_since_issue = self._calculate_days_since_issue(issue_date, settlement_date)
             results['days_since_issue'] = days_since_issue
         
-        # Calculate remaining days
         if issue_date and maturity_date:
             total_days = self._calculate_days_to_maturity(issue_date, maturity_date)
-            remaining_days = total_days - days_since_issue if days_since_issue else days_to_maturity
+            if settlement_date:
+                days_since_issue = self._calculate_days_since_issue(issue_date, settlement_date)
+                remaining_days = total_days - days_since_issue
+            elif days_to_maturity is not None:
+                remaining_days = days_to_maturity
+            else:
+                remaining_days = None
             results['remaining_days'] = remaining_days
         
-        # Time to maturity in years - only if days_to_maturity is available
         if days_to_maturity is not None:
             time_to_maturity = days_to_maturity / day_count_convention
             results['time_to_maturity'] = round_value(time_to_maturity, 4)
         else:
             results['time_to_maturity'] = None
         
-        # Face Value / Nominal Value - only if provided
         if face_value is not None:
             results['face_value'] = round_money(face_value)
             results['nominal_value'] = round_money(face_value)
@@ -146,14 +144,12 @@ class TBillsCalculator:
             results['face_value'] = None
             results['nominal_value'] = None
         
-        # Core calculations - with dependency validation
         if discount_rate is not None and face_value is not None:
             available_fields['discount_rate'] = discount_rate
             available_fields['face_value'] = face_value
             available_fields['days_to_maturity'] = days_to_maturity
             available_fields['day_count_convention'] = day_count_convention
             
-            # Discount Amount
             validation = self.dependency_engine.validate_calculation(
                 'discount_amount', available_fields, 'tbills'
             )
@@ -164,7 +160,6 @@ class TBillsCalculator:
                 validation_errors.append(self.dependency_engine.get_missing_fields_message(validation))
                 results['discount_amount'] = None
             
-            # Purchase Price (Present Value) if not provided
             if days_to_maturity is not None:
                 if purchase_price is None:
                     purchase_price = self._calculate_purchase_price(face_value, discount_rate, days_to_maturity, day_count_convention)
@@ -172,113 +167,88 @@ class TBillsCalculator:
                 results['present_value'] = round_money(purchase_price)
                 available_fields['purchase_price'] = purchase_price
             
-            # Fair Value (same as purchase price for T-Bills)
             if 'purchase_price' in results:
                 results['fair_value'] = results['purchase_price']
                 results['market_value'] = results['purchase_price']
             
-            # Discount Rate (input)
             results['discount_rate'] = round_percentage(discount_rate * 100)
             
-            # Bank Discount Yield
             bank_discount_yield = self._calculate_bank_discount_yield(discount_rate)
             results['bank_discount_yield'] = round_percentage(bank_discount_yield * 100)
             
-            # Bond Equivalent Yield (BEY)
             if purchase_price is not None and days_to_maturity is not None:
                 bey = self._calculate_bond_equivalent_yield(purchase_price, face_value, days_to_maturity)
                 results['bond_equivalent_yield'] = round_percentage(bey * 100)
                 results['yield_to_maturity'] = round_percentage(bey * 100)  # YTM = BEY for T-Bills
                 
-                # Effective Annual Yield (EAY)
                 eay = self._calculate_effective_annual_yield(bey, days_to_maturity)
                 results['effective_annual_yield'] = round_percentage(eay * 100)
                 
-                # Holding Period Yield (HPY)
                 hpy = self._calculate_holding_period_yield(purchase_price, face_value)
                 results['holding_period_yield'] = round_percentage(hpy * 100)
                 
-                # Annualized Holding Period Yield
                 annualized_hpy = self._calculate_annualized_holding_period_yield(hpy, days_to_maturity)
                 results['annualized_holding_period_yield'] = round_percentage(annualized_hpy * 100)
                 
-                # Money Market Yield
                 money_market_yield = self._calculate_money_market_yield(face_value, purchase_price, days_to_maturity)
                 results['money_market_yield'] = round_percentage(money_market_yield * 100)
                 
-                # Current Market Yield
                 current_market_yield = self._calculate_current_market_yield(purchase_price, face_value, days_to_maturity)
                 results['current_market_yield'] = round_percentage(current_market_yield * 100)
             
-            # Settlement Amount
             if purchase_price is not None:
                 results['settlement_amount'] = round_money(purchase_price)
             
-            # Maturity Value
             if face_value is not None:
                 results['maturity_value'] = round_money(face_value)
             
-            # Net Proceeds
             if purchase_price is not None:
                 results['net_proceeds'] = round_money(purchase_price)
             
-            # Gross Proceeds
             if face_value is not None:
                 results['gross_proceeds'] = round_money(face_value)
             
-            # Investment Cost
             if purchase_price is not None:
                 results['investment_cost'] = round_money(purchase_price)
             
-            # Gain/Loss at Maturity
             if face_value is not None and purchase_price is not None:
                 gain_loss = face_value - purchase_price
                 results['gain_loss_maturity'] = round_money(gain_loss)
             
-            # Percentage Return
             if 'holding_period_yield' in results and results['holding_period_yield'] is not None:
                 results['percentage_return'] = results['holding_period_yield']
             
-            # Clean Price (same as purchase price for T-Bills)
             if purchase_price is not None:
                 results['clean_price'] = round_money(purchase_price)
             
-            # Dirty Price (same as clean price for T-Bills - no accrued interest)
             if purchase_price is not None:
                 results['dirty_price'] = round_money(purchase_price)
             
-            # Sensitivity to Yield Changes (DV01)
             if purchase_price is not None and days_to_maturity is not None:
                 dv01 = self._calculate_dv01(purchase_price, days_to_maturity)
                 results['dv01'] = round_value(dv01, 4)
                 results['sensitivity_yield_changes'] = round_value(dv01, 4)
         
-        # Benchmark comparisons
         if benchmark_yield is not None:
-            # Benchmark Spread
             if 'bond_equivalent_yield' in results and results['bond_equivalent_yield'] is not None:
                 benchmark_spread = (results['bond_equivalent_yield'] / 100) - benchmark_yield
                 results['benchmark_spread'] = round_percentage(benchmark_spread * 100)
             
-            # Benchmark Yield Comparison
             results['benchmark_yield'] = round_percentage(benchmark_yield * 100)
             results['benchmark_yield_comparison'] = round_percentage(benchmark_yield * 100)
             
-            # Valuation using Benchmark Yield Curve
             if face_value is not None and days_to_maturity is not None:
                 benchmark_valuation = self._calculate_benchmark_valuation(
                     face_value, benchmark_yield, days_to_maturity, day_count_convention
                 )
                 results['benchmark_valuation'] = round_money(benchmark_valuation)
         
-        # Real Yield (Inflation Adjusted)
         if inflation_rate is not None and 'bond_equivalent_yield' in results and results['bond_equivalent_yield'] is not None:
             real_yield = self._calculate_real_yield(
                 results['bond_equivalent_yield'] / 100, inflation_rate
             )
             results['real_yield'] = round_percentage(real_yield * 100)
         
-        # Add validation errors to results
         if validation_errors:
             results['validation_errors'] = validation_errors
             results['calculation_status'] = 'partial_success'
@@ -396,7 +366,6 @@ def calculate_tbills(inputs: Dict, benchmark_yield: Optional[float] = None,
     calculator = TBillsCalculator()
     results = calculator.calculate_all_metrics(inputs, benchmark_yield, inflation_rate)
     
-    # Apply auto-rounding based on field names
     rounded_results = {}
     for key, value in results.items():
         rounded_results[key] = auto_round_by_field_name(key, value)

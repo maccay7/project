@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 from flask import request, jsonify, send_file
 from utils.db import get_db
 from datetime import datetime
@@ -76,7 +77,8 @@ def generate_appendix_data(data, instrument_type):
 
 
 def generate_report_excel(session_id, report_data, instrument_type):
-    """Generate Excel report with cover, summary, data, and appendix sheets."""
+    """Generate Excel report with cover, summary, data, and appendix sheets.
+    Uses the exact data provided without modification or recalculation."""
     output_dir = 'reports'
     os.makedirs(output_dir, exist_ok=True)
     
@@ -97,6 +99,8 @@ def generate_report_excel(session_id, report_data, instrument_type):
         bottom=Side(style='thin')
     )
     
+    valuation_date = report_data.get('valuationDate', datetime.now().strftime('%Y-%m-%d'))
+    
     # Sheet 1: Cover Page
     ws_cover = wb.active
     ws_cover.title = 'Cover'
@@ -113,17 +117,21 @@ def generate_report_excel(session_id, report_data, instrument_type):
     ws_cover['A5'].font = header_font
     ws_cover['A5'].alignment = left_align
     
-    ws_cover['A6'] = f'Session ID: {session_id}'
+    ws_cover['A6'] = f'Session: {report_data.get("session", "Current Session")}'
     ws_cover['A6'].font = normal_font
     ws_cover['A6'].alignment = left_align
     
-    ws_cover['A7'] = f'Report Generated: {datetime.now().strftime("%B %d, %Y at %H:%M")}'
+    ws_cover['A7'] = f'Valuation Date: {valuation_date}'
     ws_cover['A7'].font = normal_font
     ws_cover['A7'].alignment = left_align
     
-    ws_cover['A9'] = 'CONFIDENTIAL'
-    ws_cover['A9'].font = Font(name='Arial', size=14, bold=True, color='c62828')
-    ws_cover['A9'].alignment = center_align
+    ws_cover['A8'] = f'Report Generated: {datetime.now().strftime("%B %d, %Y at %H:%M")}'
+    ws_cover['A8'].font = normal_font
+    ws_cover['A8'].alignment = left_align
+    
+    ws_cover['A10'] = 'CONFIDENTIAL'
+    ws_cover['A10'].font = Font(name='Arial', size=14, bold=True, color='c62828')
+    ws_cover['A10'].alignment = center_align
     
     ws_cover.column_dimensions['A'].width = 50
     
@@ -314,10 +322,8 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
     style.font.name = 'Arial'
     style.font.size = Pt(11)
     
-    # ===== PAGE 1: COVER PAGE =====
-    # Cover page content (no page break before - this is the first page)
+    # Cover page
     
-    # Add logo if available
     if logo_base64:
         try:
             if logo_base64.startswith('data:image'):
@@ -326,7 +332,6 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
             with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_logo:
                 temp_logo.write(logo_data)
                 temp_logo.flush()
-                # Add logo at top left
                 logo_paragraph = doc.add_paragraph()
                 logo_run = logo_paragraph.add_run()
                 logo_run.add_picture(temp_logo.name, width=Inches(2))
@@ -334,7 +339,6 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
         except Exception as e:
             print(f"Error adding logo: {e}")
     
-    # Add background image if available (as a watermark-style image)
     if background_base64:
         try:
             if background_base64.startswith('data:image'):
@@ -343,7 +347,6 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
             with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_bg:
                 temp_bg.write(bg_data)
                 temp_bg.flush()
-                # Add background image on the right side
                 bg_paragraph = doc.add_paragraph()
                 bg_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 bg_run = bg_paragraph.add_run()
@@ -404,10 +407,9 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
     conf_run.font.bold = True
     conf_run.font.color.rgb = RGBColor(198, 40, 40)
     
-    # Add page break after cover page
     doc.add_page_break()
     
-    # ===== PAGE 2: TABLE OF CONTENTS =====
+    # Table of Contents
     toc_heading = doc.add_heading('Table of Contents', level=1)
     toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
@@ -429,16 +431,14 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
         toc_para.add_run(f'\t{page}')
         toc_para.paragraph_format.tab_stops.add_tab_stop(Cm(15))
     
-    # Add page break after TOC
     doc.add_page_break()
     
-    # ===== PAGE 3: INTRODUCTION =====
+    # Introduction
     doc.add_heading('Introduction', level=1)
     
     intro_para = doc.add_paragraph()
     intro_para.add_run(f'Dura Capital (Private) Limited was contracted to provide a fair valuation assessment report of the following {instrument_type} instruments as at {report_data.get("valuationDate", datetime.now().strftime("%Y-%m-%d"))}.')
     
-    # Add bullet list matching HTML
     intro_list = doc.add_paragraph(style='List Bullet')
     intro_list.add_run(f'{instrument_type} instruments')
     intro_list = doc.add_paragraph(style='List Bullet')
@@ -449,11 +449,10 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
         intro_list = doc.add_paragraph(style='List Bullet')
         intro_list.add_run(f'{len(data)} individual instruments assessed')
     
-    # ===== PAGE 4: EXECUTIVE SUMMARY =====
+    # Executive Summary
     doc.add_page_break()
     doc.add_heading('Executive Summary', level=1)
     
-    # Calculate summary metrics from actual data
     total_value = 0
     total_interest = 0
     rates = []
@@ -468,7 +467,6 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
     
     avg_rate = sum(rates) / len(rates) if rates else 0
     
-    # Add methodology based on instrument type (matching HTML)
     inst_type = instrument_type.lower()
     if 'money' in inst_type:
         methodology = 'Money Market Instruments: Short-term debt instruments valued using discounted cash flow methodology.'
@@ -504,7 +502,7 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
     doc.add_paragraph().add_run('\nValuation Approach: ')
     doc.add_paragraph(methodology)
     
-    # ===== PAGE 5: METHODOLOGY =====
+    # Methodology
     doc.add_page_break()
     doc.add_heading('Methodology', level=1)
     
@@ -549,7 +547,7 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
     doc.add_paragraph().add_run('\nAssumptions: ').bold = True
     doc.add_paragraph(assumptions)
     
-    # ===== PAGE 6: MARKET INPUTS =====
+    # Market Inputs
     doc.add_page_break()
     doc.add_heading('Market Inputs', level=1)
     
@@ -565,7 +563,7 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
     else:
         doc.add_paragraph('Rates sourced from FRED for valuation.')
     
-    # ===== PAGE 7: RESULTS =====
+    # Results
     doc.add_page_break()
     doc.add_heading('Results', level=1)
     
@@ -594,16 +592,14 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
         row_cells[0].text = metric
         row_cells[1].text = value
     
-    # ===== PAGE 8: YIELD CURVE =====
+    # Yield Curve
     doc.add_page_break()
     doc.add_heading('Yield Curve', level=1)
     
     doc.add_paragraph('The following yield curve was used as a benchmark for valuation, sourced from FRED.')
     
-    # Add chart image if available (matching HTML structure)
     if chart_image_base64:
         try:
-            # Remove data URL prefix if present
             if chart_image_base64.startswith('data:image'):
                 chart_image_base64 = chart_image_base64.split(',')[1]
             
@@ -611,14 +607,12 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
             with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_img:
                 temp_img.write(image_data)
                 temp_img.flush()
-                # Add chart with styling matching HTML
                 chart_paragraph = doc.add_paragraph()
                 chart_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 chart_run = chart_paragraph.add_run()
                 chart_run.add_picture(temp_img.name, width=Inches(6))
                 os.unlink(temp_img.name)
             
-            # Add caption matching HTML
             caption = doc.add_paragraph()
             caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
             caption_run = caption.add_run(f'FRED Yield Curve – {instrument_type} ({fred_filters.get("country", "US")} / {fred_filters.get("currency", "USD")})')
@@ -630,14 +624,14 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
     else:
         doc.add_paragraph('Yield curve chart not available.')
     
-    # ===== PAGE 9: CONCLUSION =====
+    # Conclusion
     doc.add_page_break()
     doc.add_heading('Conclusion', level=1)
     
     conclusion_para = doc.add_paragraph()
     conclusion_para.add_run(f'The valuation assessment is in accordance with IFRS 13 fair value measurement principles as at {report_data.get("valuationDate", datetime.now().strftime("%Y-%m-%d"))}.')
     
-    # ===== PAGE 10: APPENDIX =====
+    # Appendix
     doc.add_page_break()
     doc.add_heading('Appendix: Detailed Instrument Data', level=1)
     
@@ -664,7 +658,6 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
             row_cells[4].text = str(item.get('Term', item.get('YearsToMaturity', 0)))
             row_cells[5].text = report_data.get('valuationDate', datetime.now().strftime("%Y-%m-%d"))
         
-        # Add FRED yield curve data if available (matching HTML structure)
         if yield_curve_data and len(yield_curve_data) > 0:
             doc.add_paragraph().add_run()
             doc.add_heading('FRED Yield Curve Data', level=2)
@@ -690,7 +683,7 @@ def generate_report_word(session_id, report_data, instrument_type, fred_filters=
                 row_cells[1].text = str(point.get('maturity', 0))
                 row_cells[2].text = str(point.get('rate', 0))
     
-    # ===== PAGE 11: REFERENCE =====
+    # Reference
     doc.add_page_break()
     doc.add_heading('Reference', level=1)
     
@@ -851,19 +844,16 @@ def reports_routes(app):
             return '', 200
         
         try:
-            # Find the most recent Word report for this session
             output_dir = 'reports'
             if not os.path.exists(output_dir):
                 return jsonify({'success': False, 'message': 'Reports directory not found'}), 404
             
-            # List all .docx files for this session
             word_files = [f for f in os.listdir(output_dir) if f.startswith(f'report_{session_id}_') and f.endswith('.docx')]
             
             if not word_files:
                 return jsonify({'success': False, 'message': 'No Word report found for this session'}), 404
             
-            # Get the most recent file
-            word_files.sort(reverse=True)
+                word_files.sort(reverse=True)
             latest_file = word_files[0]
             file_path = os.path.join(output_dir, latest_file)
             

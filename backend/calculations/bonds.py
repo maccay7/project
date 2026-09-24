@@ -76,29 +76,20 @@ class BondsCalculator:
         self.dependency_engine = CalculationDependencyEngine()
     
     def calculate_all_metrics(self, inputs: Dict, benchmark_yield: Optional[float] = None,
-                            benchmark_curve: Optional[List[Tuple[float, float]]] = None,
-                            inflation_rate: Optional[float] = None) -> Dict:
+                            benchmark_curve: Optional[List] = None,
+                            inflation_rate: Optional[float] = None,
+                            valuation_date: Optional[str] = None) -> Dict:
         """
         Calculate all Bonds valuation metrics from input data.
         
         Args:
             inputs: Dictionary containing Bond parameters
-                - face_value: Face/par value of the bond
-                - coupon_rate: Annual coupon rate (as decimal)
-                - yield_to_maturity: YTM (as decimal)
-                - years_to_maturity: Years to maturity
-                - coupon_frequency: Coupon payments per year (default 2)
-                - settlement_date: Settlement date
-                - issue_date: Issue date
-                - maturity_date: Maturity date
-                - call_date: Call date (if callable)
-                - call_price: Call price (if callable)
-                - put_date: Put date (if putable)
-                - put_price: Put price (if putable)
-                - market_price: Current market price (if known)
             benchmark_yield: Benchmark yield from FRED API (as decimal)
             benchmark_curve: List of (maturity_years, yield) tuples for curve
             inflation_rate: Inflation rate for real yield calculation (as decimal)
+            valuation_date: Optional user-selected valuation date (YYYY-MM-DD).
+                            When provided, overrides the workbook settlement date
+                            so the bond is valued as of that date.
             
         Returns:
             Dictionary containing all calculated metrics with validation status
@@ -106,13 +97,11 @@ class BondsCalculator:
         results = {}
         validation_errors = []
         
-        # Extract inputs - NO DEFAULTS, use None for missing values
         face_value = inputs.get('face_value')
         coupon_rate = inputs.get('coupon_rate')
         yield_to_maturity = inputs.get('yield_to_maturity')
         years_to_maturity = inputs.get('years_to_maturity')
         coupon_frequency = inputs.get('coupon_frequency', self.compounding_frequency)
-        settlement_date = inputs.get('settlement_date')
         issue_date = inputs.get('issue_date')
         maturity_date = inputs.get('maturity_date')
         call_date = inputs.get('call_date')
@@ -122,7 +111,9 @@ class BondsCalculator:
         market_price = inputs.get('market_price')
         day_count_convention = inputs.get('day_count_convention', self.day_count_convention)
         
-        # Build available fields for validation
+        # Valuation date (if provided) overrides workbook settlement date
+        settlement_date = valuation_date if valuation_date else inputs.get('settlement_date')
+        
         available_fields = {
             'face_value': face_value,
             'coupon_rate': coupon_rate,
@@ -140,7 +131,6 @@ class BondsCalculator:
             'day_count_convention': day_count_convention
         }
         
-        # Calculate time to maturity if dates provided
         if maturity_date and settlement_date:
             validation = self.dependency_engine.validate_calculation(
                 'term_to_maturity', available_fields, 'bonds'
@@ -161,18 +151,15 @@ class BondsCalculator:
             results['years_to_maturity'] = round_value(years_to_maturity, 2)
             results['days_to_maturity'] = days_to_maturity
         else:
-            # NO DEFAULT - report missing dependency
             validation_errors.append("Cannot calculate time to maturity: missing maturity_date and settlement_date")
             results['years_to_maturity'] = None
             results['days_to_maturity'] = None
         
-        # Time to maturity
         if years_to_maturity is not None:
             results['time_to_maturity'] = round_value(years_to_maturity, 2)
         else:
             results['time_to_maturity'] = None
         
-        # Face Value / Par Value - only if provided
         if face_value is not None:
             results['face_value'] = round_money(face_value)
             results['par_value'] = round_money(face_value)
@@ -180,7 +167,6 @@ class BondsCalculator:
             results['face_value'] = None
             results['par_value'] = None
         
-        # Coupon Payment - with dependency validation
         if face_value is not None and coupon_rate is not None:
             available_fields['face_value'] = face_value
             available_fields['coupon_rate'] = coupon_rate
@@ -197,18 +183,15 @@ class BondsCalculator:
                 validation_errors.append(self.dependency_engine.get_missing_fields_message(validation))
                 results['coupon_payment'] = None
         
-        # Coupon Rate - only if provided
         if coupon_rate is not None:
             results['coupon_rate'] = round_percentage(coupon_rate * 100)
         else:
             results['coupon_rate'] = None
         
-        # Calculate prices if YTM provided - with dependency validation
         if yield_to_maturity is not None and face_value is not None and years_to_maturity is not None:
             available_fields['yield_to_maturity'] = yield_to_maturity
             available_fields['years_to_maturity'] = years_to_maturity
             
-            # Clean Price (Bond Price)
             validation = self.dependency_engine.validate_calculation(
                 'bond_price', available_fields, 'bonds'
             )
@@ -222,35 +205,31 @@ class BondsCalculator:
                 validation_errors.append(self.dependency_engine.get_missing_fields_message(validation))
                 results['clean_price'] = None
             
-            # Present Value / Fair Value / Market Value
             if 'clean_price' in results and results['clean_price'] is not None:
                 results['present_value'] = results['clean_price']
                 results['fair_value'] = results['clean_price']
                 results['market_value'] = results['clean_price']
             
-            # Accrued Interest
             if settlement_date and issue_date and coupon_rate is not None:
+                coupon_payment = self._calculate_coupon_payment(face_value, coupon_rate, coupon_frequency)
                 accrued_interest = self._calculate_accrued_interest(
-                    face_value, coupon_rate, settlement_date, issue_date, coupon_frequency
+                    coupon_payment, coupon_frequency, settlement_date, issue_date
                 )
-                results['accrued_interest'] = round_money(accrued_interest)
-                available_fields['accrued_interest'] = accrued_interest
+                if accrued_interest is not None:
+                    results['accrued_interest'] = round_money(accrued_interest)
+                    available_fields['accrued_interest'] = accrued_interest
             
-            # Dirty Price
             if 'clean_price' in results and 'accrued_interest' in results:
                 if results['clean_price'] is not None and results['accrued_interest'] is not None:
                     dirty_price = results['clean_price'] + results['accrued_interest']
                     results['dirty_price'] = round_money(dirty_price)
             
-            # Settlement Value
             if 'dirty_price' in results and results['dirty_price'] is not None:
                 results['settlement_value'] = results['dirty_price']
             
-            # Redemption Value
             if face_value is not None:
                 results['redemption_value'] = round_money(face_value)
             
-            # Premium/Discount
             if 'clean_price' in results and results['clean_price'] is not None:
                 if results['clean_price'] > face_value:
                     premium = results['clean_price'] - face_value
@@ -264,13 +243,11 @@ class BondsCalculator:
                     results['premium'] = round_money(0)
                     results['discount'] = round_money(0)
             
-            # Current Yield
             if 'coupon_payment' in results and 'clean_price' in results:
                 if results['coupon_payment'] is not None and results['clean_price'] is not None:
                     current_yield = self._calculate_current_yield(results['coupon_payment'], results['clean_price'], coupon_frequency)
                     results['current_yield'] = round_percentage(current_yield * 100)
             
-            # Duration calculations
             if 'clean_price' in results and results['clean_price'] is not None:
                 macaulay_duration = self._calculate_macaulay_duration(
                     face_value, coupon_rate, yield_to_maturity, years_to_maturity, coupon_frequency
@@ -285,24 +262,20 @@ class BondsCalculator:
                 )
                 results['convexity'] = round_value(convexity, 4)
                 
-                # DV01
-                dv01 = self._calculate_dv01(results['clean_price'], modified_duration, yield_to_maturity)
+                dv01 = self._calculate_dv01(results['clean_price'], modified_duration)
                 results['dv01'] = round_value(dv01, 4)
                 results['pvbp'] = round_value(dv01, 4)
             
-            # Yield to Call
             if call_date and call_price and settlement_date:
                 years_to_call = self._calculate_years_to_maturity(settlement_date, call_date, day_count_convention)
                 ytc = self._calculate_yield_to_call(face_value, call_price, coupon_rate, years_to_call, coupon_frequency)
                 results['yield_to_call'] = round_percentage(ytc * 100)
             
-            # Yield to Put
             if put_date and put_price and settlement_date:
                 years_to_put = self._calculate_years_to_maturity(settlement_date, put_date, day_count_convention)
                 ytp = self._calculate_yield_to_put(face_value, put_price, coupon_rate, years_to_put, coupon_frequency)
                 results['yield_to_put'] = round_percentage(ytp * 100)
             
-            # Yield to Worst
             if 'yield_to_call' in results or 'yield_to_put' in results:
                 yields = [yield_to_maturity]
                 if 'yield_to_call' in results:
@@ -312,7 +285,6 @@ class BondsCalculator:
                 ytw = min(yields)
                 results['yield_to_worst'] = round_percentage(ytw * 100)
         
-        # If market price provided instead of YTM, calculate YTM
         if market_price is not None and face_value is not None and years_to_maturity is not None:
             available_fields['market_price'] = market_price
             available_fields['face_value'] = face_value
@@ -328,68 +300,63 @@ class BondsCalculator:
             else:
                 validation_errors.append(self.dependency_engine.get_missing_fields_message(validation))
                 results['yield_to_maturity'] = None
-            
-        # Benchmark comparisons
+        
         if benchmark_yield is not None:
-            # Benchmark Spread
             if 'yield_to_maturity' in results and results['yield_to_maturity'] is not None:
                 benchmark_spread = (results['yield_to_maturity'] / 100) - benchmark_yield
                 results['benchmark_spread'] = round_percentage(benchmark_spread * 100)
             
-            # G-Spread
             if 'yield_to_maturity' in results and results['yield_to_maturity'] is not None:
                 results['g_spread'] = results['benchmark_spread']
             
-            # Benchmark Yield Comparison
             results['benchmark_yield'] = round_percentage(benchmark_yield * 100)
             results['benchmark_yield_comparison'] = round_percentage(benchmark_yield * 100)
             
-            # Valuation using Benchmark Yield Curve
             if benchmark_curve and face_value is not None and years_to_maturity is not None:
                 benchmark_valuation = self._calculate_benchmark_curve_valuation(
                     face_value, coupon_rate, benchmark_curve, years_to_maturity, coupon_frequency
                 )
                 results['benchmark_valuation'] = round_money(benchmark_valuation)
         
-        # Real Yield (Inflation Adjusted)
         if inflation_rate is not None and 'yield_to_maturity' in results and results['yield_to_maturity'] is not None:
             real_yield = self._calculate_real_yield(
                 results['yield_to_maturity'] / 100, inflation_rate
             )
             results['real_yield'] = round_percentage(real_yield * 100)
         
-        # Effective Annual Yield
         if 'yield_to_maturity' in results and results['yield_to_maturity'] is not None:
             effective_annual_yield = self._calculate_effective_annual_yield(
                 results['yield_to_maturity'] / 100, coupon_frequency
             )
             results['effective_annual_yield'] = round_percentage(effective_annual_yield * 100)
         
-        # Holding Period Return
         if market_price is not None and 'clean_price' in results and results['clean_price'] is not None:
-            if 'coupon_payment' in results:
+            if 'coupon_payment' in results and results['coupon_payment'] is not None and years_to_maturity is not None:
                 holding_period_return = self._calculate_holding_period_return(
-                    results['clean_price'], market_price, results['coupon_payment'], years_to_maturity
+                    results['clean_price'], results['coupon_payment'], years_to_maturity, coupon_frequency
                 )
                 results['holding_period_return'] = round_percentage(holding_period_return * 100)
         
-        # Total Return components
         if 'clean_price' in results and results['clean_price'] is not None:
             if 'coupon_payment' in results and years_to_maturity is not None:
                 coupon_income = results['coupon_payment'] * years_to_maturity * coupon_frequency
                 results['coupon_income'] = round_money(coupon_income)
                 
-                capital_gain_loss = market_price - results['clean_price'] if market_price else 0
-                results['capital_gain_loss'] = round_money(capital_gain_loss)
-                
-                total_return = coupon_income + capital_gain_loss
-                results['total_return'] = round_money(total_return)
-                
-                if results['clean_price'] > 0:
-                    total_return_pct = total_return / results['clean_price']
-                    results['total_return_percentage'] = round_percentage(total_return_pct * 100)
+                if market_price is not None:
+                    capital_gain_loss = market_price - results['clean_price']
+                    results['capital_gain_loss'] = round_money(capital_gain_loss)
+                    
+                    total_return = coupon_income + capital_gain_loss
+                    results['total_return'] = round_money(total_return)
+                    
+                    if results['clean_price'] > 0:
+                        total_return_pct = total_return / results['clean_price']
+                        results['total_return_percentage'] = round_percentage(total_return_pct * 100)
         
-        # Add validation errors to results
+        if valuation_date:
+            results['valuation_date'] = valuation_date
+            results['Valuation Date'] = valuation_date
+        
         if validation_errors:
             results['validation_errors'] = validation_errors
             results['calculation_status'] = 'partial_success'
@@ -423,21 +390,24 @@ class BondsCalculator:
         periods = int(years_to_maturity * coupon_frequency)
         period_yield = yield_to_maturity / coupon_frequency
         
-        # Present value of coupon payments
         pv_coupons = 0
         for t in range(1, periods + 1):
             pv_coupons += coupon_payment / ((1 + period_yield) ** t)
         
-        # Present value of face value
         pv_face = face_value / ((1 + period_yield) ** periods)
         
         return pv_coupons + pv_face
     
     def _calculate_accrued_interest(self, coupon_payment: float, coupon_frequency: int,
-                                   settlement_date: Optional[str], issue_date: Optional[str]) -> float:
-        """Calculate accrued interest."""
+                                   settlement_date: Optional[str], issue_date: Optional[str]) -> Optional[float]:
+        """
+        Calculate accrued interest.
+
+        Returns None when either date is missing — the caller must not fabricate
+        a value. FIX #8: no silent zeros for missing inputs.
+        """
         if not settlement_date or not issue_date:
-            return 0
+            return None
         
         settlement = datetime.strptime(settlement_date, '%Y-%m-%d')
         issue = datetime.strptime(issue_date, '%Y-%m-%d')
@@ -458,28 +428,24 @@ class BondsCalculator:
         return (1 + yield_to_maturity / coupon_frequency) ** coupon_frequency - 1
     
     def _calculate_yield_to_call(self, face_value: float, call_price: float, coupon_rate: float,
-                                settlement_date: str, call_date: str, coupon_frequency: int) -> float:
-        """Calculate Yield to Call (YTC)."""
-        settlement = datetime.strptime(settlement_date, '%Y-%m-%d')
-        call = datetime.strptime(call_date, '%Y-%m-%d')
-        years_to_call = (call - settlement).days / self.day_count_convention
-        
+                                years_to_call: float, coupon_frequency: int) -> float:
+        """Calculate Yield to Call (YTC) via Newton-Raphson iteration."""
         coupon_payment = self._calculate_coupon_payment(face_value, coupon_rate, coupon_frequency)
-        periods = int(years_to_call * coupon_frequency)
+        periods = max(1, int(years_to_call * coupon_frequency))
         
-        # Solve for YTC using iterative method
         ytc = coupon_rate  # Initial guess
-        for _ in range(100):  # Newton-Raphson iteration
-            pv_coupons = sum(coupon_payment / ((1 + ytc/coupon_frequency) ** t) 
+        for _ in range(100):
+            pv_coupons = sum(coupon_payment / ((1 + ytc / coupon_frequency) ** t)
                            for t in range(1, periods + 1))
-            pv_call = call_price / ((1 + ytc/coupon_frequency) ** periods)
+            pv_call = call_price / ((1 + ytc / coupon_frequency) ** periods)
             price = pv_coupons + pv_call
             
-            # Derivative
-            derivative = sum(-t * coupon_payment / ((1 + ytc/coupon_frequency) ** (t+1)) / coupon_frequency
+            derivative = sum(-t * coupon_payment / ((1 + ytc / coupon_frequency) ** (t + 1)) / coupon_frequency
                           for t in range(1, periods + 1))
-            derivative += -periods * call_price / ((1 + ytc/coupon_frequency) ** (periods+1)) / coupon_frequency
+            derivative += -periods * call_price / ((1 + ytc / coupon_frequency) ** (periods + 1)) / coupon_frequency
             
+            if derivative == 0:
+                break
             new_ytc = ytc - (price - face_value) / derivative
             if abs(new_ytc - ytc) < 0.0001:
                 break
@@ -488,11 +454,37 @@ class BondsCalculator:
         return ytc
     
     def _calculate_yield_to_put(self, face_value: float, put_price: float, coupon_rate: float,
-                               settlement_date: str, put_date: str, coupon_frequency: int) -> float:
+                               years_to_put: float, coupon_frequency: int) -> float:
         """Calculate Yield to Put (YTP)."""
-        # Similar to YTC but with put price
-        return self._calculate_yield_to_call(face_value, put_price, coupon_rate, 
-                                             settlement_date, put_date, coupon_frequency)
+        return self._calculate_yield_to_call(face_value, put_price, coupon_rate,
+                                             years_to_put, coupon_frequency)
+    
+    def _calculate_yield_to_maturity(self, clean_price: float, face_value: float,
+                                     coupon_rate: float, years_to_maturity: float,
+                                     coupon_frequency: int) -> float:
+        """Calculate Yield to Maturity (YTM) via Newton-Raphson iteration."""
+        coupon_payment = self._calculate_coupon_payment(face_value, coupon_rate, coupon_frequency)
+        periods = max(1, int(years_to_maturity * coupon_frequency))
+        
+        ytm = coupon_rate if coupon_rate is not None else 0.05
+        for _ in range(100):
+            pv_coupons = sum(coupon_payment / ((1 + ytm / coupon_frequency) ** t)
+                           for t in range(1, periods + 1))
+            pv_face = face_value / ((1 + ytm / coupon_frequency) ** periods)
+            price = pv_coupons + pv_face
+            
+            derivative = sum(-t * coupon_payment / ((1 + ytm / coupon_frequency) ** (t + 1)) / coupon_frequency
+                          for t in range(1, periods + 1))
+            derivative += -periods * face_value / ((1 + ytm / coupon_frequency) ** (periods + 1)) / coupon_frequency
+            
+            if derivative == 0:
+                break
+            new_ytm = ytm - (price - clean_price) / derivative
+            if abs(new_ytm - ytm) < 0.0001:
+                break
+            ytm = new_ytm
+        
+        return ytm
     
     def _calculate_days_accrued(self, issue_date: str, settlement_date: str) -> int:
         """Calculate days accrued since last coupon."""
@@ -515,13 +507,11 @@ class BondsCalculator:
         clean_price = self._calculate_clean_price(face_value, coupon_rate, yield_to_maturity, 
                                                   years_to_maturity, coupon_frequency)
         
-        # Weighted average time to cash flows
         weighted_time = 0
         for t in range(1, periods + 1):
             pv = coupon_payment / ((1 + period_yield) ** t)
             weighted_time += t * pv
         
-        # Add face value at maturity
         pv_face = face_value / ((1 + period_yield) ** periods)
         weighted_time += periods * pv_face
         
@@ -556,7 +546,6 @@ class BondsCalculator:
             pv = coupon_payment / ((1 + period_yield) ** t)
             convexity_sum += (t * (t + 1) * pv) / ((1 + period_yield) ** 2)
         
-        # Add face value at maturity
         pv_face = face_value / ((1 + period_yield) ** periods)
         convexity_sum += (periods * (periods + 1) * pv_face) / ((1 + period_yield) ** 2)
         
@@ -590,31 +579,29 @@ class BondsCalculator:
         """Calculate Zero Coupon Bond Price."""
         return face_value / ((1 + yield_to_maturity) ** years_to_maturity)
     
-    def _calculate_curve_valuation(self, face_value: float, coupon_rate: float, years_to_maturity: float,
-                                  coupon_frequency: int, benchmark_curve: List[Tuple[float, float]]) -> float:
+    def _calculate_benchmark_curve_valuation(self, face_value: float, coupon_rate: float,
+                                             benchmark_curve: List,
+                                             years_to_maturity: float,
+                                             coupon_frequency: int) -> float:
         """Calculate valuation using benchmark yield curve."""
-        # Find closest benchmark yield
         closest_yield = min(benchmark_curve, key=lambda x: abs(x[0] - years_to_maturity))[1]
-        return self._calculate_clean_price(face_value, coupon_rate, closest_yield, 
+        return self._calculate_clean_price(face_value, coupon_rate, closest_yield,
                                           years_to_maturity, coupon_frequency)
     
     def _calculate_z_spread(self, face_value: float, coupon_rate: float, clean_price: float,
                            years_to_maturity: float, coupon_frequency: int,
-                           benchmark_curve: List[Tuple[float, float]]) -> float:
+                           benchmark_curve: List) -> float:
         """Calculate Z-Spread (zero-volatility spread)."""
-        # Simplified Z-spread calculation
         coupon_payment = self._calculate_coupon_payment(face_value, coupon_rate, coupon_frequency)
         periods = int(years_to_maturity * coupon_frequency)
         
-        # Find average benchmark yield
         avg_benchmark_yield = sum(y for _, y in benchmark_curve) / len(benchmark_curve)
         
-        # Solve for Z-spread
         z_spread = 0.01  # Initial guess
         for _ in range(100):
-            pv_coupons = sum(coupon_payment / ((1 + (avg_benchmark_yield + z_spread)/coupon_frequency) ** t)
+            pv_coupons = sum(coupon_payment / ((1 + (avg_benchmark_yield + z_spread) / coupon_frequency) ** t)
                            for t in range(1, periods + 1))
-            pv_face = face_value / ((1 + (avg_benchmark_yield + z_spread)/coupon_frequency) ** periods)
+            pv_face = face_value / ((1 + (avg_benchmark_yield + z_spread) / coupon_frequency) ** periods)
             price = pv_coupons + pv_face
             
             if abs(price - clean_price) < 0.01:
@@ -629,8 +616,9 @@ class BondsCalculator:
 
 
 def calculate_bonds(inputs: Dict, benchmark_yield: Optional[float] = None,
-                    benchmark_curve: Optional[List[Tuple[float, float]]] = None,
-                    inflation_rate: Optional[float] = None) -> Dict:
+                    benchmark_curve: Optional[List] = None,
+                    inflation_rate: Optional[float] = None,
+                    valuation_date: Optional[str] = None) -> Dict:
     """
     Main function to calculate all Bonds metrics.
     
@@ -639,14 +627,14 @@ def calculate_bonds(inputs: Dict, benchmark_yield: Optional[float] = None,
         benchmark_yield: Benchmark yield from FRED API
         benchmark_curve: Benchmark yield curve from FRED API
         inflation_rate: Inflation rate for real yield calculation
+        valuation_date: Optional user-selected valuation date (YYYY-MM-DD)
         
     Returns:
         Dictionary containing all calculated metrics with proper rounding
     """
     calculator = BondsCalculator()
-    results = calculator.calculate_all_metrics(inputs, benchmark_yield, benchmark_curve, inflation_rate)
+    results = calculator.calculate_all_metrics(inputs, benchmark_yield, benchmark_curve, inflation_rate, valuation_date)
     
-    # Apply auto-rounding based on field names
     rounded_results = {}
     for key, value in results.items():
         rounded_results[key] = auto_round_by_field_name(key, value)

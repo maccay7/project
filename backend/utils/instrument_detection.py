@@ -8,6 +8,7 @@ or multiple instruments, and determines the appropriate workflow for each case.
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+import re
 
 
 class InstrumentCount(Enum):
@@ -26,6 +27,22 @@ class InstrumentDetectionResult:
     confidence: float
     reasoning: str
     recommended_workflow: str
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and convert separators to spaces for word-boundary matching."""
+    if text is None:
+        return ""
+    return re.sub(r'[_\-:]+', ' ', str(text).lower()).strip()
+
+
+def _word_in(pattern: str, text: str) -> bool:
+    """True if pattern appears in text as a whole word (not a substring)."""
+    p = _normalize(pattern)
+    t = _normalize(text)
+    if not p or not t:
+        return False
+    return f" {p} " in f" {t} "
 
 
 class InstrumentDetector:
@@ -147,7 +164,7 @@ class InstrumentDetector:
         
         # Check for identifier fields
         has_identifier = any(
-            any(indicator in field.lower() for indicator in self.multi_instrument_indicators)
+            any(_word_in(indicator, field) for indicator in self.multi_instrument_indicators)
             for field in fields
         )
         
@@ -179,9 +196,8 @@ class InstrumentDetector:
         fields = list(first_row.keys())
         
         for field in fields:
-            field_lower = field.lower()
             for indicator in self.multi_instrument_indicators:
-                if indicator in field_lower:
+                if _word_in(indicator, field):
                     return True
         
         return False
@@ -197,7 +213,7 @@ class InstrumentDetector:
         return self._detect_instrument_type_from_fields(fields)
     
     def _detect_instrument_type_from_fields(self, fields: List[str]) -> Optional[str]:
-        """Detect instrument type from field names only."""
+        """Detect instrument type from field names only (word-boundary aware)."""
         scores = {
             'money-market': 0,
             'tbills': 0,
@@ -205,11 +221,9 @@ class InstrumentDetector:
         }
         
         for field in fields:
-            field_lower = field.lower()
-            
             for inst_type, patterns in self.instrument_field_patterns.items():
                 for pattern in patterns:
-                    if pattern in field_lower:
+                    if _word_in(pattern, field):
                         scores[inst_type] += 1
         
         # Return type with highest score

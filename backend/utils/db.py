@@ -43,7 +43,7 @@ def get_db_connection():
         )
         return connection
     except pymysql.Error as e:
-        print(f"❌ Database connection error: {e}")
+        print(f"Database connection error: {e}")
         return None
 
 
@@ -82,7 +82,7 @@ def close_connection(connection):
         try:
             connection.close()
         except Exception as e:
-            print(f"⚠️ Error closing connection: {e}")
+            print(f"Error closing connection: {e}")
 
 
 def close_cursor(cursor):
@@ -93,7 +93,7 @@ def close_cursor(cursor):
         try:
             cursor.close()
         except Exception as e:
-            print(f"⚠️ Error closing cursor: {e}")
+            print(f"Error closing cursor: {e}")
 
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):

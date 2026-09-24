@@ -15,6 +15,7 @@ load_dotenv()
 FRED_API_KEY = os.environ.get('FRED_API_KEY')
 FRED_BASE_URL = 'https://api.stlouisfed.org/fred'
 
+
 def fred_routes(app):
 
     @app.route('/api/fred/series/<series_id>', methods=['GET', 'OPTIONS'])
@@ -22,10 +23,7 @@ def fred_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
         if not FRED_API_KEY:
-            return jsonify({
-                'success': False,
-                'error': 'FRED_API_KEY not set'
-            }), 500
+            return jsonify({'success': False, 'error': 'FRED_API_KEY not set'}), 500
         params = {
             'series_id': series_id,
             'api_key': FRED_API_KEY,
@@ -40,7 +38,7 @@ def fred_routes(app):
             if 'error_code' in data:
                 return jsonify({'success': False, 'error': data.get('error_message')}), 400
             observations = data.get('observations', [])
-            result = [{'date': obs['date'], 'value': float(obs['value'])} 
+            result = [{'date': obs['date'], 'value': float(obs['value'])}
                       for obs in observations if obs.get('value') and obs['value'] != '.']
             return jsonify({'success': True, 'series_id': series_id, 'data': result})
         except Exception as e:
@@ -76,10 +74,12 @@ def fred_routes(app):
     def fred_benchmark():
         if request.method == 'OPTIONS':
             return '', 200
-        inst = request.args.get('instrument_type', 'money_market')
-        maturity = request.args.get('maturity', '1Y')
-        country = request.args.get('country', 'US')
-        currency = request.args.get('currency', 'USD')
+        inst = request.args.get('instrument_type')
+        maturity = request.args.get('maturity')
+        country = request.args.get('country')
+        currency = request.args.get('currency')
+        if not inst or not country:
+            return jsonify({'success': False, 'error': 'instrument_type and country are required'}), 400
         data = get_market_benchmark(inst, maturity, country, currency)
         if data.get('benchmark_rate') is None:
             return jsonify({'success': False, 'error': data.get('error'), 'note': data.get('note')}), 404
@@ -89,8 +89,10 @@ def fred_routes(app):
     def fred_series_by_maturity():
         if request.method == 'OPTIONS':
             return '', 200
-        maturity = request.args.get('maturity', '1Y')
-        country = request.args.get('country', 'US')
+        maturity = request.args.get('maturity')
+        country = request.args.get('country')
+        if not maturity or not country:
+            return jsonify({'success': False, 'error': 'maturity and country are required'}), 400
         series_id, label, used_mat, _, _, note = series_for_country(country, maturity)
         if not series_id:
             return jsonify({'success': False, 'error': 'No series found'}), 404
@@ -103,39 +105,60 @@ def fred_routes(app):
             'note': note
         })
 
-    # ===== YIELD CURVE =====
     def _fred_yield_curve_handler():
         if request.method == 'OPTIONS':
-            return '', 200
-        if request.method == 'POST':
-            payload = request.get_json() or {}
-            country = payload.get('country', 'US')
-            maturities = payload.get('maturities')
-        else:
-            country = request.args.get('country', 'US')
-            maturities = request.args.get('maturities')
-            if maturities:
-                maturities = maturities.split(',')
+            response = jsonify({})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+            response.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+            return response
+        
+        try:
+            if request.method == 'POST':
+                payload = request.get_json() or {}
+                country = payload.get('country')
+                maturities = payload.get('maturities')
+                from_date = payload.get('from_date')
+                to_date = payload.get('to_date')
+            else:
+                country = request.args.get('country')
+                maturities = request.args.get('maturities')
+                if maturities:
+                    maturities = maturities.split(',')
+                from_date = request.args.get('from_date')
+                to_date = request.args.get('to_date')
 
-        points = get_yield_curve(country, maturities)
-        if points:
-            note = f'Yield curve from FRED (real data only). Retrieved {len(points)} maturities.'
-            return jsonify({
-                'success': True,
-                'data': {
-                    'maturities': [p['maturity'] for p in points],
-                    'labels': [p['maturityLabel'] for p in points],
-                    'rates': [p['rate'] for p in points],
-                    'country': country,
-                    'note': note
-                }
-            }), 200
-        else:
+            if not country:
+                return jsonify({'success': False, 'error': 'country is required'}), 400
+
+            points = get_yield_curve(country, maturities, from_date=from_date, to_date=to_date)
+            if points:
+                note = f'Yield curve from FRED (real data only). Retrieved {len(points)} maturities.'
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'maturities': [p['maturity'] for p in points],
+                        'labels': [p['maturityLabel'] for p in points],
+                        'rates': [p['rate'] for p in points],
+                        'country': country,
+                        'note': note,
+                        'datasets': [{
+                            'label': f'{country} Yield Curve',
+                            'data': [{'x': p['maturity'], 'y': p['rate']} for p in points],
+                            'borderColor': '#0B2044',
+                            'backgroundColor': 'rgba(11, 32, 68, 0.1)',
+                            'tension': 0.1
+                        }]
+                    }
+                }), 200
             return jsonify({
                 'success': False,
-                'error': 'No yield curve data could be fetched from FRED for the selected country and maturities.',
+                'error': 'No yield curve data could be fetched from FRED for the selected filters.',
                 'note': 'Please try different filters or check your FRED API key.'
             }), 404
+        except Exception as e:
+            logger.error(f"Yield curve error: {e}")
+            return jsonify({'success': False, 'error': str(e)}), 500
 
     app.add_url_rule(
         '/api/fred/yield-curve',
@@ -154,4 +177,4 @@ def fred_routes(app):
         methods=['GET', 'OPTIONS']
     )
 
-    print("✅ FRED routes registered (unique endpoints, no conflict)")
+    print("FRED routes registered")

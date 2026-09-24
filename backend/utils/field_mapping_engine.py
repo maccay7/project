@@ -181,19 +181,14 @@ class FieldMappingEngine:
         if not field_name:
             return ''
         
-        # Convert to lowercase
         normalized = field_name.lower().strip()
         
-        # Replace special characters with underscores
         normalized = re.sub(r'[^\w\s]', '_', normalized)
         
-        # Replace spaces with underscores
         normalized = re.sub(r'\s+', '_', normalized)
         
-        # Remove multiple consecutive underscores
         normalized = re.sub(r'_+', '_', normalized)
         
-        # Strip leading/trailing underscores
         normalized = normalized.strip('_')
         
         return normalized
@@ -201,6 +196,8 @@ class FieldMappingEngine:
     def calculate_semantic_similarity(self, source_field: str, target_field: str) -> float:
         """
         Calculate semantic similarity between two field names.
+        Uses word-boundary matching to avoid false positives such as
+        'rate' matching inside 'corporate'.
         
         Args:
             source_field: Field name from dataset
@@ -212,18 +209,24 @@ class FieldMappingEngine:
         source_norm = self.normalize_field_name(source_field)
         target_norm = self.normalize_field_name(target_field)
         
+        if not source_norm or not target_norm:
+            return 0.0
+        
         # Exact match
         if source_norm == target_norm:
             return 1.0
         
-        # Check if source contains target or vice versa
-        if target_norm in source_norm or source_norm in target_norm:
+        # Word-boundary contains check (avoid substring false positives)
+        source_padded = f"_{source_norm}_"
+        target_padded = f"_{target_norm}_"
+        if target_padded in source_padded or source_padded in target_padded:
             return 0.8
         
-        # Check aliases
+        # Check aliases (word-boundary matched against both sides)
         for target_key, aliases in self.field_aliases.items():
-            if target_norm in [self.normalize_field_name(a) for a in aliases]:
-                if source_norm in [self.normalize_field_name(a) for a in aliases]:
+            alias_norms = [self.normalize_field_name(a) for a in aliases]
+            if target_norm in alias_norms:
+                if source_norm in alias_norms:
                     return 0.9
         
         # Word overlap
@@ -384,7 +387,6 @@ class FieldMappingEngine:
                 if source_field in row:
                     transformed_row[target_field] = row[source_field]
             
-            # Preserve unmapped fields
             for key, value in row.items():
                 if key not in [fm.source_field for fm in mapping.values()]:
                     transformed_row[key] = value

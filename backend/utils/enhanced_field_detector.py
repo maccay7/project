@@ -214,7 +214,6 @@ class EnhancedFieldDetector:
             end_row = table_range.get('endRow', len(data))
             data = data[start_row:end_row + 1]
         
-        # First pass: Find currency-related field labels
         currency_field_indices = set()
         for row_idx, row in enumerate(data):
             if not isinstance(row, dict):
@@ -402,67 +401,6 @@ class EnhancedFieldDetector:
             'days_in_year': ['days in year', 'day count basis']
         }
     
-    def detect_fields(self, data: List[Dict], instrument_type: str = 'money-market') -> Dict[str, DetectedField]:
-        """
-        Detect all financial fields from the entire dataset.
-        
-        Args:
-            data: List of data rows (dictionaries)
-            instrument_type: Type of instrument ('money-market', 'tbills', 'bonds')
-            
-        Returns:
-            Dictionary mapping field names to DetectedField objects
-        """
-        if not data or not isinstance(data, list):
-            return {}
-        
-        detected_fields = {}
-        
-        # Step 0: Analyze worksheet structure to understand data organization
-        structure_analysis = self._analyze_worksheet_structure(data)
-        
-        # Step 1: Detect from column headers (traditional approach)
-        header_detections = self._detect_from_headers(data, structure_analysis)
-        detected_fields.update(header_detections)
-        
-        # Step 2: Detect from label/value pairs (vertical orientation)
-        label_value_detections = self._detect_from_label_value_pairs(data, structure_analysis)
-        # Merge with existing, keeping higher confidence
-        for field_name, detection in label_value_detections.items():
-            if field_name not in detected_fields or detection.confidence > detected_fields[field_name].confidence:
-                detected_fields[field_name] = detection
-        
-        # Step 3: Detect from nearby labels and values
-        nearby_detections = self._detect_from_nearby_labels(data, structure_analysis)
-        for field_name, detection in nearby_detections.items():
-            if field_name not in detected_fields or detection.confidence > detected_fields[field_name].confidence:
-                detected_fields[field_name] = detection
-        
-        # Step 4: Detect from value patterns (numeric, date, percentage)
-        pattern_detections = self._detect_from_value_patterns(data, detected_fields)
-        for field_name, detection in pattern_detections.items():
-            if field_name not in detected_fields or detection.confidence > detected_fields[field_name].confidence:
-                detected_fields[field_name] = detection
-        
-        # Step 5: Classify detected values
-        detected_fields = self._classify_values(detected_fields, data)
-        
-        # Step 6: Identify missing required fields
-        required_fields = self._get_required_fields(instrument_type)
-        for field in required_fields:
-            if field not in detected_fields:
-                detected_fields[field] = DetectedField(
-                    field_name=field,
-                    value=None,
-                    value_type=ValueType.MISSING,
-                    source='not_detected',
-                    confidence=0.0,
-                    row=-1,
-                    col=-1
-                )
-        
-        return required_fields.get(instrument_type, [])
-    
     def _analyze_worksheet_structure(self, data: List[Dict]) -> Dict[str, Any]:
         """
         Analyze worksheet structure to understand data organization.
@@ -560,7 +498,6 @@ class EnhancedFieldDetector:
             start_col = None
             end_col = None
             
-            # Find column range
             for key in data[header_row].keys():
                 if structure['cell_types'][header_row][key]['type'] != 'empty':
                     if start_col is None:
@@ -570,7 +507,6 @@ class EnhancedFieldDetector:
             if start_col is None:
                 continue
             
-            # Find end of table
             end_row = header_row
             consecutive_empty = 0
             
@@ -671,7 +607,6 @@ class EnhancedFieldDetector:
                 matched_field = self._match_field_to_synonym(header)
                 
                 if matched_field:
-                    # Get the first non-empty value for this column
                     value = None
                     for check_row in data:
                         if header in check_row and check_row[header] not in [None, '', ' ']:
@@ -717,7 +652,6 @@ class EnhancedFieldDetector:
                 matched_field = self._match_field_to_synonym(label_str)
                 
                 if matched_field and value_cell is not None and str(value_cell).strip() not in ['', ' ', 'N/A', 'n/a', '-']:
-                    # Try to parse the value
                     parsed_value = self._parse_value(str(value_cell).strip())
                     
                     # Only add if not already detected with higher confidence
@@ -854,7 +788,6 @@ class EnhancedFieldDetector:
                 
                 # Check for date values
                 elif self.date_pattern.match(value_str):
-                    # Try to match to date fields
                     for date_field in ['maturity_date', 'settlement_date', 'issue_date', 'valuation_date']:
                         if date_field not in already_detected:
                             detections[date_field] = DetectedField(
@@ -923,26 +856,38 @@ class EnhancedFieldDetector:
         return len(required_fields) > 0
     
     def _match_field_to_synonym(self, text: str) -> Optional[str]:
-        """Match a text string to a field name using synonyms."""
+        """Match a text string to a field name using synonyms (word-boundary aware)."""
         if not text:
             return None
         
-        text_lower = text.lower().strip()
+        def normalize(s: str) -> str:
+            return re.sub(r'[_\-:]+', ' ', str(s).lower()).strip()
         
-        # Direct match
+        text_norm = normalize(text)
+        if not text_norm:
+            return None
+        padded_text = f" {text_norm} "
+        
+        def word_matches(candidate: str) -> bool:
+            cand_norm = normalize(candidate)
+            if not cand_norm:
+                return False
+            return f" {cand_norm} " in padded_text
+        
+        # Exact match first
         for field_name, synonyms in self.field_synonyms.items():
-            if text_lower == field_name.lower():
+            if text_norm == normalize(field_name):
                 return field_name
             for synonym in synonyms:
-                if text_lower == synonym.lower():
+                if text_norm == normalize(synonym):
                     return field_name
         
-        # Contains match
+        # Word-boundary contains match
         for field_name, synonyms in self.field_synonyms.items():
-            if field_name.lower() in text_lower or text_lower in field_name.lower():
+            if word_matches(field_name):
                 return field_name
             for synonym in synonyms:
-                if synonym.lower() in text_lower or text_lower in synonym.lower():
+                if word_matches(synonym):
                     return field_name
         
         return None
@@ -954,9 +899,7 @@ class EnhancedFieldDetector:
         
         value_str = value_str.strip()
         
-        # Try to parse as number
         try:
-            # Remove currency symbols, commas, percentage signs
             cleaned = value_str.replace('$', '').replace('€', '').replace('£', '').replace('¥', '')
             cleaned = cleaned.replace(',', '').replace('%', '')
             
@@ -978,7 +921,6 @@ class EnhancedFieldDetector:
         
         date_str = date_str.strip()
         
-        # Try common date formats
         date_formats = [
             '%Y-%m-%d',
             '%Y/%m/%d',

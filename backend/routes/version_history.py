@@ -4,8 +4,6 @@ from flask import request, jsonify
 from datetime import datetime
 from utils.db import get_db
 
-# ===== HELPER FUNCTIONS =====
-
 def get_next_version_number(session_id):
     conn = get_db()
     if not conn:
@@ -23,7 +21,7 @@ def get_next_version_number(session_id):
             return row['max_version'] + 1
         return 1
     except Exception as e:
-        print(f"❌ Failed to get next version number: {e}")
+        print(f"Failed to get next version number: {e}")
         return 1
 
 
@@ -39,14 +37,13 @@ def create_version(
     report_snapshot=None,
     user_id=None
 ):
-    print(f"=== create_version called ===")
     print(f"Session ID: {session_id}")
     print(f"Version number: {version_number}")
     print(f"Instrument type: {instrument_type}")
     
     conn = get_db()
     if not conn:
-        print("❌ DB connection failed – version not saved")
+        print("DB connection failed – version not saved")
         return None
     
     try:
@@ -108,8 +105,7 @@ def create_version(
             (session_id,)
         )
         count_after = cursor.fetchone()
-        print(f"Version count AFTER insert: {count_after.get('count', 0) if count_after else 0}")
-        print(f"✅ Created version {version_number} for session {session_id} (ID: {version_id})")
+        print(f"Created version {version_number} for session {session_id} (ID: {version_id})")
         
         cursor.close()
         conn.close()
@@ -126,14 +122,13 @@ def create_version(
                 update_conn.commit()
                 up_cursor.close()
                 update_conn.close()
-                print(f"✅ Updated session {session_id} version_count using COUNT query")
+                print(f"Updated session {session_id} version_count using COUNT query")
         except Exception as e:
-            print(f"⚠️ Failed to update session version_count: {e}")
+            print(f"Failed to update session version_count: {e}")
         
-        print(f"=== create_version complete ===")
         return version_id
     except Exception as e:
-        print(f"❌ Failed to create version: {e}")
+        print(f"Failed to create version: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -145,8 +140,7 @@ def get_versions_by_session(session_id, limit=100, offset=0):
         return []
     try:
         cursor = conn.cursor()
-        print(f"🔍 Querying versions for session_id: {session_id} (type: {type(session_id)})")
-        # Remove ORDER BY to avoid sort buffer memory issues, sort in frontend instead
+        print(f"Querying versions for session_id: {session_id} (type: {type(session_id)})")
         cursor.execute("""
             SELECT id, version_number, instrument_type, change_summary,
                    dataset_snapshot, mapping_snapshot, calculation_snapshot,
@@ -156,7 +150,7 @@ def get_versions_by_session(session_id, limit=100, offset=0):
             LIMIT %s OFFSET %s
         """, (session_id, limit, offset))
         rows = cursor.fetchall()
-        print(f"🔍 Found {len(rows)} versions for session {session_id}")
+        print(f"Found {len(rows)} versions for session {session_id}")
         cursor.close()
         conn.close()
         
@@ -183,7 +177,7 @@ def get_versions_by_session(session_id, limit=100, offset=0):
             versions.append(version)
         return versions
     except Exception as e:
-        print(f"❌ Failed to get versions: {e}")
+        print(f"Failed to get versions: {e}")
         return []
 
 
@@ -231,7 +225,7 @@ def get_version_by_id(version_id):
                 version[snapshot_field] = None
         return version
     except Exception as e:
-        print(f"❌ Failed to get version by ID: {e}")
+        print(f"Failed to get version by ID: {e}")
         return None
 
 
@@ -249,10 +243,10 @@ def delete_versions_by_session(session_id):
         conn.commit()
         cursor.close()
         conn.close()
-        print(f"✅ Deleted {deleted} versions for session {session_id}")
+        print(f"Deleted {deleted} versions for session {session_id}")
         return deleted
     except Exception as e:
-        print(f"❌ Failed to delete versions: {e}")
+        print(f"Failed to delete versions: {e}")
         return 0
 
 
@@ -271,16 +265,14 @@ def get_version_count(session_id):
         conn.close()
         return row.get('count', 0) if row else 0
     except Exception as e:
-        print(f"❌ Failed to get version count: {e}")
+        print(f"Failed to get version count: {e}")
         return 0
 
 
 def version_history_routes(app):
     @app.route('/api/version', methods=['POST', 'OPTIONS'])
     def create_version_endpoint():
-        print("=== /api/version ENDPOINT CALLED ===")
         if request.method == 'OPTIONS':
-            print("OPTIONS request - returning 200")
             return '', 200
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
@@ -314,14 +306,14 @@ def version_history_routes(app):
         )
         print(f"Version ID returned: {version_id}")
         if version_id:
-            print(f"✅ Returning success with version_id: {version_id}, version_number: {next_version}")
+            print(f"Returning success with version_id: {version_id}, version_number: {next_version}")
             return jsonify({
                 'success': True,
                 'version_id': version_id,
                 'version_number': next_version
             })
         else:
-            print("❌ Returning failure")
+            print("Returning failure")
             return jsonify({'success': False, 'message': 'Failed to create version'}), 500
 
     @app.route('/api/version/session/<session_id>', methods=['GET', 'OPTIONS'])
@@ -399,14 +391,14 @@ def version_history_routes(app):
                 conn.commit()
                 cursor.close()
                 conn.close()
-                print(f"✅ Restored session {session_id} to version {version.get('versionNumber')}")
+                print(f"Restored session {session_id} to version {version.get('versionNumber')}")
                 return jsonify({
                     'success': True,
                     'message': f'Session restored to version {version.get("versionNumber")}. You can now continue working on this version.',
                     'data': version
                 })
             except Exception as e:
-                print(f"❌ Failed to restore version: {e}")
+                print(f"Failed to restore version: {e}")
                 return jsonify({'success': False, 'message': f'Restore failed: {str(e)}'}), 500
         else:
             return jsonify({'success': False, 'message': 'No dataset snapshot found in version'}), 400
@@ -426,7 +418,7 @@ def version_history_routes(app):
             conn.close()
             return jsonify({'success': True, 'count': row.get('count', 0) if row else 0})
         except Exception as e:
-            print(f"❌ Failed to get total version count: {e}")
+            print(f"Failed to get total version count: {e}")
             return jsonify({'success': True, 'count': 0})
 
     @app.route('/api/version/session/<session_id>/delete', methods=['DELETE', 'OPTIONS'])
@@ -472,15 +464,15 @@ def version_history_routes(app):
                     update_conn.commit()
                     up_cursor.close()
                     update_conn.close()
-                    print(f'✅ Updated session {session_id} version_count after deletion')
+                    print(f'Updated session {session_id} version_count after deletion')
             except Exception as e:
-                print(f'⚠️ Failed to update session version_count: {e}')
+                print(f'Failed to update session version_count: {e}')
             
             conn.close()
-            print(f'✅ Deleted version {version_id} for session {session_id}')
+            print(f'Deleted version {version_id} for session {session_id}')
             return jsonify({'success': True, 'deleted': deleted, 'session_id': session_id})
         except Exception as e:
-            print(f'❌ Failed to delete version: {e}')
+            print(f"Failed to delete versions: {e}")
             import traceback
             traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500

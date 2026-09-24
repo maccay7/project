@@ -46,7 +46,6 @@ def auth_routes(app):
             
             token = str(uuid.uuid4())
             expires_at = datetime.now() + timedelta(days=7)
-            # ensure auth_sessions exists
             try:
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -298,7 +297,6 @@ def auth_routes(app):
             user = cursor.fetchone()
             if not user:
                 return jsonify({'success': True, 'message': 'If the email exists, a verification code has been sent.'})
-            # Generate 6-digit verification code
             import random
             import smtplib
             from email.mime.text import MIMEText
@@ -322,7 +320,6 @@ def auth_routes(app):
             cursor.close()
             conn.close()
             
-            # Send email with verification code
             try:
                 smtp_host = 'smtp.gmail.com'
                 smtp_port = 587
@@ -355,7 +352,6 @@ def auth_routes(app):
                 })
             except Exception as email_error:
                 print(f"Email sending error: {email_error}")
-                # Fallback: return code if email fails (for development)
                 return jsonify({
                     'success': True,
                     'message': 'Verification code sent to your email',

@@ -99,7 +99,6 @@ def series_for_country(country, maturity):
     if series_id:
         label = f'{maturity} {country_upper} Treasury'
         return series_id, label, maturity, country_upper, 'USD', note
-    # Try to find a close match
     for key in maturity_map:
         if maturity in key or key in maturity:
             series_id = maturity_map[key]
