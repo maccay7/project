@@ -100,18 +100,18 @@
       </v-card>
 
       <!-- Excel Viewer (with mapping controls) -->
-<ExcelViewer
-  :data="rawData.slice(0, 500)"
-  :headers="uploadPreviewHeaders"
-  :show-mapping-controls="true"
-  :column-mapping="columnMapping"
-  :available-file-columns="fileColumns"
-  :mapping-validation="mappingValidation"
-  :suggested-mappings="suggestedMapping"
-  @data-update="onRawExcelUpdate"
-  @mapping-update="updateColumnMapping"
-  @request-auto-mapping="suggestMapping"
-/>
+      <ExcelViewer
+        :data="rawData.slice(0, 500)"
+        :headers="uploadPreviewHeaders"
+        :show-mapping-controls="true"
+        :column-mapping="columnMapping"
+        :available-file-columns="fileColumns"
+        :mapping-validation="mappingValidation"
+        :suggested-mappings="suggestedMapping"
+        @data-update="onRawExcelUpdate"
+        @mapping-update="updateColumnMapping"
+        @request-auto-mapping="suggestMapping"
+      />
 
       <!-- Dataset Info -->
       <v-card v-if="showPreview && dataset.length" class="info-card">
@@ -170,6 +170,7 @@ import ExcelViewer from '../components/ExcelViewer.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { datasetAPI } from '../services/api'
+import { API_BASE_URL } from '../config.js'
 import sessionManager from '@/services/sessionManager.js'
 import { markStepCompleted } from '@/utils/workflowProgress.js'
 import * as XLSX from 'xlsx'
@@ -202,7 +203,7 @@ const suggestedMapping = ref({})
 const mappingValidation = ref(null)
 const dependencyValidation = ref(null)
 const showMappingDialog = ref(false)
-const selectedInstrumentType = ref('money-market')
+const selectedInstrumentType = ref(null)
 const columnMapping = ref({})
 const fileColumns = ref([])
 
@@ -366,7 +367,7 @@ async function loadExcel() {
 // ---------- Instrument Detection and Mapping ----------
 async function detectInstrumentType(data) {
   try {
-    const response = await fetch('http://localhost:5000/api/detect-instrument', {
+    const response = await fetch(`${API_BASE_URL}/api/detect-instrument`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ data })
@@ -374,7 +375,7 @@ async function detectInstrumentType(data) {
     const result = await response.json()
     if (result.success) {
       instrumentDetection.value = result.data
-      selectedInstrumentType.value = result.data.instrument_type || 'money-market'
+      selectedInstrumentType.value = result.data.instrument_type || null
       
       // Get suggested mapping
       await suggestMapping()
@@ -389,7 +390,7 @@ async function detectInstrumentType(data) {
 
 async function suggestMapping() {
   try {
-    const response = await fetch('http://localhost:5000/api/suggest-mapping', {
+    const response = await fetch(`${API_BASE_URL}/api/suggest-mapping`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -421,7 +422,7 @@ async function validateDependencies() {
       availableFields[field] = dataset.value[0]?.[field] || null
     })
     
-    const response = await fetch('http://localhost:5000/api/validate-dependencies', {
+    const response = await fetch(`${API_BASE_URL}/api/validate-dependencies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -503,20 +504,21 @@ async function loadDataset(idx) {
   const ds = savedDatasets.value[idx]
   if (!ds) return
   try {
-    console.log('🔍 Loading dataset from history:', ds.id, ds.name)
     const res = await datasetAPI.load(ds.id)
-    console.log('🔍 Load response:', res)
     if (res && res.success) {
       const data = res.data || {}
-      console.log('🔍 Loaded data:', data)
       if (data.data && data.data.length) {
+        // Populate ALL data refs so the Excel viewer refreshes correctly
         dataset.value = data.data
         headers.value = data.headers || Object.keys(data.data[0] || {})
+        rawData.value = data.data
+        uploadPreviewHeaders.value = headers.value
+        fileColumns.value = headers.value
         uploadedFile.value = { name: data.name }
         selectedDatasetId.value = data.id
         selectedDatasetName.value = data.name
         showPreview.value = true
-        console.log('✅ Dataset loaded successfully, history item preserved')
+        await detectInstrumentType(data.data)
       } else {
         alert('Dataset has no data')
       }

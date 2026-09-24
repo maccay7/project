@@ -183,7 +183,6 @@ export default {
 
     const pageSize = ref(100)
     const currentPage = ref(1)
-    const loadAllMode = ref(false)
 
     function getUniqueHeaders(headers) {
       if (!headers || !headers.length) return []
@@ -226,7 +225,6 @@ export default {
 
     const totalPages = computed(() => Math.max(1, Math.ceil(displayData.value.length / pageSize.value)))
     const paginatedData = computed(() => {
-      if (loadAllMode.value) return displayData.value
       const start = (currentPage.value - 1) * pageSize.value
       return displayData.value.slice(start, start + pageSize.value)
     })
@@ -572,12 +570,6 @@ export default {
       scrollLeft.value = event.target.scrollLeft
     }
 
-    const tableStyle = computed(() => ({
-      width: '100%',
-      borderCollapse: 'collapse',
-      tableLayout: 'fixed',
-    }))
-
     function prevPage() { if (currentPage.value > 1) currentPage.value-- }
     function nextPage() { if (currentPage.value < totalPages.value) currentPage.value++ }
 
@@ -729,7 +721,6 @@ export default {
       scrollLeft,
       defaultColumnWidth,
       defaultRowHeight,
-      tableStyle,
       selectedCellRef,
       getCellValue,
       setCellValue,

@@ -162,11 +162,59 @@ async function resolveSession() {
       session = sessionManager.getActiveSession()
     }
   }
-  if (!session) {
-    const all = await sessionManager.getAllSessions()
-    if (all.length) session = all[0]
-  }
   return session
+}
+
+// Helper: resolve valuation date from session context (no forced today)
+function resolveValuationDate(session) {
+  if (session) {
+    if (session.valuationDate) return session.valuationDate
+    if (session.valuation_date) return session.valuation_date
+  }
+  try {
+    return (
+      sessionStorage.getItem('valuationDate') ||
+      sessionStorage.getItem('valuation_date') ||
+      localStorage.getItem('valuationDate') ||
+      localStorage.getItem('valuation_date') ||
+      null
+    )
+  } catch (e) {
+    return null
+  }
+}
+
+// Helper: resolve currency from session context (no assumed USD)
+function resolveCurrency(session) {
+  if (session) {
+    if (session.currency) return session.currency
+    if (session.currencyCode) return session.currencyCode
+  }
+  try {
+    return (
+      sessionStorage.getItem('currency') ||
+      localStorage.getItem('currency') ||
+      null
+    )
+  } catch (e) {
+    return null
+  }
+}
+
+// Helper: resolve country from session context (no assumed US)
+function resolveCountry(session) {
+  if (session) {
+    if (session.country) return session.country
+  }
+  try {
+    return (
+      sessionStorage.getItem('country') ||
+      localStorage.getItem('country') ||
+      null
+    )
+  } catch (e) {
+    return null
+  }
 }
 
 async function loadSummaryData(sessionId, instrumentType) {
@@ -223,17 +271,21 @@ async function loadFredDataFromSession(sessionId, instrumentType) {
     console.warn('Could not load Fred data from session:', e)
   }
   
-  // If no data in session, fetch from FRED API using default filters
+  // If no data in session, fetch from FRED API using whatever filter context is available
   console.log('No yield curve data in session, fetching from FRED API')
   try {
+    const session = await resolveSession()
+    const country = resolveCountry(session)
+    const currency = resolveCurrency(session)
+
     const response = await fetch('http://localhost:5000/api/fred/yield-curve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         instrument_type: instrumentType,
-        country: 'US',
-        currency: 'USD',
-        maturity: '1Y'
+        country: country,
+        currency: currency,
+        maturity: null
       })
     })
     const data = await response.json()
@@ -244,7 +296,7 @@ async function loadFredDataFromSession(sessionId, instrumentType) {
       }))
       console.log('Fetched yield curve from FRED API:', points.length, 'points')
       return {
-        fredFilters: { country: 'US', currency: 'USD', maturity: '1Y' },
+        fredFilters: { country: country, currency: currency, maturity: null },
         yieldCurveData: points
       }
     }
@@ -252,8 +304,8 @@ async function loadFredDataFromSession(sessionId, instrumentType) {
     console.warn('Failed to fetch yield curve from FRED API:', e)
   }
   
-  console.log('Returning default FRED data')
-  return { fredFilters: { country: 'US', currency: 'USD', maturity: '1Y' }, yieldCurveData: [] }
+  console.log('Returning empty FRED data')
+  return { fredFilters: { country: null, currency: null, maturity: null }, yieldCurveData: [] }
 }
 
 // ===== Load Dataset Preview =====
@@ -264,7 +316,8 @@ async function loadDatasetPreview() {
     if (!session) {
       return
     }
-    const instrument = route.query.instrument || 'money-market'
+    const instrument = route.query.instrument
+    if (!instrument) return
     const summary = await loadSummaryData(session.id, instrument)
     let data = []
     if (summary && summary.rows && summary.rows.length) {
@@ -304,7 +357,12 @@ async function generatePreview() {
     return
   }
   sessionName.value = session.name || 'Current Session'
-  const instrument = route.query.instrument || 'money-market'
+  const instrument = route.query.instrument
+  if (!instrument) {
+    reportError.value = 'No instrument selected in the URL.'
+    previewData.value = null
+    return
+  }
   const allWorkedData = {}
   const instruments = ['money-market', 'bonds', 'tbills']
   for (const inst of instruments) {
@@ -321,6 +379,7 @@ async function generatePreview() {
 
   // 🔥 Load FRED data from session
   const fredData = await loadFredDataFromSession(session.id, instrument)
+  const valuationDate = resolveValuationDate(session)
 
   const preview = {
     type: selectedType.value === 'current' ? 'Current Instrument Report' : 'Full Session Report',
@@ -330,7 +389,7 @@ async function generatePreview() {
     rows: currentData.length,
     columns: currentData.length ? Object.keys(currentData[0]).length : 0,
     sample: currentData.slice(0, 3),
-    valuationDate: new Date().toISOString().split('T')[0],
+    valuationDate: valuationDate,
     totalValue: currentData.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['Calculated Value'] || 0)), 0),
     allWorkedData: allWorkedData,
     fredFilters: fredData.fredFilters,
@@ -355,7 +414,7 @@ async function generatePreview() {
     const instrumentName = data.instrument || 'unknown'
     const sessionName = data.session || 'Current Session'
     const date = data.date || new Date().toLocaleString()
-    const valuationDate = data.valuationDate || new Date().toISOString().split('T')[0]
+    const valuationDate = data.valuationDate
     let fullData = []
     if (selectedType.value === 'session' && data.instruments) {
       for (const [inst, rows] of Object.entries(data.instruments)) {
@@ -392,7 +451,7 @@ async function generatePreview() {
         date,
         valuationDate,
         chartImage,
-        data.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
+        data.fredFilters || null,
         data.yieldCurveData || [],
         data.allWorkedData || {}
       )
@@ -496,8 +555,8 @@ async function downloadReport(format = 'word') {
       // Prepare report data for backend
       const reportData = {
         session: data.session || session.name || 'Current Session',
-        valuationDate: data.valuationDate || new Date().toISOString().split('T')[0],
-        data: data.allWorkedData?.[route.query.instrument || 'money-market'] || data.sample || []
+        valuationDate: data.valuationDate || null,
+        data: data.allWorkedData?.[route.query.instrument] || data.sample || []
       }
       
       // If session report, combine all instrument data
@@ -517,8 +576,8 @@ async function downloadReport(format = 'word') {
         body: JSON.stringify({
           session_id: session.id,
           report_data: reportData,
-          instrument_type: route.query.instrument || 'money-market',
-          fred_filters: data.fredFilters || { country: 'US', currency: 'USD', maturity: '1Y' },
+          instrument_type: route.query.instrument || null,
+          fred_filters: data.fredFilters || null,
           yield_curve_data: data.yieldCurveData || [],
           chart_image_base64: chartImageBase64,
           logo_base64: logoBase64,
@@ -536,7 +595,8 @@ async function downloadReport(format = 'word') {
           const url = URL.createObjectURL(blob)
           const a = document.createElement('a')
           a.href = url
-          a.download = result.data.file_name || `Dura-Capital-Valuation-Report-${new Date().toISOString().split('T')[0]}.docx`
+          const filenameSuffix = data.valuationDate ? `-${data.valuationDate}` : ''
+          a.download = result.data.file_name || `Dura-Capital-Valuation-Report${filenameSuffix}.docx`
           a.click()
           URL.revokeObjectURL(url)
         } else {
@@ -572,7 +632,6 @@ async function markDone() {
     if (!session) {
       return
     }
-    const instrument = route.query.instrument || 'money-market'
     await markStepCompleted(session.id, 'reports')
     router.push('/dashboard')
   } catch (err) {

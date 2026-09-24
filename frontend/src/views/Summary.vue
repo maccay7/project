@@ -189,7 +189,7 @@
             </div>
           </v-card-text>
           <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
-            <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
+            <span v-if="activeValuationDate" class="valuation-date-footer">Valuation Date: {{ activeValuationDate }}</span>
             <v-spacer></v-spacer>
             <button class="btn-secondary" @click="detailModalVisible = false">Close</button>
           </div>
@@ -291,7 +291,7 @@
             </div>
           </v-card-text>
           <div class="popup-footer" style="padding:12px 24px; border-top:1px solid #e0e0e0; background:#f9fafc;">
-            <span class="valuation-date-footer">Valuation Date: {{ new Date().toISOString().split('T')[0] }}</span>
+            <span v-if="activeValuationDate" class="valuation-date-footer">Valuation Date: {{ activeValuationDate }}</span>
             <v-spacer></v-spacer>
             <button class="btn-secondary" @click="combinedModalVisible = false">Close</button>
           </div>
@@ -322,16 +322,11 @@
         </v-card>
       </v-dialog>
 
-    </div> <!-- /summary-page -->
+    </div>
   </FixedLayout>
 </template>
 
 <script setup>
-// ================================================================
-// FULL IMPLEMENTATION – ALL FIXES APPLIED
-// Fixed: closing div, lifecycle hooks (onBeforeUnmount moved out)
-// ================================================================
-
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
@@ -371,96 +366,24 @@ function getUniqueHeaders(headers) {
 }
 
 // ================================================================
-// computeAggregate – robust aggregation
+// Valuation date — from session/selected value, NOT forced to today
 // ================================================================
-function computeAggregate(rows) {
-  const agg = {
-    totalValue: 0,
-    instrumentCount: 0,
-    avgRate: 0,
-    weightedAvgRate: 0,
-    totalInterest: 0,
-    interestEarned: 0,
-    annualYield: 0,
-    effectiveAnnualRate: 0,
-    avgDaysToMaturity: 0,
-    totalPrincipal: 0,
-    avgCouponRate: 0,
-    weightedAvgCoupon: 0,
-    totalAnnualIncome: 0,
-    avgYTM: 0,
-    duration: 0,
-    avgDiscountRate: 0,
-    weightedAvgDiscount: 0,
-    totalDiscount: 0,
-    effectiveYield: 0,
-    bondEquivalentYield: 0,
-    totalPurchasePrice: 0,
-    avgInvestment: 0,
-    holdingPeriodYield: 0,
-    annualizedYield: 0,
-    pricePer100: 0
+const activeValuationDate = computed(() => {
+  const s = activeSession.value
+  if (s) {
+    if (s.valuationDate) return s.valuationDate
+    if (s.valuation_date) return s.valuation_date
   }
-
-  if (!rows || !rows.length) return agg
-
-  const getNumber = (row, ...keys) => {
-    for (const key of keys) {
-      const val = row[key]
-      if (val !== undefined && val !== null && val !== '') {
-        const num = parseFloat(val)
-        if (!isNaN(num)) return num
-      }
-    }
-    return 0
-  }
-
-  let total = 0, count = 0, rateSum = 0, weightedSum = 0
-
-  rows.forEach(row => {
-    const value = getNumber(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
-    const rate = getNumber(row, 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Interest Rate', 'interest_rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate', 'Yield', 'yield')
-    total += value
-    count++
-    rateSum += rate
-    weightedSum += value * rate
-  })
-
-  const avgRate = count > 0 ? rateSum / count : 0
-  const weightedAvg = total > 0 ? weightedSum / total : 0
-
-  agg.totalValue = total
-  agg.instrumentCount = count
-  agg.avgRate = avgRate
-  agg.weightedAvgRate = weightedAvg
-  agg.totalInterest = total * (avgRate / 100) * 90 / 360
-  agg.interestEarned = agg.totalInterest
-  agg.annualYield = avgRate
-  agg.effectiveAnnualRate = avgRate
-  agg.avgDaysToMaturity = 90
-  agg.totalPrincipal = total
-
-  const couponSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate'), 0)
-  agg.avgCouponRate = count > 0 ? couponSum / count : 0
-  agg.weightedAvgCoupon = weightedAvg
-  agg.totalAnnualIncome = total * (agg.avgCouponRate / 100)
-  agg.avgYTM = avgRate
-  agg.duration = 10
-
-  const discountSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate'), 0)
-  agg.avgDiscountRate = count > 0 ? discountSum / count : 0
-  agg.weightedAvgDiscount = weightedAvg
-  agg.totalDiscount = total * (agg.avgDiscountRate / 100) * 90 / 360
-  agg.effectiveYield = avgRate
-  agg.bondEquivalentYield = avgRate
-  agg.totalPurchasePrice = total - agg.totalDiscount
-  agg.avgInvestment = count > 0 ? agg.totalPurchasePrice / count : 0
-  agg.holdingPeriodYield = avgRate
-  agg.annualizedYield = avgRate
-  agg.pricePer100 = 100 * (1 - (agg.avgDiscountRate / 100) * 90 / 360)
-
-  return agg
-}
+  try {
+    const stored =
+      sessionStorage.getItem('valuationDate') ||
+      sessionStorage.getItem('valuation_date') ||
+      localStorage.getItem('valuationDate') ||
+      localStorage.getItem('valuation_date')
+    if (stored) return stored
+  } catch (e) { /* ignore */ }
+  return null
+})
 
 // ================================================================
 // Descriptive Analytics
@@ -610,7 +533,7 @@ function formatForExcel(value, type = 'number', key = '') {
 // ---- Export functions ----
 function exportCombinedExcel() {
   const workbook = XLSX.utils.book_new()
-  const valuationDate = new Date().toISOString().split('T')[0]
+  const valuationDate = activeValuationDate.value || ''
   const sessionName = activeSession.value?.name || 'N/A'
 
   const summaryRows = []
@@ -657,21 +580,21 @@ function exportCombinedExcel() {
   for (const inst of filteredDetails.value) {
     if (inst.details && inst.details.length) {
       const headers = getUniqueHeaders(inst.detailHeaders)
-      const detailData = [
+      const headerRows = [
         [`${inst.name} – Detailed Instruments`],
-        [`Session: ${sessionName}`],
-        [`Valuation Date: ${valuationDate}`],
-        [],
-        headers,
-        ...inst.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))
+        [`Session: ${sessionName}`]
       ]
+      if (valuationDate) headerRows.push([`Valuation Date: ${valuationDate}`])
+      headerRows.push([])
+      const detailData = [...headerRows, headers, ...inst.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))]
       const sheet = XLSX.utils.aoa_to_sheet(detailData)
       sheet['!cols'] = headers.map(() => ({ wch: 16 }))
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
 
-  XLSX.writeFile(workbook, `Portfolio_Summary_${sessionName}_${valuationDate}.xlsx`)
+  const filenameSuffix = valuationDate ? `_${valuationDate}` : ''
+  XLSX.writeFile(workbook, `Portfolio_Summary_${sessionName}${filenameSuffix}.xlsx`)
   combinedModalVisible.value = false
 }
 
@@ -694,14 +617,14 @@ function exportToExcel() {
   if (toExport.length === 0 && !downloadPortfolioOption.value) { alert('No instruments selected for export'); return }
 
   const workbook = XLSX.utils.book_new()
-  const valuationDate = new Date().toISOString().split('T')[0]
+  const valuationDate = activeValuationDate.value || ''
 
   const summaryRows = []
   summaryRows.push(['', '', '', ''])
   summaryRows.push(['DuraCapital', '', '', ''])
   summaryRows.push(['Portfolio Summary', '', '', ''])
   summaryRows.push([`Session: ${activeSession.value.name}`, '', '', ''])
-  summaryRows.push([`Valuation Date: ${valuationDate}`, '', '', ''])
+  if (valuationDate) summaryRows.push([`Valuation Date: ${valuationDate}`, '', '', ''])
   summaryRows.push(['', '', '', ''])
   summaryRows.push([
     'Instrument Name',
@@ -743,21 +666,21 @@ function exportToExcel() {
     const instDetails = instrumentsWithDetails.value.find(d => d.id === inst.id)
     if (instDetails?.details && instDetails.details.length) {
       const headers = getUniqueHeaders(instDetails.detailHeaders)
-      const detailData = [
+      const headerRows = [
         [`${inst.name} – Detailed Instruments`],
-        [`Session: ${activeSession.value.name}`],
-        [`Valuation Date: ${valuationDate}`],
-        [],
-        headers,
-        ...instDetails.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))
+        [`Session: ${activeSession.value.name}`]
       ]
+      if (valuationDate) headerRows.push([`Valuation Date: ${valuationDate}`])
+      headerRows.push([])
+      const detailData = [...headerRows, headers, ...instDetails.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))]
       const sheet = XLSX.utils.aoa_to_sheet(detailData)
       sheet['!cols'] = headers.map(() => ({ wch: 16 }))
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
 
-  XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name}_${valuationDate}.xlsx`)
+  const filenameSuffix = valuationDate ? `_${valuationDate}` : ''
+  XLSX.writeFile(workbook, `Portfolio_Summary_${activeSession.value.name}${filenameSuffix}.xlsx`)
 
   if (downloadPortfolioOption.value) {
     downloadPortfolioExcel()
@@ -780,10 +703,6 @@ async function loadSummary() {
         await sessionManager.getSession(sid)
         session = sessionManager.getActiveSession()
       }
-    }
-    if (!session) {
-      const all = await sessionManager.getAllSessions()
-      if (all.length) session = all[0]
     }
     activeSession.value = session
 
@@ -929,7 +848,7 @@ async function loadSummary() {
 }
 
 // ================================================================
-// LIFECYCLE HOOKS (FIXED: onBeforeUnmount moved to top level)
+// LIFECYCLE HOOKS
 // ================================================================
 
 const handleSessionUpdate = async (event) => {

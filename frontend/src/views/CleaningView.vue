@@ -60,6 +60,45 @@
           </v-card-text>
         </v-card>
 
+        <!-- Required Values (Single Instrument) — FIX #7 -->
+        <v-card v-if="hasDetectedValues" class="stats-card">
+          <v-card-title class="card-title">
+            <v-icon class="title-icon">mdi-format-list-checks</v-icon>
+            Required Values (Single Instrument)
+          </v-card-title>
+          <v-card-text>
+            <table class="required-values-table">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Extracted Value</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in detectedValueRows"
+                  :key="row.key"
+                  :class="{ 'excluded-row': !row.included }"
+                >
+                  <td>{{ row.label }}</td>
+                  <td>{{ row.value }}</td>
+                  <td>
+                    <v-btn
+                      :color="row.included ? 'success' : 'grey'"
+                      size="small"
+                      variant="flat"
+                      @click="toggleFieldInclusion(row.key)"
+                    >
+                      {{ row.included ? 'Included' : 'Excluded' }}
+                    </v-btn>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </v-card-text>
+        </v-card>
+
         <!-- Excel Viewer with Full Dataset -->
         <v-card class="stats-card">
           <v-card-title class="card-title">
@@ -220,6 +259,10 @@ const showDatasetPreview = ref(false)
 const sheetNames = ref([])
 const selectedSheet = ref('')
 
+// Detected values (Required Values — Single Instrument, FIX #7)
+const detectedValues = ref({})
+const excludedFields = ref(new Set())
+
 // Cleaning options
 const cleaningOptions = ref([
   { key: 'removeDuplicates', label: 'Remove Duplicates', desc: 'Delete duplicate rows', value: true },
@@ -245,6 +288,72 @@ const dateFormatOptions = ref([
 const selectedDateFormat = ref('YYYY-MM-DD')
 
 const hasAnyOption = computed(() => cleaningOptions.value.some(o => o.value))
+
+// Required Values table
+const hasDetectedValues = computed(() => Object.keys(detectedValues.value).length > 0)
+
+const detectedValueRows = computed(() => {
+  return Object.entries(detectedValues.value).map(([key, value]) => ({
+    key,
+    label: getFieldLabel(key),
+    value: value === null || value === undefined || value === '' ? 'Not detected' : value,
+    included: !excludedFields.value.has(key)
+  }))
+})
+
+function getFieldLabel(key) {
+  const labels = {
+    principal: 'Principal',
+    interestRate: 'Interest Rate',
+    daysToMaturity: 'Days to Maturity',
+    issueDate: 'Issue Date',
+    maturityDate: 'Maturity Date',
+    faceValue: 'Face Value',
+    couponRate: 'Coupon Rate',
+    yield: 'Yield',
+    discountRate: 'Discount Rate',
+    frequency: 'Frequency',
+    couponFrequency: 'Coupon Frequency',
+    auctionDate: 'Auction Date',
+    instrumentName: 'Instrument Name',
+    purchasePrice: 'Purchase Price',
+    settlementDate: 'Settlement Date',
+    currency: 'Currency',
+    country: 'Country'
+  }
+  return labels[key] || key
+}
+
+function toggleFieldInclusion(key) {
+  const next = new Set(excludedFields.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  excludedFields.value = next
+  try {
+    sessionStorage.setItem('excluded_fields', JSON.stringify([...next]))
+  } catch (e) { /* ignore */ }
+}
+
+function loadDetectedValues() {
+  try {
+    const stored =
+      sessionStorage.getItem('detectedValues') ||
+      sessionStorage.getItem('detected_values') ||
+      sessionStorage.getItem('extracted_values')
+    if (stored) {
+      detectedValues.value = JSON.parse(stored)
+    }
+    const storedExcluded = sessionStorage.getItem('excluded_fields')
+    if (storedExcluded) {
+      excludedFields.value = new Set(JSON.parse(storedExcluded))
+    }
+  } catch (e) {
+    detectedValues.value = {}
+  }
+}
 
 // KPI Stats for Dataset Overview
 const kpiStats = computed(() => {
@@ -421,6 +530,7 @@ async function goToCalculations() {
 }
 
 onMounted(() => {
+  loadDetectedValues()
   if (route.query.dataset_id) {
     loadData()
   }
@@ -458,6 +568,11 @@ onMounted(() => {
 .result-item span:first-child { color: #666; font-weight: 500; }
 .result-item span:last-child { color: #0B2A44; font-weight: 700; }
 .result-actions { display: flex; gap: 12px; margin-top: 20px; }
+.required-values-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.required-values-table th { text-align: left; padding: 10px 12px; background: rgba(11,42,68,0.05); color: #0B2A44; font-weight: 600; border-bottom: 2px solid #0B2A44; }
+.required-values-table td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; color: #333; }
+.required-values-table .excluded-row { opacity: 0.5; text-decoration: line-through; }
+.required-values-table .excluded-row td { color: #999; }
 @media (max-width: 600px) {
   .cleaning-view { padding: 0 16px; }
   .action-buttons { flex-direction: column; }

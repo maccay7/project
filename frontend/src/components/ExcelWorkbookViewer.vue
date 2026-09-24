@@ -180,101 +180,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import {
   detectSheetType,
   extractSingleInstrumentValues,
-  getRequiredFieldMappings
+  getRequiredFieldMappings,
+  detectInstrumentNameColumn,
+  extractInstrumentNames
 } from '@/utils/sheetTypeDetector'
 
-const FINANCIAL_SYNONYMS = {
-  principal: ['principal', 'face value', 'nominal value', 'investment amount', 'capital', 'deposit amount', 'initial investment', 'amount invested', 'notional', 'amount'],
-  interestRate: ['interest rate', 'rate', 'coupon', 'coupon rate', 'annual rate', 'fixed rate', 'lending rate', 'investment rate', 'yield rate', 'return', 'yield'],
-  daysToMaturity: ['days to maturity', 'term', 'tenor', 'maturity days', 'duration days', 'period', 'days'],
-  issueDate: ['issue date', 'start date', 'effective date', 'trade date', 'settlement date', 'value date', 'origination date'],
-  maturityDate: ['maturity date', 'end date', 'due date', 'redemption date', 'expiry date'],
-  faceValue: ['face value', 'par value', 'nominal', 'amount', 'principal'],
-  couponRate: ['coupon rate', 'coupon', 'rate', 'interest rate'],
-  yield: ['yield', 'ytm', 'yield to maturity', 'return', 'effective yield'],
-  frequency: ['frequency', 'payment frequency', 'coupon frequency', 'period', 'semi-annual', 'quarterly', 'annual'],
-  discountRate: ['discount rate', 'discount', 'rate', 'bank discount'],
-  purchasePrice: ['purchase price', 'buy price', 'price paid', 'acquisition price'],
-  redemptionValue: ['redemption value', 'call value', 'maturity value'],
-  instrumentName: ['instrument', 'security', 'name', 'description', 'issuer', 'counterparty', 'company', 'entity', 'bond name', 'tbill name'],
-  currency: ['currency', 'ccy', 'curr', 'denomination'],
-  country: ['country', 'nation', 'jurisdiction', 'region', 'market']
-}
-
-function extractValuesIntelligently(data, instrumentType, currencyFilter = null) {
+function extractValuesIntelligently(data, instrumentType) {
   const requiredFields = getRequiredFieldMappings(instrumentType)
-  let extracted = extractSingleInstrumentValues(data, requiredFields)
-
-  // Filter data by currency if specified
-  let filteredData = data
-  if (currencyFilter) {
-    filteredData = data.filter(row => {
-      if (!row) return false
-      return Object.values(row).some(val => {
-        if (typeof val === 'string') {
-          return val.toUpperCase().includes(currencyFilter.toUpperCase())
-        }
-        return false
-      })
-    })
-    // If no data matches currency, use original data
-    if (filteredData.length === 0) {
-      filteredData = data
-    }
-  }
-
-  const fieldKeys = Object.keys(requiredFields)
-  for (const field of fieldKeys) {
-    if (!extracted[field] || extracted[field] === '') {
-      const synonyms = FINANCIAL_SYNONYMS[field] || [field]
-      
-      // Search in filtered data first
-      for (const row of filteredData) {
-        if (!row || typeof row !== 'object') continue
-        for (const [key, value] of Object.entries(row)) {
-          if (value === undefined || value === null || value === '') continue
-          const keyLower = key.toLowerCase()
-          const matched = synonyms.some(syn => 
-            keyLower.includes(syn.toLowerCase()) || syn.toLowerCase().includes(keyLower)
-          )
-          if (matched) {
-            extracted[field] = value
-            break
-          }
-        }
-        if (extracted[field]) break
-      }
-      
-      // If still not found, search in entire original data (scattered values)
-      if (!extracted[field] || extracted[field] === '') {
-        for (const row of data) {
-          if (!row || typeof row !== 'object') continue
-          for (const [key, value] of Object.entries(row)) {
-            if (value === undefined || value === null || value === '') continue
-            const keyLower = key.toLowerCase()
-            const matched = synonyms.some(syn => 
-              keyLower.includes(syn.toLowerCase()) || syn.toLowerCase().includes(keyLower)
-            )
-            if (matched) {
-              extracted[field] = value
-              break
-            }
-          }
-          if (extracted[field]) break
-        }
-      }
-    }
-  }
+  const extracted = extractSingleInstrumentValues(data, requiredFields)
 
   if (!extracted.instrumentName || extracted.instrumentName === '') {
-    const nameCol = detectInstrumentNameColumn(filteredData)
+    const nameCol = detectInstrumentNameColumn(data)
     if (nameCol && nameCol.columnName) {
-      const names = extractInstrumentNames(filteredData, nameCol.columnName)
+      const names = extractInstrumentNames(data, nameCol.columnName)
       if (names && names.length > 0) {
         extracted.instrumentName = names[0]
       }
@@ -282,30 +205,6 @@ function extractValuesIntelligently(data, instrumentType, currencyFilter = null)
   }
 
   return extracted
-}
-
-function detectInstrumentNameColumn(data) {
-  if (!data || data.length === 0) return null
-  
-  const namePatterns = ['instrument', 'name', 'security', 'bond', 'tbill', 'issuer', 'counterparty', 'company', 'entity']
-  
-  for (const header of Object.keys(data[0] || {})) {
-    const lowerHeader = header.toLowerCase()
-    if (namePatterns.some(p => lowerHeader.includes(p))) {
-      return { columnName: header, confidence: 0.9 }
-    }
-  }
-  
-  return { columnName: Object.keys(data[0] || {})[0], confidence: 0.5 }
-}
-
-function extractInstrumentNames(data, columnName) {
-  if (!data || !columnName) return []
-  
-  return data
-    .map(row => row[columnName])
-    .filter(name => name && typeof name === 'string' && name.trim() !== '')
-    .slice(0, 10)
 }
 
 const props = defineProps({
@@ -327,7 +226,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'currency-change', 'workbook-loaded'])
+const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'workbook-loaded'])
 
 // ===== STATE =====
 const sheets = ref([])
@@ -337,7 +236,7 @@ const columnHeaders = ref([])
 const selectedCell = ref({ row: -1, col: -1 })
 const selectedCellValue = ref('')
 const selectedCellFormula = ref('')
-const cellFormulas = ref(new Map()) // Store formulas by cell reference (e.g., "A1", "B2")
+const cellFormulas = ref(new Map())
 const mergedRanges = ref([])
 const rowsContainer = ref(null)
 const detectedTables = ref([])
@@ -345,12 +244,8 @@ const selectedTable = ref(null)
 const isTableIsolationMode = ref(false)
 const isSingleInstrumentSheet = ref(false)
 const extractedPreviewValues = ref({})
-const selectedTables = ref(new Set()) // For multi-table selection
+const selectedTables = ref(new Set())
 const isMultiTableMode = ref(false)
-
-// Currency selection
-const selectedCurrency = ref(null)
-const availableCurrencies = ref([])
 
 // Viewer resize
 const viewerHeight = ref(600)
@@ -447,11 +342,9 @@ function handleRowClick(rowIndex) {
   if (!isRowSelectionMode.value) return
   
   if (selectedRowRange.value.start === -1) {
-    // First click - set start
     selectedRowRange.value.start = rowIndex
     selectedRowRange.value.end = rowIndex
   } else {
-    // Second click - set end (ensure start <= end)
     selectedRowRange.value.end = rowIndex
     if (selectedRowRange.value.start > selectedRowRange.value.end) {
       const temp = selectedRowRange.value.start
@@ -483,7 +376,6 @@ function createCustomTableFromRows() {
   
   if (!activeSheet.value || !activeSheet.value.fullData) return
   
-  // Create custom table from selected rows
   const customTable = {
     startRow: startRow,
     endRow: endRow,
@@ -502,32 +394,28 @@ function createCustomTableFromRows() {
 function formatCellValue(cell) {
   if (cell === null || cell === undefined || cell === '') return ''
   
-  // Check if it's a date object
   if (cell instanceof Date) {
     return cell.toLocaleDateString()
   }
   
-  // Check if it's a date string (common Excel date formats)
   if (typeof cell === 'string') {
     const datePatterns = [
-      /^\d{4}-\d{2}-\d{2}$/, // YYYY-MM-DD
-      /^\d{2}\/\d{2}\/\d{4}$/, // MM/DD/YYYY
-      /^\d{2}-\d{2}-\d{4}$/, // DD-MM-YYYY
-      /^\d{4}\/\d{2}\/\d{2}$/, // YYYY/MM/DD
+      /^\d{4}-\d{2}-\d{2}$/,
+      /^\d{2}\/\d{2}\/\d{4}$/,
+      /^\d{2}-\d{2}-\d{4}$/,
+      /^\d{4}\/\d{2}\/\d{2}$/,
     ]
     for (const pattern of datePatterns) {
       if (pattern.test(cell)) {
         const date = new Date(cell)
         if (!isNaN(date.getTime())) {
-          return cell // Return original date string to preserve format
+          return cell
         }
       }
     }
   }
   
-  // Check if it's a number that might be an Excel serial date
   if (typeof cell === 'number') {
-    // Excel dates are typically between 1 (Jan 1, 1900) and 2958465 (Dec 31, 9999)
     if (cell > 1 && cell < 2958465 && Number.isInteger(cell)) {
       const excelDate = new Date((cell - 25569) * 86400 * 1000)
       if (!isNaN(excelDate.getTime())) {
@@ -572,19 +460,15 @@ function getCellStyle(row, col) {
     fontSize: '13px'
   }
 
-  // Simple, reliable header highlighting: Highlight first row of any data block
   const currentRow = visibleRows.value[row]
   const prevRow = row > 0 ? visibleRows.value[row - 1] : null
   
-  // Check if current row has data
   if (currentRow && currentRow.length >= 1) {
     const currentHasData = currentRow.some(cell => cell && String(cell).trim() !== '')
     
     if (currentHasData) {
-      // Check if previous row is empty or doesn't exist
       const prevHasData = prevRow && prevRow.some(cell => cell && String(cell).trim() !== '')
       
-      // Highlight if previous row is empty (start of data block) or this is row 0
       if (!prevHasData || row === 0) {
         styles.backgroundColor = 'rgba(227, 242, 253, 0.3)'
         styles.fontWeight = '600'
@@ -594,19 +478,16 @@ function getCellStyle(row, col) {
     }
   }
 
-  // Check merged ranges - but don't override header highlighting
   let isInMergedRange = false
   for (const range of mergedRanges.value) {
     if (row >= range.min_row && row <= range.max_row &&
         col >= range.min_col && col <= range.max_col) {
       isInMergedRange = true
       if (row === range.min_row && col === range.min_col) {
-        // Top-left cell of merge – expand
         const colspan = range.max_col - range.min_col + 1
         const rowspan = range.max_row - range.min_row + 1
         styles.width = `calc(${getColumnWidth(col)} * ${colspan})`
         styles.height = `calc(${getRowHeight(row)} * ${rowspan})`
-        // Don't override header highlighting - only apply if not already highlighted
         if (!styles.backgroundColor || styles.backgroundColor === 'transparent') {
           styles.backgroundColor = 'rgba(240, 244, 255, 0.08)'
         }
@@ -614,14 +495,12 @@ function getCellStyle(row, col) {
         styles.zIndex = 2
         styles.position = 'relative'
       } else {
-        // Hide non-top-left cells in merge
         styles.display = 'none'
       }
       break
     }
   }
 
-  // Number alignment
   const cellValue = activeSheet.value?.fullData?.[row]?.[col]
   if (typeof cellValue === 'number') {
     styles.textAlign = 'right'
@@ -634,14 +513,11 @@ function selectCell(rowIndex, colIndex, cell) {
   selectedCell.value = { row: rowIndex, col: colIndex }
   selectedCellValue.value = formatCellValue(cell)
   
-  // Get cell reference (e.g., "A1", "B2")
   const cellRef = getCellReference(rowIndex, colIndex)
   
-  // Check if cell has a formula - show formula in formula bar
   if (cellFormulas.value.has(cellRef)) {
     selectedCellFormula.value = cellFormulas.value.get(cellRef)
   } else {
-    // Check if cell is an object with formula property
     if (cell && typeof cell === 'object' && cell.f) {
       selectedCellFormula.value = cell.f
     } else {
@@ -656,7 +532,6 @@ function getCellReference(rowIndex, colIndex) {
 }
 
 function editCell(rowIndex, colIndex, cell) {
-  // Simple prompt-based editing (can be enhanced with inline editor)
   const newValue = prompt('Edit cell value:', formatCellValue(cell))
   if (newValue !== null) {
     if (activeSheet.value && activeSheet.value.fullData) {
@@ -667,7 +542,6 @@ function editCell(rowIndex, colIndex, cell) {
 
 function switchSheet(index) {
   activeSheetIndex.value = index
-  // Clear table selections when switching sheets
   selectedTables.value.clear()
   selectedTable.value = null
   isTableIsolationMode.value = false
@@ -680,7 +554,6 @@ function loadSheetData() {
 
   const sheet = activeSheet.value
   if (sheet.fullData && sheet.fullData.length > 0) {
-    // Apply table isolation if active
     if (isTableIsolationMode.value && selectedTable.value) {
       const table = selectedTable.value
       const isolatedRows = []
@@ -692,7 +565,6 @@ function loadSheetData() {
       visibleRows.value = isolatedRows
       const colCount = table.endCol - table.startCol + 1
       columnHeaders.value = getColumnHeaders(colCount)
-      // Clear merged ranges in isolation mode for simplicity
       mergedRanges.value = []
     } else {
       visibleRows.value = sheet.fullData
@@ -701,35 +573,24 @@ function loadSheetData() {
       mergedRanges.value = sheet.merged_ranges || []
     }
     
-    // Extract formulas from sheet data if available
     extractFormulas(sheet)
     
     detectTables()
     
-    // Auto-detect single instrument sheet and extract values
     if (sheet.data && sheet.data.length > 0) {
       const detection = detectSheetType(sheet.data, props.instrumentType)
       isSingleInstrumentSheet.value = detection.type === 'single'
       
       if (isSingleInstrumentSheet.value) {
-        const extracted = extractValuesIntelligently(sheet.data, props.instrumentType, selectedCurrency.value)
+        const extracted = extractValuesIntelligently(sheet.data, props.instrumentType)
         extractedPreviewValues.value = extracted
-        // Emit extracted values to parent
         emit('single-instrument-extracted', {
           sheetName: sheet.name,
-          extractedValues: extracted,
-          selectedCurrency: selectedCurrency.value
+          extractedValues: extracted
         })
       } else {
         extractedPreviewValues.value = {}
       }
-    }
-    
-    // Detect currencies from full data
-    if (sheet.fullData && sheet.fullData.length > 0) {
-      availableCurrencies.value = detectCurrencies(sheet.fullData)
-    } else {
-      availableCurrencies.value = []
     }
   } else {
     visibleRows.value = []
@@ -740,7 +601,6 @@ function loadSheetData() {
     extractedPreviewValues.value = {}
     cellFormulas.value.clear()
   }
-  // Reset selection
   selectedCell.value = { row: -1, col: -1 }
   selectedCellValue.value = ''
   selectedCellFormula.value = ''
@@ -749,7 +609,6 @@ function loadSheetData() {
 function extractFormulas(sheet) {
   cellFormulas.value.clear()
   
-  // If sheet has formula data, extract it
   if (sheet.formulas && typeof sheet.formulas === 'object') {
     for (const [cellRef, formula] of Object.entries(sheet.formulas)) {
       if (formula && typeof formula === 'string' && formula.startsWith('=')) {
@@ -758,7 +617,6 @@ function extractFormulas(sheet) {
     }
   }
   
-  // Also check if fullData contains formula objects
   if (sheet.fullData && sheet.fullData.length > 0) {
     for (let row = 0; row < sheet.fullData.length; row++) {
       const rowData = sheet.fullData[row]
@@ -766,7 +624,6 @@ function extractFormulas(sheet) {
       
       for (let col = 0; col < rowData.length; col++) {
         const cell = rowData[col]
-        // Check if cell is an object with formula property
         if (cell && typeof cell === 'object' && cell.f) {
           const cellRef = getCellReference(row, col)
           cellFormulas.value.set(cellRef, cell.f)
@@ -774,38 +631,6 @@ function extractFormulas(sheet) {
       }
     }
   }
-}
-
-function detectCurrencies(data) {
-  const currencySet = new Set()
-  const currencyPatterns = [
-    /\b(USD|EUR|GBP|JPY|CNY|ZWG|ZAR|AUD|CAD|CHF|INR|BRL|RUB|KRW|SGD|HKD|NOK|SEK|DKK|MXN|TRY|PLN|THB|IDR|MYR|PHP|VND|CZK|HUF|RON|BGN|HRK|RSD|UAH|ILS|SAR|AED|QAR|KWD|BHD|OMR|JOD|LBP|EGP|NGN|KES|GHS|ZMW|BWP|NAD|SZL|LSL|MZN|AOA|CDF|BIF|DJF|ERN|ETB|KMF|MGA|MWK|MUR|RWF|SCR|SOS|TZS|UGX|XAF|XOF|XPF)\b/i,
-    /\$|€|£|¥|₹|₽|₩|₫|฿|RM|₱|₫|₪|₺|zł|₫/i
-  ]
-  
-  data.forEach(row => {
-    if (!row) return
-    row.forEach(cell => {
-      if (typeof cell === 'string') {
-        for (const pattern of currencyPatterns) {
-          const match = cell.match(pattern)
-          if (match) {
-            const currency = match[0].toUpperCase()
-            if (currency === '$') currencySet.add('USD')
-            else if (currency === '€') currencySet.add('EUR')
-            else if (currency === '£') currencySet.add('GBP')
-            else if (currency === '¥') currencySet.add('JPY')
-            else currencySet.add(currency)
-          }
-        }
-      }
-    })
-  })
-  return Array.from(currencySet).sort()
-}
-
-function emitCurrencyChange() {
-  emit('currency-change', selectedCurrency.value)
 }
 
 function startResize(e) {
@@ -820,7 +645,6 @@ function onResize(e) {
   if (!isResizing.value) return
   const deltaY = e.clientY - resizeStartY.value
   const newHeight = resizeStartHeight.value + deltaY
-  // Limit height between 300px and 90vh
   if (newHeight >= 300 && newHeight <= window.innerHeight * 0.9) {
     viewerHeight.value = newHeight
   }
@@ -837,10 +661,8 @@ function detectTables() {
   const data = visibleRows.value
   if (!data || data.length === 0) return
 
-  // Enhanced content-based structure detection
   const structures = analyzeWorksheetStructure(data)
   
-  // Convert detected structures to the expected format
   structures.forEach(structure => {
     detectedTables.value.push({
       startRow: structure.startRow,
@@ -855,24 +677,11 @@ function detectTables() {
 }
 
 function analyzeWorksheetStructure(data) {
-  const structures = []
-  
-  // Step 1: Analyze each cell to classify its content type
   const cellAnalysis = analyzeCellContent(data)
-  
-  // Step 2: Detect label-value pairs (vertical and horizontal)
   const labelValuePairs = detectLabelValuePairs(data, cellAnalysis)
-  
-  // Step 3: Detect tables with headers based on content patterns
   const tables = detectContentBasedTables(data, cellAnalysis)
-  
-  // Step 4: Detect sections (areas with related content)
   const sections = detectContentSections(data, cellAnalysis)
-  
-  // Step 5: Merge and prioritize structures
-  const mergedStructures = mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data)
-  
-  return mergedStructures
+  return mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data)
 }
 
 function analyzeCellContent(data) {
@@ -900,17 +709,14 @@ function classifyCellContent(cell, row, col) {
   const isDate = /^\d{4}-\d{2}-\d{2}/.test(text) || /^\d{2}\/\d{2}\/\d{4}/.test(text) || /^\d{2}-\d{2}-\d{4}/.test(text)
   const isPercentage = /%$/.test(text)
   
-  // Check if it looks like a header based on content - more aggressive
   const headerKeywords = ['name', 'date', 'rate', 'value', 'amount', 'price', 'yield', 'coupon', 'maturity', 'issue', 'principal', 'face', 'discount', 'interest', 'term', 'tenor', 'frequency', 'currency', 'country', 'instrument', 'bond', 'bill', 'security', 'type', 'status', 'code', 'id', 'number', 'total', 'balance', 'payment', 'period', 'year', 'month', 'day', 'description', 'category', 'account', 'reference', 'transaction', 'debit', 'credit', 'asset', 'liability', 'equity', 'revenue', 'expense', 'income', 'cost', 'profit', 'loss', 'margin', 'ratio', 'percentage', 'quantity', 'unit', 'measure', 'location', 'address', 'contact', 'phone', 'email', 'customer', 'client', 'vendor', 'supplier', 'product', 'service', 'item', 'sku', 'barcode', 'serial', 'batch', 'lot', 'expiry', 'valid', 'active', 'inactive', 'pending', 'complete', 'open', 'closed', 'approved', 'rejected', 'submitted', 'draft', 'final', 'original', 'current', 'previous', 'next', 'first', 'last', 'beginning', 'ending', 'start', 'end', 'min', 'max', 'avg', 'sum', 'count']
   const isHeaderKeyword = headerKeywords.some(keyword => text.toLowerCase().includes(keyword))
   const isShortText = text.length < 100 && !isNumeric && !isDate
   const isHeader = isShortText && (isHeaderKeyword || /^[A-Z]/.test(text) || text.length > 0)
   
-  // Check if it looks like a label
   const labelPatterns = [/^(.+?)\s*[:=]\s*$/, /^(.+?)\s*$/]
   const isLabel = isShortText && (labelPatterns.some(pattern => pattern.test(text)) || isHeaderKeyword)
   
-  // Check if it's data
   const isData = isNumeric || isDate || isPercentage || (!isHeader && !isLabel && text.length > 0)
   
   return {
@@ -926,7 +732,6 @@ function classifyCellContent(cell, row, col) {
 function detectLabelValuePairs(data, cellAnalysis) {
   const pairs = []
   
-  // Detect vertical label-value pairs (label in row N, value in row N+1)
   for (let row = 0; row < data.length - 1; row++) {
     for (let col = 0; col < (data[row]?.length || 0); col++) {
       const currentCell = cellAnalysis[row][col]
@@ -946,7 +751,6 @@ function detectLabelValuePairs(data, cellAnalysis) {
     }
   }
   
-  // Detect horizontal label-value pairs (label in col N, value in col N+1)
   for (let row = 0; row < data.length; row++) {
     for (let col = 0; col < (data[row]?.length - 1); col++) {
       const currentCell = cellAnalysis[row][col]
@@ -972,7 +776,6 @@ function detectLabelValuePairs(data, cellAnalysis) {
 function detectContentBasedTables(data, cellAnalysis) {
   const tables = []
   
-  // Look for rows that could be headers based on content
   const potentialHeaderRows = []
   for (let row = 0; row < data.length; row++) {
     let headerCount = 0
@@ -987,7 +790,6 @@ function detectContentBasedTables(data, cellAnalysis) {
       }
     }
     
-    // More precise detection: row must have header keywords or be mostly text
     let textCount = 0
     for (let col = 0; col < (data[row]?.length || 0); col++) {
       if (cellAnalysis[row][col].type === 'text' && cellAnalysis[row][col].type !== 'empty') {
@@ -996,11 +798,7 @@ function detectContentBasedTables(data, cellAnalysis) {
     }
     const isMostlyText = totalCells >= 2 && (textCount / totalCells >= 0.5)
     
-    // Consider a row as a potential header if:
-    // - It has at least 2 non-empty cells
-    // - AND it's mostly text OR has header keywords
     if (totalCells >= 2 && (isMostlyText || headerCount >= 1)) {
-      // Avoid duplicate detection - check if this row is already covered by an existing table
       const isCovered = potentialHeaderRows.some(existingRow => 
         Math.abs(existingRow - row) <= 1
       )
@@ -1010,12 +808,10 @@ function detectContentBasedTables(data, cellAnalysis) {
     }
   }
   
-  // For each potential header row, find the extent of the table
   for (const headerRow of potentialHeaderRows) {
     let startCol = -1
     let endCol = -1
     
-    // Find the column range of the header
     for (let col = 0; col < (data[headerRow]?.length || 0); col++) {
       if (cellAnalysis[headerRow][col].type !== 'empty') {
         if (startCol === -1) startCol = col
@@ -1025,7 +821,6 @@ function detectContentBasedTables(data, cellAnalysis) {
     
     if (startCol === -1) continue
     
-    // Find the end of the table - stop at first blank row (not 2 consecutive)
     let endRow = headerRow
     
     for (let row = headerRow + 1; row < data.length; row++) {
@@ -1041,14 +836,11 @@ function detectContentBasedTables(data, cellAnalysis) {
       if (hasData) {
         endRow = row
       } else {
-        // Stop at first blank row to avoid merging separate tables
         break
       }
     }
     
-    // Only add if we have at least one data row
     if (endRow > headerRow) {
-      // Generate a more descriptive name based on header content
       const headerContent = data[headerRow].slice(startCol, endCol + 1)
         .filter(cell => cell && cell !== '')
         .join(' - ')
@@ -1073,9 +865,6 @@ function detectContentBasedTables(data, cellAnalysis) {
 function detectContentSections(data, cellAnalysis) {
   const sections = []
   
-  // Detect contiguous areas of content that aren't tables
-  // Split on ANY blank row to identify separate sections
-  // Also split if column structure changes significantly
   let inSection = false
   let sectionStartRow = -1
   let sectionStartCol = -1
@@ -1107,10 +896,8 @@ function detectContentSections(data, cellAnalysis) {
         sectionEndCol = lastNonEmptyCol
         sectionColumnCount = rowColumnCount
       } else {
-        // Check if column structure changed significantly (more than 50% difference)
         const columnRatio = sectionColumnCount > 0 ? rowColumnCount / sectionColumnCount : 0
         if (columnRatio < 0.5 || columnRatio > 1.5) {
-          // Column structure changed - end current section and start new one
           if (sectionEndRow - sectionStartRow >= 0) {
             const firstRowContent = data[sectionStartRow].slice(sectionStartCol, sectionEndCol + 1)
               .filter(cell => cell && String(cell).trim() !== '')
@@ -1141,7 +928,6 @@ function detectContentSections(data, cellAnalysis) {
         }
       }
     } else {
-      // Blank row - end current section immediately
       if (inSection) {
         if (sectionEndRow - sectionStartRow >= 0) {
           const firstRowContent = data[sectionStartRow].slice(sectionStartCol, sectionEndCol + 1)
@@ -1166,7 +952,6 @@ function detectContentSections(data, cellAnalysis) {
     }
   }
   
-  // Add final section if still in one
   if (inSection && sectionEndRow - sectionStartRow >= 0) {
     const firstRowContent = data[sectionStartRow].slice(sectionStartCol, sectionEndCol + 1)
       .filter(cell => cell && String(cell).trim() !== '')
@@ -1191,15 +976,12 @@ function detectContentSections(data, cellAnalysis) {
 function mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data) {
   const allStructures = [...labelValuePairs, ...tables, ...sections]
   
-  // Sort by size (larger structures first) to prioritize tables over individual pairs
   allStructures.sort((a, b) => {
     const aSize = (a.endRow - a.startRow + 1) * (a.endCol - a.startCol + 1)
     const bSize = (b.endRow - b.startRow + 1) * (b.endCol - b.startCol + 1)
     return bSize - aSize
   })
   
-  // Remove overlapping structures (keep larger ones)
-  // Very lenient - only remove if almost complete overlap (>80%)
   const nonOverlapping = []
   const occupied = new Set()
   
@@ -1218,8 +1000,6 @@ function mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data) {
       }
     }
     
-    // Only consider it overlapping if more than 80% of cells overlap
-    // This allows more structures to coexist
     if (totalCells > 0 && overlapCount / totalCells > 0.8) {
       overlaps = true
     }
@@ -1234,145 +1014,36 @@ function mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data) {
     }
   }
   
-  // Sort by row position for display order
   nonOverlapping.sort((a, b) => a.startRow - b.startRow)
   
   return nonOverlapping
-}
-
-function detectSections(data) {
-  // DISABLED - Using analyzeWorksheetStructure instead
-  // This legacy function was causing duplicate/incorrect section detection
-  // The new analyzeWorksheetStructure function provides better dynamic detection
-  return
-}
-
-function detectScatteredValues(data) {
-  if (!data || data.length === 0) return
-
-  // Find individual cells with important values (monetary, dates, percentages, etc.)
-  const importantCells = []
-  
-  for (let row = 0; row < data.length; row++) {
-    const rowData = data[row]
-    if (!rowData) continue
-
-    for (let col = 0; col < rowData.length; col++) {
-      const cell = rowData[col]
-      if (cell === null || cell === undefined || cell === '') continue
-
-      // Check if cell contains important data
-      const isMonetary = typeof cell === 'string' && (cell.match(/\$|€|£|¥|USD|EUR|GBP|ZWG/i) || cell.match(/\d+[,.]\d+/))
-      const isPercentage = typeof cell === 'string' && cell.match(/\d+%|\d+\.\d+%/)
-      const isDate = typeof cell === 'string' && cell.match(/\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4}/)
-      const isNumber = typeof cell === 'number'
-      const isLongText = typeof cell === 'string' && cell.length > 20
-
-      if (isMonetary || isPercentage || isDate || isNumber || isLongText) {
-        importantCells.push({
-          row,
-          col,
-          value: cell,
-          type: isMonetary ? 'monetary' : isPercentage ? 'percentage' : isDate ? 'date' : isNumber ? 'number' : 'text'
-        })
-      }
-    }
-  }
-
-  // Group nearby important cells into value areas
-  if (importantCells.length > 0) {
-    let currentArea = null
-    
-    for (const cell of importantCells) {
-      if (!currentArea) {
-        currentArea = {
-          startRow: cell.row,
-          endRow: cell.row,
-          startCol: cell.col,
-          endCol: cell.col,
-          cells: [cell]
-        }
-      } else {
-        // Check if this cell is close to the current area
-        const rowDiff = Math.abs(cell.row - currentArea.endRow)
-        const colDiff = Math.abs(cell.col - currentArea.endCol)
-        
-        if (rowDiff <= 2 && colDiff <= 3) {
-          // Extend current area
-          currentArea.endRow = Math.max(currentArea.endRow, cell.row)
-          currentArea.endCol = Math.max(currentArea.endCol, cell.col)
-          currentArea.startRow = Math.min(currentArea.startRow, cell.row)
-          currentArea.startCol = Math.min(currentArea.startCol, cell.col)
-          currentArea.cells.push(cell)
-        } else {
-          // Save current area and start new one
-          if (currentArea.cells.length >= 1) {
-            detectedTables.value.push({
-              startRow: currentArea.startRow,
-              endRow: currentArea.endRow,
-              startCol: currentArea.startCol,
-              endCol: currentArea.endCol,
-              headerRow: currentArea.startRow,
-              type: 'values',
-              name: `Value Area ${detectedTables.value.length + 1}`
-            })
-          }
-          currentArea = {
-            startRow: cell.row,
-            endRow: cell.row,
-            startCol: cell.col,
-            endCol: cell.col,
-            cells: [cell]
-          }
-        }
-      }
-    }
-    
-    // Add the last area
-    if (currentArea && currentArea.cells.length >= 1) {
-      detectedTables.value.push({
-        startRow: currentArea.startRow,
-        endRow: currentArea.endRow,
-        startCol: currentArea.startCol,
-        endCol: currentArea.endCol,
-        headerRow: currentArea.startRow,
-        type: 'values',
-        name: `Value Area ${detectedTables.value.length + 1}`
-      })
-    }
-  }
 }
 
 function selectTable(table) {
   selectedTable.value = table
   isTableIsolationMode.value = true
   
-  // Convert isolated table/section data to JSON format for mapping
   if (activeSheet.value && activeSheet.value.fullData) {
     const isolatedData = []
     const headers = []
     
-    // Extract headers from the header row of the table/section
     const headerRowIndex = table.headerRow !== undefined ? table.headerRow : table.startRow
     for (let col = table.startCol; col <= table.endCol; col++) {
       const headerCell = activeSheet.value.fullData[headerRowIndex]?.[col]
       headers.push(headerCell || `Column ${col}`)
     }
     
-    // Extract data rows (skip header row)
     for (let row = headerRowIndex + 1; row <= table.endRow; row++) {
       const rowData = {}
       for (let col = table.startCol; col <= table.endCol; col++) {
         const cellValue = activeSheet.value.fullData[row]?.[col]
         rowData[headers[col - table.startCol]] = cellValue !== undefined ? cellValue : ''
       }
-      // Only add non-empty rows
       if (Object.values(rowData).some(v => v !== '')) {
         isolatedData.push(rowData)
       }
     }
     
-    // Emit the isolated table/section data for mapping
     emit('table-isolated', {
       sheetName: activeSheet.value.name,
       tableName: table.name,
@@ -1385,8 +1056,7 @@ function selectTable(table) {
         startCol: table.startCol,
         endCol: table.endCol,
         headerRow: headerRowIndex
-      },
-      selectedCurrency: selectedCurrency.value
+      }
     })
   }
 }
@@ -1431,7 +1101,6 @@ function autoDetectSelectedTables() {
         data: []
       }
 
-      // Extract table data
       for (let row = table.startRow; row <= table.endRow; row++) {
         if (activeSheet.value.fullData[row]) {
           tableData.data.push(
@@ -1444,7 +1113,6 @@ function autoDetectSelectedTables() {
     }
   }
 
-  // Emit to parent for auto-detection
   emit('multi-table-detect', {
     sheetName: activeSheet.value.name,
     tables: selectedTableData,
@@ -1486,66 +1154,40 @@ function closeViewer() {
   emit('close')
 }
 
-// ===== WATCHERS =====
 watch(() => props.workbookData, (newData) => {
-  console.log('ExcelWorkbookViewer: workbookData changed', newData)
   if (newData && newData.sheets) {
     sheets.value = newData.sheets
-    console.log('ExcelWorkbookViewer: sheets loaded', sheets.value.length, 'sheets')
-    console.log('ExcelWorkbookViewer: fileBuffer present?', !!newData.fileBuffer)
-    console.log('ExcelWorkbookViewer: first sheet has fullData?', !!newData.sheets[0]?.fullData)
-    
-    // Clear table selections when workbook changes
     selectedTables.value.clear()
     selectedTable.value = null
     isTableIsolationMode.value = false
-    
-    // Emit workbook-loaded event with file name
     emit('workbook-loaded', props.fileName)
     
-    // If sheets don't have fullData, parse from fileBuffer
     if (newData.fileBuffer && (!newData.sheets[0]?.fullData || newData.sheets[0]?.fullData?.length === 0)) {
-      console.log('ExcelWorkbookViewer: Loading from fileBuffer')
       loadWorkbookFromFileBuffer(newData.fileBuffer)
     } else {
-      console.log('ExcelWorkbookViewer: Loading from existing fullData')
       loadSheetData()
     }
   }
 }, { immediate: true, deep: true })
 
-// ===== LIFECYCLE =====
 onMounted(() => {
-  console.log('ExcelWorkbookViewer: mounted')
   if (props.workbookData && props.workbookData.sheets) {
     sheets.value = props.workbookData.sheets
-    console.log('ExcelWorkbookViewer: sheets loaded on mount', sheets.value.length, 'sheets')
-    console.log('ExcelWorkbookViewer: fileBuffer present?', !!props.workbookData.fileBuffer)
-    console.log('ExcelWorkbookViewer: first sheet has fullData?', !!props.workbookData.sheets[0]?.fullData)
     
-    // If sheets don't have fullData, parse from fileBuffer
     if (props.workbookData.fileBuffer && (!props.workbookData.sheets[0]?.fullData || props.workbookData.sheets[0]?.fullData?.length === 0)) {
-      console.log('ExcelWorkbookViewer: Loading from fileBuffer on mount')
       loadWorkbookFromFileBuffer(props.workbookData.fileBuffer)
     } else {
-      console.log('ExcelWorkbookViewer: Loading from existing fullData on mount')
       loadSheetData()
     }
   }
 })
 
-// ===== LOAD WORKBOOK FROM FILE BUFFER =====
 function loadWorkbookFromFileBuffer(fileBuffer) {
   if (!fileBuffer) {
-    console.error('ExcelWorkbookViewer: fileBuffer is null/undefined')
     return
   }
   
-  console.log('ExcelWorkbookViewer: fileBuffer type:', fileBuffer.constructor.name)
-  console.log('ExcelWorkbookViewer: fileBuffer byteLength:', fileBuffer.byteLength || fileBuffer.length || 'unknown')
-  
   try {
-    console.log('Loading workbook from file buffer for viewer...')
     const workbook = XLSX.read(fileBuffer, {
       type: 'array',
       cellDates: true,
@@ -1554,15 +1196,10 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
       cellFormula: true
     })
     
-    console.log('ExcelWorkbookViewer: Workbook parsed successfully')
-    console.log('ExcelWorkbookViewer: Sheet names:', workbook.SheetNames)
-    
     const loadedSheets = []
     for (const sheetName of workbook.SheetNames) {
-      console.log(`ExcelWorkbookViewer: Processing sheet "${sheetName}"`)
       const worksheet = workbook.Sheets[sheetName]
       
-      // Get full 2D array data
       const ref = worksheet['!ref']
       let fullData = []
       let totalRows = 0
@@ -1575,25 +1212,18 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         totalRows = range.e.r - range.s.r + 1
         totalColumns = range.e.c - range.s.c + 1
         
-        console.log(`ExcelWorkbookViewer: Sheet "${sheetName}" has ${totalRows} rows, ${totalColumns} columns`)
-        
-        // Skip sheets that are too large to prevent hanging
         if (totalRows > 50000 || totalColumns > 500) {
-          console.log(`ExcelWorkbookViewer: Skipping sheet "${sheetName}" - too large (${totalRows} rows x ${totalColumns} columns)`)
           continue
         }
         
-        // Limit to reasonable size for display to prevent browser hanging
         maxRows = Math.min(500, totalRows)
         maxCols = Math.min(100, totalColumns)
-        console.log(`ExcelWorkbookViewer: Loading ${maxRows} rows x ${maxCols} columns for display`)
         
         for (let R = range.s.r; R < range.s.r + maxRows; R++) {
           const row = []
           for (let C = range.s.c; C < range.s.c + maxCols; C++) {
             const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
             const cell = worksheet[cellAddress]
-            // Extract actual value for display - use formatted value (w) or raw value (v)
             if (cell) {
               row.push(cell.w ?? cell.v ?? '')
             } else {
@@ -1604,7 +1234,6 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         }
       }
       
-      // Get merged ranges
       const mergedRanges = []
       if (worksheet['!merges']) {
         for (const merge of worksheet['!merges']) {
@@ -1617,7 +1246,6 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         }
       }
       
-      // Get JSON data for detection - use full range
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
         defval: '', 
         raw: false
@@ -2118,42 +1746,6 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
 .preview-value {
   font-size: 12px;
   color: #333;
-}
-
-/* Currency selector styles */
-.currency-selector {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
-  background: #f0f4ff;
-  border-radius: 4px;
-  margin: 0 12px;
-}
-
-.currency-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #0B2044;
-}
-
-.currency-select {
-  padding: 4px 8px;
-  border: 1px solid #0B2044;
-  border-radius: 4px;
-  font-size: 12px;
-  background: white;
-  color: #0B2044;
-  min-width: 120px;
-}
-
-.selected-currency-badge {
-  padding: 2px 8px;
-  background: #0B2044;
-  color: white;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
 }
 
 .resize-handle {

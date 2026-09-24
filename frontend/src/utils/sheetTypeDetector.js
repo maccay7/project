@@ -1,4 +1,35 @@
-export function detectSheetType(data, instrumentType = 'money-market') {
+// ─── Matching helpers ─────────────────────────────────────────────────────
+
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function normalizeForMatch(text) {
+  if (text === null || text === undefined) return ''
+  return String(text)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]/g, ' ')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function fieldToWords(field) {
+  return normalizeForMatch(field)
+}
+
+function wordsOverlap(a, b) {
+  const na = normalizeForMatch(a)
+  const nb = normalizeForMatch(b)
+  if (!na || !nb) return false
+  const aa = ' ' + na + ' '
+  const bb = ' ' + nb + ' '
+  return aa.includes(bb) || bb.includes(aa)
+}
+
+// ─── Sheet type detection ─────────────────────────────────────────────────
+
+export function detectSheetType(data, instrumentType) {
   if (!data || !data.length) {
     return { type: 'single', data: [], confidence: 0 }
   }
@@ -20,10 +51,11 @@ export function detectSheetType(data, instrumentType = 'money-market') {
   const hasInstrumentLabels = checkForLabels(data, ['Instrument', 'Bond', 'T-Bill', 'Money Market', 'Treasury Bill'])
   
   const requiredFields = getRequiredFieldMappings(instrumentType)
+  const hasRequiredFields = requiredFields.length > 0
   const detectedFields = detectFieldsInData(data, requiredFields)
-  const allFieldsFound = requiredFields.every(field => detectedFields[field])
+  const allFieldsFound = hasRequiredFields && requiredFields.every(field => detectedFields[field])
   const fieldsFoundCount = requiredFields.filter(field => detectedFields[field]).length
-  const fieldMatchRatio = fieldsFoundCount / requiredFields.length
+  const fieldMatchRatio = hasRequiredFields ? fieldsFoundCount / requiredFields.length : 0
 
   if (isKeyValueStyle && fieldMatchRatio >= 0.6) {
     return { type: 'single', data, confidence: 0.9 }
@@ -107,11 +139,10 @@ function detectFieldsInData(data, requiredFields) {
       allKeys.add(key.toLowerCase())
     }
   }
+  const keyList = Array.from(allKeys)
   for (const field of requiredFields) {
-    const fieldLower = field.toLowerCase()
-    result[field] = Array.from(allKeys).some(key => 
-      key.includes(fieldLower) || fieldLower.includes(key)
-    )
+    const fieldWords = fieldToWords(field)
+    result[field] = keyList.some(key => wordsOverlap(key, fieldWords))
   }
   return result
 }
@@ -122,7 +153,8 @@ export function getRequiredFieldMappings(instrumentType) {
     'bonds': ['faceValue', 'couponRate', 'yield', 'maturityDate', 'issueDate', 'frequency', 'instrumentName'],
     'tbills': ['faceValue', 'discountRate', 'daysToMaturity', 'auctionDate', 'maturityDate', 'instrumentName']
   }
-  return mappings[instrumentType] || mappings['money-market']
+  const key = normalizeForMatch(instrumentType)
+  return mappings[key] || []
 }
 
 export function extractSingleInstrumentValues(data, requiredFields) {
@@ -132,15 +164,11 @@ export function extractSingleInstrumentValues(data, requiredFields) {
 
   for (const row of allRows) {
     const entries = Object.entries(row)
-    const nonEmpty = entries.filter(([key, val]) => 
-      val !== '' && val !== null && val !== undefined
-    )
     for (const [key, val] of entries) {
       if (val === '' || val === null || val === undefined) continue
-      const lowerKey = key.toLowerCase()
       for (const field of requiredFields) {
-        const fieldLower = field.toLowerCase()
-        if (lowerKey.includes(fieldLower) || fieldLower.includes(lowerKey)) {
+        const fieldWords = fieldToWords(field)
+        if (wordsOverlap(key, fieldWords)) {
           if (!values[field]) {
             values[field] = val
           }
@@ -152,13 +180,9 @@ export function extractSingleInstrumentValues(data, requiredFields) {
   for (const row of allRows) {
     for (const [key, value] of Object.entries(row)) {
       if (value === '' || value === null || value === undefined) continue
-      const lowerKey = key.toLowerCase()
       for (const field of requiredFields) {
-        const fieldLower = field.toLowerCase()
         const synonyms = getSynonyms(field)
-        const matches = synonyms.some(syn => 
-          lowerKey.includes(syn.toLowerCase()) || syn.toLowerCase().includes(lowerKey)
-        )
+        const matches = synonyms.some(syn => wordsOverlap(key, syn))
         if (matches && !values[field]) {
           values[field] = value
         }
@@ -171,13 +195,9 @@ export function extractSingleInstrumentValues(data, requiredFields) {
     const nextRow = allRows[i + 1]
     for (const [key, label] of Object.entries(currentRow)) {
       if (!label || typeof label !== 'string') continue
-      const lowerLabel = label.toLowerCase()
       for (const field of requiredFields) {
-        const fieldLower = field.toLowerCase()
         const synonyms = getSynonyms(field)
-        const matches = synonyms.some(syn => 
-          lowerLabel.includes(syn.toLowerCase()) || syn.toLowerCase().includes(lowerLabel)
-        )
+        const matches = synonyms.some(syn => wordsOverlap(label, syn))
         if (matches && !values[field]) {
           const val = nextRow[key]
           if (val !== '' && val !== null && val !== undefined) {
@@ -192,15 +212,12 @@ export function extractSingleInstrumentValues(data, requiredFields) {
   for (const row of allRows) {
     for (const [key, value] of Object.entries(row)) {
       if (value === '' || value === null || value === undefined) continue
-      const lowerKey = key.toLowerCase()
       const isNumeric = typeof value === 'number' || 
                         (typeof value === 'string' && /^[\d\,\.\-\$]+$/.test(value.trim()))
       if (isNumeric) {
         for (const field of numericFields) {
           const synonyms = getSynonyms(field)
-          const matches = synonyms.some(syn => 
-            lowerKey.includes(syn.toLowerCase()) || syn.toLowerCase().includes(lowerKey)
-          )
+          const matches = synonyms.some(syn => wordsOverlap(key, syn))
           if (matches && !values[field]) {
             values[field] = value
           }

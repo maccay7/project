@@ -2,9 +2,9 @@
   <div class="top-navbar">
     <div class="logo-area">
       <div class="logo-placeholder">
-        <img 
-          src="/DataStudio-logo.jpeg" 
-          alt="DataStudio Logo" 
+        <img
+          src="/DuraCapital logo.png"
+          alt="DuraCapital Logo"
           class="navbar-logo"
           @error="e => e.target.style.display = 'none'"
         />
@@ -30,12 +30,9 @@ function goToSettings() {
   router.push('/settings')
 }
 
-// FIXED: Force redirect to login page
 function handleLogout() {
-  // Clear all storage
   localStorage.clear()
   sessionStorage.clear()
-  // Force hard navigation to login page
   window.location.href = '/login'
 }
 </script>
@@ -64,6 +61,7 @@ function handleLogout() {
 .logo-placeholder {
   display: flex;
   align-items: center;
+  padding: 0;
 }
 
 .navbar-logo {
@@ -71,7 +69,7 @@ function handleLogout() {
   max-height: 48px;
   height: auto;
   object-fit: contain;
-  border-radius: 8px;
+  display: block;
 }
 
 .nav-actions {
@@ -101,6 +99,11 @@ function handleLogout() {
 @media (max-width: 768px) {
   .top-navbar {
     padding: 0 16px;
+    height: 60px;
+  }
+  .navbar-logo {
+    width: 140px;
+    max-height: 36px;
   }
 }
 </style>

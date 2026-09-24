@@ -2,13 +2,11 @@
   <fixed-layout>
     <div class="visualizations-view">
 
-      <!-- Header -->
       <div class="page-header">
         <h1>Data Visualizations</h1>
         <p>Visualize your financial calculations with interactive charts</p>
       </div>
 
-      <!-- Action Buttons -->
       <div class="action-buttons">
         <v-btn color="#0B2A44" @click="loadData">
           <v-icon left>mdi-database</v-icon> Load Data
@@ -18,10 +16,8 @@
         </v-btn>
       </div>
 
-      <!-- Show only when data loaded -->
       <template v-if="hasData">
 
-        <!-- KPI Cards -->
         <v-card class="stats-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-chart-line</v-icon> Calculation Overview
@@ -48,7 +44,6 @@
           </v-card-text>
         </v-card>
 
-        <!-- Yield Curve Chart -->
         <v-card class="chart-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-chart-line</v-icon> Yield Curve (FRED API)
@@ -87,6 +82,25 @@
                 />
               </v-col>
               <v-col cols="12" md="3">
+                <div class="maturity-mode-toggle">
+                  <button
+                    type="button"
+                    class="mode-btn"
+                    :class="{ active: fredFilters.maturityMode !== 'date' }"
+                    @click="setMaturityMode('tenor')"
+                  >Maturity / Tenor</button>
+                  <button
+                    type="button"
+                    class="mode-btn"
+                    :class="{ active: fredFilters.maturityMode === 'date' }"
+                    @click="setMaturityMode('date')"
+                  >Actual Date</button>
+                </div>
+              </v-col>
+            </v-row>
+
+            <v-row class="mb-3" v-if="fredFilters.maturityMode !== 'date'">
+              <v-col cols="12" md="4">
                 <v-select
                   v-model="fredFilters.maturity"
                   :items="maturityItems"
@@ -98,12 +112,34 @@
                 />
               </v-col>
             </v-row>
+
+            <v-row class="mb-3" v-else>
+              <v-col cols="12" md="4">
+                <v-text-field
+                  v-model="fredFilters.fromDate"
+                  type="date"
+                  label="From Date"
+                  density="compact"
+                  @update:model-value="loadYieldCurve"
+                />
+              </v-col>
+              <v-col cols="12" md="4">
+                <v-text-field
+                  v-model="fredFilters.toDate"
+                  type="date"
+                  label="To Date"
+                  density="compact"
+                  @update:model-value="loadYieldCurve"
+                />
+              </v-col>
+            </v-row>
+            <p v-if="dateRangeError" class="date-error mb-2">{{ dateRangeError }}</p>
+
             <p class="fred-note mb-2">
               Market data from FRED — {{ fredFilters.country }} ({{ fredFilters.currency }}). Non-US countries use government bond yields available on FRED.
             </p>
             <v-alert v-if="yieldLoading" type="info" density="compact" class="mb-3">Loading Yield Curve...</v-alert>
             <v-alert v-if="yieldError" type="error" density="compact" class="mb-3">{{ yieldError }}</v-alert>
-            <!-- Analytics Display -->
             <v-row v-if="yieldAnalytics && !yieldLoading" class="mb-3">
               <v-col cols="12" sm="6" md="3">
                 <v-card class="analytics-card">
@@ -144,7 +180,6 @@
           </v-card-text>
         </v-card>
 
-        <!-- Compare all instruments -->
         <v-card class="chart-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-chart-multiline</v-icon> Instrument Comparison (FRED)
@@ -157,7 +192,6 @@
           </v-card-text>
         </v-card>
 
-        <!-- Proceed Button -->
         <v-card class="action-card">
           <v-card-text class="text-center">
             <v-btn color="#0B2A44" size="large" @click="goToReports">
@@ -167,7 +201,6 @@
         </v-card>
       </template>
 
-      <!-- No Data Message -->
       <v-card v-if="!hasData" class="stats-card">
         <v-card-text class="text-center pa-8">
           <v-icon size="64" color="#999">mdi-chart-box-outline</v-icon>
@@ -182,7 +215,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import api from '@/services/api.js'
@@ -196,13 +229,12 @@ Chart.register(...registerables)
 const router = useRouter()
 const route = useRoute()
 
-// State
 const hasData = ref(false)
 const calcData = ref(null)
 const yieldData = ref(null)
 const yieldError = ref('')
 const yieldLoading = ref(false)
-const selectedInstrument = ref('all')
+const selectedInstrument = ref('')
 const instrumentOptions = [
   { title: 'All Instruments', value: 'all' },
   { title: 'Treasury Bills', value: 'treasury_bills' },
@@ -210,7 +242,6 @@ const instrumentOptions = [
   { title: 'Money Market', value: 'money_market' }
 ]
 
-// Analytics state
 const yieldAnalytics = ref(null)
 
 const { fredFilters, countryItems, currencyItems, maturityItems, loadFilterOptions, onCountryChange } = useFredMarket('1Y')
@@ -220,11 +251,9 @@ const compareCanvas = ref(null)
 let yieldChart = null
 let compareChart = null
 
-// Yield curve cache for performance optimization
 const yieldCurveCache = ref(new Map())
 const lastYieldCurveRequest = ref({})
 
-// KPI Stats
 const kpiStats = ref([
   { title: 'Records', value: 0, icon: 'mdi-table-large', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
   { title: 'Instrument Type', value: 'N/A', icon: 'mdi-shape-outline', gradient: 'linear-gradient(135deg, #1E88E5, #42a5f5)' },
@@ -232,7 +261,13 @@ const kpiStats = ref([
   { title: 'Data Source', value: 'FRED API', icon: 'mdi-web', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
 ])
 
-// Load data from the latest calculation for the selected dataset
+const dateRangeError = computed(() => {
+  if (fredFilters.value.maturityMode !== 'date') return ''
+  const { fromDate, toDate } = fredFilters.value
+  if (fromDate && toDate && fromDate > toDate) return 'From date must be on or before To date.'
+  return ''
+})
+
 async function loadData() {
   try {
     const datasetId = route.query.dataset_id
@@ -252,9 +287,9 @@ async function loadData() {
     hasData.value = true
 
     kpiStats.value[0].value = calculations.length
-    const inst = (res.data.instrument_type || 'money_market').toLowerCase().replace('-', '_')
+    const inst = (res.data.instrument_type || '').toLowerCase().replace('-', '_')
     kpiStats.value[1].value = inst.replace('_', ' ')
-    selectedInstrument.value = inst
+    selectedInstrument.value = inst || 'all'
     kpiStats.value[2].value = (calcData.value.fred?.benchmark_rate ?? getAvgYield(calculations)) + '%'
     if (calcData.value.fred?.maturity) fredFilters.value.maturity = calcData.value.fred.maturity
 
@@ -267,7 +302,6 @@ async function loadData() {
   }
 }
 
-// Get average yield
 function getAvgYield(calculations) {
   if (!calculations.length) return 0
   const yields = calculations.map(c => parseFloat(c.annual_yield || c.yield_to_maturity || c.bond_equivalent_yield || 0))
@@ -275,7 +309,6 @@ function getAvgYield(calculations) {
   return avg.toFixed(2)
 }
 
-// Clear all data
 function clearData() {
   if (confirm('Clear all data?')) {
     hasData.value = false
@@ -286,6 +319,11 @@ function clearData() {
   }
 }
 
+function setMaturityMode(mode) {
+  fredFilters.value.maturityMode = mode
+  loadYieldCurve()
+}
+
 function chartDatasets(payload) {
   if (payload.datasets && payload.datasets.length) {
     return payload.datasets.map(d => {
@@ -294,12 +332,12 @@ function chartDatasets(payload) {
         chartData = d.data
       } else {
         const maturities = d.maturities || payload.labels || []
-        chartData = d.data.map((val, idx) => ({ 
-          x: maturities[idx] || idx, 
-          y: val 
+        chartData = d.data.map((val, idx) => ({
+          x: maturities[idx] || idx,
+          y: val
         }))
       }
-      
+
       return {
         label: d.label,
         data: chartData,
@@ -311,7 +349,6 @@ function chartDatasets(payload) {
       }
     })
   }
-  // Fallback: assume payload.labels are maturity strings and payload.current are rates
   const maturities = (payload.labels || []).map(l => parseFloat(l.replace(/[^0-9.]/g, '')) || 0)
   return [{
     label: 'Yield Curve',
@@ -324,12 +361,15 @@ function chartDatasets(payload) {
   }]
 }
 
-// ----- FIXED: loadYieldCurve with proper maturity mapping -----
 async function loadYieldCurve() {
+  if (dateRangeError.value) {
+    yieldError.value = dateRangeError.value
+    return
+  }
   yieldError.value = ''
   yieldLoading.value = true
   try {
-    const cacheKey = `${selectedInstrument.value}_${fredFilters.value.country}_${fredFilters.value.currency}_${fredFilters.value.maturity}`
+    const cacheKey = `${selectedInstrument.value}_${fredFilters.value.country}_${fredFilters.value.currency}_${fredFilters.value.maturityMode}_${fredFilters.value.maturity}_${fredFilters.value.fromDate}_${fredFilters.value.toDate}`
     if (yieldCurveCache.value.has(cacheKey)) {
       const cached = yieldCurveCache.value.get(cacheKey)
       if (Date.now() - cached.timestamp < 300000) {
@@ -340,30 +380,25 @@ async function loadYieldCurve() {
         return
       }
     }
-    const requestKey = `${cacheKey}_${Date.now()}`
     if (lastYieldCurveRequest.value[cacheKey] && Date.now() - lastYieldCurveRequest.value[cacheKey] < 1000) {
       return
     }
     lastYieldCurveRequest.value[cacheKey] = Date.now()
 
-    console.log('Loading yield curve with params:', {
-      instrument: selectedInstrument.value,
+    const params = {
+      instrument_type: selectedInstrument.value,
       country: fredFilters.value.country,
-      currency: fredFilters.value.currency,
-      maturity: fredFilters.value.maturity
-    })
+      currency: fredFilters.value.currency
+    }
+    if (fredFilters.value.maturityMode === 'date') {
+      params.from_date = fredFilters.value.fromDate
+      params.to_date = fredFilters.value.toDate
+    } else {
+      params.maturity = fredFilters.value.maturity
+    }
 
-    const res = await api.fredAPI.getYieldCurve(
-      selectedInstrument.value,
-      fredFilters.value.country,
-      fredFilters.value.currency,
-      fredFilters.value.maturity
-    )
-    
-    console.log('FRED API response:', res)
-    console.log('FRED API success:', res?.success)
-    console.log('FRED API data:', res?.data)
-    
+    const res = await api.fredAPI.getYieldCurve(params)
+
     if (res?.success && res.data?.datasets?.length) {
       yieldData.value = res.data
       yieldAnalytics.value = res.data.analytics || null
@@ -372,36 +407,27 @@ async function loadYieldCurve() {
         analytics: res.data.analytics || null,
         timestamp: Date.now()
       })
-      
-      // Save yield curve data to session immediately so it persists across page navigation
+
       const session = sessionManager.getActiveSession()
       const sid = session?.id || sessionManager.getActiveSessionId()
       if (sid) {
         const workflow = await sessionManager.getInstrumentWorkflow(sid, selectedInstrument.value)
         if (workflow) {
-          // Convert yield curve data to the format expected by the report
           const yieldCurvePoints = []
           if (res.data.datasets[0]?.data) {
             res.data.datasets[0].data.forEach(pt => {
-              yieldCurvePoints.push({
-                maturity: pt.x,
-                rate: pt.y
-              })
+              yieldCurvePoints.push({ maturity: pt.x, rate: pt.y })
             })
           }
-          
+
           await sessionManager.updateInstrumentWorkflow(sid, selectedInstrument.value, {
             ...workflow,
             fredFilters: { ...fredFilters.value },
             yieldCurveData: yieldCurvePoints
           })
-          console.log('Saved yield curve data to session workflow:', yieldCurvePoints.length, 'points')
         }
       }
-      
-      await saveFredSettings()
     } else {
-      console.error('FRED API failed or returned no data:', res)
       yieldError.value = res?.data?.error || res?.error || 'Unable to load Yield Curve. Please try again.'
       yieldData.value = null
       yieldAnalytics.value = null
@@ -418,7 +444,6 @@ async function loadYieldCurve() {
   }
 }
 
-// ----- FIXED: renderYieldChart with meaningful x‑axis using actual maturity labels -----
 function renderYieldChart() {
   if (!yieldCanvas.value || !yieldData.value) return
   if (yieldChart) yieldChart.destroy()
@@ -427,17 +452,15 @@ function renderYieldChart() {
   const maturities = yieldData.value.maturities || []
   const maxMaturity = maturities.length ? Math.max(...maturities) : 10
   const selectedMaturityStr = fredFilters.value.maturity || '1Y'
-  
-  console.log('Rendering yield chart with maturity:', selectedMaturityStr, 'maturities:', maturities)
-  
-  // Parse maturity to determine label format and scale
+
   let effectiveMax = maxMaturity
   let xAxisTitle = 'Maturity'
   let stepSize = 1
-  let minX = 0
 
   const match = selectedMaturityStr.match(/^(\d+)([YMW])$/)
-  if (match) {
+  if (fredFilters.value.maturityMode === 'date') {
+    xAxisTitle = 'Date'
+  } else if (match) {
     const num = parseInt(match[1], 10)
     const unit = match[2]
     if (unit === 'Y') {
@@ -446,14 +469,10 @@ function renderYieldChart() {
       effectiveMax = Math.min(maxMaturity, num)
     } else if (unit === 'M') {
       xAxisTitle = 'Months'
-      stepSize = 1
       effectiveMax = Math.min(maxMaturity, num)
-      minX = 0
     } else if (unit === 'W') {
       xAxisTitle = 'Weeks'
-      stepSize = 1
       effectiveMax = Math.min(maxMaturity, num)
-      minX = 0
     }
   } else {
     xAxisTitle = 'Years'
@@ -462,12 +481,8 @@ function renderYieldChart() {
     stepSize = num > 5 ? 5 : 1
   }
 
-  console.log('Chart parameters:', { effectiveMax, minX, stepSize, xAxisTitle })
-
-  // Filter data points up to effectiveMax, but ensure we include 0 if not present
   const filteredData = yieldData.value.datasets.map(ds => {
     let data = ds.data.filter(pt => pt.x <= effectiveMax)
-    // Ensure 0 point exists for proper chart display
     if (!data.some(pt => pt.x === 0)) {
       data = [{ x: 0, y: data[0]?.y || 0 }, ...data]
     }
@@ -475,24 +490,14 @@ function renderYieldChart() {
   })
 
   if (filteredData.every(ds => ds.data.length === 0)) {
-    yieldError.value = 'No yield curve data available for selected maturity'
+    yieldError.value = 'No yield curve data available for selected range'
     return
   }
 
-  // Determine tick values based on unit
-  let tickCallback
-  if (xAxisTitle === 'Months' || xAxisTitle === 'Weeks') {
-    tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= effectiveMax ? val : ''
-  } else {
-    tickCallback = (val) => Number.isInteger(val) && val >= 0 && val <= effectiveMax ? val : ''
-  }
-
-  // 🔥 Use actual maturity labels from the data
   const dataPoints = filteredData[0]?.data || []
   const labelsMap = {}
   dataPoints.forEach(pt => {
     const xVal = pt.x
-    // Find the corresponding maturity label from the original data
     const labelIndex = yieldData.value.maturities.findIndex(m => Math.abs(m - xVal) < 0.01)
     if (labelIndex !== -1 && yieldData.value.labels && yieldData.value.labels[labelIndex]) {
       labelsMap[xVal] = yieldData.value.labels[labelIndex]
@@ -522,11 +527,10 @@ function renderYieldChart() {
         x: {
           type: 'linear',
           title: { display: true, text: xAxisTitle },
-          min: 0, // Always start from 0
+          min: 0,
           max: effectiveMax,
           ticks: {
             callback: function(value) {
-              // Use the label from the map if available
               if (labelsMap[value]) return labelsMap[value]
               if (Number.isInteger(value) && value >= 0) return value.toString()
               return null
@@ -539,19 +543,22 @@ function renderYieldChart() {
   })
 }
 
-// ---- loadComparisonChart ----
 async function loadComparisonChart() {
   try {
-    const res = await api.fredAPI.getYieldCurve('all', fredFilters.value.country, fredFilters.value.currency)
+    const params = {
+      instrument_type: 'all',
+      country: fredFilters.value.country,
+      currency: fredFilters.value.currency
+    }
+    const res = await api.fredAPI.getYieldCurve(params)
     if (!res?.success || !res.data?.maturities?.length) return
     await nextTick()
     if (compareChart) compareChart.destroy()
     const ctx = compareCanvas.value?.getContext('2d')
     if (!ctx) return
-    
+
     const maturities = res.data.maturities || []
     const maxMaturity = maturities.length ? Math.max(...maturities) : 10
-    const effectiveMax = maxMaturity
 
     compareChart = new Chart(ctx, {
       type: 'line',
@@ -576,7 +583,7 @@ async function loadComparisonChart() {
             type: 'linear',
             title: { display: true, text: 'Maturity (Years)' },
             min: 0,
-            max: effectiveMax,
+            max: maxMaturity,
             ticks: {
               callback: (val) => Number.isInteger(val) ? val : '',
               stepSize: 1
@@ -590,7 +597,6 @@ async function loadComparisonChart() {
   }
 }
 
-// ---- Navigation ----
 async function goToReports() {
   const datasetId = route.query.dataset_id
   if (!datasetId) {
@@ -602,52 +608,31 @@ async function goToReports() {
     const sid = session?.id || sessionManager.getActiveSessionId()
     if (sid) {
       await markStepCompleted(String(sid), 'visualizations')
-      
-      // Save FRED filters and yield curve data to session workflow for report
+
       const workflow = await sessionManager.getInstrumentWorkflow(sid, selectedInstrument.value)
       if (workflow) {
-        // Convert yield curve data to the format expected by the report
         const yieldCurvePoints = []
         if (yieldData.value?.datasets?.[0]?.data) {
           yieldData.value.datasets[0].data.forEach(pt => {
-            yieldCurvePoints.push({
-              maturity: pt.x,
-              rate: pt.y
-            })
+            yieldCurvePoints.push({ maturity: pt.x, rate: pt.y })
           })
         }
-        
+
         await sessionManager.updateInstrumentWorkflow(sid, selectedInstrument.value, {
           ...workflow,
           fredFilters: { ...fredFilters.value },
           yieldCurveData: yieldCurvePoints
         })
-        console.log('Saved FRED filters and yield curve data to session workflow:', {
-          fredFilters: fredFilters.value,
-          yieldCurveData: yieldCurvePoints.length
-        })
       }
     }
-  } catch (e) { 
+  } catch (e) {
     console.warn('Failed to save FRED settings:', e)
   }
   router.push({ name: 'reports', query: { dataset_id: datasetId } })
 }
 
-// ---- Save FRED settings (optional) ----
-async function saveFredSettings() {
-  // could be implemented to store in localStorage or backend
-}
-
-// ---- Load FRED settings ----
-async function loadFredSettings() {
-  // could be implemented
-}
-
-// ---- Lifecycle ----
 onMounted(async () => {
   await loadFilterOptions()
-  await loadFredSettings()
   if (route.query.dataset_id) loadData()
 })
 </script>
@@ -679,6 +664,10 @@ onMounted(async () => {
 .analytics-card { border-radius: 8px; background: #f8f9ff; border: 1px solid #e0e0e0; }
 .analytics-label { font-size: 12px; color: #666; margin-bottom: 4px; }
 .analytics-value { font-size: 18px; font-weight: 700; color: #0B2044; }
+.maturity-mode-toggle { display: flex; gap: 6px; }
+.mode-btn { flex: 1; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 6px; background: white; cursor: pointer; font-size: 12px; color: #0B2044; }
+.mode-btn.active { background: #0B2A44; color: white; border-color: #0B2A44; }
+.date-error { color: #c62828; font-size: 12px; }
 @media (max-width: 600px) {
   .visualizations-view { padding: 0 16px; }
   .action-buttons { flex-direction: column; }

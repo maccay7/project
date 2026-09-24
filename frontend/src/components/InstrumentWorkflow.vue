@@ -186,8 +186,10 @@ async function drawYieldCurve() {
   if (yieldChart) yieldChart.destroy()
   try {
     const res = await api.fredAPI.getYieldCurve(instrument)
-    const labels = (res && res.success && res.data && res.data.labels) ? res.data.labels : ['3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y']
-    const values = (res && res.success && res.data && res.data.current) ? res.data.current : [4.2, 4.4, 4.6, 4.8, 4.5, 4.3, 4.1]
+    const labels = res?.data?.labels
+    const values = res?.data?.current
+    if (!Array.isArray(labels) || !labels.length) return
+    if (!Array.isArray(values) || !values.length) return
     const ctx = yieldCanvas.value.getContext('2d')
     yieldChart = new Chart(ctx, {
       type: 'line',

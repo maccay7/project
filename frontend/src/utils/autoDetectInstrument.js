@@ -928,8 +928,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
             usedLabelValuePairs.add(pairKey)
             console.log(`Detected "${requiredField}": "${value}" at ${location} (confidence: ${confidence.toFixed(2)})`)
             
-            // Detect currency codes
-            if (requiredField === 'Currency' || /^[A-Z]{3}$/.test(String(value).toUpperCase())) {
+            // Detect currency codes (only when Currency field is required)
+            if (requiredField === 'Currency') {
               detectedCurrencies.add(String(value).toUpperCase())
             }
           }
@@ -987,8 +987,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
             usedLabelValuePairs.add(pairKey)
             console.log(`Detected "${requiredField}": "${value}" at ${location} (vertical, confidence: ${confidence.toFixed(2)})`)
             
-            // Detect currency codes
-            if (requiredField === 'Currency' || /^[A-Z]{3}$/.test(String(value).toUpperCase())) {
+            // Detect currency codes (only when Currency field is required)
+            if (requiredField === 'Currency') {
               detectedCurrencies.add(String(value).toUpperCase())
             }
           }
@@ -1057,7 +1057,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
               usedLabelValuePairs.add(pairKey)
               console.log(`Detected "${requiredField}": "${value}" at ${location} (table, confidence: ${confidence.toFixed(2)})`)
               
-              if (requiredField === 'Currency' || /^[A-Z]{3}$/.test(String(value).toUpperCase())) {
+              if (requiredField === 'Currency') {
                 detectedCurrencies.add(String(value).toUpperCase())
               }
             }
@@ -1289,8 +1289,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
                     usedLabelValuePairs.add(pairKey)
                     console.log(`Detected "${requiredField}": "${nearbyValue}" at ${location} (scattered, confidence: ${confidence.toFixed(2)})`)
                     
-                    // Detect currency codes
-                    if (requiredField === 'Currency' || /^[A-Z]{3}$/.test(String(nearbyValue).toUpperCase())) {
+                    // Detect currency codes (only when Currency field is required)
+                    if (requiredField === 'Currency') {
                       detectedCurrencies.add(String(nearbyValue).toUpperCase())
                     }
                     valueFound = true
@@ -1373,8 +1373,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
                     }
                     console.log(`Detected "${requiredField}" in full worksheet scan: "${nearbyValue}" at ${location}`)
                     
-                    // Detect currency codes
-                    if (requiredField === 'Currency' || /^[A-Z]{3}$/.test(String(nearbyValue).toUpperCase())) {
+                    // Detect currency codes (only when Currency field is required)
+                    if (requiredField === 'Currency') {
                       detectedCurrencies.add(String(nearbyValue).toUpperCase())
                     }
                     break // Found a value, stop searching directions

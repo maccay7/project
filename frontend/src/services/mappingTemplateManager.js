@@ -121,7 +121,7 @@ export const mappingTemplateManager = {
     const existing = await this.getTemplatesByInstrument(instrumentType)
     // Check if a similar mapping already exists
     const similar = existing.find(t => {
-      const mappingKeys = Object.keys(t.columnMapping || {}).sort()
+      const mappingKeys = Object.keys(t.column_mapping || {}).sort()
       const currentKeys = Object.keys(columnMapping || {}).sort()
       return JSON.stringify(mappingKeys) === JSON.stringify(currentKeys)
     })

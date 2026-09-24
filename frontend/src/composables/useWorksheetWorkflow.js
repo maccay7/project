@@ -9,65 +9,9 @@ import {
 } from '@/utils/sheetTypeDetector'
 import { autoMatchColumns, getDisplayColumns } from '@/utils/instrumentMapping'
 
-const FINANCIAL_SYNONYMS = {
-  // Money Market Instruments
-  principal: ['principal', 'face value', 'par value', 'nominal', 'amount', 'notional', 'investment amount', 'capital', 'deposit amount', 'initial investment', 'starting balance'],
-  interestRate: ['interest rate', 'rate', 'yield', 'annual rate', 'nominal rate', 'coupon', 'stated rate', 'apr', 'effective rate'],
-  daysToMaturity: ['days to maturity', 'term', 'tenor', 'maturity days', 'duration days', 'period', 'days', 'contract days'],
-  issueDate: ['issue date', 'start date', 'effective date', 'trade date', 'settlement date', 'origination date', 'value date'],
-  maturityDate: ['maturity date', 'end date', 'due date', 'redemption date', 'expiry date', 'termination date'],
-  purchasePrice: ['purchase price', 'buy price', 'acquisition price', 'entry price', 'cost', 'price paid'],
-  settlementAmount: ['settlement amount', 'settlement value', 'cash flow', 'proceeds'],
-  
-  // T-Bills
-  faceValue: ['face value', 'par value', 'redemption value', 'maturity value', 'amount', 'principal', 'nominal'],
-  discountRate: ['discount rate', 'bank discount', 'discount yield', 'rate', 't-bill rate', 'auction rate', 'discount'],
-  auctionDate: ['auction date', 'issue date', 'start date', 'settlement date', 'trade date'],
-  
-  // Bonds
-  couponRate: ['coupon rate', 'coupon', 'interest rate', 'nominal rate', 'stated rate', 'annual coupon', 'fixed rate'],
-  couponFrequency: ['coupon frequency', 'frequency', 'payment frequency', 'period', 'semi-annual', 'quarterly', 'annual', 'coupon period'],
-  price: ['price', 'market price', 'clean price', 'dirty price', 'current price', 'flat price', 'quoted price'],
-  yield: ['yield', 'yield to maturity', 'ytm', 'required return', 'market yield', 'effective yield', 'redemption yield'],
-  callDate: ['call date', 'first call date', 'callable date', 'early redemption date'],
-  callPrice: ['call price', 'call premium', 'redemption price', 'sinking fund price'],
-  putDate: ['put date', 'puttable date', 'putable date'],
-  putPrice: ['put price', 'put premium'],
-  benchmarkRate: ['benchmark', 'risk-free rate', 'government yield', 'sofr', 'treasury yield'],
-  creditSpread: ['credit spread', 'g-spread', 'z-spread', 'asset swap spread', 'oas'],
-  inflationRate: ['inflation', 'cpi', 'inflation rate', 'real yield proxy'],
-  
-  // Common fields
-  instrumentName: ['instrument', 'security', 'name', 'description', 'issuer', 'counterparty', 'company', 'entity', 'bond name', 'tbill name'],
-  currency: ['currency', 'ccy', 'curr', 'denomination'],
-  country: ['country', 'nation', 'jurisdiction', 'region', 'market']
-}
-
 function extractValuesIntelligently(data, instrumentType) {
   const requiredFields = getRequiredFieldMappings(instrumentType)
-  let extracted = extractSingleInstrumentValues(data, requiredFields)
-
-  const fieldKeys = Object.keys(requiredFields)
-  for (const field of fieldKeys) {
-    if (!extracted[field] || extracted[field] === '') {
-      const synonyms = FINANCIAL_SYNONYMS[field] || [field]
-      for (const row of data) {
-        if (!row || typeof row !== 'object') continue
-        for (const [key, value] of Object.entries(row)) {
-          if (value === undefined || value === null || value === '') continue
-          const keyLower = key.toLowerCase()
-          const matched = synonyms.some(syn => 
-            keyLower.includes(syn.toLowerCase()) || syn.toLowerCase().includes(keyLower)
-          )
-          if (matched) {
-            extracted[field] = value
-            break
-          }
-        }
-        if (extracted[field]) break
-      }
-    }
-  }
+  const extracted = extractSingleInstrumentValues(data, requiredFields)
 
   if (!extracted.instrumentName || extracted.instrumentName === '') {
     const nameCol = detectInstrumentNameColumn(data)
@@ -305,7 +249,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       
       // Upload full file to backend to preserve complete dataset
       console.log('Uploading full file to backend for preservation...')
-      const uploadResult = await uploadFullFileToBackend(file)
+      const uploadResult = await uploadFullFileToBackend(file, null, currentInstrumentType.value)
       if (uploadResult.success) {
         console.log('Full file uploaded successfully, dataset_id:', uploadResult.data.dataset_id)
         sheets.forEach(sheet => {

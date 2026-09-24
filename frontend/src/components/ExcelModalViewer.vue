@@ -105,17 +105,12 @@ export default {
   methods: {
     loadFileData(fileData) {
       try {
-        console.log('📂 Loading file data into viewer...');
-        
         if (fileData.name) {
           this.fileName = fileData.name;
         }
 
-        // --- NEW: Check if we already have parsed sheets with fullData ---
         if (fileData.sheets && Array.isArray(fileData.sheets)) {
-          console.log('📄 Using pre-parsed workbook sheets with fullData...');
           this.sheetNames = fileData.sheets.map(s => s.name);
-          // Store the sheets for later use
           this.workbook = {
             sheets: fileData.sheets,
             SheetNames: this.sheetNames
@@ -126,14 +121,10 @@ export default {
           return;
         }
 
-        // 1) If we have an arrayBuffer (original file buffer)
         if (fileData.arrayBuffer) {
-          console.log('📄 Parsing original file arrayBuffer...');
           this.workbook = XLSX.read(fileData.arrayBuffer, { type: 'array' });
         }
-        // 2) If we have base64 data
         else if (fileData.base64) {
-          console.log('📄 Parsing base64 data...');
           const binary = atob(fileData.base64.split(',')[1]);
           const arrayBuffer = new ArrayBuffer(binary.length);
           const uint8Array = new Uint8Array(arrayBuffer);
@@ -142,9 +133,7 @@ export default {
           }
           this.workbook = XLSX.read(arrayBuffer, { type: 'array' });
         }
-        // 3) If we have a File object
         else if (fileData instanceof File) {
-          console.log('📄 Processing File object...');
           const reader = new FileReader();
           reader.onload = (e) => {
             const data = new Uint8Array(e.target.result);
@@ -154,9 +143,7 @@ export default {
           reader.readAsArrayBuffer(fileData);
           return;
         }
-        // 4) If we have a data URL
         else if (typeof fileData === 'string' && fileData.startsWith('data:')) {
-          console.log('📄 Parsing data URL...');
           const binary = atob(fileData.split(',')[1]);
           const arrayBuffer = new ArrayBuffer(binary.length);
           const uint8Array = new Uint8Array(arrayBuffer);
@@ -165,9 +152,7 @@ export default {
           }
           this.workbook = XLSX.read(arrayBuffer, { type: 'array' });
         }
-        // Fallback: assume it's already a workbook
         else {
-          console.log('📄 Assuming workbook is already loaded...');
           this.workbook = fileData;
         }
 
@@ -189,7 +174,6 @@ export default {
           this.sheetNames = [];
         }
         
-        console.log('📑 Sheets found:', this.sheetNames);
         if (this.sheetNames.length > 0) {
           this.switchSheet(this.sheetNames[0]);
         }
@@ -221,7 +205,6 @@ export default {
           this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
           this.currentPage = 0;
           this.updateDisplayGrid();
-          console.log(`📊 Sheet "${sheetName}" loaded from fullData. Total rows: ${this.fullData.length}`);
           return;
         }
         // If no fullData, fallback to data (list of dict)
@@ -235,7 +218,6 @@ export default {
           this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
           this.currentPage = 0;
           this.updateDisplayGrid();
-          console.log(`📊 Sheet "${sheetName}" loaded from data (dict). Total rows: ${this.fullData.length}`);
           return;
         }
       }
@@ -254,7 +236,6 @@ export default {
         this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
         this.currentPage = 0;
         this.updateDisplayGrid();
-        console.log(`📊 Sheet "${sheetName}" loaded via XLSX. Total rows: ${this.fullData.length}`);
       } else {
         // No data
         this.fullData = [];

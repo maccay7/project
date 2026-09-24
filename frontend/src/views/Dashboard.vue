@@ -4,7 +4,7 @@
     <div class="top-navbar">
       <div class="logo-area">
         <div class="logo-placeholder">
-          <img src="/DataStudio-logo.jpeg" alt="DataStudio Logo" class="navbar-logo" @error="e => e.target.style.display = 'none'"/>
+          <img src="/DuraCapital logo.png" alt="DuraCapital Logo" class="navbar-logo" @error="e => e.target.style.display = 'none'"/>
         </div>
       </div>
       <div class="nav-actions">
@@ -405,19 +405,10 @@ const totalSessions = computed(() => sessions.value.length)
 const completedSessions = computed(() => sessions.value.filter(s => s.status === 'completed').length)
 const inProgressSessions = computed(() => sessions.value.filter(s => s.status === 'in-progress').length)
 
-const backendKpiData = ref(null)
 const kpiStats = computed(() => {
-  // Count unique instruments from versions across all sessions (using stored instrument_count)
   const totalInstrumentsValued = sessions.value.reduce((sum, s) => sum + (s.instrument_count || 0), 0)
   const totalVersions = sessions.value.reduce((sum, s) => sum + (s.version_count || 0), 0)
   
-  if (backendKpiData.value) {
-    return [
-      { title: 'Active Sessions', value: backendKpiData.value.active_sessions || totalSessions.value, icon: 'mdi-folder-multiple', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
-      { title: 'Total Versions', value: totalVersions, icon: 'mdi-history', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
-      { title: 'Total Instruments Valued', value: totalInstrumentsValued, icon: 'mdi-check-circle', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' }
-    ]
-  }
   return [
     { title: 'Active Sessions', value: totalSessions.value, icon: 'mdi-folder-multiple', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
     { title: 'Total Versions', value: totalVersions, icon: 'mdi-history', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' },
@@ -831,22 +822,6 @@ async function handleLogout() {
   router.push('/login')
 }
 
-// ---- Fetch backend KPI ----
-async function fetchBackendKPI() {
-  try {
-    const response = await api.dashboardAPI.getKPI()
-    if (response?.success && response?.data) {
-      backendKpiData.value = {
-        active_sessions: response.data.total_users || 0,
-        total_instruments: response.data.total_instruments || 0,
-        portfolio_total: response.data.datasets_processed || 0
-      }
-    }
-  } catch (err) {
-    console.error('Failed to fetch backend KPI data:', err)
-  }
-}
-
 // ---- Event handler for session updates ----
 const handleSessionUpdate = async (event) => {
   const { sessionId, versionCount, instrumentCount } = event.detail || {}
@@ -876,11 +851,10 @@ onMounted(async () => {
   try {
     const user = JSON.parse(localStorage.getItem('user'))
     if (user) {
-      currentUserFullName.value = (user.firstName || '' + ' ' + user.lastName || '').trim()
+      currentUserFullName.value = `${user.firstName || ''} ${user.lastName || ''}`.trim()
     }
   } catch {}
 
-  await fetchBackendKPI()
   await refreshDashboard()
 
   let activeId = localStorage.getItem(ACTIVE_KEY)

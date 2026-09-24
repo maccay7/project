@@ -9,6 +9,7 @@
  * @param {Object} fredFilters - { country, currency, maturity } from session.
  * @param {Array} yieldCurveData - Array of { maturity, maturityLabel, rate }.
  * @param {Object} allInstrumentsData - Object with instrument types as keys and their data arrays as values.
+ * @param {Object} options - Optional overrides: { currencySymbol, logoUrl, backgroundUrl }.
  * @returns {string} Full HTML report.
  */
 export function generateReportHtml(
@@ -18,17 +19,26 @@ export function generateReportHtml(
   date,
   valuationDate,
   chartImageData = '',
-  fredFilters = { country: 'US', currency: 'USD', maturity: '1Y' },
+  fredFilters = null,
   yieldCurveData = [],
-  allInstrumentsData = {}
+  allInstrumentsData = {},
+  options = {}
 ) {
-  const valDate = valuationDate || new Date().toISOString().split('T')[0]
+  const valDate = valuationDate || ''
+  const currencySymbol = options.currencySymbol || ''
+  const logoUrl = options.logoUrl || '/DuraCapital logo.png'
+  const backgroundCoverUrl = options.backgroundUrl || '/reportbackground.png'
+
+  // Normalized FRED filters (no hardcoded defaults)
+  const filters = fredFilters || {}
+  const filterCountry = filters.country || '—'
+  const filterCurrency = filters.currency || '—'
+  const filterMaturity = filters.maturity || '—'
   
   // Handle portfolio report with all instruments
   let reportData = data
   let reportInstrument = instrument
   if (instrument === 'portfolio' && allInstrumentsData && Object.keys(allInstrumentsData).length > 0) {
-    // Combine all instrument data
     reportData = []
     Object.values(allInstrumentsData).forEach(instrumentRows => {
       if (Array.isArray(instrumentRows)) {
@@ -92,10 +102,8 @@ export function generateReportHtml(
     `).join('')
   }
 
-  const logoUrl = '/DuraCapital logo.png'
-  const backgroundCoverUrl = '/reportbackground.png'
   const chartHtml = chartImageData ?
-    `<div class="chart-container"><img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" /><p class="chart-caption">FRED Yield Curve – ${instrument} (${fredFilters.country} / ${fredFilters.currency})</p></div>` :
+    `<div class="chart-container"><img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" /><p class="chart-caption">FRED Yield Curve – ${instrument} (${filterCountry} / ${filterCurrency})</p></div>` :
     '<p>Yield curve chart not available.</p>'
 
   return `<!DOCTYPE html>
@@ -144,7 +152,7 @@ export function generateReportHtml(
 <button class="close-button" onclick="window.close()">×</button>
 
 <div class="page cover-page">
-  <div class="cover-logo"><img src="${logoUrl}" alt="Dura Capital Logo" /></div>
+  <div class="cover-logo"><img src="${logoUrl}" alt="Company Logo" /></div>
   <div class="cover-content">
     <div class="cover-session-name">${session}</div>
     <h1 class="cover-title">Valuation Assessment Report</h1>
@@ -164,17 +172,17 @@ export function generateReportHtml(
   <div class="toc-item"><span>Reference</span><span>9</span></div>
 </div>
 <div class="page"><h1 class="section-title">Introduction</h1><p>Dura Capital (Private) Limited was contracted to provide a fair valuation assessment report of the following ${instrument} instruments as at ${valDate}.</p><ul style="margin:20px 0 20px 30px;"><li>${instrument} instruments</li><li>Valuation as at ${valDate}</li><li>${data.length} individual instruments assessed</li></ul></div>
-<div class="page"><h1 class="section-title">Executive Summary</h1><div class="executive-summary"><p><strong>Key Findings:</strong></p><ul style="margin-left:20px;"><li>Total Portfolio Value: <span class="highlight">$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li><li>Number of Instruments: <span class="highlight">${data.length}</span></li><li>Average Rate: <span class="highlight">${avgRate.toFixed(2)}%</span></li><li>Valuation Date: <span class="highlight">${valDate}</span></li></ul><p><strong>Valuation Approach:</strong> ${methodology}</p></div></div>
+<div class="page"><h1 class="section-title">Executive Summary</h1><div class="executive-summary"><p><strong>Key Findings:</strong></p><ul style="margin-left:20px;"><li>Total Portfolio Value: <span class="highlight">${currencySymbol}${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li><li>Number of Instruments: <span class="highlight">${data.length}</span></li><li>Average Rate: <span class="highlight">${avgRate.toFixed(2)}%</span></li><li>Valuation Date: <span class="highlight">${valDate}</span></li></ul><p><strong>Valuation Approach:</strong> ${methodology}</p></div></div>
 <div class="page"><h1 class="section-title">Methodology</h1><div class="methodology-box"><p>${methodology}</p><div class="formula">${formulas}</div><p><strong>Assumptions:</strong> ${assumptions}</p></div></div>
-<div class="page"><h1 class="section-title">Market Inputs</h1><p>Rates sourced from FRED for ${valDate}. Filters used: Country = ${fredFilters.country}, Currency = ${fredFilters.currency}, Maturity = ${fredFilters.maturity}.</p></div>
-<div class="page"><h1 class="section-title">Results</h1><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Total Portfolio Value</td><td>$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Number of Instruments</td><td>${data.length}</td></tr><tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr><tr><td>Total Interest Earned</td><td>$${totalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Valuation Date</td><td>${valDate}</td></tr></tbody></table></div>
+<div class="page"><h1 class="section-title">Market Inputs</h1><p>Rates sourced from FRED for ${valDate}. Filters used: Country = ${filterCountry}, Currency = ${filterCurrency}, Maturity = ${filterMaturity}.</p></div>
+<div class="page"><h1 class="section-title">Results</h1><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Total Portfolio Value</td><td>${currencySymbol}${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Number of Instruments</td><td>${data.length}</td></tr><tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr><tr><td>Total Interest Earned</td><td>${currencySymbol}${totalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Valuation Date</td><td>${valDate}</td></tr></tbody></table></div>
 <div class="page"><h1 class="section-title">Yield Curve</h1><p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>${chartHtml}</div>
 <div class="page"><h1 class="section-title">Conclusion</h1><p>The valuation assessment is in accordance with IFRS 13 fair value measurement principles as at ${valDate}.</p></div>
-<div class="page"><h1 class="section-title">Appendix: Detailed Instrument Data</h1><table class="appendix-table"><thead><tr><th>Instrument Name</th><th>BB Ticker</th><th>Face Value ($)</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead><tbody>${instrumentRows}</tbody></table>
+<div class="page"><h1 class="section-title">Appendix: Detailed Instrument Data</h1><table class="appendix-table"><thead><tr><th>Instrument Name</th><th>BB Ticker</th><th>Face Value</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead><tbody>${instrumentRows}</tbody></table>
 ${appendixRows ? `
 <br>
 <h2 style="font-size:18px; color:#0B2044; margin-top:20px;">FRED Yield Curve Data</h2>
-<p><strong>Country:</strong> ${fredFilters.country} &nbsp;|&nbsp; <strong>Currency:</strong> ${fredFilters.currency} &nbsp;|&nbsp; <strong>Maturity:</strong> ${fredFilters.maturity}</p>
+<p><strong>Country:</strong> ${filterCountry} &nbsp;|&nbsp; <strong>Currency:</strong> ${filterCurrency} &nbsp;|&nbsp; <strong>Maturity:</strong> ${filterMaturity}</p>
 <table class="appendix-table">
   <thead><tr><th>Maturity Label</th><th>Term (Yr)</th><th>Rate (%)</th></tr></thead>
   <tbody>${appendixRows}</tbody>
