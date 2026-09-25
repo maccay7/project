@@ -1,627 +1,1144 @@
+"""
+Financial calculations for Money Market, Treasury Bills and Bonds.
+
+RULES:
+- The uploaded workbook is the ONLY source of truth.
+- NO mock data, hardcoded values, or zero fallbacks.
+- ExcelJS formula cells ({v, w, f}) are unwrapped before parsing.
+- Missing inputs produce structured errors, never silent zeros.
+
+Counts:
+- instrument_count counts UNIQUE instrument names, not rows.
+- Rows without an instrument name are counted individually.
+"""
+
 import math
-from typing import List, Dict, Any, Union
-from datetime import datetime, date
+import re
+from datetime import datetime, date, timedelta
+from typing import Any, Dict, List, Optional
 
-def safe_float(value: Any, default: float = None) -> float:
-    """
-    Convert value to float without fallback defaults.
-    Returns None if conversion fails, enforcing strict validation.
-    """
-    try:
-        if value is None or value == "":
-            return None
-        if isinstance(value, str):
-            value = value.replace(',', '')
-        return float(value)
-    except (TypeError, ValueError) as e:
+
+# =============================================================================
+# CELL UNWRAPPING
+# =============================================================================
+
+def _unwrap_cell(value):
+    """Unwrap ExcelJS cell objects {v, w, f} and rich-text blocks to primitives."""
+    if isinstance(value, dict):
+        for key in ('v', 'value', 'w', 'f'):
+            if key in value and value[key] is not None:
+                return _unwrap_cell(value[key])
+        if 'richText' in value and isinstance(value['richText'], list):
+            parts = []
+            for chunk in value['richText']:
+                if isinstance(chunk, dict) and 'text' in chunk:
+                    parts.append(str(chunk['text']))
+                elif isinstance(chunk, str):
+                    parts.append(chunk)
+            return ''.join(parts) if parts else None
         return None
+    if isinstance(value, list):
+        for item in value:
+            u = _unwrap_cell(item)
+            if u not in (None, ''):
+                return u
+        return None
+    return value
 
-def parse_percentage(value: Any) -> float:
-    """
-    Parse percentage value with strict validation.
-    Handles both percentage formats (5%, 5.0%) and decimal (0.05).
-    Returns None if conversion fails, no silent zero fallback.
-    """
+
+# =============================================================================
+# SAFE CONVERSION HELPERS
+# =============================================================================
+
+def safe_float(value: Any) -> Optional[float]:
+    value = _unwrap_cell(value)
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        f = float(value)
+        if math.isnan(f) or math.isinf(f):
+            return None
+        return f
+    if isinstance(value, str):
+        cleaned = (value.strip()
+                   .replace(",", "").replace("$", "").replace("€", "")
+                   .replace("£", "").replace("%", "").replace(" ", ""))
+        if cleaned == "":
+            return None
+        if cleaned.startswith("(") and cleaned.endswith(")"):
+            cleaned = "-" + cleaned[1:-1]
+        try:
+            return float(cleaned)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def parse_percentage(value: Any) -> Optional[float]:
+    value = _unwrap_cell(value)
     if value is None or value == "":
         return None
     try:
         if isinstance(value, str):
-            value = value.strip()
-            if value.endswith('%'):
-                value = value.rstrip('%')
-        val = float(value)
+            v = value.strip()
+            had_pct = v.endswith("%")
+            if had_pct:
+                v = v.rstrip("%").strip()
+            v = v.replace(",", "").replace(" ", "")
+            val = float(v)
+            if had_pct:
+                return val / 100.0
+        else:
+            val = float(value)
         if val > 1:
             return val / 100.0
         return val
     except (TypeError, ValueError):
         return None
 
-def parse_date(value: Any) -> date:
-    """
-    Parse date value with strict validation.
-    Handles MM/DD/YY, MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD formats.
-    Returns None if conversion fails, no silent fallback to today's date.
-    """
+
+_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%m/%d/%Y", "%m/%d/%y",
+    "%d/%m/%Y", "%d/%m/%y",
+    "%Y/%m/%d",
+    "%d-%m-%Y", "%m-%d-%Y",
+    "%d.%m.%Y", "%d %b %Y", "%d-%b-%Y",
+    "%Y-%m-%dT%H:%M:%S",
+)
+
+
+def parse_date(value: Any) -> Optional[date]:
+    value = _unwrap_cell(value)
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
     if isinstance(value, date):
         return value
+    if isinstance(value, (int, float)):
+        try:
+            n = float(value)
+            if 1 <= n <= 2958465:
+                base = datetime(1899, 12, 30)
+                return (base + timedelta(days=int(n))).date()
+        except Exception:
+            pass
+        return None
     if isinstance(value, str):
-        value = value.strip()
-        date_formats = [
-            '%Y-%m-%d',
-            '%m/%d/%Y',
-            '%m/%d/%y',
-            '%d/%m/%Y',
-            '%d/%m/%y',
-        ]
-        for fmt in date_formats:
+        s = value.strip()
+        if not s:
+            return None
+        for fmt in _DATE_FORMATS:
             try:
-                parsed_date = datetime.strptime(value, fmt).date()
-                if '%y' in fmt:
-                    year = parsed_date.year
-                    if year >= 50:
-                        parsed_date = parsed_date.replace(year=1900 + year)
-                    else:
-                        parsed_date = parsed_date.replace(year=2000 + year)
-                return parsed_date
+                return datetime.strptime(s, fmt).date()
             except ValueError:
                 continue
     return None
 
-def round_money(value: Any) -> float:
-    """
-    Round monetary values to 2 decimal places.
-    Returns None if value is None, no silent zero fallback.
-    """
+
+def round_money(value: Any) -> Optional[float]:
     val = safe_float(value)
     if val is None:
         return None
     return round(val, 2)
 
-def round_time(value: Any) -> int:
-    """
-    Round time values (days) to nearest whole number.
-    Returns None if value is None, no silent zero fallback.
-    """
+
+def round_time(value: Any) -> Optional[int]:
     val = safe_float(value)
     if val is None:
         return None
     return int(round(val))
 
-def days_between(date1: date, date2: date) -> int:
-    return abs((date2 - date1).days)
+
+def days_between(d1: date, d2: date) -> int:
+    return abs((d2 - d1).days)
+
+
+# =============================================================================
+# SEMANTIC NORMALISATION
+# =============================================================================
+
+SPECIFIC_ALIASES: Dict[str, List[str]] = {
+    "principal": [
+        "principal", "principle", "principal amount", "principle amount",
+        "face value", "facevalue", "face_value", "face amount",
+        "par value", "parvalue", "par amount",
+        "nominal", "nominal amount", "nominal value",
+        "notional", "notional amount",
+        "investment amount", "initial investment", "initial amount",
+        "starting balance", "opening balance", "deposit amount",
+        "capital", "total cost", "purchase cost", "cost", "amount", "value",
+        "outstanding principal", "current principal",
+    ],
+    "interest_rate": [
+        "interest rate", "interestrate", "interest_rate",
+        "annual rate", "annual interest rate",
+        "nominal rate", "stated rate", "effective rate",
+        "apr", "coupon", "coupon rate",
+        "rate %", "rate%", "rate",
+    ],
+    "days_to_maturity": [
+        "days to maturity", "daystomaturity", "days_to_maturity",
+        "maturity days", "duration days", "contract days",
+        "term days", "term_days", "termdays", "term in days",
+        "tenor", "term", "days", "period",
+    ],
+    "issue_date": [
+        "issue date", "issuedate", "issue_date",
+        "start date", "startdate", "start_date",
+        "effective date", "effectivedate", "effective_date",
+        "settlement date", "settlementdate", "settlement_date",
+        "origination date", "value date", "valuedate", "value_date",
+        "trade date", "tradedate", "trade_date",
+    ],
+    "maturity_date": [
+        "maturity date", "maturitydate", "maturity_date",
+        "end date", "enddate", "end_date",
+        "due date", "duedate", "due_date",
+        "redemption date", "redemptiondate", "redemption_date",
+        "expiry date", "expirydate", "expiry_date",
+        "termination date",
+    ],
+    "valuation_date": [
+        "valuation", "valuation date", "valuationdate", "valuation_date",
+        "portfolio date", "portfoliodate", "portfolio_date",
+        "report date", "reportdate", "report_date",
+        "as of date", "asofdate", "as_of_date",
+        "date pfolio", "datepfolio",
+    ],
+    "purchase_price": [
+        "purchase price", "purchaseprice", "purchase_price",
+        "buy price", "buyprice", "buy_price",
+        "acquisition price", "entry price",
+        "price paid", "pricepaid", "price_paid",
+        "issue price", "issueprice", "issue_price",
+        "price",
+    ],
+    "current_price": ["current price", "currentprice", "current_price"],
+    "settlement_amount": [
+        "settlement amount", "settlementamount",
+        "settlement value", "cash flow", "proceeds",
+    ],
+    "market_value": [
+        "market value", "marketvalue", "market_value",
+        "current value", "currentvalue",
+        "fair value", "fairvalue",
+        "present value", "presentvalue",
+        "total value", "totalvalue",
+    ],
+    "portfolio_name": ["portfolio name", "pfolio name", "portfolio"],
+    "security": [
+        "security", "security id", "securityid",
+        "instrument id", "instrumentid", "isin", "ticker",
+    ],
+    # ─── Extended name aliases ────────────────────────────────────────────────
+    # Previously the engine only recognised 'instrument name' and a handful of
+    # similar tokens. Adding 'name', 'bond name', 'tbill name' etc. fixes the
+    # case where the workbook's identifier column is labelled simply "Name"
+    # or "Bond Name", which caused the instrument_count to fall back to the
+    # row count.
+    "instrument_name": [
+        "parent company name", "parent company",
+        "issuer", "company", "entity",
+        "short name", "shortname",
+        "instrument name", "instrumentname", "instrument_name",
+        "instrument", "description", "counterparty",
+        "bond name", "bondname", "bond_name", "bond",
+        "t-bill name", "tbill name", "tbillname", "tbill_name",
+        "tbill", "t-bill", "treasury bill name",
+        "security name", "securityname",
+        "name", "ticker", "symbol",
+    ],
+    "classification": ["classification", "category", "asset class", "type"],
+    "currency": ["currency", "ccy", "iso code", "currency code"],
+    "country": ["country", "jurisdiction", "domicile"],
+    "sector": ["sector", "industry", "industry group"],
+    "rating": ["credit rating", "rating", "moody", "s&p", "fitch"],
+    "face_value": [
+        "face value", "facevalue", "face_value",
+        "par value", "parvalue", "par_value",
+        "redemption value", "redemptionvalue", "redemption_value",
+        "maturity value", "maturityvalue", "maturity_value",
+        "nominal value", "nominalvalue", "nominal_value",
+    ],
+    "discount_rate": [
+        "discount rate", "discountrate", "discount_rate",
+        "bank discount", "bankdiscount",
+        "discount yield", "discountyield",
+        "t-bill rate", "tbillrate",
+        "auction rate", "auctionrate",
+        "discount",
+    ],
+    "term_days": [
+        "term days", "termdays", "term_days",
+        "days to maturity", "daystomaturity",
+        "maturity days", "maturitydays",
+        "tenor", "term", "days",
+    ],
+    "auction_date": ["auction date", "auctiondate", "issue date", "settlement date"],
+    "coupon_rate": [
+        "coupon rate", "couponrate", "coupon_rate",
+        "coupon", "annual coupon", "annualcoupon",
+        "fixed rate", "fixedrate",
+        "nominal rate", "nominalrate",
+        "stated rate", "statedrate",
+        "interest rate", "interestrate",
+    ],
+    "coupon_frequency": [
+        "coupon frequency", "couponfrequency", "coupon_frequency",
+        "payment frequency", "paymentfrequency",
+        "frequency", "coupon period", "payments per year",
+    ],
+    "years_to_maturity": [
+        "years to maturity", "yearstomaturity", "years_to_maturity",
+        "maturity years", "maturityyears",
+        "term years", "termyears",
+        "duration years", "durationyears",
+        "time to maturity", "timetomaturity",
+        "years", "year",
+    ],
+    "yield": [
+        "yield to maturity", "yieldtomaturity", "yield_to_maturity",
+        "ytm", "market yield", "marketyield",
+        "required return", "requiredreturn",
+        "redemption yield", "redemptionyield",
+        "yield",
+    ],
+    "call_date": ["call date", "calldate", "first call date"],
+    "call_price": ["call price", "callprice", "call premium", "redemption price"],
+    "put_date": ["put date", "putdate", "puttable date"],
+    "put_price": ["put price", "putprice", "put premium"],
+    "benchmark_rate": [
+        "benchmark rate", "benchmarkrate",
+        "risk-free rate", "riskfreerate",
+        "government yield", "governmentyield",
+        "treasury yield", "treasuryyield", "sofr",
+    ],
+    "credit_spread": [
+        "credit spread", "creditspread",
+        "g-spread", "gspread", "z-spread", "zspread",
+        "asset swap spread", "oas",
+    ],
+    "inflation_rate": ["inflation rate", "inflationrate", "cpi", "inflation"],
+    "instrument": ["instrument", "instrument type", "instrumenttype",
+                   "asset type", "security type"],
+    "exchange": ["exchange", "listing exchange", "trading venue"],
+    "risk": ["risk", "risk level", "risklevel", "risk category"],
+}
+
+
+def _tokenize(s: str) -> set:
+    return set(re.split(r"[\s_\-%\(\)\[\]/\.]+", str(s).lower().strip())) - {""}
+
 
 def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Map uploaded columns to canonical field names. Unwrap formula cells.
+    Idempotent — safe to call more than once."""
     if not isinstance(row, dict):
         return {}
+    normalized: Dict[str, Any] = {}
+    consumed: set = set()
 
-    normalized = {}
-    source_values = {}
-
-    specific_aliases = {
-        'principal': ['principal', 'face value', 'par value', 'nominal', 'amount', 'notional', 'investment amount', 'capital', 
-                      'deposit amount', 'initial investment', 'starting balance', 'facevalue', 'parvalue', 'investmentamount',
-                      'depositamount', 'initialinvestment', 'startingbalance',
-                      'total cost', 'total cost (base)', 'cost', 'totalcost', 'totalcost(base)', 'purchase cost',
-                      'amount', 'facevalue', 'face_value', 'principal', 'facevalue', 'principal', 'amount', 'facevalue',
-                      'amount', 'facevalue', 'amount', 'facevalue', 'amount', 'facevalue', 'amount'],
-        'interest_rate': ['interest rate', 'rate', 'rate %', 'yield', 'annual rate', 'nominal rate', 'coupon', 'stated rate', 'apr', 
-                         'effective rate', 'interestrate', 'annualrate', 'nominalrate', 'statedrate', 'effectiverate',
-                         'rate%', 'rate %', 'rate', 'interestrate', 'rate', 'interestrate', 'discountrate', 'rate', 'interestrate',
-                         'rate', 'interestrate', 'rate', 'interestrate'],
-        'days_to_maturity': ['days to maturity', 'term', 'tenor', 'maturity days', 'duration days', 'period', 'days', 
-                            'contract days', 'daystomaturity', 'maturitydays', 'durationdays', 'contractdays', 'term days', 'term_days',
-                            'days', 'term', 'days', 'term', 'days', 'term'],
-        'issue_date': ['issue date', 'start date', 'effective date', 'trade date', 'settlement date', 'origination date', 
-                      'value date', 'issuedate', 'startdate', 'effectivedate', 'tradedate', 'settlementdate', 
-                      'originationdate', 'valuedate'],
-        'maturity_date': ['maturity date', 'end date', 'due date', 'redemption date', 'expiry date', 'termination date',
-                         'maturitydate', 'enddate', 'duedate', 'redemptiondate', 'expirydate', 'terminationdate', 'maturitydate', 'maturitydate'],
-        'purchase_price': ['purchase price', 'buy price', 'acquisition price', 'entry price', 'cost', 'price paid',
-                         'purchaseprice', 'buyprice', 'acquisitionprice', 'entryprice', 'pricepaid', 'price'],
-        'settlement_amount': ['settlement amount', 'settlement value', 'cash flow', 'proceeds', 'settlementamount',
-                            'settlementvalue', 'cashflow'],
-        'market_value': ['total value', 'market value', 'current value', 'fair value', 'present value', 'totalvalue',
-                        'marketvalue', 'currentvalue', 'fairvalue', 'presentvalue', 'amount', 'facevalue'],
-        'valuation_date': ['date pfolio', 'valuation date', 'portfolio date', 'report date', 'as of date', 'date pfolio',
-                         'valuationdate', 'portfoliodate', 'reportdate', 'asofdate', 'datepfolio', 'date', 'valuation date',
-                         'date', 'valuationdate', 'date', 'date'],
-        'portfolio_name': ['pfolio name', 'portfolio name', 'portfolio', 'pfoname', 'portfolioname', 'pfolio name', 'date'],
-        'security': ['security', 'security id', 'instrument', 'instrument id', 'securityid', 'instrumentid'],
-        'instrument_name': ['parent company name', 'parent company', 'issuer', 'company', 'entity', 'parentcompanyname',
-                           'parentcompany', 'short name', 'shortname', 'instrument', 'instrument', 'instrument'],
-        'classification': ['classification', 'category', 'type', 'asset class', 'assetclass'],
-        
-        'face_value': ['face value', 'par value', 'redemption value', 'maturity value', 'amount', 'principal', 'nominal',
-                      'facevalue', 'parvalue', 'redemptionvalue', 'maturityvalue', 'amount', 'facevalue', 'amount', 'facevalue'],
-        'discount_rate': ['discount rate', 'bank discount', 'discount yield', 'rate', 't-bill rate', 'auction rate', 'discount',
-                         'discountrate', 'bankdiscount', 'discountyield', 'tbillrate', 'auctionrate', 'rate', 'discountrate', 'rate', 'discountrate'],
-        'term_days': ['term days', 'days to maturity', 'term', 'tenor', 'maturity days', 'duration days', 'period', 'days',
-                      'contract days', 'daystomaturity', 'maturitydays', 'durationdays', 'contractdays', 'termdays', 'days', 'term', 'days', 'term'],
-        'auction_date': ['auction date', 'issue date', 'start date', 'settlement date', 'trade date',
-                        'auctiondate', 'issuedate', 'startdate', 'settlementdate', 'tradedate'],
-        
-        'coupon_rate': ['coupon rate', 'coupon', 'interest rate', 'nominal rate', 'stated rate', 'annual coupon', 'fixed rate',
-                       'couponrate', 'interestrate', 'nominalrate', 'statedrate', 'annualcoupon', 'fixedrate', 'rate', 'interestrate'],
-        'coupon_frequency': ['coupon frequency', 'frequency', 'payment frequency', 'period', 'semi-annual', 'quarterly', 
-                           'annual', 'coupon period', 'couponfrequency', 'paymentfrequency', 'semiannual', 'quarterly', 'frequency'],
-        'price': ['price', 'market price', 'clean price', 'dirty price', 'current price', 'flat price', 'quoted price',
-                 'marketprice', 'cleanprice', 'dirtyprice', 'currentprice', 'flatprice', 'quotedprice', 'current_price', 'price'],
-        'years_to_maturity': ['years to maturity', 'maturity years', 'term years', 'duration years', 'time to maturity',
-                             'yearstomaturity', 'maturityyears', 'termyears', 'durationyears', 'timetomaturity', 'years', 'term'],
-        'yield': ['yield', 'yield to maturity', 'ytm', 'required return', 'market yield', 'effective yield', 'redemption yield',
-                'yieldtomaturity', 'requiredreturn', 'marketyield', 'effectiveyield', 'redemptionyield'],
-        'call_date': ['call date', 'first call date', 'callable date', 'early redemption date',
-                     'calldate', 'firstcalldate', 'callabledate', 'earlyredemptiondate'],
-        'call_price': ['call price', 'call premium', 'redemption price', 'sinking fund price',
-                      'callprice', 'callpremium', 'redemptionprice', 'sinkingfundprice'],
-        'put_date': ['put date', 'puttable date', 'putable date', 'putdate', 'puttabledate', 'putabledate'],
-        'put_price': ['put price', 'put premium', 'putprice', 'putpremium'],
-        'benchmark_rate': ['benchmark', 'risk-free rate', 'government yield', 'sofr', 'treasury yield',
-                         'benchmarkrate', 'riskfreerate', 'governmentyield', 'treasuryyield'],
-        'credit_spread': ['credit spread', 'g-spread', 'z-spread', 'asset swap spread', 'oas',
-                        'creditspread', 'gspread', 'zspread', 'assetswapspread'],
-        'inflation_rate': ['inflation', 'cpi', 'inflation rate', 'real yield proxy',
-                         'inflationrate', 'realyieldproxy'],
-        
-        'instrument': ['instrument', 'instrument type', 'asset type', 'security type', 'instrumenttype', 'assettype', 'securitytype'],
-        'currency': ['currency', 'ccy', 'iso code', 'currency code'],
-        'country': ['country', 'jurisdiction', 'domicile', 'issuing country'],
-        'exchange': ['exchange', 'market', 'listing exchange', 'trading venue'],
-        'sector': ['sector', 'industry', 'industry group', 'business sector'],
-        'rating': ['rating', 'credit rating', 'moody', 's&p', 'fitch', 'creditrating', 'moody', 's&p', 'fitch'],
-        'risk': ['risk', 'risk level', 'risk category', 'riskgrade', 'risklevel', 'riskcategory']
-    }
-
-    for target_field, source_aliases in specific_aliases.items():
-        for alias in source_aliases:
-            for source_key in row.keys():
-                if source_key.lower() == alias.lower() or alias.lower() in source_key.lower():
-                    normalized[target_field] = row[source_key]
-                    source_values[target_field] = {'source_column': source_key, 'raw_value': row[source_key]}
+    # Pass 1: exact case-insensitive match
+    for target, aliases in SPECIFIC_ALIASES.items():
+        for alias in aliases:
+            alias_l = alias.lower().strip()
+            for src_key in row.keys():
+                if src_key in consumed:
+                    continue
+                if str(src_key).lower().strip() == alias_l:
+                    normalized[target] = _unwrap_cell(row[src_key])
+                    consumed.add(src_key)
                     break
-            if target_field in normalized:
+            if target in normalized:
                 break
 
+    # Pass 2: token-subset match
+    for target, aliases in SPECIFIC_ALIASES.items():
+        if target in normalized:
+            continue
+        for alias in aliases:
+            alias_tokens = _tokenize(alias)
+            if not alias_tokens:
+                continue
+            for src_key in row.keys():
+                if src_key in consumed:
+                    continue
+                if alias_tokens.issubset(_tokenize(src_key)):
+                    normalized[target] = _unwrap_cell(row[src_key])
+                    consumed.add(src_key)
+                    break
+            if target in normalized:
+                break
+
+    # Preserve unmatched, unwrapped
     for key, value in row.items():
-        if key not in [v for aliases in specific_aliases.values() for v in aliases]:
-            normalized[key] = value
+        if key not in consumed and key not in normalized:
+            unwrapped = _unwrap_cell(value)
+            if unwrapped is not None:
+                normalized[key] = unwrapped
 
     return normalized
 
-def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
+
+# =============================================================================
+# INSTRUMENT NAME EXTRACTION  (NEW — fixes instrument_count = rows bug)
+# =============================================================================
+
+def _extract_instrument_name(row: Dict[str, Any]) -> Optional[str]:
     """
-    Calculate T-Bill metrics with strict input validation.
-    NO FALLBACK DEFAULTS - returns error if required fields missing.
+    Pull the instrument name out of a NORMALIZED row.
+    Falls back to common alternative keys so it works regardless of which
+    column the user mapped as the identifier.
     """
-    
-    face = safe_float(item.get('face_value'))
-    
-    purchase_price = safe_float(item.get('purchase_price'))
-    current_price = safe_float(item.get('current_price'))
-    
-    if purchase_price is None and current_price is None:
-        face_value = safe_float(item.get('face_value'))
-        discount_rate = safe_float(item.get('discount_rate'))
-        term_days = safe_float(item.get('term_days'))
-        
-        if face_value and discount_rate and term_days:
-            current_price = face_value * (1 - (discount_rate * term_days / 360))
-        elif face_value:
-            current_price = face_value
-    
-    price = purchase_price if purchase_price is not None else current_price
-    days = safe_float(item.get('term_days'))
-    discount_rate = parse_percentage(item.get('discount_rate'))
+    candidates = [
+        "instrument_name",
+        "BondName", "TBillName",
+        "Instrument Name", "Instrument", "Security", "Name",
+        "Ticker", "Symbol", "ISIN", "isin", "Security ID",
+    ]
+    for key in candidates:
+        v = row.get(key)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s and s.lower() not in ("n/a", "na", "-", "none", "null", ""):
+            return s
+    return None
 
-    if days is None:
-        days = 90
 
-    if discount_rate is not None and face is not None and days is not None and days > 0:
-        price = face * (1 - (discount_rate * days / 360))
+# =============================================================================
+# VALIDATION
+# =============================================================================
 
-    if face is None:
-        return {'status': 'cannot_calculate', 'error': 'Missing required field: face_value', 'instrument_type': 'tbills'}
-    if price is None:
-        return {'status': 'cannot_calculate', 'error': 'Missing required field: purchase_price or current_price (or discount_rate with term_days)', 'instrument_type': 'tbills'}
-    if days is None:
-        return {'status': 'cannot_calculate', 'error': 'Missing required field: term_days', 'instrument_type': 'tbills'}
+def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
+    if not isinstance(row, dict):
+        return {"can_calculate": False,
+                "missing_fields": ["row is not a dictionary"],
+                "invalid_fields": [], "detected_fields": {},
+                "normalized_row": {}, "all_source_keys": []}
 
-    if 'valuation_date' in item and 'maturity_date' in item:
-        valuation_date = parse_date(item.get('valuation_date'))
-        maturity_date = parse_date(item.get('maturity_date'))
-        if valuation_date is not None and maturity_date is not None:
-            calculated_days = days_between(valuation_date, maturity_date)
-            if calculated_days > 0:
-                days = calculated_days
-    elif 'issue_date' in item and 'maturity_date' in item:
-        issue_date = parse_date(item.get('issue_date'))
-        maturity_date = parse_date(item.get('maturity_date'))
-        if issue_date is not None and maturity_date is not None:
-            calculated_days = days_between(issue_date, maturity_date)
-            if calculated_days > 0:
-                days = calculated_days
+    norm = normalize_row(row)
+    missing: List[str] = []
+    invalid: List[tuple] = []
+    detected: Dict[str, Any] = {}
 
-    if price <= 0:
-        return {'status': 'cannot_calculate', 'error': 'purchase_price must be greater than 0', 'instrument_type': 'tbills'}
-    if days <= 0:
-        return {'status': 'cannot_calculate', 'error': 'term_days must be greater than 0', 'instrument_type': 'tbills'}
+    def note(field):
+        if norm.get(field) is not None:
+            detected[field] = norm.get(field)
 
-    discount_yield = None
-    money_market_yield = None
-    bond_equivalent_yield = None
-    holding_period_yield = None
-    effective_annual_yield = None
+    if instrument_type == "bonds":
+        face = safe_float(norm.get("face_value")) or safe_float(norm.get("principal"))
+        note("face_value"); note("principal")
+        if face is None:
+            missing.append("face_value (aliases: Face Value, Principal, Par Value, Notional, Amount)")
 
-    if face != 0 and days != 0:
-        discount_yield = ((face - price) / face) * (360 / days) * 100
-    if price != 0 and days != 0:
-        money_market_yield = ((face - price) / price) * (360 / days) * 100
-        bond_equivalent_yield = ((face - price) / price) * (365 / days) * 100
-        holding_period_yield = ((face - price) / price) * 100
-        effective_annual_yield = ((face / price) ** (365 / days) - 1) * 100
+        cr = parse_percentage(norm.get("coupon_rate")) or parse_percentage(norm.get("interest_rate"))
+        note("coupon_rate"); note("interest_rate")
+        if cr is None:
+            missing.append("coupon_rate (aliases: Coupon Rate, Coupon, Interest Rate, Rate)")
+
+        price = (safe_float(norm.get("price"))
+                 or safe_float(norm.get("purchase_price"))
+                 or safe_float(norm.get("current_price")))
+        ytm = parse_percentage(norm.get("yield")) or parse_percentage(norm.get("yield_to_maturity"))
+        note("price"); note("purchase_price"); note("current_price")
+        note("yield"); note("yield_to_maturity")
+        if price is None and ytm is None:
+            missing.append("price or yield_to_maturity")
+
+        years = safe_float(norm.get("years_to_maturity"))
+        note("years_to_maturity"); note("valuation_date"); note("maturity_date")
+        if years is None:
+            val_d = parse_date(norm.get("valuation_date"))
+            mat_d = parse_date(norm.get("maturity_date"))
+            if val_d and mat_d:
+                years = days_between(val_d, mat_d) / 365.0
+            else:
+                d2m = safe_float(norm.get("days_to_maturity"))
+                if d2m is not None:
+                    years = d2m / 365.0
+        if years is None or years <= 0:
+            missing.append("years_to_maturity (or Valuation Date + Maturity Date)")
+
+        freq = safe_float(norm.get("coupon_frequency")) or safe_float(norm.get("frequency"))
+        note("coupon_frequency"); note("frequency")
+        if freq is None:
+            raw_freq = norm.get("coupon_frequency") or norm.get("frequency")
+            if isinstance(raw_freq, str):
+                rl = raw_freq.strip().lower()
+                if rl in ("annual", "annually", "yearly", "1"): freq = 1
+                elif rl in ("semi-annual", "semi annual", "semiannual",
+                            "semiannually", "2"): freq = 2
+                elif rl in ("quarterly", "quarter", "4"): freq = 4
+                elif rl in ("monthly", "month", "12"): freq = 12
+        if freq is None or freq <= 0:
+            missing.append("coupon_frequency (Annual=1, Semi-annual=2, Quarterly=4, Monthly=12)")
+
+        if face is not None and face <= 0:
+            invalid.append(("face_value", "must be > 0"))
+
+    elif instrument_type == "money-market":
+        principal = (safe_float(norm.get("principal"))
+                     or safe_float(norm.get("face_value"))
+                     or safe_float(norm.get("amount")))
+        note("principal"); note("face_value"); note("amount")
+        if principal is None:
+            missing.append("principal (aliases: Principal, Principle, Face Value, Amount, Notional)")
+        elif principal <= 0:
+            invalid.append(("principal", "must be > 0"))
+
+        rate = (parse_percentage(norm.get("interest_rate"))
+                or parse_percentage(norm.get("rate")))
+        note("interest_rate"); note("rate")
+        if rate is None:
+            missing.append("interest_rate (aliases: Interest Rate, Rate, Coupon, Yield)")
+
+        days = safe_float(norm.get("term_days")) or safe_float(norm.get("days_to_maturity"))
+        note("term_days"); note("days_to_maturity")
+        note("valuation_date"); note("maturity_date"); note("issue_date")
+        if days is None:
+            val_d = parse_date(norm.get("valuation_date"))
+            mat_d = parse_date(norm.get("maturity_date"))
+            if val_d and mat_d:
+                days = days_between(val_d, mat_d)
+        if days is None:
+            iss_d = parse_date(norm.get("issue_date"))
+            mat_d = parse_date(norm.get("maturity_date"))
+            if iss_d and mat_d:
+                days = days_between(iss_d, mat_d)
+        if days is None or days <= 0:
+            missing.append("term_days (or Valuation Date + Maturity Date)")
+
+    else:  # tbills
+        face = safe_float(norm.get("face_value")) or safe_float(norm.get("principal"))
+        note("face_value"); note("principal")
+        if face is None:
+            missing.append("face_value (aliases: Face Value, Principal, Par Value, Amount, Notional)")
+        elif face <= 0:
+            invalid.append(("face_value", "must be > 0"))
+
+        days = safe_float(norm.get("term_days")) or safe_float(norm.get("days_to_maturity"))
+        note("term_days"); note("days_to_maturity")
+        note("valuation_date"); note("maturity_date"); note("issue_date")
+        if days is None:
+            val_d = parse_date(norm.get("valuation_date"))
+            mat_d = parse_date(norm.get("maturity_date"))
+            if val_d and mat_d:
+                days = days_between(val_d, mat_d)
+        if days is None:
+            iss_d = parse_date(norm.get("issue_date"))
+            mat_d = parse_date(norm.get("maturity_date"))
+            if iss_d and mat_d:
+                days = days_between(iss_d, mat_d)
+        if days is None or days <= 0:
+            missing.append("term_days (or Valuation Date + Maturity Date)")
+
+        price = (safe_float(norm.get("purchase_price"))
+                 or safe_float(norm.get("price"))
+                 or safe_float(norm.get("current_price")))
+        disc = parse_percentage(norm.get("discount_rate"))
+        note("purchase_price"); note("price"); note("current_price"); note("discount_rate")
+        if price is None and disc is None:
+            missing.append("purchase_price or discount_rate")
 
     return {
-        'instrument_type': 'tbills',
-        'face_value': round_money(face),
-        'purchase_price': round_money(price),
-        'term_days': round_time(days),
-        'discount_yield': round(discount_yield, 1) if discount_yield is not None else None,
-        'money_market_yield': round(money_market_yield, 1) if money_market_yield is not None else None,
-        'bond_equivalent_yield': round(bond_equivalent_yield, 1) if bond_equivalent_yield is not None else None,
-        'holding_period_yield': round(holding_period_yield, 1) if holding_period_yield is not None else None,
-        'effective_annual_yield': round(effective_annual_yield, 1) if effective_annual_yield is not None else None,
-        'yield_curve_rate': round(money_market_yield, 1) if money_market_yield is not None else None
+        "can_calculate": len(missing) == 0 and len(invalid) == 0,
+        "missing_fields": missing,
+        "invalid_fields": [{"field": f, "reason": r} for f, r in invalid],
+        "detected_fields": detected,
+        "normalized_row": norm,
+        "all_source_keys": list(row.keys()),
     }
 
+
+# =============================================================================
+# YIELD SOLVER
+# =============================================================================
+
+def _solve_ytm(price: float, face: float, coupon_rate: float,
+               years: float, frequency: int) -> Optional[float]:
+    if price is None or face is None or coupon_rate is None:
+        return None
+    if price <= 0 or face <= 0 or years <= 0 or frequency <= 0:
+        return None
+    coupon = face * coupon_rate / frequency
+    n = int(round(years * frequency))
+    if n <= 0:
+        return None
+    annual_coupon = face * coupon_rate
+    ytm = annual_coupon / price if price > 0 else 0.05
+    for _ in range(200):
+        r = ytm / frequency
+        if r <= -1: r = 1e-6
+        pv = 0.0
+        dpv = 0.0
+        for t in range(1, n + 1):
+            disc = (1 + r) ** t
+            pv += coupon / disc
+            dpv += -t * coupon / (disc * (1 + r))
+        disc_n = (1 + r) ** n
+        pv += face / disc_n
+        dpv += -n * face / (disc_n * (1 + r))
+        diff = pv - price
+        if abs(diff) < 1e-8: break
+        if abs(dpv) < 1e-14: break
+        ytm_new = ytm - (diff * frequency) / dpv
+        if abs(ytm_new - ytm) < 1e-10:
+            ytm = ytm_new
+            break
+        ytm = ytm_new
+        if ytm < -0.99: ytm = 1e-6
+    if ytm is None or math.isnan(ytm) or math.isinf(ytm):
+        return None
+    return ytm
+
+
+def _price_from_ytm(face: float, coupon_rate: float, ytm: float,
+                    years: float, frequency: int) -> Optional[float]:
+    """
+    Price a bond from its YTM using the standard discounted cash flow formula.
+    Used when the uploaded workbook provides a YTM but no price column.
+    """
+    if (face is None or coupon_rate is None or ytm is None
+            or years is None or frequency is None):
+        return None
+    if face <= 0 or years <= 0 or frequency <= 0:
+        return None
+    r = ytm / frequency
+    if r <= -1:
+        return None
+    n = max(1, int(round(years * frequency)))
+    coupon_per = face * coupon_rate / frequency
+    try:
+        pv = 0.0
+        for t in range(1, n + 1):
+            pv += coupon_per / ((1 + r) ** t)
+        pv += face / ((1 + r) ** n)
+        return pv
+    except (ZeroDivisionError, OverflowError):
+        return None
+
+
+# =============================================================================
+# TREASURY BILLS
+# =============================================================================
+
+def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
+    item = normalize_row(item)
+    face = safe_float(item.get("face_value")) or safe_float(item.get("principal"))
+    purchase_price = (safe_float(item.get("purchase_price"))
+                      or safe_float(item.get("current_price"))
+                      or safe_float(item.get("price")))
+    discount_rate = parse_percentage(item.get("discount_rate"))
+
+    days = safe_float(item.get("term_days")) or safe_float(item.get("days_to_maturity"))
+    if days is None:
+        val_d = parse_date(item.get("valuation_date"))
+        mat_d = parse_date(item.get("maturity_date"))
+        if val_d and mat_d:
+            days = days_between(val_d, mat_d)
+    if days is None:
+        iss_d = parse_date(item.get("issue_date"))
+        mat_d = parse_date(item.get("maturity_date"))
+        if iss_d and mat_d:
+            days = days_between(iss_d, mat_d)
+
+    if face is None:
+        return {"status": "cannot_calculate",
+                "error": "Missing required field: face_value",
+                "instrument_type": "tbills"}
+    if days is None or days <= 0:
+        return {"status": "cannot_calculate",
+                "error": "Missing/invalid term_days (or valuation/maturity dates)",
+                "instrument_type": "tbills"}
+
+    if purchase_price is None:
+        if discount_rate is None:
+            return {"status": "cannot_calculate",
+                    "error": "Missing purchase_price and discount_rate",
+                    "instrument_type": "tbills"}
+        purchase_price = face * (1.0 - discount_rate * days / 360.0)
+
+    if purchase_price <= 0:
+        return {"status": "cannot_calculate",
+                "error": "purchase_price must be > 0",
+                "instrument_type": "tbills"}
+
+    discount_amount = face - purchase_price
+    discount_yield = (discount_amount / face) * (360.0 / days) * 100.0
+    money_market_yield = (discount_amount / purchase_price) * (360.0 / days) * 100.0
+    bond_equivalent_yield = (discount_amount / purchase_price) * (365.0 / days) * 100.0
+    holding_period_yield = (discount_amount / purchase_price) * 100.0
+    effective_annual_yield = ((face / purchase_price) ** (365.0 / days) - 1.0) * 100.0
+
+    result = {
+        "status": "success",
+        "instrument_type": "tbills",
+        "face_value": round_money(face),
+        "purchase_price": round_money(purchase_price),
+        "term_days": round_time(days),
+        "discount_amount": round_money(discount_amount),
+        "discount_yield": round(discount_yield, 4),
+        "money_market_yield": round(money_market_yield, 4),
+        "bond_equivalent_yield": round(bond_equivalent_yield, 4),
+        "holding_period_yield": round(holding_period_yield, 4),
+        "effective_annual_yield": round(effective_annual_yield, 4),
+        "yield_curve_rate": round(money_market_yield, 4),
+        "total_value": round_money(face),
+    }
+    # Add camelCase aliases for frontend compatibility
+    result["faceValue"] = result["face_value"]
+    result["purchasePrice"] = result["purchase_price"]
+    result["termDays"] = result["term_days"]
+    result["discountAmount"] = result["discount_amount"]
+    result["discountYield"] = result["discount_yield"]
+    result["moneyMarketYield"] = result["money_market_yield"]
+    result["bondEquivalentYield"] = result["bond_equivalent_yield"]
+    result["holdingPeriodYield"] = result["holding_period_yield"]
+    result["effectiveAnnualYield"] = result["effective_annual_yield"]
+    result["yieldCurveRate"] = result["yield_curve_rate"]
+    result["totalValue"] = result["total_value"]
+    return result
+
+
+# =============================================================================
+# BONDS
+# =============================================================================
+
 def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Calculate Bond metrics with strict input validation.
-    NO FALLBACK DEFAULTS - returns error if required fields missing.
-    Note: item is already normalized by calculate_data, no need to normalize again.
-    """
-    
-    face = safe_float(item.get('face_value'))
-    coupon_rate = parse_percentage(item.get('coupon_rate'))
-    price = safe_float(item.get('price'))
-    if price is None:
-        price = safe_float(item.get('current_price'))
+    item = normalize_row(item)
+    face = safe_float(item.get("face_value")) or safe_float(item.get("principal"))
+    coupon_rate = (parse_percentage(item.get("coupon_rate"))
+                   or parse_percentage(item.get("interest_rate")))
+    price = (safe_float(item.get("price"))
+             or safe_float(item.get("purchase_price"))
+             or safe_float(item.get("current_price")))
     years = safe_float(item.get('years_to_maturity'))
     frequency = safe_float(item.get('frequency'))
     if frequency is None:
         frequency = safe_float(item.get('coupon_frequency'))
+    if frequency is None:
+        rl = str(item.get('frequency') or item.get('coupon_frequency') or '').lower()
+        if rl in ("quarterly", "quarter", "4"): frequency = 4
+        elif rl in ("monthly", "month", "12"): frequency = 12
 
     if years is None:
-        years = 10
-
-    if frequency is None:
-        frequency = 2
+        val_d = parse_date(item.get("valuation_date"))
+        mat_d = parse_date(item.get("maturity_date"))
+        if val_d and mat_d:
+            years = days_between(val_d, mat_d) / 365.0
+    if years is None:
+        d2m = safe_float(item.get("days_to_maturity"))
+        if d2m is not None and d2m > 0:
+            years = d2m / 365.0
 
     if face is None:
-        return {'status': 'cannot_calculate', 'error': 'Missing required field: face_value', 'instrument_type': 'bonds'}
+        return {"status": "cannot_calculate",
+                "error": "Missing required field: face_value",
+                "instrument_type": "bonds"}
     if coupon_rate is None:
-        return {'status': 'cannot_calculate', 'error': 'Missing required field: coupon_rate', 'instrument_type': 'bonds'}
-    if price is None:
-        return {'status': 'cannot_calculate', 'error': 'Missing required field: price or current_price', 'instrument_type': 'bonds'}
+        return {"status": "cannot_calculate",
+                "error": "Missing required field: coupon_rate",
+                "instrument_type": "bonds"}
+    if years is None or years <= 0:
+        return {"status": "cannot_calculate",
+                "error": "Missing years_to_maturity (or valuation/maturity dates)",
+                "instrument_type": "bonds"}
+    if frequency is None or frequency <= 0:
+        return {"status": "cannot_calculate",
+                "error": "Missing coupon_frequency",
+                "instrument_type": "bonds"}
 
-    if 'valuation_date' in item and 'maturity_date' in item:
-        valuation_date = parse_date(item.get('valuation_date'))
-        maturity_date = parse_date(item.get('maturity_date'))
-        if valuation_date is not None and maturity_date is not None:
-            calculated_days = days_between(valuation_date, maturity_date)
-            if calculated_days > 0:
-                years = calculated_days / 365.0
-    elif 'issue_date' in item and 'maturity_date' in item:
-        issue_date = parse_date(item.get('issue_date'))
-        maturity_date = parse_date(item.get('maturity_date'))
-        if issue_date is not None and maturity_date is not None:
-            calculated_days = days_between(issue_date, maturity_date)
-            if calculated_days > 0:
-                years = calculated_days / 365.0
+    frequency = int(frequency)
 
-    if years <= 0:
-        return {'status': 'cannot_calculate', 'error': 'years_to_maturity must be greater than 0', 'instrument_type': 'bonds'}
-    if price <= 0:
-        return {'status': 'cannot_calculate', 'error': 'price must be greater than 0', 'instrument_type': 'bonds'}
-    if frequency <= 0:
-        return {'status': 'cannot_calculate', 'error': 'frequency must be greater than 0', 'instrument_type': 'bonds'}
+    # ── NEW: if price is missing, derive it from the uploaded YTM ────────────
+    # validate_row accepts "price OR yield_to_maturity", but calculate_bond
+    # previously required price and errored when it was missing. That's why
+    # some bond rows silently failed.
+    ytm_input = (parse_percentage(item.get("yield"))
+                 or parse_percentage(item.get("yield_to_maturity")))
+
+    if price is None or price <= 0:
+        if ytm_input is not None:
+            price = _price_from_ytm(face, coupon_rate, ytm_input, years, frequency)
+        if price is None or price <= 0:
+            return {"status": "cannot_calculate",
+                    "error": "Missing/invalid price and could not derive from YTM",
+                    "instrument_type": "bonds"}
 
     annual_coupon = coupon_rate * face
-    coupon_per_period = annual_coupon / frequency if frequency != 0 else None
-    periods = int(years * frequency) if frequency != 0 else None
+    coupon_per_period = annual_coupon / frequency
+    periods = max(1, int(round(years * frequency)))
 
-    ytm = None
-    if periods is not None and periods > 0 and (face + price) != 0:
-        ytm_approx = (coupon_per_period + (face - price) / periods) / ((face + price) / 2)
-        ytm = ytm_approx * frequency * 100
+    # Solve YTM from price (this is robust and returns the input YTM when the
+    # price was derived from it above).
+    ytm = _solve_ytm(price, face, coupon_rate, years, frequency)
+    if ytm is None and ytm_input is not None:
+        ytm = ytm_input
+    ytm_pct = ytm * 100.0 if ytm is not None else None
 
-    duration = years
-    modified_duration = None
-    if ytm is not None and ytm > 0 and frequency != 0:
-        ytm_decimal = ytm / 100 / frequency
-        if ytm_decimal > 0 and price != 0:
-            c = coupon_per_period / price if price != 0 else None
-            y = ytm_decimal
-            n = periods
-            if c is not None and y > 0 and c >= 0:
-                numerator = (1 + y) / y - (1 + y + n * (c - y))
-                denominator = c * ((1 + y) ** n - 1) + y
-                if denominator != 0:
-                    duration = max(0, numerator / denominator) / frequency
-            modified_duration = duration / (1 + ytm / 100 / frequency)
+    macaulay = None
+    modified = None
+    if ytm is not None and ytm > -0.99:
+        r = ytm / frequency
+        if r > -1:
+            pv_total = 0.0
+            weighted = 0.0
+            for t in range(1, periods + 1):
+                disc = (1 + r) ** t
+                pv_c = coupon_per_period / disc
+                pv_total += pv_c
+                weighted += t * pv_c
+            disc_n = (1 + r) ** periods
+            pv_f = face / disc_n
+            pv_total += pv_f
+            weighted += periods * pv_f
+            if pv_total > 0:
+                macaulay = (weighted / pv_total) / frequency
+                modified = macaulay / (1 + r)
 
-    current_yield = None
-    if price > 0:
-        current_yield = (annual_coupon / price) * 100
-
-    accrued_interest = None
-    if years > 0:
-        accrued_interest = annual_coupon * (years % 1)
-
-    return {
-        'instrument_type': 'bonds',
-        'face_value': round_money(face),
-        'current_price': round_money(price),
-        'coupon_rate': round(coupon_rate * 100, 1) if coupon_rate is not None else None,
-        'years_to_maturity': round(years, 2),
-        'frequency': int(frequency),
-        'yield_to_maturity': round(ytm, 1) if ytm is not None else None,
-        'duration': round(duration, 2),
-        'modified_duration': round(modified_duration, 2) if modified_duration is not None else None,
-        'current_yield': round(current_yield, 1) if current_yield is not None else None,
-        'accrued_interest': round_money(accrued_interest),
-        'bond_equivalent_yield': round(ytm, 1) if ytm is not None else None,
-        'yield_curve_rate': round(ytm, 1) if ytm is not None else None
-    }
-
-def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Calculate Money Market metrics with strict input validation.
-    NO FALLBACK DEFAULTS - returns error if required fields missing.
-    Uses normalized fields from semantic mapping layer.
-    """
-    
-    principal = safe_float(item.get('principal'))
-    if principal is None:
-        principal = safe_float(item.get('amount'))
-    if principal is None:
-        principal = safe_float(item.get('face_value'))
-    
-    rate = parse_percentage(item.get('interest_rate'))
-    if rate is None:
-        rate = parse_percentage(item.get('rate'))
-    
-    days = safe_float(item.get('term_days'))
-    if days is None:
-        days = safe_float(item.get('days'))
-    
-    if days is None and 'valuation_date' in item and 'maturity_date' in item:
-        valuation_date = parse_date(item.get('valuation_date'))
-        maturity_date = parse_date(item.get('maturity_date'))
-        if valuation_date is not None and maturity_date is not None:
-            days = days_between(valuation_date, maturity_date)
-    
-    if days is None:
-        days = 90
-    
-    market_value = safe_float(item.get('market_value'))
-
-    if principal is None:
-        return {
-            'status': 'cannot_calculate', 
-            'error': 'Missing required field: principal (mapped from: Total Cost, Amount, Face Value, etc.)',
-            'instrument_type': 'money-market'
-        }
-    if rate is None:
-        return {
-            'status': 'cannot_calculate', 
-            'error': 'Missing required field: rate (mapped from: Rate %, Interest Rate, etc.)',
-            'instrument_type': 'money-market'
-        }
-    if days is None:
-        return {
-            'status': 'cannot_calculate', 
-            'error': 'Missing required field: term_days (mapped from: Days, or calculated from Valuation Date + Maturity Date)',
-            'instrument_type': 'money-market'
-        }
-
-    if days <= 0:
-        return {
-            'status': 'cannot_calculate', 
-            'error': 'term_days must be greater than 0',
-            'instrument_type': 'money-market'
-        }
-    if principal <= 0:
-        return {
-            'status': 'cannot_calculate', 
-            'error': 'principal must be greater than 0',
-            'instrument_type': 'money-market'
-        }
-
-    interest = None
-    if principal is not None and rate is not None and days is not None:
-        interest = principal * (rate / 100) * (days / 360)
-    total_value = principal + interest
-
-    discount_yield = None
-    if total_value != 0 and days != 0:
-        discount_yield = (interest / total_value) * (360 / days) * 100
-
-    effective_yield = None
-    if principal != 0 and days != 0:
-        effective_yield = (interest / principal) * (365 / days) * 100
-
+    current_yield = (annual_coupon / price) * 100.0 if price > 0 else None
+    accrued = None
+    iss_d = parse_date(item.get("issue_date"))
+    val_d = parse_date(item.get("valuation_date")) or parse_date(item.get("settlement_date"))
+    if iss_d and val_d:
+        days_accrued = days_between(iss_d, val_d)
+        days_in_period = 365.0 / frequency
+        accrued = coupon_per_period * (days_accrued / days_in_period)
 
     result = {
-        'instrument_type': 'money-market',
-        'principal': round_money(principal),
-        'interest_rate': round(rate * 100, 1) if rate is not None else None,
-        'term_days': round_time(days),
-        'interest_earned': round_money(interest),
-        'total_value': round_money(total_value),
-        'discount_yield': round(discount_yield, 1) if discount_yield is not None else None,
-        'effective_yield': round(effective_yield, 1) if effective_yield is not None else None,
-        'yield_curve_rate': round(effective_yield, 1) if effective_yield is not None else None
+        "status": "success",
+        "instrument_type": "bonds",
+        "face_value": round_money(face),
+        "current_price": round_money(price),
+        "coupon_rate": round(coupon_rate * 100.0, 4),
+        "years_to_maturity": round(years, 4),
+        "frequency": frequency,
+        "yield_to_maturity": round(ytm_pct, 4) if ytm_pct is not None else None,
+        "duration": round(macaulay, 4) if macaulay is not None else None,
+        "modified_duration": round(modified, 4) if modified is not None else None,
+        "current_yield": round(current_yield, 4) if current_yield is not None else None,
+        "accrued_interest": round_money(accrued),
+        "bond_equivalent_yield": round(ytm_pct, 4) if ytm_pct is not None else None,
+        "yield_curve_rate": round(ytm_pct, 4) if ytm_pct is not None else None,
+        "total_value": round_money(price),
+        "annual_coupon": round_money(annual_coupon),
     }
-    
-    if market_value is not None:
-        result['market_value'] = round_money(market_value)
-    
+    # Add camelCase aliases for frontend compatibility
+    result["faceValue"] = result["face_value"]
+    result["currentPrice"] = result["current_price"]
+    result["couponRate"] = result["coupon_rate"]
+    result["yearsToMaturity"] = result["years_to_maturity"]
+    result["yieldToMaturity"] = result["yield_to_maturity"]
+    result["duration"] = result["duration"]
+    result["modifiedDuration"] = result["modified_duration"]
+    result["currentYield"] = result["current_yield"]
+    result["accruedInterest"] = result["accrued_interest"]
+    result["bondEquivalentYield"] = result["bond_equivalent_yield"]
+    result["yieldCurveRate"] = result["yield_curve_rate"]
+    result["totalValue"] = result["total_value"]
+    result["annualCoupon"] = result["annual_coupon"]
     return result
 
-def calculate_data(data: List[Dict], instrument_type: str = 'tbills', valuation_date: str = None) -> Dict[str, Any]:
-    """
-    Main calculation function with standardized result structure.
-    Returns consistent format with status, mode, instrument_results, and aggregates.
-    """
-    
-    if not isinstance(data, list) or len(data) == 0:
+
+# =============================================================================
+# MONEY MARKET
+# =============================================================================
+
+def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
+    item = normalize_row(item)
+    principal = (safe_float(item.get("principal"))
+                 or safe_float(item.get("face_value"))
+                 or safe_float(item.get("amount")))
+    rate = (parse_percentage(item.get("interest_rate"))
+            or parse_percentage(item.get("rate")))
+
+    days = safe_float(item.get("term_days")) or safe_float(item.get("days_to_maturity"))
+    if days is None:
+        val_d = parse_date(item.get("valuation_date"))
+        mat_d = parse_date(item.get("maturity_date"))
+        if val_d and mat_d:
+            days = days_between(val_d, mat_d)
+    if days is None:
+        iss_d = parse_date(item.get("issue_date"))
+        mat_d = parse_date(item.get("maturity_date"))
+        if iss_d and mat_d:
+            days = days_between(iss_d, mat_d)
+
+    market_value = safe_float(item.get("market_value"))
+
+    if principal is None or principal <= 0:
+        return {"status": "cannot_calculate",
+                "error": "Missing/invalid principal",
+                "instrument_type": "money-market"}
+    if rate is None:
+        return {"status": "cannot_calculate",
+                "error": "Missing required field: interest_rate",
+                "instrument_type": "money-market"}
+    if days is None or days <= 0:
+        return {"status": "cannot_calculate",
+                "error": "Missing/invalid term_days (or valuation/maturity dates)",
+                "instrument_type": "money-market"}
+
+    interest = principal * rate * (days / 360.0)
+    total_value = principal + interest
+    discount_yield = (interest / total_value) * (360.0 / days) * 100.0 if total_value else None
+    effective_yield = (interest / principal) * (365.0 / days) * 100.0
+
+    result = {
+        "status": "success",
+        "instrument_type": "money-market",
+        "principal": round_money(principal),
+        "interest_rate": round(rate * 100.0, 4),
+        "term_days": round_time(days),
+        "interest_earned": round_money(interest),
+        "total_value": round_money(total_value),
+        "discount_yield": round(discount_yield, 4) if discount_yield is not None else None,
+        "effective_yield": round(effective_yield, 4),
+        "yield_curve_rate": round(effective_yield, 4),
+    }
+    if market_value is not None:
+        result["market_value"] = round_money(market_value)
+    # Add camelCase aliases for frontend compatibility
+    result["principal"] = result["principal"]
+    result["interestRate"] = result["interest_rate"]
+    result["termDays"] = result["term_days"]
+    result["interestEarned"] = result["interest_earned"]
+    result["totalValue"] = result["total_value"]
+    result["discountYield"] = result["discount_yield"]
+    result["effectiveYield"] = result["effective_yield"]
+    result["yieldCurveRate"] = result["yield_curve_rate"]
+    if "market_value" in result:
+        result["marketValue"] = result["market_value"]
+    return result
+
+
+# =============================================================================
+# SINGLE INSTRUMENT DISPATCHER
+# =============================================================================
+
+def calc_single(row: Dict[str, Any], instrument_type: str,
+                valuation_date: Optional[str] = None) -> Dict[str, Any]:
+    if valuation_date:
+        row = {**row, "valuation_date": valuation_date}
+
+    validation = validate_row(row, instrument_type)
+    if not validation["can_calculate"]:
         return {
-            'status': 'cannot_calculate',
-            'mode': 'unknown',
-            'instrument_type': instrument_type,
-            'instrument_count': 0,
-            'instrument_results': [],
-            'aggregates': {},
-            'error': 'No data provided'
+            "status": "error",
+            "instrumentId": (row.get("Instrument Name") or row.get("instrument_name")
+                             or "instrument-1"),
+            "instrumentType": instrument_type,
+            "inputs": validation["normalized_row"],
+            "sourceData": row,
+            "errors": [
+                *[{"field": f, "code": "missing",
+                   "message": f"Missing required field: {f}"}
+                  for f in validation["missing_fields"]],
+                *[{"field": iv["field"], "code": "invalid",
+                   "message": f"{iv['field']}: {iv['reason']}"}
+                  for iv in validation["invalid_fields"]],
+            ],
         }
 
-    instrument_name_col = None
-    name_variants = ['instrument', 'name', 'bond_name', 'tbill_name', 'issuer', 'security', 'description', 'counterparty',
-                     'company', 'entity', 'instrument name']
-    
-    if data and len(data) > 0:
-        first_row = data[0]
-        for variant in name_variants:
-            if variant in first_row:
-                instrument_name_col = variant
-                break
-            for col in first_row.keys():
-                if col.lower() == variant.lower() or variant.lower() in col.lower():
-                    instrument_name_col = col
-                    break
-            if instrument_name_col:
-                break
-    
-    if not instrument_name_col and data:
-        for col in first_row.keys():
-            lower = col.lower()
-            if 'name' in lower or 'instrument' in lower or 'security' in lower or 'bond' in lower or 'tbill' in lower:
-                instrument_name_col = col
-                break
-    
-    if not instrument_name_col and data:
-        instrument_name_col = list(first_row.keys())[0]
+    norm = validation["normalized_row"]
+    if instrument_type == "bonds":
+        calc = calculate_bond(norm)
+    elif instrument_type == "money-market":
+        calc = calculate_money_market(norm)
+    else:
+        calc = calculate_treasury_bill(norm)
 
-    grouped = {}
-    for row in data:
-        name = 'Instrument'
-        if instrument_name_col and row.get(instrument_name_col):
-            name = str(row[instrument_name_col]).strip()
-        elif row.get('Instrument'):
-            name = str(row['Instrument']).strip()
-        elif row.get('BondName'):
-            name = str(row['BondName']).strip()
-        elif row.get('TBillName'):
-            name = str(row['TBillName']).strip()
-        if not name or name == '':
-            name = 'Instrument'
-        if name not in grouped:
-            grouped[name] = []
-        grouped[name].append(row)
-
-    unique_names = list(grouped.keys())
-    instrument_count = len(unique_names)
-    
-    mode = 'single' if instrument_count == 1 else 'multiple'
-
-    instrument_results = []
-    successful_results = []
-    failed_results = []
-    
-    for name, rows in grouped.items():
-        for row in rows:
-            norm = normalize_row(row)
-            if valuation_date:
-                norm['valuation_date'] = valuation_date
-            if 'coupon_rate' in norm:
-                norm['coupon_rate'] = parse_percentage(norm['coupon_rate'])
-            if 'interest_rate' in norm:
-                norm['interest_rate'] = parse_percentage(norm['interest_rate'])
-            if 'rate' in norm:
-                norm['rate'] = parse_percentage(norm['rate'])
-
-            if instrument_type == 'bonds':
-                calc = calculate_bond(norm)
-                rate = calc.get('yield_to_maturity', 0)
-                value = calc.get('face_value', 0)
-            elif instrument_type == 'money-market':
-                calc = calculate_money_market(norm)
-                rate = calc.get('effective_yield', 0)
-                value = calc.get('principal', 0)
-            else:
-                calc = calculate_treasury_bill(norm)
-                rate = calc.get('money_market_yield', 0)
-                value = calc.get('face_value', 0)
-
-            instrument_results.append(calc)
-            
-            if calc.get('status') == 'success':
-                successful_results.append(calc)
-            else:
-                failed_results.append(calc)
-
-    aggregates = {
-        'instrument_count': len(successful_results),
-        'failed_count': len(failed_results)
-    }
-    
-    if successful_results:
-        if instrument_type == 'money-market':
-            aggregates['total_principal'] = sum(r.get('principal', 0) for r in successful_results if r.get('principal') is not None)
-            aggregates['total_interest'] = sum(r.get('interest_earned', 0) for r in successful_results if r.get('interest_earned') is not None)
-            aggregates['total_value'] = sum(r.get('total_value', 0) for r in successful_results if r.get('total_value') is not None)
-            
-            principals = [r.get('principal', 0) for r in successful_results if r.get('principal') is not None]
-            rates = [r.get('interest_rate', 0) for r in successful_results if r.get('interest_rate') is not None]
-            if principals and sum(principals) > 0:
-                aggregates['weighted_avg_rate'] = sum(p * r for p, r in zip(principals, rates)) / sum(principals)
-            
-            days = [r.get('term_days', 0) for r in successful_results if r.get('term_days') is not None]
-            if days:
-                aggregates['avg_days_to_maturity'] = sum(days) / len(days)
-                
-        elif instrument_type == 'tbills':
-            aggregates['total_face_value'] = sum(r.get('face_value', 0) for r in successful_results if r.get('face_value') is not None)
-            aggregates['total_purchase_price'] = sum(r.get('purchase_price', 0) for r in successful_results if r.get('purchase_price') is not None)
-            aggregates['total_discount'] = sum((r.get('face_value', 0) - r.get('purchase_price', 0)) for r in successful_results if r.get('face_value') is not None and r.get('purchase_price') is not None)
-            
-            rates = [r.get('money_market_yield', 0) for r in successful_results if r.get('money_market_yield') is not None]
-            if rates:
-                aggregates['avg_discount_rate'] = sum(rates) / len(rates)
-            
-            days = [r.get('term_days', 0) for r in successful_results if r.get('term_days') is not None]
-            if days:
-                aggregates['avg_days_to_maturity'] = sum(days) / len(days)
-                
-        elif instrument_type == 'bonds':
-            aggregates['total_face_value'] = sum(r.get('face_value', 0) for r in successful_results if r.get('face_value') is not None)
-            aggregates['total_market_value'] = sum(r.get('current_price', 0) for r in successful_results if r.get('current_price') is not None)
-            aggregates['total_coupon_income'] = sum(r.get('accrued_interest', 0) for r in successful_results if r.get('accrued_interest') is not None)
-            
-            ytms = [r.get('yield_to_maturity', 0) for r in successful_results if r.get('yield_to_maturity') is not None]
-            if ytms:
-                aggregates['avg_ytm'] = sum(ytms) / len(ytms)
-            
-            durations = [r.get('duration', 0) for r in successful_results if r.get('duration') is not None]
-            if durations:
-                aggregates['avg_duration'] = sum(durations) / len(durations)
+    name = _extract_instrument_name(norm) or (row.get("Instrument Name")
+                                              or row.get("instrument_name")
+                                              or "instrument-1")
 
     return {
-        'status': 'success' if successful_results else 'cannot_calculate',
-        'mode': mode,
-        'instrument_type': instrument_type,
-        'instrument_count': instrument_count,
-        'instrument_results': instrument_results,
-        'aggregates': aggregates,
-        'calculations': instrument_results
+        "status": "success" if calc.get("status") == "success" else "error",
+        "instrumentId": name,
+        "instrumentType": instrument_type,
+        "inputs": norm,
+        "calculation": calc,
+        "valuation": {
+            "total_value": calc.get("total_value"),
+            "principal": calc.get("principal"),
+            "face_value": calc.get("face_value"),
+            "interest_earned": calc.get("interest_earned"),
+            "effective_yield": calc.get("effective_yield"),
+            "yield_to_maturity": calc.get("yield_to_maturity"),
+        },
+        "sourceData": row,
+        "errors": [] if calc.get("status") == "success" else [
+            {"field": "calculation", "code": "failed",
+             "message": calc.get("error", "Unknown error")}
+        ],
+    }
+
+
+# =============================================================================
+# MAIN DISPATCHER
+# =============================================================================
+
+def _pick_name_column(first_row: Dict[str, Any]) -> Optional[str]:
+    """Legacy helper — kept for backward compatibility. Prefer _extract_instrument_name."""
+    if not first_row:
+        return None
+    preferred = ["instrument name", "instrument", "security", "name",
+                 "issuer", "description", "bond name", "tbill name"]
+    keys_lower = {str(k).lower(): k for k in first_row.keys()}
+    for p in preferred:
+        for kl, k in keys_lower.items():
+            if p == kl or p in kl:
+                return k
+    return next(iter(first_row.keys())) if first_row else None
+
+
+def calculate_data(data: List[Dict],
+                   instrument_type: str = "tbills",
+                   valuation_date: Optional[str] = None) -> Dict[str, Any]:
+    if not isinstance(data, list) or len(data) == 0:
+        return {"status": "cannot_calculate", "mode": "unknown",
+                "instrument_type": instrument_type, "instrument_count": 0,
+                "instrument_results": [], "aggregates": {},
+                "error": "No data provided"}
+
+    instrument_results = []
+    successful = []
+    failed = []
+
+    for row in data:
+        if valuation_date:
+            row = {**row, "valuation_date": valuation_date}
+        row = normalize_row(row)
+
+        # CRITICAL FIX: extract the instrument name from the NORMALIZED row,
+        # not from the original column key. Previously the original column name
+        # (e.g. "Instrument Name") was used to index into the normalized dict,
+        # which had renamed that key to "instrument_name". The lookup always
+        # returned None, so instrument_count fell back to the row count.
+        name = _extract_instrument_name(row)
+
+        if instrument_type == "bonds":
+            calc = calculate_bond(row)
+        elif instrument_type == "money-market":
+            calc = calculate_money_market(row)
+        else:
+            calc = calculate_treasury_bill(row)
+
+        if name:
+            calc["instrument_name"] = name
+
+        instrument_results.append(calc)
+        if calc.get("status") == "success":
+            successful.append(calc)
+        else:
+            failed.append(calc)
+
+    # -------------------------------------------------------------------------
+    # AGGREGATES — instrument_count counts UNIQUE instruments, not rows.
+    # -------------------------------------------------------------------------
+    unique_names = set()
+    unnamed_rows = 0
+    for r in successful:
+        nm = r.get("instrument_name")
+        if nm and str(nm).strip():
+            unique_names.add(str(nm).strip())
+        else:
+            unnamed_rows += 1
+
+    unique_instrument_count = len(unique_names) + unnamed_rows
+
+    aggregates: Dict[str, Any] = {
+        "instrument_count": unique_instrument_count,
+        "successful_rows": len(successful),
+        "failed_count": len(failed),
+        "total_rows": len(data),
+        "unique_names": list(unique_names),
+    }
+
+    if successful:
+        def _sum(field):
+            return sum(r[field] for r in successful if r.get(field) is not None)
+
+        def _mean(field):
+            vals = [r[field] for r in successful if r.get(field) is not None]
+            return sum(vals) / len(vals) if vals else None
+
+        if instrument_type == "money-market":
+            aggregates["total_principal"] = round_money(_sum("principal"))
+            aggregates["total_interest"] = round_money(_sum("interest_earned"))
+            aggregates["total_value"] = round_money(_sum("total_value"))
+            principals = [r["principal"] for r in successful if r.get("principal") is not None]
+            rates = [r["interest_rate"] for r in successful if r.get("interest_rate") is not None]
+            if principals and sum(principals) > 0 and len(principals) == len(rates):
+                aggregates["weighted_avg_rate"] = round(
+                    sum(p * r for p, r in zip(principals, rates)) / sum(principals), 4)
+            m = _mean("term_days")
+            aggregates["avg_days_to_maturity"] = round(m, 2) if m is not None else None
+
+        elif instrument_type == "tbills":
+            aggregates["total_face_value"] = round_money(_sum("face_value"))
+            aggregates["total_purchase_price"] = round_money(_sum("purchase_price"))
+            aggregates["total_discount"] = round_money(_sum("discount_amount"))
+            aggregates["total_value"] = round_money(_sum("face_value"))
+            m = _mean("money_market_yield")
+            aggregates["avg_discount_rate"] = round(m, 4) if m is not None else None
+            m = _mean("term_days")
+            aggregates["avg_days_to_maturity"] = round(m, 2) if m is not None else None
+
+        elif instrument_type == "bonds":
+            aggregates["total_face_value"] = round_money(_sum("face_value"))
+            aggregates["total_market_value"] = round_money(_sum("current_price"))
+            # FIX: coupon income should come from annual_coupon, not accrued_interest.
+            aggregates["total_coupon_income"] = round_money(_sum("annual_coupon"))
+            aggregates["total_value"] = round_money(_sum("current_price"))
+            m = _mean("yield_to_maturity")
+            aggregates["avg_ytm"] = round(m, 4) if m is not None else None
+            m = _mean("duration")
+            aggregates["avg_duration"] = round(m, 4) if m is not None else None
+            m = _mean("coupon_rate")
+            aggregates["weighted_avg_coupon"] = round(m, 4) if m is not None else None
+
+    # -------------------------------------------------------------------------
+    # Camel-case aliases so the frontend's calculationFields can find them.
+    # The frontend reads keys like 'weightedAvgCoupon', 'avgYTM',
+    # 'totalAnnualIncome', 'duration', 'totalValue', 'instrumentCount', etc.
+    # -------------------------------------------------------------------------
+    camel_map = {
+        "instrumentCount":    "instrument_count",
+        "totalValue":         "total_value",
+        "totalMarketValue":   "total_market_value",
+        "totalFaceValue":     "total_face_value",
+        "totalPrincipal":     "total_principal",
+        "totalInterest":      "total_interest",
+        "totalCouponIncome":  "total_coupon_income",
+        "totalAnnualIncome":  "total_coupon_income",   # frontend label for bonds
+        "weightedAvgRate":    "weighted_avg_rate",
+        "avgRate":            "weighted_avg_rate",
+        "weightedAvgCoupon":  "weighted_avg_coupon",
+        "avgYTM":             "avg_ytm",
+        "avgDiscountRate":    "avg_discount_rate",
+        "avgDaysToMaturity":  "avg_days_to_maturity",
+        "duration":           "avg_duration",
+        "failedCount":        "failed_count",
+    }
+    for camel, snake in camel_map.items():
+        if snake in aggregates and camel not in aggregates:
+            aggregates[camel] = aggregates[snake]
+
+    mode = "single" if unique_instrument_count == 1 else "multiple"
+
+    return {
+        "status": "success" if successful else "cannot_calculate",
+        "mode": mode,
+        "instrument_type": instrument_type,
+        "instrument_count": unique_instrument_count,
+        "successful_rows": len(successful),
+        "instrument_results": instrument_results,
+        "aggregates": aggregates,
+        "calculations": instrument_results,
     }

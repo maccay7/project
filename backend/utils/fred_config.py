@@ -1,5 +1,14 @@
+# backend/.../fred_config.py
+"""
+FRED API integration.
+
+Rules:
+- Never fabricate benchmark data. If FRED returns nothing, benchmark_rate is None.
+- Country and maturity default to US / 1Y when not supplied.
+- Date range queries are supported via from_date / to_date.
+"""
+
 import os
-import json
 import requests
 import logging
 from dotenv import load_dotenv
@@ -12,10 +21,6 @@ load_dotenv()
 FRED_API_KEY = os.environ.get('FRED_API_KEY')
 FRED_BASE_URL = 'https://api.stlouisfed.org/fred'
 
-# Alias used by some modules
-FRED_KEY = FRED_API_KEY
-
-# Map frontend country codes to FRED country codes
 COUNTRY_ALIASES = {
     'USA': 'US', 'US': 'US',
     'GBR': 'GB', 'GB': 'GB', 'UK': 'GB',
@@ -43,7 +48,15 @@ COUNTRY_ALIASES = {
     'ISR': 'IL', 'IL': 'IL',
 }
 
-# Valid FRED series IDs only – no fake/mock series
+# Currency per country — used to echo the right currency back to the client
+COUNTRY_CURRENCY = {
+    'US': 'USD', 'GB': 'GBP', 'EUR': 'EUR', 'JP': 'JPY', 'CA': 'CAD',
+    'AU': 'AUD', 'ZA': 'ZAR', 'CH': 'CHF', 'NZ': 'NZD', 'NO': 'NOK',
+    'SE': 'SEK', 'DK': 'DKK', 'BR': 'BRL', 'MX': 'MXN', 'IN': 'INR',
+    'CN': 'CNY', 'KR': 'KRW', 'SG': 'SGD', 'HK': 'HKD', 'RU': 'RUB',
+    'TR': 'TRY', 'SA': 'SAR', 'AE': 'AED', 'IL': 'ILS',
+}
+
 COUNTRY_SERIES_MAP = {
     'US': {
         '1M': 'DGS1MO', '3M': 'DGS3MO', '6M': 'DGS6MO', '1Y': 'DGS1',
@@ -79,46 +92,74 @@ COUNTRY_SERIES_MAP = {
 
 
 def normalize_country(country):
-    """Convert any country code (USA, GBR, etc.) to our FRED map key."""
     if not country:
         return 'US'
     code = str(country).upper().strip()
     return COUNTRY_ALIASES.get(code, code)
 
+
+def currency_for_country(country):
+    code = normalize_country(country)
+    return COUNTRY_CURRENCY.get(code, 'USD')
+
+
 def series_for_country(country, maturity):
-    country_upper = country.upper()
+    """Return (series_id, label, used_maturity, country_upper, currency, note)."""
+    if not country or not str(country).strip():
+        country = 'US'
+    country_upper = normalize_country(country)
     maturity_map = COUNTRY_SERIES_MAP.get(country_upper)
     if not maturity_map:
-        # Fallback to US if country not found
         maturity_map = COUNTRY_SERIES_MAP.get('US')
-        country_upper = 'US'
         note = f'Country "{country}" not in map, using US fallback'
+        country_upper = 'US'
     else:
         note = ''
+
+    if not maturity:
+        maturity = '1Y'
+    maturity = str(maturity).upper().strip()
+
     series_id = maturity_map.get(maturity)
     if series_id:
         label = f'{maturity} {country_upper} Treasury'
-        return series_id, label, maturity, country_upper, 'USD', note
+        return series_id, label, maturity, country_upper, currency_for_country(country_upper), note
+
     for key in maturity_map:
         if maturity in key or key in maturity:
             series_id = maturity_map[key]
             label = f'{key} {country_upper} Treasury'
-            return series_id, label, key, country_upper, 'USD', note
-    return None, None, maturity, country_upper, 'USD', 'No series found'
+            return series_id, label, key, country_upper, currency_for_country(country_upper), note
 
-def fetch_fred_observation(series_id):
+    return None, None, maturity, country_upper, currency_for_country(country_upper), 'No series found'
+
+
+def fetch_fred_observation(series_id, from_date=None, to_date=None):
+    """
+    Fetch the latest observation for a FRED series.
+    If from_date/to_date are given, uses them to filter; else returns the most recent value.
+    Returns (value, date) or (None, None).
+    """
     if not FRED_API_KEY:
-        logger.error("FRED_API_KEY not set – cannot fetch real data")
+        logger.error("FRED_API_KEY not set — cannot fetch real data")
         return None, None
     try:
         params = {
             'series_id': series_id,
             'api_key': FRED_API_KEY,
             'file_type': 'json',
-            'sort_order': 'desc',
-            'limit': 1
         }
-        resp = requests.get(f'{FRED_BASE_URL}/series/observations', params=params, timeout=10)
+        if from_date and to_date:
+            params['observation_start'] = from_date
+            params['observation_end'] = to_date
+            params['sort_order'] = 'desc'
+            params['limit'] = 1
+        else:
+            params['sort_order'] = 'desc'
+            params['limit'] = 1
+
+        resp = requests.get(f'{FRED_BASE_URL}/series/observations',
+                            params=params, timeout=10)
         if resp.status_code != 200:
             logger.error(f"FRED API status {resp.status_code} for series {series_id}")
             return None, None
@@ -126,12 +167,10 @@ def fetch_fred_observation(series_id):
         if 'error_code' in data:
             logger.error(f"FRED error: {data.get('error_message')} for series {series_id}")
             return None, None
-        observations = data.get('observations', [])
-        for obs in observations:
+        for obs in data.get('observations', []):
             if obs.get('value') and obs.get('value') != '.':
                 try:
-                    val = float(obs['value'])
-                    return val, obs.get('date')
+                    return float(obs['value']), obs.get('date')
                 except (ValueError, TypeError):
                     continue
         logger.warning(f"No valid observation for series {series_id}")
@@ -140,37 +179,52 @@ def fetch_fred_observation(series_id):
         logger.error(f"Exception fetching FRED series {series_id}: {e}")
         return None, None
 
-def get_yield_curve(country='US', maturities=None):
+
+def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None):
+    """
+    Return a sorted list of {maturity, maturityLabel, rate, date, source}.
+    Optional `from_date`/`to_date` filter observations by date.
+    """
+    if not country:
+        country = 'US'
     if maturities is None:
         maturities = ['1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y']
-    points = []
+
     maturity_map = {
         '1M': 0.083, '3M': 0.25, '6M': 0.5, '1Y': 1.0, '2Y': 2.0, '3Y': 3.0,
         '5Y': 5.0, '7Y': 7.0, '10Y': 10.0, '20Y': 20.0, '30Y': 30.0,
-        '4W': 0.077, '13W': 0.25, '26W': 0.5, '52W': 1.0
+        '4W': 0.077, '13W': 0.25, '26W': 0.5, '52W': 1.0,
     }
+
+    points = []
     for mat_label in maturities:
         series_id, label, used_mat, _, _, note = series_for_country(country, mat_label)
         if not series_id:
-            logger.warning(f"No series found for {country} {mat_label} – skipping")
+            logger.warning(f"No series found for {country} {mat_label} — skipping")
             continue
-        val, date = fetch_fred_observation(series_id)
+        val, date = fetch_fred_observation(series_id, from_date=from_date, to_date=to_date)
         if val is not None:
             points.append({
                 'maturity': maturity_map.get(used_mat, 1.0),
                 'maturityLabel': used_mat,
                 'rate': round(val, 4),
                 'date': date,
-                'source': 'fred'
+                'source': 'fred',
             })
-            logger.info(f"FRED: {series_id} = {val}%")
-        else:
-            logger.warning(f"FRED failed for {series_id} – skipping this maturity")
     points.sort(key=lambda x: x['maturity'])
-    return points  # Will be empty if no data fetched
+    return points
+
 
 def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency='USD'):
-    series_id, label, used_mat, _, _, note = series_for_country(country, maturity)
+    """Return a benchmark record. benchmark_rate is None when FRED has no data."""
+    if not country:
+        country = 'US'
+    if not maturity:
+        maturity = '1Y'
+    if not currency:
+        currency = currency_for_country(country)
+
+    series_id, label, used_mat, country_upper, inferred_ccy, note = series_for_country(country, maturity)
     if series_id:
         val, date = fetch_fred_observation(series_id)
         if val is not None:
@@ -178,29 +232,46 @@ def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency=
                 'benchmark_rate': round(val, 4),
                 'series_label': label,
                 'series_id': series_id,
-                'country': country.upper(),
-                'currency': currency,
+                'country': country_upper,
+                'currency': currency or inferred_ccy,
                 'maturity': used_mat,
                 'date': date,
-                'note': note
+                'note': note,
             }
-    # No synthetic fallback – return error
     return {
         'error': f'No benchmark data available for {instrument_type} {maturity} {country}',
         'benchmark_rate': None,
-        'note': 'FRED API returned no data'
+        'note': 'FRED API returned no data',
     }
 
-def attach_fred_to_calculation(result, instrument_type, maturity='1Y', country='US', currency='USD'):
+
+def attach_fred_to_calculation(result, instrument_type, maturity='1Y',
+                               country='US', currency='USD'):
+    """Attach FRED benchmark data to a calculation result. Never fabricates values."""
+    if not country:
+        country = 'US'
+    if not maturity:
+        maturity = '1Y'
+    if not currency:
+        currency = currency_for_country(country)
     try:
         benchmark = get_market_benchmark(instrument_type, maturity, country, currency)
         if benchmark.get('benchmark_rate') is not None:
             result['fred'] = benchmark
         else:
-            result['fred'] = {'error': benchmark.get('error'), 'note': benchmark.get('note')}
+            result['fred'] = {
+                'benchmark_rate': None,
+                'error': benchmark.get('error'),
+                'note': benchmark.get('note'),
+            }
     except Exception as e:
         logger.error(f"Error attaching FRED benchmark: {e}")
-        result['fred'] = {'error': str(e), 'note': 'Failed to fetch benchmark'}
+        result['fred'] = {
+            'benchmark_rate': None,
+            'error': str(e),
+            'note': 'FRED benchmark fetch failed',
+        }
+
 
 def build_filter_options():
     countries = []
@@ -209,11 +280,19 @@ def build_filter_options():
         countries.append({
             'code': code,
             'name': code,
-            'currency': 'USD',
-            'maturities': maturities
+            'currency': currency_for_country(code),
+            'maturities': maturities,
         })
     return {
         'countries': countries,
-        'currencies': [{'code': 'USD', 'name': 'USD'}],
-        'note': 'Filter options from local configuration'
+        'currencies': [
+            {'code': 'USD', 'name': 'USD'},
+            {'code': 'GBP', 'name': 'GBP'},
+            {'code': 'EUR', 'name': 'EUR'},
+            {'code': 'JPY', 'name': 'JPY'},
+            {'code': 'CAD', 'name': 'CAD'},
+            {'code': 'AUD', 'name': 'AUD'},
+            {'code': 'ZAR', 'name': 'ZAR'},
+        ],
+        'note': 'Filter options from local configuration',
     }

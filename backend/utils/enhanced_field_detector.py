@@ -1,1003 +1,511 @@
 """
-Enhanced Field Detection Engine
+Enhanced Field Detector
+=======================
 
-This module provides comprehensive field detection for financial instrument data,
-scanning the entire dataset (not just headers) to detect:
-- Column headers
-- Label/value pairs
-- Nearby labels and values
-- Synonyms and spelling variations
-- Dates, percentages, currencies and numeric values
-- Existing formulas/calculated values
+Detects the canonical financial fields present in an uploaded workbook.
 
-It classifies each detected value as:
-- Input (raw user-provided data)
-- Existing Worksheet Value (pre-calculated in the sheet)
-- Derived Calculation (can be calculated from other inputs)
-- Unavailable/Missing Required Input (not found)
+For each row we look at the columns present and try to map them to a
+canonical field name for the selected instrument type
+(money-market / tbills / bonds). The detector then reads the value in
+that column for the first row where it appears and reports:
+
+    - value       : the actual value found in the uploaded data
+    - value_type  : NUMBER / DATE / PERCENTAGE / TEXT / MISSING
+    - source      : the original column name in the workbook
+    - confidence  : 0.0 .. 1.0 match confidence
+    - row / col   : zero-based location of the first successful hit
+
+HARD RULES enforced by this module:
+
+*  NEVER returns a fabricated value. If a field is not found the
+   value_type is MISSING and value is None.
+*  NEVER rounds, converts, or reformats the value. That is the
+   calculation layer's job.
+*  NEVER adds a field that is not backed by a real column.
+
+The calculation pipeline can therefore trust every FieldDetection
+object as a genuine observation from the uploaded workbook.
 """
 
-from typing import Dict, List, Optional, Tuple, Set, Any
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field as dataclass_field
+from datetime import datetime, date
 from enum import Enum
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import re
-from datetime import datetime
-
-# ISO 4217 Currency Codes - Valid currency codes for validation
-ISO_CURRENCY_CODES = {
-    'USD', 'EUR', 'GBP', 'JPY', 'CNY', 'ZAR', 'AUD', 'CAD', 'CHF', 'INR', 'BRL',
-    'RUB', 'KRW', 'SGD', 'HKD', 'NOK', 'SEK', 'DKK', 'MXN', 'TRY', 'PLN', 'THB',
-    'IDR', 'MYR', 'PHP', 'VND', 'CZK', 'HUF', 'RON', 'BGN', 'HRK', 'RSD', 'UAH',
-    'ILS', 'SAR', 'AED', 'QAR', 'KWD', 'BHD', 'OMR', 'JOD', 'LBP', 'EGP', 'NGN',
-    'KES', 'GHS', 'ZMW', 'BWP', 'NAD', 'SZL', 'LSL', 'MZN', 'AOA', 'CDF', 'BIF',
-    'DJF', 'ERN', 'ETB', 'KMF', 'MGA', 'MWK', 'MUR', 'RWF', 'SCR', 'SOS', 'TZS',
-    'UGX', 'XAF', 'XOF', 'XPF', 'ZWG', 'BND', 'FJD', 'PGK', 'SBD', 'TOP', 'VUV',
-    'WST', 'ALL', 'AMD', 'AZN', 'BYN', 'GEL', 'KGS', 'KZT', 'MDL', 'RUB', 'TJS',
-    'TMT', 'UZS', 'AFN', 'BHD', 'IQD', 'IRR', 'KWD', 'LBP', 'OMR', 'QAR', 'SAR',
-    'SYP', 'AED', 'EGP', 'ILS', 'JOD', 'LBP', 'DZD', 'MAD', 'TND', 'LYD'
-}
-
-# Currency symbols mapping to ISO codes
-CURRENCY_SYMBOLS = {
-    '$': 'USD',
-    '€': 'EUR',
-    '£': 'GBP',
-    '¥': 'JPY',
-    '₹': 'INR',
-    '₽': 'RUB',
-    '₩': 'KRW',
-    '₫': 'VND',
-    '฿': 'THB',
-    'RM': 'MYR',
-    '₱': 'PHP',
-    '₪': 'ILS',
-    '₺': 'TRY',
-    'zł': 'PLN'
-}
 
 
-class ValueType(Enum):
-    """Classification of detected field values."""
-    INPUT = "input"  # Raw user-provided data
-    EXISTING = "existing"  # Pre-calculated value in worksheet
-    DERIVED = "derived"  # Can be calculated from other inputs
-    MISSING = "missing"  # Not found or unavailable
+# =============================================================================
+#  VALUE TYPE ENUM
+# =============================================================================
 
+class FieldValueType(Enum):
+    """The physical shape of a detected value."""
+    MISSING    = "missing"
+    NUMBER     = "number"
+    PERCENTAGE = "percentage"
+    DATE       = "date"
+    TEXT       = "text"
+
+
+# =============================================================================
+#  DETECTION RESULT
+# =============================================================================
 
 @dataclass
-class DetectedField:
-    """Represents a detected field with its value and classification."""
+class FieldDetection:
+    """The result of trying to locate one canonical field in the data."""
     field_name: str
-    value: Any
-    value_type: ValueType
-    source: str  # Where it was found (header, label_value, nearby, etc.)
-    confidence: float  # 0-1 confidence score
-    row: int  # Row index where found
-    col: int  # Column index where found
-    raw_label: Optional[str] = None  # Original label if from label/value pair
+    value: Any = None
+    value_type: FieldValueType = FieldValueType.MISSING
+    source: Optional[str] = None           # original column name
+    confidence: float = 0.0                # 0.0 – 1.0
+    row: Optional[int] = None              # zero-based row index of the hit
+    col: Optional[int] = None              # zero-based column index of the hit
+    raw_label: Optional[str] = None        # the original header text
 
+    # ---------------------------------------------------------------
+    # Convenience predicates used by the caller
+    # ---------------------------------------------------------------
+    @property
+    def found(self) -> bool:
+        return self.value_type is not FieldValueType.MISSING
+
+
+# =============================================================================
+#  ALIAS TABLE  —  canonical field  →  list of source-column names
+# =============================================================================
+
+# These aliases are conservative on purpose: we match column names, we
+# do NOT substring-guess. Ordering matters only for confidence scoring.
+
+_MONEY_MARKET_ALIASES: Dict[str, List[str]] = {
+    "principal":       ["principal", "investment amount", "initial investment",
+                        "starting balance", "deposit amount", "amount",
+                        "total cost", "purchase cost", "notional",
+                        "nominal", "face value", "par value"],
+    "interest_rate":   ["interest rate", "rate", "annual rate", "nominal rate",
+                        "stated rate", "effective rate", "apr", "coupon",
+                        "rate %", "rate%"],
+    "term_days":       ["term days", "term_days", "days to maturity",
+                        "maturity days", "duration days", "contract days",
+                        "tenor", "term", "days", "period"],
+    "issue_date":      ["issue date", "start date", "effective date",
+                        "trade date", "settlement date", "origination date",
+                        "value date"],
+    "maturity_date":   ["maturity date", "end date", "due date",
+                        "redemption date", "expiry date", "termination date"],
+    "valuation_date":  ["valuation date", "portfolio date", "report date",
+                        "as of date", "date pfolio", "date"],
+    "purchase_price":  ["purchase price", "buy price", "acquisition price",
+                        "entry price", "price paid"],
+    "market_value":    ["market value", "current value", "fair value",
+                        "present value", "total value"],
+    "instrument_name": ["instrument name", "instrument", "issuer", "company",
+                        "entity", "security", "short name"],
+    "currency":        ["currency", "ccy", "iso code", "currency code"],
+    "country":         ["country", "jurisdiction", "domicile"],
+    "classification":  ["classification", "category", "asset class", "type"],
+}
+
+_TBILLS_ALIASES: Dict[str, List[str]] = {
+    "face_value":      ["face value", "par value", "redemption value",
+                        "maturity value", "nominal value", "principal",
+                        "amount"],
+    "discount_rate":   ["discount rate", "bank discount", "discount yield",
+                        "t-bill rate", "auction rate", "discount"],
+    "term_days":       ["term days", "term_days", "days to maturity",
+                        "maturity days", "tenor", "term", "days", "period"],
+    "issue_date":      ["issue date", "start date", "settlement date",
+                        "trade date", "auction date"],
+    "maturity_date":   ["maturity date", "end date", "due date",
+                        "redemption date", "expiry date"],
+    "valuation_date":  ["valuation date", "portfolio date", "report date",
+                        "as of date", "date"],
+    "purchase_price":  ["purchase price", "buy price", "price paid", "price",
+                        "clean price"],
+    "instrument_name": ["instrument name", "instrument", "issuer", "security",
+                        "short name"],
+    "currency":        ["currency", "ccy", "iso code"],
+    "country":         ["country", "jurisdiction", "domicile"],
+}
+
+_BONDS_ALIASES: Dict[str, List[str]] = {
+    "face_value":        ["face value", "par value", "principal", "nominal",
+                          "redemption value", "maturity value"],
+    "coupon_rate":       ["coupon rate", "coupon", "annual coupon",
+                          "fixed rate", "stated rate", "interest rate"],
+    "coupon_frequency":  ["coupon frequency", "payment frequency", "frequency",
+                          "coupon period", "payments per year"],
+    "years_to_maturity": ["years to maturity", "maturity years", "term years",
+                          "duration years", "time to maturity", "years",
+                          "term"],
+    "yield_to_maturity": ["yield to maturity", "ytm", "market yield",
+                          "required return", "redemption yield", "yield"],
+    "market_price":      ["market price", "clean price", "dirty price",
+                          "current price", "flat price", "quoted price",
+                          "price"],
+    "issue_date":        ["issue date", "start date", "effective date",
+                          "settlement date", "trade date"],
+    "maturity_date":     ["maturity date", "end date", "due date",
+                          "redemption date", "expiry date"],
+    "valuation_date":    ["valuation date", "portfolio date", "report date",
+                          "as of date", "date"],
+    "call_date":         ["call date", "first call date",
+                          "early redemption date"],
+    "call_price":        ["call price", "call premium", "redemption price"],
+    "put_date":          ["put date", "puttable date"],
+    "put_price":         ["put price", "put premium"],
+    "instrument_name":   ["instrument name", "instrument", "issuer", "bond name",
+                          "security", "short name"],
+    "currency":          ["currency", "ccy", "iso code"],
+    "country":           ["country", "jurisdiction", "domicile"],
+    "sector":            ["sector", "industry", "industry group"],
+    "rating":            ["credit rating", "rating", "moody", "s&p", "fitch"],
+}
+
+
+_ALIAS_TABLE: Dict[str, Dict[str, List[str]]] = {
+    "money-market": _MONEY_MARKET_ALIASES,
+    "money_market": _MONEY_MARKET_ALIASES,
+    "mm":           _MONEY_MARKET_ALIASES,
+    "tbills":       _TBILLS_ALIASES,
+    "t-bills":      _TBILLS_ALIASES,
+    "treasury-bills": _TBILLS_ALIASES,
+    "bonds":        _BONDS_ALIASES,
+    "bond":         _BONDS_ALIASES,
+}
+
+
+# =============================================================================
+#  VALUE-TYPE DETECTION
+# =============================================================================
+
+# A relaxed date regexp — the string parsers downstream handle many formats.
+_DATE_RE = re.compile(
+    r"""^\s*
+        (?:
+            \d{4}[-/]\d{1,2}[-/]\d{1,2}          # 2024-01-15, 2024/1/15
+          | \d{1,2}[-/]\d{1,2}[-/]\d{2,4}        # 15/01/2024, 1/15/24
+        )
+        (?:\s+\d{1,2}:\d{2}(?::\d{2})?)?         # optional time
+        \s*$""",
+    re.VERBOSE,
+)
+
+
+def _classify_value(value: Any) -> FieldValueType:
+    """Determine the physical shape of one cell."""
+    if value is None or value == "":
+        return FieldValueType.MISSING
+    if isinstance(value, bool):
+        return FieldValueType.TEXT
+    if isinstance(value, datetime):
+        return FieldValueType.DATE
+    if isinstance(value, date):
+        return FieldValueType.DATE
+    if isinstance(value, (int, float)):
+        # We cannot tell percentage from number at this stage.
+        # The type will be refined by the field-level expectation below.
+        return FieldValueType.NUMBER
+    if isinstance(value, str):
+        s = value.strip()
+        if s == "":
+            return FieldValueType.MISSING
+        if s.endswith("%"):
+            return FieldValueType.PERCENTAGE
+        if _DATE_RE.match(s):
+            return FieldValueType.DATE
+        # Numeric-with-commas string
+        try:
+            float(s.replace(",", ""))
+            return FieldValueType.NUMBER
+        except (TypeError, ValueError):
+            pass
+        return FieldValueType.TEXT
+    return FieldValueType.TEXT
+
+
+# Percentage-expected canonical fields — if such a field is found as
+# a NUMBER we upgrade its type to PERCENTAGE only when its magnitude
+# is consistent with a percentage (i.e. value > 1). Values 0..1 are
+# treated as decimal-rate inputs.
+_PERCENTAGE_FIELDS = {
+    "interest_rate", "discount_rate", "coupon_rate",
+    "yield_to_maturity", "yield", "inflation_rate",
+}
+
+
+def _refine_value_type(field_name: str, value: Any,
+                       base: FieldValueType) -> FieldValueType:
+    """Upgrade NUMBER → PERCENTAGE for percentage-shaped fields."""
+    if base is not FieldValueType.NUMBER:
+        return base
+    if field_name not in _PERCENTAGE_FIELDS:
+        return base
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return base
+    if numeric > 1:
+        return FieldValueType.PERCENTAGE
+    # 0..1 decimals are left as NUMBER — the parser knows they are decimals.
+    return base
+
+
+# =============================================================================
+#  COLUMN-NAME MATCHING  —  confidence scoring
+# =============================================================================
+
+def _normalise_header(text: str) -> str:
+    """Lower-case, collapse whitespace, strip punctuation we don't care about."""
+    if text is None:
+        return ""
+    return re.sub(r"\s+", " ", str(text).strip().lower())
+
+
+def _tokens(text: str) -> List[str]:
+    """Split a header into lower-case word tokens."""
+    if not text:
+        return []
+    return [t for t in re.split(r"[\s_\-\(\)\[\]/]+", text.lower().strip()) if t]
+
+
+def _confidence(header: str, alias: str) -> float:
+    """
+    Score a match between a workbook header and an alias.
+
+    *  1.00 — exact case-insensitive string match
+    *  0.90 — all alias tokens appear in the header, in the same order
+    *  0.75 — all alias tokens appear in the header, any order
+    *  0.50 — the header is a single token that equals a single alias token
+    *  0.00 — no match (caller must reject these)
+    """
+    if not header or not alias:
+        return 0.0
+    h = _normalise_header(header)
+    a = _normalise_header(alias)
+    if h == a:
+        return 1.00
+
+    h_tokens = _tokens(h)
+    a_tokens = _tokens(a)
+    if not a_tokens or not h_tokens:
+        return 0.0
+
+    a_set = set(a_tokens)
+    h_set = set(h_tokens)
+
+    if a_set.issubset(h_set):
+        # Same order?  Compare the sequence of alias tokens in the header.
+        indices = [h_tokens.index(t) for t in a_tokens if t in h_tokens]
+        if indices == sorted(indices):
+            return 0.90
+        return 0.75
+
+    if len(a_tokens) == 1 and a_tokens[0] in h_set:
+        return 0.50
+
+    return 0.0
+
+
+# =============================================================================
+#  THE DETECTOR
+# =============================================================================
 
 class EnhancedFieldDetector:
     """
-    Enhanced field detection engine that scans entire data comprehensively.
-    
-    This detector:
-    - Scans entire dataset, not just headers
-    - Detects label/value pairs in various orientations
-    - Matches synonyms and spelling variations
-    - Identifies numeric, date, percentage, currency patterns
-    - Recognizes existing calculated values
-    - Classifies values by type (input, existing, derived, missing)
-    - Provides confidence scores for detections
-    - Detects currencies with context-aware validation
-    """
-    
-    def __init__(self):
-        # Comprehensive field synonym database
-        self.field_synonyms = self._build_field_synonyms()
-        
-        # Patterns for value type detection
-        self.numeric_pattern = re.compile(r'^[\d\,\.\-\$€£¥%]+$')
-        self.percentage_pattern = re.compile(r'^[\d\,\.\-\%]+\%?$')
-        self.currency_pattern = re.compile(r'^[\$\€\£\¥]?[\d\,\.\-]+[\$\€\£\¥]?$')
-        self.date_pattern = re.compile(
-            r'^\d{4}[-/]\d{1,2}[-/]\d{1,2}$|'  # YYYY-MM-DD or YYYY/MM/DD
-            r'^\d{1,2}[-/]\d{1,2}[-/]\d{4}$|'  # DD-MM-DD or DD/MM/YYYY
-            r'^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$|'  # DD Mon YYYY
-            r'^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$'  # Mon DD, YYYY
-        )
-        
-        # Currency-specific patterns (ISO codes and symbols)
-        self.iso_currency_pattern = re.compile(r'\b[A-Z]{3}\b')  # 3-letter codes
-        self.currency_symbol_pattern = re.compile(r'[\$\€\£\¥₹₽₩₫฿RM₱₪₺zł]')
-        
-        # Fields that typically indicate calculated values
-        self.calculated_field_patterns = [
-            'calculated', 'computed', 'derived', 'formula', 'result',
-            'total', 'sum', 'average', 'avg', 'present value', 'pv',
-            'future value', 'fv', 'dirty price', 'clean price', 'yield',
-            'duration', 'convexity', 'accrued', 'discount'
-        ]
-        
-        # Fields that are NOT currencies (to avoid false positives)
-        self.non_currency_fields = {
-            'counterpart', 'counterparty', 'bank', 'institution', 'company',
-            'issuer', 'borrower', 'lender', 'investor', 'holder', 'owner',
-            'manager', 'administrator', 'operator', 'user', 'client', 'customer',
-            'supplier', 'vendor', 'partner', 'affiliate', 'subsidiary', 'parent',
-            'entity', 'organization', 'corporation', 'firm', 'business', 'enterprise',
-            'instrument', 'security', 'bond', 'bill', 'note', 'certificate',
-            'description', 'notes', 'comment', 'reference', 'id', 'number',
-            'type', 'category', 'status', 'class', 'group', 'sector', 'industry',
-            'region', 'location', 'address', 'contact', 'phone', 'email', 'website',
-            'link', 'url', 'source', 'origin', 'destination', 'route', 'path'
-        }
-    
-    def detect_fields(self, data: List[Dict], instrument_type: str = 'money-market') -> Dict[str, DetectedField]:
-        """
-        Detect all financial fields from the entire dataset.
-        
-        Args:
-            data: List of data rows (dictionaries)
-            instrument_type: Type of instrument ('money-market', 'tbills', 'bonds')
-            
-        Returns:
-            Dictionary mapping field names to DetectedField objects
-        """
-        if not data or not isinstance(data, list):
-            return {}
-        
-        detected_fields = {}
-        
-        # Step 0: Analyze worksheet structure to understand data organization
-        structure_analysis = self._analyze_worksheet_structure(data)
-        
-        # Step 1: Detect from column headers (traditional approach)
-        header_detections = self._detect_from_headers(data, structure_analysis)
-        detected_fields.update(header_detections)
-        
-        # Step 2: Detect from label/value pairs (vertical orientation)
-        label_value_detections = self._detect_from_label_value_pairs(data, structure_analysis)
-        # Merge with existing, keeping higher confidence
-        for field_name, detection in label_value_detections.items():
-            if field_name not in detected_fields or detection.confidence > detected_fields[field_name].confidence:
-                detected_fields[field_name] = detection
-        
-        # Step 3: Detect from nearby labels and values
-        nearby_detections = self._detect_from_nearby_labels(data, structure_analysis)
-        for field_name, detection in nearby_detections.items():
-            if field_name not in detected_fields or detection.confidence > detected_fields[field_name].confidence:
-                detected_fields[field_name] = detection
-        
-        # Step 4: Detect from value patterns (numeric, date, percentage)
-        pattern_detections = self._detect_from_value_patterns(data, detected_fields)
-        for field_name, detection in pattern_detections.items():
-            if field_name not in detected_fields or detection.confidence > detected_fields[field_name].confidence:
-                detected_fields[field_name] = detection
-        
-        # Step 5: Classify detected values
-        detected_fields = self._classify_values(detected_fields, data)
-        
-        # Step 6: Identify missing required fields
-        required_fields = self._get_required_fields(instrument_type)
-        for field in required_fields:
-            if field not in detected_fields:
-                detected_fields[field] = DetectedField(
-                    field_name=field,
-                    value=None,
-                    value_type=ValueType.MISSING,
-                    source='not_detected',
-                    confidence=0.0,
-                    row=-1,
-                    col=-1
-                )
-        
-        return detected_fields
-    
-    def detect_currencies(self, data: List[Dict[str, Any]], table_range: Optional[Dict[str, int]] = None) -> List[str]:
-        """
-        Detect genuine currencies from the data with context-aware validation.
-        
-        Args:
-            data: The data rows to scan
-            table_range: Optional range to restrict detection to specific table/section
-                        {'startRow', 'endRow', 'startCol', 'endCol'}
-        
-        Returns:
-            List of detected currency codes (ISO 4217 format), sorted alphabetically
-        """
-        detected_currencies = set()
-        
-        # If table_range is provided, only scan that range
-        if table_range:
-            start_row = table_range.get('startRow', 0)
-            end_row = table_range.get('endRow', len(data))
-            data = data[start_row:end_row + 1]
-        
-        currency_field_indices = set()
-        for row_idx, row in enumerate(data):
-            if not isinstance(row, dict):
-                continue
-            for col_idx, (key, value) in enumerate(row.items()):
-                key_lower = str(key).lower()
-                # Check if this is a currency field label
-                if key_lower in self.field_synonyms.get('currency', []):
-                    currency_field_indices.add(col_idx)
-        
-        # Second pass: Scan values for currency codes with context validation
-        for row_idx, row in enumerate(data):
-            if not isinstance(row, dict):
-                continue
-            
-            for col_idx, (key, value) in enumerate(row.items()):
-                key_lower = str(key).lower()
-                
-                # Skip if this is a non-currency field
-                if key_lower in self.non_currency_fields:
-                    continue
-                
-                # Check value for currency codes
-                if isinstance(value, str):
-                    value_upper = value.upper().strip()
-                    
-                    # Check for ISO currency codes (3 letters)
-                    if len(value_upper) == 3 and value_upper in ISO_CURRENCY_CODES:
-                        # Validate context: should be in a currency field or associated with numeric values
-                        if self._is_valid_currency_context(row, key, value_upper, col_idx in currency_field_indices):
-                            detected_currencies.add(value_upper)
-                    
-                    # Check for currency symbols
-                    for symbol, iso_code in CURRENCY_SYMBOLS.items():
-                        if symbol in value:
-                            # Validate context
-                            if self._is_valid_currency_context(row, key, iso_code, col_idx in currency_field_indices):
-                                detected_currencies.add(iso_code)
-        
-        return sorted(list(detected_currencies))
-    
-    def _is_valid_currency_context(self, row: Dict[str, Any], field_name: str, 
-                                  currency_code: str, is_currency_field: bool) -> bool:
-        """
-        Validate that a detected currency is in a valid context.
-        
-        This prevents false positives like "Counterpart" being detected as a currency.
-        
-        Args:
-            row: The data row
-            field_name: The field name containing the currency value
-            currency_code: The detected currency code
-            is_currency_field: Whether the field is labeled as a currency field
-        
-        Returns:
-            True if the currency is in a valid context, False otherwise
-        """
-        # If it's explicitly a currency field, it's valid
-        if is_currency_field:
-            return True
-        
-        # Check if the field name contains currency-related terms
-        field_lower = str(field_name).lower()
-        currency_related_terms = ['currency', 'ccy', 'denomination', 'curr', 'base currency']
-        if any(term in field_lower for term in currency_related_terms):
-            return True
-        
-        # Check if the value is associated with a numeric amount (same row)
-        # This handles cases like "USD" appearing next to a value
-        for key, value in row.items():
-            if isinstance(value, (int, float)) or (isinstance(value, str) and self.numeric_pattern.match(value)):
-                # If there's a numeric value in the same row, the currency might be valid
-                # But only if the field name suggests it's related
-                key_lower = str(key).lower()
-                if any(term in key_lower for term in ['amount', 'value', 'price', 'principal', 'face', 'notional']):
-                    return True
-        
-        # If the currency code appears as a standalone value (not part of a longer text)
-        # and the field name is not a known non-currency field
-        if field_lower not in self.non_currency_fields:
-            # Check if it's a very short, clean match (exact 3-letter code)
-            if len(str(currency_code)) == 3 and currency_code in ISO_CURRENCY_CODES:
-                return True
-        
-        return False
-    
-    def _build_field_synonyms(self) -> Dict[str, List[str]]:
-        """Build comprehensive synonym database for all financial fields."""
-        return {
-            # Principal/Face Value
-            'principal': ['principal', 'face value', 'face', 'face amount', 'par value', 'par',
-                        'nominal', 'nominal value', 'investment amount', 'amount invested',
-                        'purchase amount', 'issue price', 'notional', 'notional amount',
-                        'capital', 'investment'],
-            'face_value': ['face value', 'face', 'face amount', 'par value', 'par',
-                         'principal', 'nominal', 'nominal value', 'maturity value'],
-            'par_value': ['par value', 'face value', 'principal', 'par'],
-            'nominal_value': ['nominal value', 'face value', 'par value', 'notional'],
-            'notional': ['notional', 'nominal value', 'face value', 'principal'],
-            
-            # Interest Rate / Coupon
-            'interest_rate': ['interest rate', 'rate', 'coupon rate', 'coupon', 'yield',
-                           'annual rate', 'nominal rate', 'stated rate', 'fixed rate',
-                           'floating rate', 'apr', 'annual percentage rate'],
-            'coupon_rate': ['coupon rate', 'coupon', 'interest rate', 'rate', 'annual coupon'],
-            'discount_rate': ['discount rate', 'discount', 'bank discount', 'discount yield'],
-            'yield': ['yield', 'ytm', 'yield to maturity', 'investment yield',
-                     'money market yield', 'bond equivalent yield', 'bey', 'return'],
-            'yield_to_maturity': ['yield to maturity', 'ytm', 'yield'],
-            
-            # Dates
-            'maturity_date': ['maturity date', 'maturity', 'due date', 'expiration date',
-                            'redemption date', 'expiry date', 'end date'],
-            'settlement_date': ['settlement date', 'settlement', 'trade date', 'value date',
-                              'effective date', 'purchase date'],
-            'issue_date': ['issue date', 'issuance date', 'origination date', 'start date',
-                         'commencement date', 'auction date'],
-            'valuation_date': ['valuation date', 'pricing date', 'as of date', 'value date'],
-            
-            # Duration/Term
-            'days_to_maturity': ['days to maturity', 'maturity days', 'term', 'tenor', 'days',
-                               'remaining days', 'days remaining', 'term in days'],
-            'term': ['term', 'tenor', 'duration', 'maturity', 'period'],
-            'tenor': ['tenor', 'term', 'duration', 'maturity'],
-            'years_to_maturity': ['years to maturity', 'term in years', 'remaining years'],
-            
-            # Frequency
-            'coupon_frequency': ['coupon frequency', 'frequency', 'payment frequency',
-                              'payments per year', 'compounding frequency', 'pmt frequency'],
-            'compounding_frequency': ['compounding frequency', 'frequency'],
-            
-            # Prices
-            'purchase_price': ['purchase price', 'purchase', 'price', 'clean price', 'dirty price',
-                             'issue price', 'investment amount', 'amount invested', 'cost'],
-            'clean_price': ['clean price', 'price', 'quoted price'],
-            'dirty_price': ['dirty price', 'full price', 'gross price'],
-            'market_price': ['market price', 'current price', 'trading price'],
-            
-            # Values
-            'present_value': ['present value', 'pv', 'current value', 'discounted value'],
-            'future_value': ['future value', 'fv', 'maturity value'],
-            'fair_value': ['fair value', 'fv', 'market value', 'current value'],
-            'market_value': ['market value', 'fair value', 'current value'],
-            'carrying_value': ['carrying value', 'book value', 'amortised cost'],
-            'book_value': ['book value', 'carrying value', 'amortised cost'],
-            
-            # Interest
-            'accrued_interest': ['accrued interest', 'accrued', 'interest accrued', 'accrued coupon'],
-            'interest_earned': ['interest earned', 'interest income', 'interest amount'],
-            'interest_amount': ['interest amount', 'interest earned'],
-            
-            # Identification
-            'instrument_name': ['instrument name', 'name', 'security', 'security name',
-                              'bond name', 'tbill name', 'description', 'ticker', 'symbol',
-                              'counterparty', 'issuer', 'borrower', 'entity', 'company'],
-            'instrument_id': ['instrument id', 'id', 'security id', 'bond id', 'tbill id'],
-            'isin': ['isin', 'isin code'],
-            'cusip': ['cusip', 'cusip code'],
-            
-            # Currency
-            'currency': ['currency', 'denomination', 'ccy', 'currency code', 'curr',
-                       'base currency', 'local currency', 'reporting currency'],
-            'exchange_rate': ['exchange rate', 'exch rate', 'fx rate', 'forex rate',
-                            'conversion rate', 'spot rate', 'forward rate'],
-            
-            # Country/Region
-            'country': ['country', 'jurisdiction', 'nation', 'region'],
-            'issuer_country': ['issuer country', 'country of issue', 'issuing country'],
-            
-            # T-Bill specific
-            'price_per_100': ['price per 100', 'clean price', 'price'],
-            'bond_equivalent_yield': ['bond equivalent yield', 'investment yield', 'bey'],
-            'effective_annual_yield': ['effective annual yield', 'eay', 'effective yield'],
-            
-            # Bond specific
-            'call_date': ['call date', 'optional redemption date'],
-            'call_price': ['call price', 'redemption price'],
-            'put_date': ['put date', 'optional put date'],
-            'put_price': ['put price'],
-            'next_coupon_date': ['next coupon date', 'upcoming coupon date'],
-            
-            # Day count
-            'day_count_convention': ['day count', 'day count convention', 'day basis',
-                                   'basis', 'day count basis'],
-            'days_in_year': ['days in year', 'day count basis']
-        }
-    
-    def _analyze_worksheet_structure(self, data: List[Dict]) -> Dict[str, Any]:
-        """
-        Analyze worksheet structure to understand data organization.
-        
-        This method identifies:
-        - Cell content types (empty, numeric, date, text, header, label, data)
-        - Potential header rows
-        - Label-value pair patterns
-        - Table structures
-        - Section boundaries
-        
-        Returns:
-            Dictionary containing structure analysis results
-        """
-        if not data:
-            return {}
-        
-        structure = {
-            'cell_types': [],
-            'potential_header_rows': [],
-            'label_value_pairs': [],
-            'table_regions': [],
-            'section_boundaries': []
-        }
-        
-        # Analyze each cell's content type
-        for row_idx, row in enumerate(data):
-            row_types = {}
-            for col_idx, (key, value) in enumerate(row.items()):
-                cell_type = self._classify_cell_content(value)
-                row_types[key] = cell_type
-            structure['cell_types'].append(row_types)
-        
-        # Identify potential header rows
-        for row_idx, row_types in enumerate(structure['cell_types']):
-            header_count = 0
-            total_cells = 0
-            
-            for key, cell_type in row_types.items():
-                if cell_type['type'] != 'empty':
-                    total_cells += 1
-                    if cell_type['is_header']:
-                        header_count += 1
-            
-            # If more than 50% of non-empty cells look like headers
-            if total_cells >= 2 and header_count / total_cells >= 0.5:
-                structure['potential_header_rows'].append(row_idx)
-        
-        # Identify label-value pairs
-        for row_idx in range(len(data) - 1):
-            current_row = data[row_idx]
-            next_row = data[row_idx + 1]
-            
-            for key, label_cell in current_row.items():
-                label_str = str(label_cell).strip() if label_cell else ''
-                if not label_str:
-                    continue
-                
-                label_type = structure['cell_types'][row_idx].get(key, {})
-                if label_type.get('is_label', False):
-                    value_cell = next_row.get(key)
-                    if value_cell is not None and str(value_cell).strip() not in ['', ' ', 'N/A', 'n/a', '-']:
-                        structure['label_value_pairs'].append({
-                            'row': row_idx,
-                            'col': key,
-                            'label': label_str,
-                            'value': value_cell,
-                            'orientation': 'vertical'
-                        })
-        
-        # Horizontal label-value pairs
-        for row_idx, row in enumerate(data):
-            keys = list(row.keys())
-            for col_idx in range(len(keys) - 1):
-                label_cell = row[keys[col_idx]]
-                value_cell = row[keys[col_idx + 1]]
-                
-                label_str = str(label_cell).strip() if label_cell else ''
-                if not label_str:
-                    continue
-                
-                label_type = structure['cell_types'][row_idx].get(keys[col_idx], {})
-                if label_type.get('is_label', False):
-                    if value_cell is not None and str(value_cell).strip() not in ['', ' ', 'N/A', 'n/a', '-']:
-                        structure['label_value_pairs'].append({
-                            'row': row_idx,
-                            'col': keys[col_idx],
-                            'label': label_str,
-                            'value': value_cell,
-                            'orientation': 'horizontal'
-                        })
-        
-        # Identify table regions (header row + data rows)
-        for header_row in structure['potential_header_rows']:
-            start_col = None
-            end_col = None
-            
-            for key in data[header_row].keys():
-                if structure['cell_types'][header_row][key]['type'] != 'empty':
-                    if start_col is None:
-                        start_col = key
-                    end_col = key
-            
-            if start_col is None:
-                continue
-            
-            end_row = header_row
-            consecutive_empty = 0
-            
-            for row_idx in range(header_row + 1, len(data)):
-                has_data = False
-                for key in data[row_idx].keys():
-                    if structure['cell_types'][row_idx][key]['type'] != 'empty':
-                        has_data = True
-                        break
-                
-                if has_data:
-                    end_row = row_idx
-                    consecutive_empty = 0
-                else:
-                    consecutive_empty += 1
-                    if consecutive_empty >= 2:
-                        break
-            
-            if end_row > header_row:
-                structure['table_regions'].append({
-                    'start_row': header_row,
-                    'end_row': end_row,
-                    'start_col': start_col,
-                    'end_col': end_col
-                })
-        
-        # Identify section boundaries (empty rows)
-        for row_idx, row in enumerate(data):
-            is_empty = all(
-                structure['cell_types'][row_idx][key]['type'] == 'empty'
-                for key in row.keys()
-            )
-            if is_empty:
-                structure['section_boundaries'].append(row_idx)
-        
-        return structure
-    
-    def _classify_cell_content(self, value: Any) -> Dict[str, Any]:
-        """
-        Classify cell content type.
-        
-        Returns:
-            Dictionary with type classification and flags
-        """
-        if value is None or value == '':
-            return {'type': 'empty', 'is_header': False, 'is_label': False, 'is_data': False}
-        
-        text = str(value).strip()
-        is_numeric = self.numeric_pattern.match(text)
-        is_date = self.date_pattern.match(text)
-        is_percentage = self.percentage_pattern.match(text)
-        
-        # Header keywords
-        header_keywords = ['name', 'date', 'rate', 'value', 'amount', 'price', 'yield', 
-                          'coupon', 'maturity', 'issue', 'principal', 'face', 'discount', 
-                          'interest', 'term', 'tenor', 'frequency', 'currency', 'country', 
-                          'instrument', 'bond', 'bill', 'security']
-        
-        is_header_keyword = any(keyword in text.lower() for keyword in header_keywords)
-        is_short_text = len(text) < 50 and not is_numeric and not is_date
-        is_header = is_short_text and (is_header_keyword or (text and text[0].isupper()))
-        
-        # Label detection
-        label_patterns = [r'^(.+?)\s*[:=]\s*$', r'^(.+?)\s*$']
-        is_label = is_short_text and (
-            any(re.match(pattern, text) for pattern in label_patterns) or is_header_keyword
-        )
-        
-        # Data detection
-        is_data = is_numeric or is_date or is_percentage or (not is_header and not is_label and text)
-        
-        cell_type = 'numeric' if is_numeric else 'date' if is_date else 'percentage' if is_percentage else 'text'
-        
-        return {
-            'type': cell_type,
-            'is_header': is_header,
-            'is_label': is_label,
-            'is_data': is_data,
-            'text': text,
-            'length': len(text)
-        }
-    
-    def _detect_from_headers(self, data: List[Dict], structure_analysis: Dict[str, Any]) -> Dict[str, DetectedField]:
-        """Detect fields from column headers."""
-        detections = {}
-        
-        if not data:
-            return detections
-        
-        # Check all rows for headers, not just first row
-        for row_idx, row in enumerate(data):
-            headers = list(row.keys())
-            
-            for col_idx, header in enumerate(headers):
-                if not header:
-                    continue
-                
-                matched_field = self._match_field_to_synonym(header)
-                
-                if matched_field:
-                    value = None
-                    for check_row in data:
-                        if header in check_row and check_row[header] not in [None, '', ' ']:
-                            value = check_row[header]
-                            break
-                    
-                    if value is not None:
-                        # Only add if not already detected with higher confidence
-                        if matched_field not in detections or 0.9 > detections[matched_field].confidence:
-                            detections[matched_field] = DetectedField(
-                                field_name=matched_field,
-                                value=value,
-                                value_type=ValueType.INPUT,  # Will be reclassified later
-                                source='header',
-                                confidence=0.9,
-                                row=row_idx,
-                                col=col_idx,
-                                raw_label=header
-                            )
-        
-        return detections
-    
-    def _detect_from_label_value_pairs(self, data: List[Dict], structure_analysis: Dict[str, Any]) -> Dict[str, DetectedField]:
-        """Detect fields from label/value pairs (vertical orientation)."""
-        detections = {}
-        
-        if not data:
-            return detections
-        
-        # Scan all rows for label/value pairs
-        for row_idx, row in enumerate(data):
-            keys = list(row.keys())
-            
-            for col_idx in range(len(keys) - 1):
-                label_cell = row[keys[col_idx]]
-                value_cell = row[keys[col_idx + 1]]
-                
-                if not label_cell:
-                    continue
-                
-                label_str = str(label_cell).strip()
-                
-                matched_field = self._match_field_to_synonym(label_str)
-                
-                if matched_field and value_cell is not None and str(value_cell).strip() not in ['', ' ', 'N/A', 'n/a', '-']:
-                    parsed_value = self._parse_value(str(value_cell).strip())
-                    
-                    # Only add if not already detected with higher confidence
-                    if matched_field not in detections or 0.85 > detections[matched_field].confidence:
-                        detections[matched_field] = DetectedField(
-                            field_name=matched_field,
-                            value=parsed_value,
-                            value_type=ValueType.INPUT,  # Will be reclassified later
-                            source='label_value_pair',
-                            confidence=0.85,
-                            row=row_idx,
-                            col=col_idx + 1,
-                            raw_label=label_str
-                        )
-        
-        return detections
-    
-    def _detect_from_nearby_labels(self, data: List[Dict], structure_analysis: Dict[str, Any]) -> Dict[str, DetectedField]:
-        """Detect fields from nearby labels and values (horizontal scanning)."""
-        detections = {}
-        
-        if not data or len(data) < 2:
-            return detections
-        
-        # Scan all adjacent row pairs
-        for row_idx in range(len(data) - 1):
-            current_row = data[row_idx]
-            next_row = data[row_idx + 1]
-            
-            for col_idx, (key, label_cell) in enumerate(current_row.items()):
-                if not label_cell:
-                    continue
-                
-                label_str = str(label_cell).strip()
-                matched_field = self._match_field_to_synonym(label_str)
-                
-                if matched_field:
-                    # Look for value in same column in next row
-                    value_cell = next_row.get(key)
-                    if value_cell is not None and str(value_cell).strip() not in ['', ' ', 'N/A', 'n/a', '-']:
-                        parsed_value = self._parse_value(str(value_cell).strip())
-                        
-                        # Only add if not already detected with higher confidence
-                        if matched_field not in detections or 0.75 > detections[matched_field].confidence:
-                            detections[matched_field] = DetectedField(
-                                field_name=matched_field,
-                                value=parsed_value,
-                                value_type=ValueType.INPUT,  # Will be reclassified later
-                                source='nearby_label',
-                                confidence=0.75,
-                                row=row_idx + 1,
-                                col=col_idx,
-                                raw_label=label_str
-                            )
-        
-        return detections
-    
-    def _detect_from_value_patterns(self, data: List[Dict], 
-                                   existing_detections: Dict[str, DetectedField]) -> Dict[str, DetectedField]:
-        """Detect fields based on value patterns (numeric, date, percentage)."""
-        detections = {}
-        
-        if not data:
-            return detections
-        
-        # Only detect fields not already found
-        already_detected = set(existing_detections.keys())
-        
-        for row_idx, row in enumerate(data):
-            for col_idx, (key, value) in enumerate(row.items()):
-                if key in already_detected:
-                    continue
-                
-                if value is None or value == '':
-                    continue
-                
-                value_str = str(value).strip()
-                
-                # Check for percentage values (likely interest/discount rates)
-                if self.percentage_pattern.match(value_str):
-                    if 'interest_rate' not in already_detected:
-                        detections['interest_rate'] = DetectedField(
-                            field_name='interest_rate',
-                            value=self._parse_value(value_str),
-                            value_type=ValueType.INPUT,
-                            source='percentage_pattern',
-                            confidence=0.6,
-                            row=row_idx,
-                            col=col_idx
-                        )
-                    elif 'discount_rate' not in already_detected:
-                        detections['discount_rate'] = DetectedField(
-                            field_name='discount_rate',
-                            value=self._parse_value(value_str),
-                            value_type=ValueType.INPUT,
-                            source='percentage_pattern',
-                            confidence=0.6,
-                            row=row_idx,
-                            col=col_idx
-                        )
-                    elif 'coupon_rate' not in already_detected:
-                        detections['coupon_rate'] = DetectedField(
-                            field_name='coupon_rate',
-                            value=self._parse_value(value_str),
-                            value_type=ValueType.INPUT,
-                            source='percentage_pattern',
-                            confidence=0.6,
-                            row=row_idx,
-                            col=col_idx
-                        )
-                
-                # Check for currency values (likely principal/face value)
-                elif self.currency_pattern.match(value_str):
-                    if 'principal' not in already_detected:
-                        detections['principal'] = DetectedField(
-                            field_name='principal',
-                            value=self._parse_value(value_str),
-                            value_type=ValueType.INPUT,
-                            source='currency_pattern',
-                            confidence=0.6,
-                            row=row_idx,
-                            col=col_idx
-                        )
-                    elif 'face_value' not in already_detected:
-                        detections['face_value'] = DetectedField(
-                            field_name='face_value',
-                            value=self._parse_value(value_str),
-                            value_type=ValueType.INPUT,
-                            source='currency_pattern',
-                            confidence=0.6,
-                            row=row_idx,
-                            col=col_idx
-                        )
-                
-                # Check for date values
-                elif self.date_pattern.match(value_str):
-                    for date_field in ['maturity_date', 'settlement_date', 'issue_date', 'valuation_date']:
-                        if date_field not in already_detected:
-                            detections[date_field] = DetectedField(
-                                field_name=date_field,
-                                value=self._parse_date(value_str),
-                                value_type=ValueType.INPUT,
-                                source='date_pattern',
-                                confidence=0.5,
-                                row=row_idx,
-                                col=col_idx
-                            )
-                            break  # Only assign to first matching date field
-        
-        return detections
-    
-    def _classify_values(self, detections: Dict[str, DetectedField], data: List[Dict]) -> Dict[str, DetectedField]:
-        """Classify detected values as input, existing, derived, or missing."""
-        
-        for field_name, detection in detections.items():
-            if detection.value_type == ValueType.MISSING:
-                continue
-            
-            # Check if field name suggests it's a calculated value
-            if any(pattern in field_name.lower() for pattern in self.calculated_field_patterns):
-                detection.value_type = ValueType.EXISTING
-                continue
-            
-            # Check if the source suggests it's calculated
-            if detection.source in ['existing_formula', 'calculated_cell']:
-                detection.value_type = ValueType.EXISTING
-                continue
-            
-            # Check if it can be derived from other fields
-            if self._can_be_derived(field_name, detections):
-                detection.value_type = ValueType.DERIVED
-            else:
-                detection.value_type = ValueType.INPUT
-        
-        return detections
-    
-    def _can_be_derived(self, field_name: str, detections: Dict[str, DetectedField]) -> bool:
-        """Check if a field can be derived from other detected fields."""
-        
-        # Define derivation rules
-        derivation_rules = {
-            'days_to_maturity': ['settlement_date', 'maturity_date'],
-            'term': ['settlement_date', 'maturity_date'],
-            'years_to_maturity': ['settlement_date', 'maturity_date'],
-            'annual_coupon': ['face_value', 'coupon_rate'],
-            'coupon_payment': ['face_value', 'coupon_rate', 'coupon_frequency'],
-            'discount_amount': ['face_value', 'purchase_price'],
-            'investment_yield': ['face_value', 'purchase_price', 'days_to_maturity'],
-            'simple_interest': ['principal', 'interest_rate', 'days_to_maturity'],
-            'present_value': ['future_value', 'interest_rate', 'days_to_maturity']
-        }
-        
-        required_fields = derivation_rules.get(field_name, [])
-        
-        # Check if all required fields are available as INPUT or EXISTING
-        for req_field in required_fields:
-            if req_field not in detections:
-                return False
-            if detections[req_field].value_type in [ValueType.MISSING]:
-                return False
-        
-        return len(required_fields) > 0
-    
-    def _match_field_to_synonym(self, text: str) -> Optional[str]:
-        """Match a text string to a field name using synonyms (word-boundary aware)."""
-        if not text:
-            return None
-        
-        def normalize(s: str) -> str:
-            return re.sub(r'[_\-:]+', ' ', str(s).lower()).strip()
-        
-        text_norm = normalize(text)
-        if not text_norm:
-            return None
-        padded_text = f" {text_norm} "
-        
-        def word_matches(candidate: str) -> bool:
-            cand_norm = normalize(candidate)
-            if not cand_norm:
-                return False
-            return f" {cand_norm} " in padded_text
-        
-        # Exact match first
-        for field_name, synonyms in self.field_synonyms.items():
-            if text_norm == normalize(field_name):
-                return field_name
-            for synonym in synonyms:
-                if text_norm == normalize(synonym):
-                    return field_name
-        
-        # Word-boundary contains match
-        for field_name, synonyms in self.field_synonyms.items():
-            if word_matches(field_name):
-                return field_name
-            for synonym in synonyms:
-                if word_matches(synonym):
-                    return field_name
-        
-        return None
-    
-    def _parse_value(self, value_str: str) -> Any:
-        """Parse a string value to appropriate type."""
-        if not value_str:
-            return None
-        
-        value_str = value_str.strip()
-        
-        try:
-            cleaned = value_str.replace('$', '').replace('€', '').replace('£', '').replace('¥', '')
-            cleaned = cleaned.replace(',', '').replace('%', '')
-            
-            # Check if it's a decimal
-            if '.' in cleaned:
-                return float(cleaned)
-            else:
-                return int(cleaned)
-        except (ValueError, TypeError):
-            pass
-        
-        # Return as string if not numeric
-        return value_str
-    
-    def _parse_date(self, date_str: str) -> str:
-        """Parse a date string to ISO format (YYYY-MM-DD)."""
-        if not date_str:
-            return None
-        
-        date_str = date_str.strip()
-        
-        date_formats = [
-            '%Y-%m-%d',
-            '%Y/%m/%d',
-            '%d-%m-%Y',
-            '%d/%m/%Y',
-            '%m-%d-%Y',
-            '%m/%d/%Y',
-            '%d %b %Y',
-            '%b %d, %Y'
-        ]
-        
-        for fmt in date_formats:
-            try:
-                parsed_date = datetime.strptime(date_str, fmt)
-                return parsed_date.strftime('%Y-%m-%d')
-            except ValueError:
-                continue
-        
-        # Return original if parsing fails
-        return date_str
-    
-    def _looks_like_label(self, text: str) -> bool:
-        """Check if text looks like a label rather than a value."""
-        if not text:
-            return False
-        
-        text_lower = text.lower().strip()
-        
-        # If it contains letters and is relatively short, it's likely a label
-        if len(text_lower) > 2 and len(text_lower) < 50:
-            # Check if it contains alphabetic characters
-            if any(c.isalpha() for c in text_lower):
-                # Check if it's not purely numeric
-                if not self.numeric_pattern.match(text_lower):
-                    return True
-        
-        return False
-    
-    def _get_required_fields(self, instrument_type: str) -> List[str]:
-        """Get required fields for a given instrument type."""
-        required_fields = {
-            'money-market': ['principal', 'interest_rate'],
-            'tbills': ['face_value', 'discount_rate'],
-            'bonds': ['face_value', 'coupon_rate', 'yield_to_maturity']
-        }
-        
-        return required_fields.get(instrument_type, [])
-    
-    def get_detection_summary(self, detections: Dict[str, DetectedField]) -> Dict[str, Any]:
-        """Generate a summary of detection results."""
-        summary = {
-            'total_fields_detected': len(detections),
-            'input_fields': 0,
-            'existing_fields': 0,
-            'derived_fields': 0,
-            'missing_fields': 0,
-            'fields_by_type': {},
-            'confidence_scores': {}
-        }
-        
-        for field_name, detection in detections.items():
-            # Count by type
-            if detection.value_type == ValueType.INPUT:
-                summary['input_fields'] += 1
-            elif detection.value_type == ValueType.EXISTING:
-                summary['existing_fields'] += 1
-            elif detection.value_type == ValueType.DERIVED:
-                summary['derived_fields'] += 1
-            elif detection.value_type == ValueType.MISSING:
-                summary['missing_fields'] += 1
-            
-            # Track confidence
-            summary['confidence_scores'][field_name] = detection.confidence
-        
-        return summary
+    Locates canonical fields in an uploaded workbook.
 
+    Usage (matches the existing call-site in calculations.py):
+
+        detector = create_enhanced_field_detector()
+        detected = detector.detect_fields(data, "tbills")
+        summary  = detector.get_detection_summary(detected)
+    """
+
+    #: Minimum confidence required for a hit to be reported.
+    MIN_CONFIDENCE = 0.50
+
+    def __init__(self) -> None:
+        # Public counters we expose in the summary; reset per detect_fields call.
+        self._last_rows_scanned = 0
+        self._last_columns_scanned = 0
+
+    # ------------------------------------------------------------------ public
+
+    def detect_fields(self, data: List[Dict[str, Any]],
+                      instrument_type: str) -> Dict[str, FieldDetection]:
+        """
+        Return one FieldDetection per canonical field for the instrument type.
+
+        Fields that could not be located are included in the result with
+        value_type=MISSING — this makes the summary deterministic and
+        lets the caller iterate safely.
+        """
+        aliases = self._aliases_for(instrument_type)
+        if not aliases:
+            # Unknown instrument type — return everything MISSING.
+            return {}
+
+        if not data or not isinstance(data, list):
+            self._last_rows_scanned = 0
+            self._last_columns_scanned = 0
+            return {
+                name: FieldDetection(field_name=name,
+                                     value_type=FieldValueType.MISSING)
+                for name in aliases
+            }
+
+        # Discover the union of column headers across all rows.
+        headers: List[str] = []
+        seen = set()
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            for key in row.keys():
+                if key not in seen:
+                    seen.add(key)
+                    headers.append(key)
+
+        self._last_rows_scanned = len(data)
+        self._last_columns_scanned = len(headers)
+
+        detected: Dict[str, FieldDetection] = {}
+        for canonical, alias_list in aliases.items():
+            detected[canonical] = self._detect_one(
+                canonical, alias_list, headers, data
+            )
+        return detected
+
+    def get_detection_summary(self,
+                              detected_fields: Dict[str, FieldDetection]) -> Dict[str, Any]:
+        """
+        Return a compact summary suitable for logging or API responses.
+        """
+        found = []
+        missing = []
+        by_type: Dict[str, int] = {}
+
+        for name, det in detected_fields.items():
+            if det.found:
+                found.append({
+                    "field": name,
+                    "value": det.value,
+                    "value_type": det.value_type.value,
+                    "source_column": det.source,
+                    "confidence": det.confidence,
+                })
+                by_type[det.value_type.value] = by_type.get(det.value_type.value, 0) + 1
+            else:
+                missing.append(name)
+
+        return {
+            "rows_scanned": self._last_rows_scanned,
+            "columns_scanned": self._last_columns_scanned,
+            "found_count": len(found),
+            "missing_count": len(missing),
+            "found": found,
+            "missing": missing,
+            "by_value_type": by_type,
+        }
+
+    # ----------------------------------------------------------------- internal
+
+    @staticmethod
+    def _aliases_for(instrument_type: Optional[str]) -> Dict[str, List[str]]:
+        if not instrument_type:
+            return {}
+        key = instrument_type.lower().replace("_", "-").strip()
+        return _ALIAS_TABLE.get(key, {})
+
+    def _detect_one(self,
+                    canonical: str,
+                    alias_list: Sequence[str],
+                    headers: Sequence[str],
+                    data: Sequence[Dict[str, Any]]) -> FieldDetection:
+        """
+        Find the best matching column for `canonical`, then read the first
+        non-empty value from that column across the rows.
+        """
+        # 1. Score every header against every alias and keep the best (header, alias).
+        best_header: Optional[str] = None
+        best_alias: Optional[str] = None
+        best_score = 0.0
+
+        for header in headers:
+            for alias in alias_list:
+                score = _confidence(header, alias)
+                if score > best_score:
+                    best_score = score
+                    best_header = header
+                    best_alias = alias
+
+        if best_header is None or best_score < self.MIN_CONFIDENCE:
+            return FieldDetection(field_name=canonical,
+                                  value_type=FieldValueType.MISSING)
+
+        # 2. Read the first non-empty value in that column.
+        value, row_idx, col_idx = self._first_non_empty(best_header, headers, data)
+
+        if value is None:
+            return FieldDetection(
+                field_name=canonical,
+                value_type=FieldValueType.MISSING,
+                source=best_header,
+                raw_label=best_header,
+                confidence=best_score,
+            )
+
+        # 3. Classify and (for percentage-shaped fields) refine the type.
+        base_type = _classify_value(value)
+        value_type = _refine_value_type(canonical, value, base_type)
+
+        return FieldDetection(
+            field_name=canonical,
+            value=value,
+            value_type=value_type,
+            source=best_header,
+            raw_label=best_header,
+            confidence=best_score,
+            row=row_idx,
+            col=col_idx,
+        )
+
+    @staticmethod
+    def _first_non_empty(column: str,
+                         headers: Sequence[str],
+                         data: Sequence[Dict[str, Any]]
+                         ) -> Tuple[Any, Optional[int], Optional[int]]:
+        """
+        Return the first non-empty cell in `column`, plus its (row, col)
+        indices. If the column never has a value we return (None, None, None).
+        """
+        try:
+            col_idx: Optional[int] = list(headers).index(column)
+        except ValueError:
+            col_idx = None
+
+        for row_idx, row in enumerate(data):
+            if not isinstance(row, dict):
+                continue
+            if column not in row:
+                continue
+            v = row[column]
+            if v is None:
+                continue
+            if isinstance(v, str) and v.strip() == "":
+                continue
+            return v, row_idx, col_idx
+
+        return None, None, col_idx
+
+
+# =============================================================================
+#  FACTORY
+# =============================================================================
 
 def create_enhanced_field_detector() -> EnhancedFieldDetector:
-    """Factory function to create an enhanced field detector."""
+    """Factory used by the calculation pipeline."""
     return EnhancedFieldDetector()

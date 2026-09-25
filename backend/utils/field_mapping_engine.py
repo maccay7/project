@@ -31,7 +31,7 @@ class FieldMapping:
 class FieldMappingEngine:
     """
     Dynamic field detection and semantic mapping engine.
-    
+
     This engine:
     - Detects fields from uploaded datasets
     - Performs semantic matching to identify equivalent fields
@@ -39,7 +39,7 @@ class FieldMappingEngine:
     - Provides confidence scores for mappings
     - Allows user confirmation/override of mappings
     """
-    
+
     def __init__(self):
         # Comprehensive field alias database
         self.field_aliases = {
@@ -57,7 +57,7 @@ class FieldMappingEngine:
                 'purchase price', 'purchase', 'price', 'clean price', 'dirty price',
                 'issue price', 'investment amount', 'amount invested'
             ],
-            
+
             # Interest Rate concepts
             'interest_rate': [
                 'interest rate', 'rate', 'coupon rate', 'coupon', 'yield',
@@ -73,11 +73,11 @@ class FieldMappingEngine:
                 'yield', 'ytm', 'yield to maturity', 'investment yield',
                 'money market yield', 'bond equivalent yield', 'bey'
             ],
-            
+
             # Date concepts
             'maturity_date': [
                 'maturity date', 'maturity', 'due date', 'expiration date',
-                'redemption date', 'maturity'
+                'redemption date'
             ],
             'settlement_date': [
                 'settlement date', 'settlement', 'trade date', 'value date',
@@ -86,7 +86,7 @@ class FieldMappingEngine:
             'issue_date': [
                 'issue date', 'issuance date', 'origination date', 'start date'
             ],
-            
+
             # Term/Duration concepts
             'days_to_maturity': [
                 'days to maturity', 'maturity days', 'term', 'tenor', 'days',
@@ -95,23 +95,32 @@ class FieldMappingEngine:
             'term': [
                 'term', 'tenor', 'duration', 'maturity', 'period'
             ],
-            
+
             # Frequency concepts
             'coupon_frequency': [
                 'coupon frequency', 'frequency', 'payment frequency',
                 'payments per year', 'compounding frequency'
             ],
-            
-            # Other financial concepts
+
+            # Other financial concepts — extended name aliases so any of these
+            # column labels map to the same field.
             'instrument_name': [
-                'instrument name', 'name', 'security', 'security name',
-                'bond name', 'tbill name', 'description', 'ticker', 'symbol'
+                'parent company name', 'parent company',
+                'issuer', 'company', 'entity',
+                'short name', 'shortname',
+                'instrument name', 'instrumentname', 'instrument_name',
+                'instrument', 'description', 'counterparty',
+                'bond name', 'bondname', 'bond_name', 'bond',
+                't-bill name', 'tbill name', 'tbillname', 'tbill_name',
+                'tbill', 't-bill', 'treasury bill name',
+                'security name', 'securityname',
+                'name', 'ticker', 'symbol',
             ],
             'instrument_type': [
                 'instrument type', 'type', 'category', 'class', 'asset class'
             ],
             'quantity': [
-                'quantity', 'quantity', 'amount', 'number of units', 'units',
+                'quantity', 'amount', 'number of units', 'units',
                 'face quantity'
             ],
             'accrued_interest': [
@@ -122,13 +131,13 @@ class FieldMappingEngine:
                 'basis', 'day basis'
             ]
         }
-        
+
         # Instrument-specific required fields
         self.instrument_requirements = {
             InstrumentType.MONEY_MARKET: {
                 'required': ['principal', 'interest_rate'],
-                'optional': ['maturity_date', 'settlement_date', 'days_to_maturity', 
-                            'day_count_convention', 'compounding_frequency'],
+                'optional': ['maturity_date', 'settlement_date', 'days_to_maturity',
+                             'day_count_convention', 'compounding_frequency'],
                 'calculations': {
                     'simple_interest': ['principal', 'interest_rate', 'days_to_maturity', 'day_count_convention'],
                     'present_value': ['principal', 'interest_rate', 'days_to_maturity', 'day_count_convention'],
@@ -150,153 +159,111 @@ class FieldMappingEngine:
             },
             InstrumentType.BONDS: {
                 'required': ['face_value', 'coupon_rate', 'yield_to_maturity'],
-                'optional': ['maturity_date', 'settlement_date', 'years_to_maturity', 
-                            'coupon_frequency', 'call_date', 'call_price', 'put_date', 'put_price'],
+                'optional': ['maturity_date', 'settlement_date', 'years_to_maturity',
+                             'coupon_frequency', 'call_date', 'call_price',
+                             'put_date', 'put_price'],
                 'calculations': {
                     'coupon_payment': ['face_value', 'coupon_rate', 'coupon_frequency'],
-                    'clean_price': ['face_value', 'coupon_rate', 'yield_to_maturity', 
-                                  'years_to_maturity', 'coupon_frequency'],
+                    'clean_price': ['face_value', 'coupon_rate', 'yield_to_maturity',
+                                    'years_to_maturity', 'coupon_frequency'],
                     'dirty_price': ['clean_price', 'accrued_interest'],
-                    'accrued_interest': ['coupon_payment', 'coupon_frequency', 'settlement_date', 'issue_date'],
-                    'macaulay_duration': ['face_value', 'coupon_rate', 'yield_to_maturity', 
-                                         'years_to_maturity', 'coupon_frequency'],
-                    'modified_duration': ['macaulay_duration', 'yield_to_maturity', 'coupon_frequency'],
-                    'convexity': ['face_value', 'coupon_rate', 'yield_to_maturity', 
-                                'years_to_maturity', 'coupon_frequency'],
+                    'accrued_interest': ['coupon_payment', 'coupon_frequency',
+                                         'settlement_date', 'issue_date'],
+                    'macaulay_duration': ['face_value', 'coupon_rate', 'yield_to_maturity',
+                                          'years_to_maturity', 'coupon_frequency'],
+                    'modified_duration': ['macaulay_duration', 'yield_to_maturity',
+                                          'coupon_frequency'],
+                    'convexity': ['face_value', 'coupon_rate', 'yield_to_maturity',
+                                  'years_to_maturity', 'coupon_frequency'],
                     'current_yield': ['coupon_payment', 'clean_price', 'coupon_frequency']
                 }
             }
         }
-    
+
     def normalize_field_name(self, field_name: str) -> str:
-        """
-        Normalize a field name for comparison.
-        
-        Args:
-            field_name: Raw field name from dataset
-            
-        Returns:
-            Normalized field name (lowercase, underscores, no special chars)
-        """
+        """Normalize a field name for comparison."""
         if not field_name:
             return ''
-        
         normalized = field_name.lower().strip()
-        
         normalized = re.sub(r'[^\w\s]', '_', normalized)
-        
         normalized = re.sub(r'\s+', '_', normalized)
-        
         normalized = re.sub(r'_+', '_', normalized)
-        
         normalized = normalized.strip('_')
-        
         return normalized
-    
+
     def calculate_semantic_similarity(self, source_field: str, target_field: str) -> float:
         """
         Calculate semantic similarity between two field names.
         Uses word-boundary matching to avoid false positives such as
         'rate' matching inside 'corporate'.
-        
-        Args:
-            source_field: Field name from dataset
-            target_field: Target field name to match against
-            
-        Returns:
-            Similarity score between 0 and 1
         """
         source_norm = self.normalize_field_name(source_field)
         target_norm = self.normalize_field_name(target_field)
-        
+
         if not source_norm or not target_norm:
             return 0.0
-        
-        # Exact match
+
         if source_norm == target_norm:
             return 1.0
-        
-        # Word-boundary contains check (avoid substring false positives)
+
         source_padded = f"_{source_norm}_"
         target_padded = f"_{target_norm}_"
         if target_padded in source_padded or source_padded in target_padded:
             return 0.8
-        
-        # Check aliases (word-boundary matched against both sides)
+
         for target_key, aliases in self.field_aliases.items():
             alias_norms = [self.normalize_field_name(a) for a in aliases]
             if target_norm in alias_norms:
                 if source_norm in alias_norms:
                     return 0.9
-        
-        # Word overlap
+
         source_words = set(source_norm.split('_'))
         target_words = set(target_norm.split('_'))
-        
+
         if source_words & target_words:
             overlap = len(source_words & target_words)
             total = len(source_words | target_words)
             return overlap / total if total > 0 else 0
-        
+
         return 0.0
-    
+
     def detect_fields(self, data: List[Dict]) -> List[str]:
-        """
-        Detect all unique field names from dataset.
-        
-        Args:
-            data: List of data rows (dictionaries)
-            
-        Returns:
-            List of unique field names
-        """
+        """Detect all unique field names from dataset."""
         if not data:
             return []
-        
         fields = set()
         for row in data:
             if isinstance(row, dict):
                 fields.update(row.keys())
-        
         return sorted(list(fields))
-    
-    def suggest_mapping(self, source_fields: List[str], 
-                      instrument_type: InstrumentType) -> Dict[str, FieldMapping]:
-        """
-        Suggest field mappings for a given instrument type.
-        
-        Args:
-            source_fields: List of field names from dataset
-            instrument_type: Type of instrument
-            
-        Returns:
-            Dictionary mapping target fields to FieldMapping objects
-        """
+
+    def suggest_mapping(self, source_fields: List[str],
+                        instrument_type: InstrumentType) -> Dict[str, FieldMapping]:
+        """Suggest field mappings for a given instrument type."""
         requirements = self.instrument_requirements.get(instrument_type, {})
         required_fields = requirements.get('required', [])
         optional_fields = requirements.get('optional', [])
         all_target_fields = required_fields + optional_fields
-        
+
         mappings = {}
-        
+
         for target_field in all_target_fields:
             best_match = None
             best_confidence = 0.0
-            
+
             for source_field in source_fields:
                 confidence = self.calculate_semantic_similarity(source_field, target_field)
-                
-                # Also check against aliases
+
                 aliases = self.field_aliases.get(target_field, [])
                 for alias in aliases:
                     alias_confidence = self.calculate_semantic_similarity(source_field, alias)
                     if alias_confidence > confidence:
                         confidence = alias_confidence
-                
+
                 if confidence > best_confidence:
                     best_confidence = confidence
                     best_match = source_field
-            
+
             if best_match and best_confidence > 0.5:
                 mappings[target_field] = FieldMapping(
                     target_field=target_field,
@@ -305,9 +272,9 @@ class FieldMappingEngine:
                     aliases=self.field_aliases.get(target_field, []),
                     semantic_category=self._get_semantic_category(target_field)
                 )
-        
+
         return mappings
-    
+
     def _get_semantic_category(self, field_name: str) -> str:
         """Get semantic category for a field."""
         categories = {
@@ -328,71 +295,50 @@ class FieldMappingEngine:
             'instrument_type': 'type',
             'quantity': 'quantity'
         }
-        
         norm_name = self.normalize_field_name(field_name)
         return categories.get(norm_name, 'other')
-    
+
     def validate_mapping(self, mapping: Dict[str, FieldMapping],
-                        instrument_type: InstrumentType) -> Tuple[bool, List[str], List[str]]:
-        """
-        Validate a mapping against instrument requirements.
-        
-        Args:
-            mapping: Dictionary of field mappings
-            instrument_type: Type of instrument
-            
-        Returns:
-            Tuple of (is_valid, missing_fields, warnings)
-        """
+                         instrument_type: InstrumentType) -> Tuple[bool, List[str], List[str]]:
+        """Validate a mapping against instrument requirements."""
         requirements = self.instrument_requirements.get(instrument_type, {})
         required_fields = requirements.get('required', [])
-        
+
         mapped_fields = set(mapping.keys())
         missing_fields = [f for f in required_fields if f not in mapped_fields]
-        
+
         warnings = []
-        
-        # Check for unmapped source fields that might be important
         for field_mapping in mapping.values():
             if field_mapping.confidence < 0.7:
                 warnings.append(
-                    f"Low confidence mapping: {field_mapping.source_field} -> {field_mapping.target_field} "
+                    f"Low confidence mapping: {field_mapping.source_field} -> "
+                    f"{field_mapping.target_field} "
                     f"(confidence: {field_mapping.confidence:.2f})"
                 )
-        
+
         return (len(missing_fields) == 0, missing_fields, warnings)
-    
-    def apply_mapping(self, data: List[Dict], 
-                     mapping: Dict[str, FieldMapping]) -> List[Dict]:
-        """
-        Apply field mappings to transform data.
-        
-        Args:
-            data: Original data rows
-            mapping: Field mappings
-            
-        Returns:
-            Transformed data with mapped field names
-        """
+
+    def apply_mapping(self, data: List[Dict],
+                      mapping: Dict[str, FieldMapping]) -> List[Dict]:
+        """Apply field mappings to transform data."""
         if not data or not mapping:
             return data
-        
+
+        # Precompute consumed source columns once
+        consumed_sources = {fm.source_field for fm in mapping.values()}
+
         transformed = []
         for row in data:
             transformed_row = {}
-            
-            # Apply mappings
             for target_field, field_mapping in mapping.items():
                 source_field = field_mapping.source_field
                 if source_field in row:
                     transformed_row[target_field] = row[source_field]
-            
             for key, value in row.items():
-                if key not in [fm.source_field for fm in mapping.values()]:
+                if key not in consumed_sources:
                     transformed_row[key] = value
-            
             transformed.append(transformed_row)
-        
+
         return transformed
 
 
