@@ -4465,7 +4465,7 @@ async function calculateMetrics() {
 
           const agg = {
             totalValue: response.data.totalValue ?? response.data.total_value ?? 0,
-            instrumentCount: response.data.instrument_count ?? response.data.instrumentCount ?? (sheetType.value === 'single' ? 1 : new Set(rows.map(r => r['Instrument Name'])).size),
+            instrumentCount: response.data.instrument_count ?? response.data.instrumentCount ?? 0,
             avgRate: response.data.avgRate ?? response.data.avg_rate ?? 0,
             weightedAvgRate: response.data.weightedAvgRate ?? response.data.weighted_avg_rate ?? 0,
             totalInterest: response.data.totalInterest ?? response.data.total_interest ?? 0,

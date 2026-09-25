@@ -4,7 +4,7 @@
     <div class="top-navbar">
       <div class="logo-area">
         <div class="logo-placeholder">
-          <img src="/DuraCapital logo.png" alt="DuraCapital Logo" class="navbar-logo" @error="e => e.target.style.display = 'none'"/>
+          <img src="/logo.png" alt="DuraCapital Logo" class="navbar-logo" @error="e => e.target.style.display = 'none'"/>
         </div>
       </div>
       <div class="nav-actions">

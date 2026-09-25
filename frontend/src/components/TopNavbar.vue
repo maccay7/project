@@ -3,7 +3,7 @@
     <div class="logo-area">
       <div class="logo-placeholder">
         <img
-          src="/DuraCapital logo.png"
+          src="/logo.png"
           alt="DuraCapital Logo"
           class="navbar-logo"
           @error="e => e.target.style.display = 'none'"

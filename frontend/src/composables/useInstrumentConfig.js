@@ -10,13 +10,13 @@ const STATIC_CONFIGS = {
       'Trade Date', 'Maturity Date', 'Days to Maturity'
     ],
     column_variations: {
-      'Instrument': ['Instrument', 'Security', 'Name', 'Description', 'Issuer', 'Bank', 'Counterparty'],
-      'Amount': ['Amount', 'Principal', 'FaceValue', 'Value', 'Notional', 'Investment'],
-      'Rate': ['Rate', 'InterestRate', 'Yield', 'CouponRate', 'DiscountRate'],
-      'Principal': ['Principal', 'Amount', 'Value'],
-      'DaysToMaturity': ['DaysToMaturity', 'Term', 'Maturity', 'Tenor', 'Period'],
-      'Trade Date': ['Trade Date', 'Settlement Date', 'Date', 'Start Date'],
-      'Maturity Date': ['Maturity Date', 'End Date', 'Maturity', 'Redemption Date']
+      'Instrument': ['Instrument', 'Security', 'Name', 'Description', 'Issuer', 'Bank', 'Counterparty', 'Company', 'Entity'],
+      'Amount': ['Amount', 'FaceValue', 'Value', 'Notional', 'Investment', 'Investment Amount'],
+      'Rate': ['Rate', 'InterestRate', 'Yield', 'CouponRate', 'DiscountRate', 'Annual Rate', 'Nominal Rate'],
+      'Principal': ['Principal', 'FaceValue', 'Par Value', 'Nominal Value', 'Notional Amount'],
+      'DaysToMaturity': ['DaysToMaturity', 'Term', 'Maturity', 'Tenor', 'Period', 'Days'],
+      'Trade Date': ['Trade Date', 'Settlement Date', 'Date', 'Start Date', 'Issue Date'],
+      'Maturity Date': ['Maturity Date', 'End Date', 'Maturity', 'Redemption Date', 'Due Date']
     },
     workflow_steps: [
       { tab: 'upload', name: 'Upload', order: 1 },
