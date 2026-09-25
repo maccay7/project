@@ -716,14 +716,60 @@ async function loadSummary() {
 
     const sid = activeSession.value.id
 
-    const wf = await sessionManager.getInstrumentWorkflow(sid, 'money-market')
-    const summary = wf?.instrumentSummary || { rows: [], columns: [] }
+    console.log('Loading summary for session:', sid)
 
-    const allSummaryRows = [...summary.rows]
+    const wf = await sessionManager.getInstrumentWorkflow(sid, 'money-market')
+    console.log('Money market workflow:', wf)
+    const summary = wf?.instrumentSummary || { rows: [], columns: [] }
+    const portfolioSummary = wf?.portfolioSummary || { rows: [], columns: [] }
+    const completedPortfolioSummary = wf?.completedPortfolioSummary || { rows: [], columns: [] }
+    const allCalculations = wf?.allCalculations || {}
+
+    console.log('Money market allCalculations:', allCalculations)
+    console.log('Money market portfolioSummary rows:', portfolioSummary.rows)
+    console.log('Money market completedPortfolioSummary rows:', completedPortfolioSummary.rows)
+
+    // First, try to use completed portfolio summary rows (these are the aggregated portfolio rows)
+    let allSummaryRows = [...(completedPortfolioSummary.rows || [])]
+    
+    // If no completed portfolio summary, fall back to portfolio summary
+    if (allSummaryRows.length === 0) {
+      allSummaryRows = [...(portfolioSummary.rows || [])]
+    }
+    
+    // If still no data, fall back to instrument summary
+    if (allSummaryRows.length === 0) {
+      allSummaryRows = [...summary.rows]
+    }
+    
+    // Also check other instrument types for their portfolio summaries
     for (const type of ['bonds', 'tbills']) {
       const wfType = await sessionManager.getInstrumentWorkflow(sid, type)
-      if (wfType?.instrumentSummary?.rows && wfType.instrumentSummary.rows.length > 0) {
-        const hasData = wfType.cleanedData?.length > 0 || wfType.calculations?.totalValue > 0 || wfType.rawData?.length > 0
+      console.log(`${type} workflow:`, wfType)
+      console.log(`${type} allCalculations:`, wfType?.allCalculations)
+      console.log(`${type} portfolioSummary rows:`, wfType?.portfolioSummary?.rows)
+      console.log(`${type} completedPortfolioSummary rows:`, wfType?.completedPortfolioSummary?.rows)
+      
+      if (wfType?.completedPortfolioSummary?.rows && wfType.completedPortfolioSummary.rows.length > 0) {
+        const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
+        if (hasData) {
+          wfType.completedPortfolioSummary.rows.forEach(row => {
+            const id = row['Portfolio Name'] + '_' + (row['Instrument Type'] || '')
+            const exists = allSummaryRows.some(r => (r['Portfolio Name'] || '') + '_' + (r['Instrument Type'] || '') === id)
+            if (!exists) allSummaryRows.push(row)
+          })
+        }
+      } else if (wfType?.portfolioSummary?.rows && wfType.portfolioSummary.rows.length > 0) {
+        const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
+        if (hasData) {
+          wfType.portfolioSummary.rows.forEach(row => {
+            const id = row['Portfolio Name'] + '_' + (row['Instrument Type'] || '')
+            const exists = allSummaryRows.some(r => (r['Portfolio Name'] || '') + '_' + (r['Instrument Type'] || '') === id)
+            if (!exists) allSummaryRows.push(row)
+          })
+        }
+      } else if (wfType?.instrumentSummary?.rows && wfType.instrumentSummary.rows.length > 0) {
+        const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
         if (hasData) {
           wfType.instrumentSummary.rows.forEach(row => {
             const id = row['Instrument Name'] + '_' + (row['Worksheet'] || '')
@@ -733,6 +779,8 @@ async function loadSummary() {
         }
       }
     }
+
+    console.log('Final allSummaryRows:', allSummaryRows)
 
     if (allSummaryRows.length === 0) {
       try {
@@ -766,26 +814,64 @@ async function loadSummary() {
     }
 
     for (const template of templates) {
-      const rows = allSummaryRows.filter(r => r['Instrument Type'] === template.id)
-      let totalValue = 0, totalFaceValue = 0, totalAvgRate = 0, totalFredBench = 0, fredBenchCount = 0
-
-      rows.forEach(row => {
-        const value = getVal(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
-        const faceValue = getVal(row, 'Face Value', 'face_value', 'Amount', 'amount', 'Principal', 'principal')
-        const rate = getVal(row, 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate')
-        const fred = getVal(row, 'FRED Benchmark', 'fred_benchmark', 'FRED_Benchmark')
-        totalValue += value
-        totalFaceValue += faceValue
-        totalAvgRate += rate
-        if (fred !== null && fred !== undefined && fred !== 0) {
-          totalFredBench += fred
-          fredBenchCount++
-        }
+      // Filter rows by instrument type - handle both portfolio summary and instrument summary rows
+      const rows = allSummaryRows.filter(r => {
+        const instType = r['Instrument Type'] || r['instrument_type'] || r['instrumentType']
+        return instType === template.id
       })
+      
+      let totalValue = 0, totalFaceValue = 0, totalAvgRate = 0, totalFredBench = 0, fredBenchCount = 0
+      let instrumentCount = 0
 
-      const avgRate = rows.length > 0 ? totalAvgRate / rows.length : null
+      // Also check calculations/aggregates from workflow for more accurate totals
+      const wfType = await sessionManager.getInstrumentWorkflow(sid, template.id)
+      const aggregates = wfType?.allCalculations || wfType?.calculations || {}
+      
+      // If aggregates exist, use them for totals
+      if (aggregates.totalValue !== undefined && aggregates.totalValue !== null) {
+        totalValue = aggregates.totalValue
+      }
+      if (aggregates.totalPrincipal !== undefined && aggregates.totalPrincipal !== null) {
+        totalFaceValue = aggregates.totalPrincipal
+      }
+      if (aggregates.totalFaceValue !== undefined && aggregates.totalFaceValue !== null) {
+        totalFaceValue = aggregates.totalFaceValue
+      }
+      if (aggregates.avgRate !== undefined && aggregates.avgRate !== null) {
+        totalAvgRate = aggregates.avgRate
+      }
+      if (aggregates.instrumentCount !== undefined && aggregates.instrumentCount !== null) {
+        instrumentCount = aggregates.instrumentCount
+      }
+      if (aggregates.fred?.benchmark_rate !== undefined && aggregates.fred.benchmark_rate !== null) {
+        totalFredBench = aggregates.fred.benchmark_rate
+        fredBenchCount = 1
+      }
+
+      // Fall back to summary rows if aggregates are empty
+      if (totalValue === 0 && rows.length > 0) {
+        rows.forEach(row => {
+          // Portfolio summary rows have different field names
+          const value = getVal(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
+          const faceValue = getVal(row, 'Face Value', 'face_value', 'Amount', 'amount', 'Principal', 'principal', 'Total Principal', 'total_principal')
+          const rate = getVal(row, 'Average Rate', 'average_rate', 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate')
+          const count = getVal(row, 'Number of Instruments', 'number_of_instruments', 'Instrument Count', 'instrument_count')
+          const fred = getVal(row, 'FRED Benchmark', 'fred_benchmark', 'FRED_Benchmark')
+          
+          totalValue += value
+          totalFaceValue += faceValue
+          totalAvgRate += rate
+          if (count > 0) instrumentCount += count
+          if (fred !== null && fred !== undefined && fred !== 0) {
+            totalFredBench += fred
+            fredBenchCount++
+          }
+        })
+      }
+
+      const avgRate = totalAvgRate !== 0 ? totalAvgRate : (rows.length > 0 ? totalAvgRate / rows.length : null)
       const avgFredBench = fredBenchCount > 0 ? totalFredBench / fredBenchCount : null
-      const completed = rows.length > 0
+      const completed = (rows.length > 0) || (totalValue > 0) || (instrumentCount > 0)
 
       const details = rows.map(row => {
         const obj = {}
@@ -812,7 +898,7 @@ async function loadSummary() {
         value: totalValue,
         faceValue: totalFaceValue,
         difference: totalFaceValue - totalValue,
-        count: rows.length,
+        count: instrumentCount > 0 ? instrumentCount : rows.length,
         avgRate: avgRate,
         fredBench: avgFredBench,
         completed: completed,

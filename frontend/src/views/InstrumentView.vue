@@ -2429,11 +2429,7 @@ function addToHistory(filename, data) {
 
 async function loadHistoryFile(item) {
   if (!item.fileData) {
-    const idx = uploadHistory.value.findIndex(h => h.name === item.name && h.date === item.date)
-    if (idx !== -1) {
-      uploadHistory.value.splice(idx, 1)
-      saveUploadHistory()
-    }
+    alert('This file cannot be loaded because the file data is missing. Please upload the file again.')
     return
   }
   
@@ -2456,12 +2452,15 @@ async function loadHistoryFile(item) {
           workbookSheets.value = worksheetWorkflow.workbookSheets.value
           worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
           originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
+          showSnackbar(`Loaded ${item.name} from history`, 'success')
         } else {
           console.error('Workbook parse failed:', result.error)
+          showSnackbar('Failed to parse workbook', 'error')
         }
       } catch (err) {
         console.error('Failed to restore file from base64:', err)
         uploadedFile.value = { name: item.name, size: 0 }
+        showSnackbar('Failed to load file', 'error')
       }
     } else {
       uploadedFile.value = { name: item.name, size: 0 }
@@ -4329,16 +4328,27 @@ async function calculateMetrics() {
   const requiredFields = requiredColumns.value[instrumentType.value] || []
   const missingFields = []
   
-  for (const field of requiredFields) {
-    const mappedColumn = columnMapping.value[field]
-    if (!mappedColumn) {
-      missingFields.push(field)
-      continue
+  // For single instruments, check fields directly in cleaned data
+  // For multi-instrument, check through column mapping
+  if (sheetType.value === 'single') {
+    for (const field of requiredFields) {
+      const hasColumn = cleanedData.value.some(row => row.hasOwnProperty(field))
+      if (!hasColumn) {
+        missingFields.push(field)
+      }
     }
-    
-    const hasColumn = cleanedData.value.some(row => row.hasOwnProperty(mappedColumn))
-    if (!hasColumn) {
-      missingFields.push(field)
+  } else {
+    for (const field of requiredFields) {
+      const mappedColumn = columnMapping.value[field]
+      if (!mappedColumn) {
+        missingFields.push(field)
+        continue
+      }
+      
+      const hasColumn = cleanedData.value.some(row => row.hasOwnProperty(mappedColumn))
+      if (!hasColumn) {
+        missingFields.push(field)
+      }
     }
   }
   
@@ -4420,6 +4430,31 @@ async function calculateMetrics() {
           }
         }
       } 
+      
+      // Save the portfolio summary data to session immediately after calculations complete
+      if (activeSession.value?.id) {
+        await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
+          rawData: rawData.value,
+          cleanedData: cleanedData.value,
+          calculations: calculations.value,
+          allCalculations: allCalculations.value,
+          selectedCalculations: selectedCalculations.value,
+          columnMapping: columnMapping.value,
+          worksheetStatus: worksheetStatus.value,
+          workbookSheets: workbookSheets.value,
+          instrumentSummary: instrumentSummary.value,
+          portfolioSummary: portfolioSummary.value,
+          completedInstrumentSummary: completedInstrumentSummary.value,
+          completedPortfolioSummary: completedPortfolioSummary.value,
+          yieldCurveData: yieldCurveData.value,
+          fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+          uploadedFile: uploadedFile.value?.name || null,
+          cleaningStats: cleaningStats.value,
+          sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
+          manualInputs: manualInputs.value,
+          formulas: formulas.value
+        })
+      }
       else if (response?.data) {
         calculations.value = response.data
 
@@ -4431,7 +4466,98 @@ async function calculateMetrics() {
 
         const calcArray = response.data.calculations || []
         
-        if (calcArray.length) {
+        // Handle single instrument case - use the single calculation directly
+        if (sheetType.value === 'single' && calcArray.length === 1) {
+          const singleCalc = calcArray[0]
+          calculations.value = singleCalc
+          
+          // For single instruments, allCalculations should contain the calculation fields directly
+          allCalculations.value = singleCalc
+          selectedCalculations.value = singleCalc
+          
+          const row = {
+            'Instrument Name': backendInstrumentNames[0] || singleCalc.instrument_name || 'Instrument',
+            'Instrument Type': instrumentType.value,
+            ...singleCalc,
+            'Worksheet': currentSheetName.value || 'Calculated'
+          }
+
+          const currentCols = new Set()
+          Object.keys(row).forEach(k => currentCols.add(k))
+          instrumentSummary.value = { columns: Array.from(currentCols), rows: [row] }
+          
+          const existingRows = completedInstrumentSummary.value.rows || []
+          const rowsWithWorkbook = [{
+            ...row,
+            'Workbook': currentWorkbookName.value || 'Unknown',
+            'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
+          }]
+          
+          const existingRowsWithWorkbook = existingRows.map(row => ({
+            ...row,
+            'Workbook': row['Workbook'] || 'Unknown',
+            'Worksheet': row['Worksheet'] || row['worksheet'] || 'Unknown'
+          }))
+          
+          const mergedRows = [...existingRowsWithWorkbook, ...rowsWithWorkbook]
+          
+          const allCols = new Set()
+          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+          
+          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+
+          // For single instruments, use aggregates if available, otherwise use the single calc values
+          const aggregates = response.data.aggregates || {}
+          const agg = {
+            totalValue: aggregates.totalValue ?? aggregates.total_value ?? singleCalc.total_value ?? singleCalc.calculated_value ?? 0,
+            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? 1,
+            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? singleCalc.interest_rate ?? singleCalc.coupon_rate ?? singleCalc.discount_rate ?? 0,
+            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? singleCalc.interest_rate ?? singleCalc.coupon_rate ?? singleCalc.discount_rate ?? 0,
+            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? singleCalc.interest_earned ?? 0,
+            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? singleCalc.interest_earned ?? 0,
+            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? singleCalc.annual_yield ?? 0,
+            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? singleCalc.effective_annual_rate ?? 0,
+            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? singleCalc.days_to_maturity ?? 0,
+            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? singleCalc.principal ?? singleCalc.face_value ?? 0
+          }
+          
+          allCalculations.value = agg
+          selectedCalculations.value = agg
+
+          const portfolioRow = {
+            'Portfolio Name': currentSheetName.value || 'Current Portfolio',
+            'Instrument Type': instrumentType.value,
+            'Total Value': agg.totalValue || 0,
+            'Number of Instruments': agg.instrumentCount || 1,
+            'Average Rate': agg.avgRate || 0,
+            'Weighted Average Rate': agg.weightedAvgRate || 0,
+            'Total Interest': agg.totalInterest || 0,
+            'Interest Earned': agg.interestEarned || 0,
+            'Annual Yield': agg.annualYield || 0,
+            'Effective Annual Rate': agg.effectiveAnnualRate || 0,
+            'Average Days to Maturity': agg.avgDaysToMaturity || 0,
+            'Total Principal': agg.totalPrincipal || 0
+          }
+          
+          if (response.data.fred?.benchmark_rate) {
+            portfolioRow['FRED Benchmark'] = response.data.fred.benchmark_rate
+            portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market || 0
+          }
+          
+          const currentPortfolioCols = new Set()
+          Object.keys(portfolioRow).forEach(k => currentPortfolioCols.add(k))
+          portfolioSummary.value = { columns: Array.from(currentPortfolioCols), rows: [portfolioRow] }
+          
+          const existingPortfolioRows = completedPortfolioSummary.value.rows || []
+          const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
+          
+          const portfolioCols = new Set()
+          mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => portfolioCols.add(k)))
+          
+          completedPortfolioSummary.value = { columns: Array.from(portfolioCols), rows: mergedPortfolioRows }
+        }
+        else if (calcArray.length) {
+          // Multi-instrument case
           const rows = calcArray.map((calc, idx) => ({
             'Instrument Name': backendInstrumentNames[idx] || calc.instrument_name || 'Instrument',
             'Instrument Type': instrumentType.value,
@@ -4463,17 +4589,18 @@ async function calculateMetrics() {
           
           completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
 
+          const aggregates = response.data.aggregates || response.data || {}
           const agg = {
-            totalValue: response.data.totalValue ?? response.data.total_value ?? 0,
-            instrumentCount: response.data.instrument_count ?? response.data.instrumentCount ?? 0,
-            avgRate: response.data.avgRate ?? response.data.avg_rate ?? 0,
-            weightedAvgRate: response.data.weightedAvgRate ?? response.data.weighted_avg_rate ?? 0,
-            totalInterest: response.data.totalInterest ?? response.data.total_interest ?? 0,
-            interestEarned: response.data.interestEarned ?? response.data.interest_earned ?? 0,
-            annualYield: response.data.annualYield ?? response.data.annual_yield ?? 0,
-            effectiveAnnualRate: response.data.effectiveAnnualRate ?? response.data.effective_annual_rate ?? 0,
-            avgDaysToMaturity: response.data.avgDaysToMaturity ?? response.data.avg_days_to_maturity ?? 0,
-            totalPrincipal: response.data.totalPrincipal ?? response.data.total_principal ?? 0
+            totalValue: aggregates.totalValue ?? aggregates.total_value ?? 0,
+            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? 0,
+            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? 0,
+            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? 0,
+            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? 0,
+            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? 0,
+            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? 0,
+            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? 0,
+            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? 0,
+            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? 0
           }
           
           allCalculations.value = agg
@@ -4557,17 +4684,18 @@ async function calculateMetrics() {
           
           completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
 
+          const aggregates = response.data.aggregates || response.data || {}
           const agg = {
-            totalValue: response.data.totalValue ?? response.data.total_value ?? 0,
-            instrumentCount: response.data.instrumentCount ?? response.data.instrument_count ?? 1,
-            avgRate: response.data.avgRate ?? response.data.avg_rate ?? 0,
-            weightedAvgRate: response.data.weightedAvgRate ?? response.data.weighted_avg_rate ?? 0,
-            totalInterest: response.data.totalInterest ?? response.data.total_interest ?? 0,
-            interestEarned: response.data.interestEarned ?? response.data.interest_earned ?? 0,
-            annualYield: response.data.annualYield ?? response.data.annual_yield ?? 0,
-            effectiveAnnualRate: response.data.effectiveAnnualRate ?? response.data.effective_annual_rate ?? 0,
-            avgDaysToMaturity: response.data.avgDaysToMaturity ?? response.data.avg_days_to_maturity ?? 0,
-            totalPrincipal: response.data.totalPrincipal ?? response.data.total_principal ?? 0
+            totalValue: aggregates.totalValue ?? aggregates.total_value ?? 0,
+            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? 1,
+            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? 0,
+            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? 0,
+            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? 0,
+            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? 0,
+            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? 0,
+            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? 0,
+            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? 0,
+            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? 0
           }
           
           allCalculations.value = agg
@@ -4604,6 +4732,31 @@ async function calculateMetrics() {
           mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => portfolioCols.add(k)))
           
           completedPortfolioSummary.value = { columns: Array.from(portfolioCols), rows: mergedPortfolioRows }
+        }
+        
+        // Save the portfolio summary data to session immediately after calculations complete
+        if (activeSession.value?.id) {
+          await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
+            rawData: rawData.value,
+            cleanedData: cleanedData.value,
+            calculations: calculations.value,
+            allCalculations: allCalculations.value,
+            selectedCalculations: selectedCalculations.value,
+            columnMapping: columnMapping.value,
+            worksheetStatus: worksheetStatus.value,
+            workbookSheets: workbookSheets.value,
+            instrumentSummary: instrumentSummary.value,
+            portfolioSummary: portfolioSummary.value,
+            completedInstrumentSummary: completedInstrumentSummary.value,
+            completedPortfolioSummary: completedPortfolioSummary.value,
+            yieldCurveData: yieldCurveData.value,
+            fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+            uploadedFile: uploadedFile.value?.name || null,
+            cleaningStats: cleaningStats.value,
+            sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
+            manualInputs: manualInputs.value,
+            formulas: formulas.value
+          })
         }
 
         saveSessionData()
@@ -4651,6 +4804,28 @@ async function continueFromVisualizations() {
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
     await markStepCompleted(String(sid), 'visualizations')
+    // Ensure portfolio summary is saved before navigating
+    await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, {
+      rawData: rawData.value,
+      cleanedData: cleanedData.value,
+      calculations: calculations.value,
+      allCalculations: allCalculations.value,
+      selectedCalculations: selectedCalculations.value,
+      columnMapping: columnMapping.value,
+      worksheetStatus: worksheetStatus.value,
+      workbookSheets: workbookSheets.value,
+      instrumentSummary: instrumentSummary.value,
+      portfolioSummary: portfolioSummary.value,
+      completedInstrumentSummary: completedInstrumentSummary.value,
+      completedPortfolioSummary: completedPortfolioSummary.value,
+      yieldCurveData: yieldCurveData.value,
+      fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+      uploadedFile: uploadedFile.value?.name || null,
+      cleaningStats: cleaningStats.value,
+      sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
+      manualInputs: manualInputs.value,
+      formulas: formulas.value
+    })
     saveSessionData()
   }
 }
