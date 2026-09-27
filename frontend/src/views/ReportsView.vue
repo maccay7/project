@@ -218,31 +218,37 @@ function resolveCountry(session) {
 }
 
 async function loadSummaryData(sessionId, instrumentType) {
+  const wf = await sessionManager.getInstrumentWorkflow(sessionId, instrumentType)
+  if (!wf) return null
+
+  // Prioritize completedInstrumentSummary (backend-calculated values)
+  if (wf.completedInstrumentSummary && wf.completedInstrumentSummary.rows && wf.completedInstrumentSummary.rows.length) {
+    return wf.completedInstrumentSummary
+  }
+  
+  // Fall back to instrumentSummary (backend-calculated values)
+  if (wf.instrumentSummary && wf.instrumentSummary.rows && wf.instrumentSummary.rows.length) {
+    return wf.instrumentSummary
+  }
+  
+  // Fall back to completedPortfolioSummary (aggregated backend values)
+  if (wf.completedPortfolioSummary && wf.completedPortfolioSummary.rows && wf.completedPortfolioSummary.rows.length) {
+    return wf.completedPortfolioSummary
+  }
+  
+  // Fall back to portfolioSummary (aggregated backend values)
+  if (wf.portfolioSummary && wf.portfolioSummary.rows && wf.portfolioSummary.rows.length) {
+    return wf.portfolioSummary
+  }
+  
+  // Last resort: try backend API
   try {
     const response = await api.calculationsAPI.getInstrumentSummary(sessionId, instrumentType)
     if (response?.success && response?.data) return response.data
   } catch (err) {
     console.error('Failed to load instrument summary from backend:', err)
   }
-  const summaryKey = `${instrumentType}_session_${sessionId}_summary`
-  const saved = localStorage.getItem(summaryKey)
-  if (saved) {
-    try {
-      const summary = JSON.parse(saved)
-      if (summary.rows && summary.rows.length) return summary
-    } catch (e) {}
-  }
-  const wf = await sessionManager.getInstrumentWorkflow(sessionId, instrumentType)
-  // Prioritize completedInstrumentSummary for full session reports
-  if (wf && wf.completedInstrumentSummary && wf.completedInstrumentSummary.rows && wf.completedInstrumentSummary.rows.length) {
-    return wf.completedInstrumentSummary
-  }
-  if (wf && wf.cleanedData && wf.cleanedData.length) {
-    return { rows: wf.cleanedData, columns: Object.keys(wf.cleanedData[0] || {}) }
-  }
-  if (wf && wf.data && wf.data.length) {
-    return { rows: wf.data, columns: Object.keys(wf.data[0] || {}) }
-  }
+  
   return null
 }
 

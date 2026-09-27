@@ -1317,10 +1317,26 @@
     </v-dialog>
 
     <!-- Formula Dialog -->
-    <v-dialog v-model="formulaDialog" max-width="500px">
+    <v-dialog v-model="formulaDialog" max-width="600px">
       <v-card>
-        <v-card-title class="formula-dialog-title"><v-icon>mdi-ruler</v-icon> Formula Used</v-card-title>
+        <v-card-title class="formula-dialog-title">
+          <v-icon>mdi-ruler</v-icon> Formula Used
+          <v-spacer></v-spacer>
+          <button v-if="formulaCalculationDetails" class="btn-secondary small" @click="showCalculationDetails = !showCalculationDetails">
+            {{ showCalculationDetails ? 'Hide Details' : 'Show Calculation Details' }}
+          </button>
+        </v-card-title>
         <v-card-text class="formula-text">{{ formulaText }}</v-card-text>
+        <v-card-text v-if="showCalculationDetails && formulaCalculationDetails" class="calculation-details">
+          <div class="calculation-steps">
+            <h4>Calculation Breakdown:</h4>
+            <div v-for="(step, idx) in formulaCalculationDetails" :key="idx" class="calculation-step">
+              <div class="step-label">{{ step.label }}:</div>
+              <div class="step-value">{{ step.value }}</div>
+              <div v-if="step.formula" class="step-formula">{{ step.formula }}</div>
+            </div>
+          </div>
+        </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
           <button class="btn-secondary" @click="formulaDialog = false">Close</button>
@@ -1704,6 +1720,8 @@ const viewerFileData = ref(null)
 
 const formulaDialog = ref(false)
 const formulaText = ref('')
+const formulaCalculationDetails = ref(null)
+const showCalculationDetails = ref(false)
 const formulas = ref({})
 const manualInputs = ref({})
 
@@ -2142,7 +2160,7 @@ function getCurrencyLabel(code) {
 }
 
 function formatNumber(num, isTimeField = false) {
-  if (num === undefined || num === null) return '0.00'
+  if (num === undefined || num === null || num === '') return '—'
   if (isTimeField) {
     const rounded = Math.round(num)
     return rounded.toLocaleString()
@@ -2152,7 +2170,7 @@ function formatNumber(num, isTimeField = false) {
 }
 
 function formatTimeValue(num) {
-  if (num === undefined || num === null) return '0'
+  if (num === undefined || num === null || num === '') return '—'
   const rounded = Math.round(num)
   return rounded.toLocaleString()
 }
@@ -2832,26 +2850,30 @@ function updateColumnMapping(newMapping) {
 async function saveFinalMapping() {
   const mappingKey = `mapping_${instrumentType.value}_${uploadedFile.value?.name || 'default'}`
   localStorage.setItem(mappingKey, JSON.stringify(columnMapping.value))
+  console.log('Mapping saved to localStorage:', mappingKey)
 
   if (currentMappingTemplateId.value) {
     try {
+      console.log('Updating existing template:', currentMappingTemplateId.value)
       const result = await mappingTemplateManager.updateTemplate(currentMappingTemplateId.value, {
         columnMapping: columnMapping.value,
         fileColumns: fileColumns.value
       })
+      console.log('Update result:', result)
       if (result) {
         await loadSavedTemplates()
-        showSnackbar('Mapping updated successfully', 'success')
+        showSnackbar('Mapping saved successfully', 'success')
       } else {
-        showSnackbar('Failed to update mapping')
+        showSnackbar('Failed to update mapping: No response from server', 'error')
       }
     } catch (e) {
       console.error('Error updating template:', e)
-      showSnackbar('Error updating mapping')
+      showSnackbar('Failed to update mapping: ' + (e.message || e), 'error')
     }
   } else {
     const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'}`
     try {
+      console.log('Creating new template:', templateName)
       const result = await mappingTemplateManager.saveTemplate(
         templateName,
         instrumentType.value,
@@ -2864,11 +2886,11 @@ async function saveFinalMapping() {
         await loadSavedTemplates()
         showSnackbar('Mapping saved successfully', 'success')
       } else {
-        showSnackbar('Failed to save mapping')
+        showSnackbar('Failed to save mapping: No response from server', 'error')
       }
     } catch (e) {
       console.error('Error saving template:', e)
-      showSnackbar('Error saving mapping')
+      showSnackbar('Failed to save mapping: ' + (e.message || e), 'error')
     }
   }
   debouncedSave()
@@ -3966,21 +3988,28 @@ function openInstrumentDataExcel() {
 }
 
 function downloadCalculatedInstrumentsExcel() {
-  const summaryRows = completedInstrumentSummary.value.rows || instrumentSummary.value.rows
+  const summaryRows = instrumentSummary.value.rows || []
   if (!summaryRows.length) {
+    showSnackbar('No calculated instruments to export', 'error')
     return
   }
 
   const workbook = XLSX.utils.book_new()
-  const columns = instrumentSummaryColumnsForDisplay.value
-  const rows = summaryRows
+  
+  // Get all unique columns from the backend calculation response
+  const allColumns = new Set()
+  summaryRows.forEach(row => {
+    Object.keys(row).forEach(key => allColumns.add(key))
+  })
+  const columns = Array.from(allColumns)
 
   const data = [columns]
 
-  rows.forEach(row => {
+  summaryRows.forEach(row => {
     const dataRow = columns.map(col => {
       const value = row[col]
-      return formatTableCell(value, col)
+      // Return raw values, don't format them
+      return value !== undefined && value !== null ? value : ''
     })
     data.push(dataRow)
   })
@@ -3988,9 +4017,9 @@ function downloadCalculatedInstrumentsExcel() {
   const worksheet = XLSX.utils.aoa_to_sheet(data)
   
   const columnWidths = columns.map(col => {
-    const isNumeric = columns.some(c => c.toLowerCase().includes('value') || c.toLowerCase().includes('amount') || c.toLowerCase().includes('rate') || c.toLowerCase().includes('yield') || c.toLowerCase().includes('price'))
+    const isNumeric = col.toLowerCase().includes('value') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('rate') || col.toLowerCase().includes('yield') || col.toLowerCase().includes('price') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest') || col.toLowerCase().includes('discount') || col.toLowerCase().includes('coupon')
     const isDate = col.toLowerCase().includes('date')
-    const isName = col.toLowerCase().includes('name') || col.toLowerCase().includes('instrument') || col.toLowerCase().includes('ticker')
+    const isName = col.toLowerCase().includes('name') || col.toLowerCase().includes('instrument') || col.toLowerCase().includes('ticker') || col.toLowerCase().includes('worksheet') || col.toLowerCase().includes('workbook')
     
     if (isNumeric) return { wch: 18 }
     if (isDate) return { wch: 14 }
@@ -4359,6 +4388,8 @@ async function calculateMetrics() {
   }
 
   try {
+    console.log('Calling calculations API with instrument type:', instrumentType.value)
+    console.log('Cleaned data length:', cleanedData.value.length)
     const response = await api.calculationsAPI.executeByType(
       instrumentType.value,
       cleanedData.value,
@@ -4369,16 +4400,42 @@ async function calculateMetrics() {
         manualInputs: manualInputs.value,
         sheet_name: currentSheetName.value,
         section_id: selectedSectionId.value,
-        valuationDate: activeValuationDate.value
+        valuationDate: activeValuationDate.value || new Date().toISOString().split('T')[0]
       },
       null,
       activeSession.value?.id
     )
     
+    console.log('=== FULL BACKEND RESPONSE ===')
+    console.log('Calculations API response:', response)
+    console.log('Response keys:', Object.keys(response || {}))
+    console.log('Response success:', response?.success)
+    console.log('Response is_multi_instrument:', response?.is_multi_instrument)
+    console.log('Response aggregate:', response?.aggregate)
+    console.log('Response data.aggregates:', response?.data?.aggregates)
+    console.log('Response results:', response?.results)
+    console.log('Response data:', JSON.stringify(response?.data, null, 2))
+    console.log('Response data.calculations:', response?.data?.calculations)
+    console.log('Response data.aggregates keys:', response?.data?.aggregates ? Object.keys(response.data.aggregates) : 'N/A')
+    
+    if (response?.data?.aggregates) {
+      console.log('=== AGGREGATES CONTENT ===')
+      for (const [key, value] of Object.entries(response.data.aggregates)) {
+        console.log(`${key}:`, value)
+      }
+    }
+    
     if (response?.success) {
+      console.log('=== RESPONSE SUCCESS - CHECKING BRANCHES ===')
+      console.log('is_multi_instrument:', response?.is_multi_instrument)
+      console.log('Has aggregate:', !!response?.aggregate)
+      console.log('Has data:', !!response?.data)
+      
       if (response?.is_multi_instrument) {
+        console.log('=== MULTI-INSTRUMENT MODE ===')
         if (response?.instrument_summary) {
           instrumentSummary.value = response.instrument_summary
+          console.log('Instrument summary rows:', response.instrument_summary.rows?.length)
           
           const currentRows = response.instrument_summary.rows || []
           const existingRows = completedInstrumentSummary.value.rows || []
@@ -4405,6 +4462,7 @@ async function calculateMetrics() {
         
         if (response?.portfolio_summary) {
           portfolioSummary.value = response.portfolio_summary
+          console.log('Portfolio summary rows:', response.portfolio_summary.rows?.length)
           
           const currentRows = response.portfolio_summary.rows || []
           const existingRows = completedPortfolioSummary.value.rows || []
@@ -4418,45 +4476,95 @@ async function calculateMetrics() {
         
         const results = response?.results || {}
         const firstInstType = Object.keys(results)[0]
+        console.log('Results keys:', Object.keys(results))
+        console.log('First instrument type:', firstInstType)
         if (firstInstType && results[firstInstType]) {
           calculations.value = results[firstInstType].data
+          console.log('Calculations set from results[firstInstType].data')
           
           if (response?.aggregate) {
-            allCalculations.value = response.aggregate
-            selectedCalculations.value = response.aggregate
+            // Include all backend-calculated fields from aggregate
+            const agg = {
+              ...response.aggregate,
+              // Ensure all instrument-specific fields are included
+              accruedInterest: response.aggregate.accrued_interest ?? null,
+              annualCoupon: response.aggregate.annual_coupon ?? null,
+              bondEquivalentYield: response.aggregate.bond_equivalent_yield ?? null,
+              couponRate: response.aggregate.coupon_rate ?? null,
+              currentPrice: response.aggregate.current_price ?? null,
+              currentYield: response.aggregate.current_yield ?? null,
+              duration: response.aggregate.duration ?? null,
+              faceValue: response.aggregate.face_value ?? null,
+              frequency: response.aggregate.frequency ?? null,
+              modifiedDuration: response.aggregate.modified_duration ?? null,
+              yearsToMaturity: response.aggregate.years_to_maturity ?? null,
+              yieldToMaturity: response.aggregate.yield_to_maturity ?? null,
+              yieldCurveRate: response.aggregate.yield_curve_rate ?? null,
+              purchasePrice: response.aggregate.purchase_price ?? null,
+              termDays: response.aggregate.term_days ?? null,
+              discountAmount: response.aggregate.discount_amount ?? null,
+              discountYield: response.aggregate.discount_yield ?? null,
+              moneyMarketYield: response.aggregate.money_market_yield ?? null,
+              holdingPeriodYield: response.aggregate.holding_period_yield ?? null,
+              effectiveAnnualYield: response.aggregate.effective_annual_yield ?? null,
+              principal: response.aggregate.principal ?? null,
+              interestRate: response.aggregate.interest_rate ?? null,
+              interestEarned: response.aggregate.interest_earned ?? null,
+              effectiveYield: response.aggregate.effective_yield ?? null
+            }
+            allCalculations.value = agg
+            selectedCalculations.value = agg
+            console.log('allCalculations set from response.aggregate:', response.aggregate)
+          } else if (response?.data?.aggregates) {
+            // Include all backend-calculated fields from data.aggregates
+            const aggregates = response.data.aggregates
+            const agg = {
+              ...aggregates,
+              // Ensure all instrument-specific fields are included
+              accruedInterest: aggregates.accrued_interest ?? null,
+              annualCoupon: aggregates.annual_coupon ?? null,
+              bondEquivalentYield: aggregates.bond_equivalent_yield ?? null,
+              couponRate: aggregates.coupon_rate ?? null,
+              currentPrice: aggregates.current_price ?? null,
+              currentYield: aggregates.current_yield ?? null,
+              duration: aggregates.duration ?? null,
+              faceValue: aggregates.face_value ?? null,
+              frequency: aggregates.frequency ?? null,
+              modifiedDuration: aggregates.modified_duration ?? null,
+              yearsToMaturity: aggregates.years_to_maturity ?? null,
+              yieldToMaturity: aggregates.yield_to_maturity ?? null,
+              yieldCurveRate: aggregates.yield_curve_rate ?? null,
+              purchasePrice: aggregates.purchase_price ?? null,
+              termDays: aggregates.term_days ?? null,
+              discountAmount: aggregates.discount_amount ?? null,
+              discountYield: aggregates.discount_yield ?? null,
+              moneyMarketYield: aggregates.money_market_yield ?? null,
+              holdingPeriodYield: aggregates.holding_period_yield ?? null,
+              effectiveAnnualYield: aggregates.effective_annual_yield ?? null,
+              principal: aggregates.principal ?? null,
+              interestRate: aggregates.interest_rate ?? null,
+              interestEarned: aggregates.interest_earned ?? null,
+              effectiveYield: aggregates.effective_yield ?? null
+            }
+            allCalculations.value = agg
+            selectedCalculations.value = agg
+            console.log('allCalculations set from response.data.aggregates:', response.data.aggregates)
           } else {
             allCalculations.value = results[firstInstType].data
             selectedCalculations.value = results[firstInstType].data
+            console.log('allCalculations set from results[firstInstType].data (no aggregate)')
           }
+        } else {
+          console.warn('No results found for multi-instrument response')
         }
-      } 
-      
-      // Save the portfolio summary data to session immediately after calculations complete
-      if (activeSession.value?.id) {
-        await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
-          rawData: rawData.value,
-          cleanedData: cleanedData.value,
-          calculations: calculations.value,
-          allCalculations: allCalculations.value,
-          selectedCalculations: selectedCalculations.value,
-          columnMapping: columnMapping.value,
-          worksheetStatus: worksheetStatus.value,
-          workbookSheets: workbookSheets.value,
-          instrumentSummary: instrumentSummary.value,
-          portfolioSummary: portfolioSummary.value,
-          completedInstrumentSummary: completedInstrumentSummary.value,
-          completedPortfolioSummary: completedPortfolioSummary.value,
-          yieldCurveData: yieldCurveData.value,
-          fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
-          uploadedFile: uploadedFile.value?.name || null,
-          cleaningStats: cleaningStats.value,
-          sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
-          manualInputs: manualInputs.value,
-          formulas: formulas.value
-        })
-      }
-      else if (response?.data) {
+      } else if (response?.data) {
+        console.log('=== ENTERED DATA MODE BRANCH ===')
+        console.log('=== SINGLE INSTRUMENT / DATA MODE ===')
         calculations.value = response.data
+        console.log('Response.data keys:', Object.keys(response.data || {}))
+        console.log('Response.data calculations:', response.data?.calculations)
+        console.log('Response.data aggregates:', response.data?.aggregates)
+        console.log('Sheet type:', sheetType.value)
 
         if (response.data?.field_detection) {
           fieldDetectionResults.value = response.data.field_detection
@@ -4465,15 +4573,80 @@ async function calculateMetrics() {
         const backendInstrumentNames = response?.instrument_names || []
 
         const calcArray = response.data.calculations || []
+        console.log('CalcArray length:', calcArray.length)
         
         // Handle single instrument case - use the single calculation directly
         if (sheetType.value === 'single' && calcArray.length === 1) {
+          console.log('=== SINGLE INSTRUMENT DETECTED ===')
           const singleCalc = calcArray[0]
+          console.log('Single calc:', singleCalc)
           calculations.value = singleCalc
           
-          // For single instruments, allCalculations should contain the calculation fields directly
-          allCalculations.value = singleCalc
-          selectedCalculations.value = singleCalc
+          // For single instruments, allCalculations should contain the calculation fields directly from backend
+          // NO fallbacks - use only backend-calculated values
+          const agg = {
+            totalValue: singleCalc.total_value ?? singleCalc.calculated_value ?? null,
+            instrumentCount: 1,
+            avgRate: singleCalc.interest_rate ?? singleCalc.coupon_rate ?? singleCalc.discount_rate ?? null,
+            weightedAvgRate: singleCalc.interest_rate ?? singleCalc.coupon_rate ?? singleCalc.discount_rate ?? null,
+            totalInterest: singleCalc.interest_earned ?? null,
+            interestEarned: singleCalc.interest_earned ?? null,
+            annualYield: singleCalc.annual_yield ?? null,
+            effectiveAnnualRate: singleCalc.effective_annual_rate ?? null,
+            avgDaysToMaturity: singleCalc.days_to_maturity ?? singleCalc.term_days ?? null,
+            totalPrincipal: singleCalc.principal ?? singleCalc.face_value ?? null,
+            fred: response.data.fred || null,
+            // Include all backend-calculated fields directly from bonds calculation
+            accruedInterest: singleCalc.accrued_interest ?? null,
+            annualCoupon: singleCalc.annual_coupon ?? null,
+            bondEquivalentYield: singleCalc.bond_equivalent_yield ?? null,
+            couponRate: singleCalc.coupon_rate ?? null,
+            currentPrice: singleCalc.current_price ?? null,
+            currentYield: singleCalc.current_yield ?? null,
+            duration: singleCalc.duration ?? null,
+            faceValue: singleCalc.face_value ?? null,
+            frequency: singleCalc.frequency ?? null,
+            modifiedDuration: singleCalc.modified_duration ?? null,
+            yearsToMaturity: singleCalc.years_to_maturity ?? null,
+            yieldToMaturity: singleCalc.yield_to_maturity ?? null,
+            yieldCurveRate: singleCalc.yield_curve_rate ?? null,
+            // Legacy field mappings
+            discountYield: singleCalc.discount_yield ?? null,
+            effectiveYield: singleCalc.effective_yield ?? null,
+            termDays: singleCalc.term_days ?? null,
+            status: singleCalc.status ?? null
+          }
+          
+          // Check if calculation failed due to error
+          if (singleCalc.status === 'cannot_calculate' || singleCalc.error) {
+            const errorMsg = singleCalc.error || 'Calculation failed'
+            console.error('Backend calculation error:', errorMsg)
+            showSnackbar(`Calculation failed: ${errorMsg}`, 'error')
+            allCalculations.value = {
+              status: 'error',
+              message: errorMsg,
+              error: singleCalc.error,
+              missing_field: singleCalc.missing_field,
+              // Include partial results that were calculated
+              ...agg
+            }
+            selectedCalculations.value = allCalculations.value
+            return
+          }
+          
+          // If status is partial, show warning with error message if available
+          if (singleCalc.status === 'partial' && singleCalc.error) {
+            console.warn('Partial calculation with error:', singleCalc.error)
+            showSnackbar(`Partial calculation: ${singleCalc.error}`, 'warning')
+            agg.status = 'partial'
+            agg.error = singleCalc.error
+            agg.missing_field = singleCalc.missing_field
+          }
+          
+          console.log('Final single instrument agg object:', agg)
+          allCalculations.value = agg
+          selectedCalculations.value = agg
+          console.log('allCalculations set to single instrument backend values')
           
           const row = {
             'Instrument Name': backendInstrumentNames[0] || singleCalc.instrument_name || 'Instrument',
@@ -4505,58 +4678,126 @@ async function calculateMetrics() {
           mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
           
           completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
-
-          // For single instruments, use aggregates if available, otherwise use the single calc values
+        } else if (calcArray.length > 1) {
+          // Handle case where backend returns multiple calculations but flags as single-instrument mode
+          console.log('=== MULTIPLE CALCULATIONS IN SINGLE MODE ===')
+          console.log('Using aggregates from response.data')
+          
           const aggregates = response.data.aggregates || {}
+          console.log('Aggregates:', aggregates)
+          
+          // Build allCalculations from aggregates - include all backend-calculated fields
           const agg = {
-            totalValue: aggregates.totalValue ?? aggregates.total_value ?? singleCalc.total_value ?? singleCalc.calculated_value ?? 0,
-            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? 1,
-            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? singleCalc.interest_rate ?? singleCalc.coupon_rate ?? singleCalc.discount_rate ?? 0,
-            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? singleCalc.interest_rate ?? singleCalc.coupon_rate ?? singleCalc.discount_rate ?? 0,
-            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? singleCalc.interest_earned ?? 0,
-            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? singleCalc.interest_earned ?? 0,
-            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? singleCalc.annual_yield ?? 0,
-            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? singleCalc.effective_annual_rate ?? 0,
-            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? singleCalc.days_to_maturity ?? 0,
-            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? singleCalc.principal ?? singleCalc.face_value ?? 0
+            totalValue: aggregates.totalValue ?? aggregates.total_value ?? null,
+            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? calcArray.length,
+            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? null,
+            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? null,
+            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? null,
+            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? null,
+            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? null,
+            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? null,
+            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? null,
+            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? null,
+            fred: response.data.fred || null,
+            // Include all bonds-specific fields
+            accruedInterest: aggregates.accrued_interest ?? null,
+            annualCoupon: aggregates.annual_coupon ?? null,
+            bondEquivalentYield: aggregates.bond_equivalent_yield ?? null,
+            couponRate: aggregates.coupon_rate ?? null,
+            currentPrice: aggregates.current_price ?? null,
+            currentYield: aggregates.current_yield ?? null,
+            duration: aggregates.duration ?? null,
+            faceValue: aggregates.face_value ?? null,
+            frequency: aggregates.frequency ?? null,
+            modifiedDuration: aggregates.modified_duration ?? null,
+            yearsToMaturity: aggregates.years_to_maturity ?? null,
+            yieldToMaturity: aggregates.yield_to_maturity ?? null,
+            yieldCurveRate: aggregates.yield_curve_rate ?? null,
+            // Include Treasury Bill-specific fields
+            purchasePrice: aggregates.purchase_price ?? null,
+            termDays: aggregates.term_days ?? null,
+            discountAmount: aggregates.discount_amount ?? null,
+            discountYield: aggregates.discount_yield ?? null,
+            moneyMarketYield: aggregates.money_market_yield ?? null,
+            holdingPeriodYield: aggregates.holding_period_yield ?? null,
+            effectiveAnnualYield: aggregates.effective_annual_yield ?? null,
+            // Include Money Market-specific fields
+            principal: aggregates.principal ?? null,
+            interestRate: aggregates.interest_rate ?? null,
+            interestEarned: aggregates.interest_earned ?? null,
+            discountYield: aggregates.discount_yield ?? null,
+            effectiveYield: aggregates.effective_yield ?? null
           }
           
+          console.log('Final agg object:', agg)
           allCalculations.value = agg
           selectedCalculations.value = agg
-
-          const portfolioRow = {
-            'Portfolio Name': currentSheetName.value || 'Current Portfolio',
+          console.log('allCalculations set to agg from multi-calc single-mode')
+          
+          // Build instrument summary from calculations
+          const rows = calcArray.map((calc, idx) => ({
+            'Instrument Name': backendInstrumentNames[idx] || calc.instrument_name || `Instrument ${idx + 1}`,
             'Instrument Type': instrumentType.value,
-            'Total Value': agg.totalValue || 0,
-            'Number of Instruments': agg.instrumentCount || 1,
-            'Average Rate': agg.avgRate || 0,
-            'Weighted Average Rate': agg.weightedAvgRate || 0,
-            'Total Interest': agg.totalInterest || 0,
-            'Interest Earned': agg.interestEarned || 0,
-            'Annual Yield': agg.annualYield || 0,
-            'Effective Annual Rate': agg.effectiveAnnualRate || 0,
-            'Average Days to Maturity': agg.avgDaysToMaturity || 0,
-            'Total Principal': agg.totalPrincipal || 0
+            ...calc,
+            'Worksheet': currentSheetName.value || 'Calculated'
+          }))
+          
+          const currentCols = new Set()
+          rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
+          instrumentSummary.value = { columns: Array.from(currentCols), rows }
+          
+          const existingRows = completedInstrumentSummary.value.rows || []
+          const rowsWithWorkbook = rows.map(row => ({
+            ...row,
+            'Workbook': currentWorkbookName.value || 'Unknown',
+            'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
+          }))
+          
+          const existingRowsWithWorkbook = existingRows.map(row => ({
+            ...row,
+            'Workbook': row['Workbook'] || 'Unknown',
+            'Worksheet': row['Worksheet'] || row['worksheet'] || 'Unknown'
+          }))
+          
+          const mergedRows = [...existingRowsWithWorkbook, ...rowsWithWorkbook]
+          
+          const allCols = new Set()
+          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+          
+          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          
+          // Build portfolio summary from aggregates
+          if (response.data.portfolio_summary) {
+            portfolioSummary.value = response.data.portfolio_summary
+          } else {
+            const portfolioRow = {
+              'Portfolio Name': currentSheetName.value || 'Current Portfolio',
+              'Instrument Type': instrumentType.value,
+              'Total Value': agg.totalValue || 0,
+              'Number of Instruments': agg.instrumentCount || calcArray.length,
+              'Average Rate': agg.avgRate || 0,
+              'Weighted Average Rate': agg.weightedAvgRate || 0,
+              'Total Interest': agg.totalInterest || 0,
+              'Interest Earned': agg.interestEarned || 0,
+              'Annual Yield': agg.annualYield || 0,
+              'Effective Annual Rate': agg.effectiveAnnualRate || 0,
+              'Average Days to Maturity': agg.avgDaysToMaturity || 0,
+              'Total Principal': agg.totalPrincipal || 0
+            }
+            
+            const portfolioCols = new Set()
+            Object.keys(portfolioRow).forEach(k => portfolioCols.add(k))
+            portfolioSummary.value = { columns: Array.from(portfolioCols), rows: [portfolioRow] }
+            
+            const existingPortfolioRows = completedPortfolioSummary.value.rows || []
+            const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
+            
+            const allPortfolioCols = new Set()
+            mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => allPortfolioCols.add(k)))
+            
+            completedPortfolioSummary.value = { columns: Array.from(allPortfolioCols), rows: mergedPortfolioRows }
           }
-          
-          if (response.data.fred?.benchmark_rate) {
-            portfolioRow['FRED Benchmark'] = response.data.fred.benchmark_rate
-            portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market || 0
-          }
-          
-          const currentPortfolioCols = new Set()
-          Object.keys(portfolioRow).forEach(k => currentPortfolioCols.add(k))
-          portfolioSummary.value = { columns: Array.from(currentPortfolioCols), rows: [portfolioRow] }
-          
-          const existingPortfolioRows = completedPortfolioSummary.value.rows || []
-          const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
-          
-          const portfolioCols = new Set()
-          mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => portfolioCols.add(k)))
-          
-          completedPortfolioSummary.value = { columns: Array.from(portfolioCols), rows: mergedPortfolioRows }
-        }
-        else if (calcArray.length) {
+        } else if (calcArray.length) {
           // Multi-instrument case
           const rows = calcArray.map((calc, idx) => ({
             'Instrument Name': backendInstrumentNames[idx] || calc.instrument_name || 'Instrument',
@@ -4591,16 +4832,16 @@ async function calculateMetrics() {
 
           const aggregates = response.data.aggregates || response.data || {}
           const agg = {
-            totalValue: aggregates.totalValue ?? aggregates.total_value ?? 0,
-            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? 0,
-            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? 0,
-            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? 0,
-            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? 0,
-            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? 0,
-            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? 0,
-            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? 0,
-            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? 0,
-            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? 0
+            totalValue: aggregates.totalValue ?? aggregates.total_value ?? null,
+            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? null,
+            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? null,
+            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? null,
+            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? null,
+            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? null,
+            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? null,
+            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? null,
+            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? null,
+            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? null
           }
           
           allCalculations.value = agg
@@ -4609,21 +4850,21 @@ async function calculateMetrics() {
           const portfolioRow = {
             'Portfolio Name': currentSheetName.value || 'Current Portfolio',
             'Instrument Type': instrumentType.value,
-            'Total Value': agg.totalValue || 0,
-            'Number of Instruments': agg.instrumentCount || 0,
-            'Average Rate': agg.avgRate || 0,
-            'Weighted Average Rate': agg.weightedAvgRate || 0,
-            'Total Interest': agg.totalInterest || 0,
-            'Interest Earned': agg.interestEarned || 0,
-            'Annual Yield': agg.annualYield || 0,
-            'Effective Annual Rate': agg.effectiveAnnualRate || 0,
-            'Average Days to Maturity': agg.avgDaysToMaturity || 0,
-            'Total Principal': agg.totalPrincipal || 0
+            'Total Value': agg.totalValue ?? null,
+            'Number of Instruments': agg.instrumentCount ?? null,
+            'Average Rate': agg.avgRate ?? null,
+            'Weighted Average Rate': agg.weightedAvgRate ?? null,
+            'Total Interest': agg.totalInterest ?? null,
+            'Interest Earned': agg.interestEarned ?? null,
+            'Annual Yield': agg.annualYield ?? null,
+            'Effective Annual Rate': agg.effectiveAnnualRate ?? null,
+            'Average Days to Maturity': agg.avgDaysToMaturity ?? null,
+            'Total Principal': agg.totalPrincipal ?? null
           }
           
           if (response.data.fred?.benchmark_rate) {
             portfolioRow['FRED Benchmark'] = response.data.fred.benchmark_rate
-            portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market || 0
+            portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market ?? null
           }
           
           const currentPortfolioCols = new Set()
@@ -4638,100 +4879,13 @@ async function calculateMetrics() {
           
           completedPortfolioSummary.value = { columns: Array.from(portfolioCols), rows: mergedPortfolioRows }
         } else {
-          const instrumentName = backendInstrumentNames.length > 0 
-            ? backendInstrumentNames[0]
-            : (columnMapping.value['Instrument Name']
-              ? (cleanedData.value[0]?.[columnMapping.value['Instrument Name']] || instrumentLabel.value)
-              : instrumentLabel.value)
-
-          const summaryRow = {
-            'Instrument Name': instrumentName,
-            'Instrument Type': instrumentType.value,
-            'Total Value': response.data.totalValue ?? response.data.total_value ?? 0,
-            'total_value': response.data.totalValue ?? response.data.total_value ?? 0,
-            'Instrument Count': response.data.instrumentCount ?? response.data.instrument_count ?? 0,
-            'instrument_count': response.data.instrumentCount ?? response.data.instrument_count ?? 0,
-            'Avg Rate': response.data.avgRate ?? response.data.avg_rate ?? 0,
-            'avg_rate': response.data.avgRate ?? response.data.avg_rate ?? 0,
-            'Weighted Avg Rate': response.data.weightedAvgRate ?? response.data.weighted_avg_rate ?? 0,
-            'weighted_avg_rate': response.data.weightedAvgRate ?? response.data.weighted_avg_rate ?? 0,
-            'Total Interest': response.data.totalInterest ?? response.data.total_interest ?? 0,
-            'total_interest': response.data.totalInterest ?? response.data.total_interest ?? 0,
-            'Interest Earned': response.data.interestEarned ?? response.data.interest_earned ?? 0,
-            'interest_earned': response.data.interestEarned ?? response.data.interest_earned ?? 0,
-            'Annual Yield': response.data.annualYield ?? response.data.annual_yield ?? 0,
-            'annual_yield': response.data.annualYield ?? response.data.annual_yield ?? 0,
-            'Effective Annual Rate': response.data.effectiveAnnualRate ?? response.data.effective_annual_rate ?? 0,
-            'effective_annual_rate': response.data.effectiveAnnualRate ?? response.data.effective_annual_rate ?? 0,
-            'Avg Days to Maturity': response.data.avgDaysToMaturity ?? response.data.avg_days_to_maturity ?? 0,
-            'avg_days_to_maturity': response.data.avgDaysToMaturity ?? response.data.avg_days_to_maturity ?? 0,
-            'Total Principal': response.data.totalPrincipal ?? response.data.total_principal ?? 0,
-            'total_principal': response.data.totalPrincipal ?? response.data.total_principal ?? 0,
-            'FRED Benchmark': response.data.fred?.benchmark_rate ?? null,
-            'fred_benchmark': response.data.fred?.benchmark_rate ?? null,
-            'Worksheet': currentSheetName.value || 'Calculated'
+          // No calculations returned - show error
+          console.warn('No calculations returned from backend')
+          allCalculations.value = {
+            status: 'error',
+            message: 'Not calculable — required input not detected.'
           }
-
-          const currentCols = new Set()
-          Object.keys(summaryRow).forEach(k => currentCols.add(k))
-          instrumentSummary.value = { columns: Array.from(currentCols), rows: [summaryRow] }
-          
-          const existingRows = completedInstrumentSummary.value.rows || []
-          const mergedRows = [...existingRows, summaryRow]
-          
-          const allCols = new Set()
-          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-          
-          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
-
-          const aggregates = response.data.aggregates || response.data || {}
-          const agg = {
-            totalValue: aggregates.totalValue ?? aggregates.total_value ?? 0,
-            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? 1,
-            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? 0,
-            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? 0,
-            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? 0,
-            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? 0,
-            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? 0,
-            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? 0,
-            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? 0,
-            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? 0
-          }
-          
-          allCalculations.value = agg
-          selectedCalculations.value = agg
-
-          const portfolioRow = {
-            'Portfolio Name': currentSheetName.value || 'Current Portfolio',
-            'Instrument Type': instrumentType.value,
-            'Total Value': agg.totalValue || 0,
-            'Number of Instruments': agg.instrumentCount || 0,
-            'Average Rate': agg.avgRate || 0,
-            'Weighted Average Rate': agg.weightedAvgRate || 0,
-            'Total Interest': agg.totalInterest || 0,
-            'Interest Earned': agg.interestEarned || 0,
-            'Annual Yield': agg.annualYield || 0,
-            'Effective Annual Rate': agg.effectiveAnnualRate || 0,
-            'Average Days to Maturity': agg.avgDaysToMaturity || 0,
-            'Total Principal': agg.totalPrincipal || 0
-          }
-          
-          if (response.data.fred?.benchmark_rate) {
-            portfolioRow['FRED Benchmark'] = response.data.fred.benchmark_rate
-            portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market || 0
-          }
-          
-          const currentPortfolioCols = new Set()
-          Object.keys(portfolioRow).forEach(k => currentPortfolioCols.add(k))
-          portfolioSummary.value = { columns: Array.from(currentPortfolioCols), rows: [portfolioRow] }
-          
-          const existingPortfolioRows = completedPortfolioSummary.value.rows || []
-          const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
-          
-          const portfolioCols = new Set()
-          mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => portfolioCols.add(k)))
-          
-          completedPortfolioSummary.value = { columns: Array.from(portfolioCols), rows: mergedPortfolioRows }
+          selectedCalculations.value = allCalculations.value
         }
         
         // Save the portfolio summary data to session immediately after calculations complete
@@ -5743,6 +5897,43 @@ function showFormula(metricKey) {
     'duration': 'Macaulay Duration = Σ (t × PV(C_t)) / Price'
   }
   formulaText.value = formulaMap[metricKey] || 'No formula available for this metric.'
+  
+  // Build calculation details from backend aggregates
+  const agg = allCalculations.value || {}
+  const details = []
+  
+  if (metricKey === 'Total Portfolio Value' || metricKey === 'totalValue') {
+    details.push({ label: 'Total Value', value: agg.totalValue || agg.total_value || 0, formula: 'Sum of all instrument values' })
+    if (agg.totalPrincipal || agg.total_principal) {
+      details.push({ label: 'Total Principal', value: agg.totalPrincipal || agg.total_principal, formula: 'Sum of principal amounts' })
+    }
+    if (agg.totalFaceValue || agg.total_face_value) {
+      details.push({ label: 'Total Face Value', value: agg.totalFaceValue || agg.total_face_value, formula: 'Sum of face values' })
+    }
+  } else if (metricKey === 'Average Rate' || metricKey === 'avgRate' || metricKey === 'weightedAvgRate') {
+    details.push({ label: 'Weighted Average Rate', value: agg.weightedAvgRate || agg.avgRate || agg.avg_rate || 0, formula: 'Σ (Rate × Principal) / Σ Principal' })
+    details.push({ label: 'Instrument Count', value: agg.instrumentCount || agg.instrument_count || 0, formula: 'Number of unique instruments' })
+  } else if (metricKey === 'Number of Instruments' || metricKey === 'instrumentCount') {
+    details.push({ label: 'Unique Instruments', value: agg.instrumentCount || agg.instrument_count || 0, formula: 'Count of unique instrument names' })
+    details.push({ label: 'Successful Rows', value: agg.successful_rows || 0, formula: 'Rows with successful calculations' })
+  } else if (metricKey === 'totalInterest' || metricKey === 'interestEarned') {
+    details.push({ label: 'Total Interest', value: agg.totalInterest || agg.total_interest || 0, formula: 'Σ (Principal × Rate × Days/360)' })
+  } else if (metricKey === 'avgDaysToMaturity') {
+    details.push({ label: 'Average Days to Maturity', value: agg.avgDaysToMaturity || agg.avg_days_to_maturity || 0, formula: 'Σ Days / Instrument Count' })
+  } else if (metricKey === 'weightedAvgCoupon' || metricKey === 'totalAnnualIncome') {
+    details.push({ label: 'Weighted Average Coupon', value: agg.weightedAvgCoupon || 0, formula: 'Σ (Coupon Rate × Face Value) / Σ Face Value' })
+    details.push({ label: 'Total Annual Income', value: agg.totalAnnualIncome || agg.total_coupon_income || 0, formula: 'Σ (Coupon Rate × Face Value)' })
+  } else if (metricKey === 'avgYTM') {
+    details.push({ label: 'Average YTM', value: agg.avgYTM || agg.avg_ytm || 0, formula: 'Σ Yield to Maturity / Instrument Count' })
+  } else if (metricKey === 'duration') {
+    details.push({ label: 'Average Duration', value: agg.duration || agg.avg_duration || 0, formula: 'Macaulay Duration = Σ (t × PV(C_t)) / Price' })
+  } else if (metricKey === 'weightedAvgDiscount' || metricKey === 'totalDiscount') {
+    details.push({ label: 'Weighted Average Discount', value: agg.weightedAvgDiscount || agg.avg_discount_rate || 0, formula: 'Σ (Discount Rate × Face Value) / Σ Face Value' })
+    details.push({ label: 'Total Discount', value: agg.totalDiscount || agg.total_discount || 0, formula: 'Σ ((Face Value - Purchase Price) / Face Value × Face Value)' })
+  }
+  
+  formulaCalculationDetails.value = details.length > 0 ? details : null
+  showCalculationDetails.value = false
   formulaDialog.value = true
 }
 

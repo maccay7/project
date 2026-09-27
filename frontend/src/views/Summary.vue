@@ -823,35 +823,24 @@ async function loadSummary() {
       let totalValue = 0, totalFaceValue = 0, totalAvgRate = 0, totalFredBench = 0, fredBenchCount = 0
       let instrumentCount = 0
 
-      // Also check calculations/aggregates from workflow for more accurate totals
+      // Use backend aggregates as the source of truth
       const wfType = await sessionManager.getInstrumentWorkflow(sid, template.id)
       const aggregates = wfType?.allCalculations || wfType?.calculations || {}
       
-      // If aggregates exist, use them for totals
-      if (aggregates.totalValue !== undefined && aggregates.totalValue !== null) {
-        totalValue = aggregates.totalValue
-      }
-      if (aggregates.totalPrincipal !== undefined && aggregates.totalPrincipal !== null) {
-        totalFaceValue = aggregates.totalPrincipal
-      }
-      if (aggregates.totalFaceValue !== undefined && aggregates.totalFaceValue !== null) {
-        totalFaceValue = aggregates.totalFaceValue
-      }
-      if (aggregates.avgRate !== undefined && aggregates.avgRate !== null) {
-        totalAvgRate = aggregates.avgRate
-      }
-      if (aggregates.instrumentCount !== undefined && aggregates.instrumentCount !== null) {
-        instrumentCount = aggregates.instrumentCount
-      }
-      if (aggregates.fred?.benchmark_rate !== undefined && aggregates.fred.benchmark_rate !== null) {
-        totalFredBench = aggregates.fred.benchmark_rate
-        fredBenchCount = 1
-      }
-
-      // Fall back to summary rows if aggregates are empty
-      if (totalValue === 0 && rows.length > 0) {
+      // Use backend aggregates if available - these are the authoritative values
+      if (Object.keys(aggregates).length > 0) {
+        totalValue = aggregates.totalValue ?? aggregates.total_value ?? 0
+        totalFaceValue = aggregates.totalPrincipal ?? aggregates.total_principal ?? aggregates.totalFaceValue ?? aggregates.total_face_value ?? 0
+        totalAvgRate = aggregates.avgRate ?? aggregates.avg_rate ?? aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? 0
+        instrumentCount = aggregates.instrumentCount ?? aggregates.instrument_count ?? 0
+        if (aggregates.fred?.benchmark_rate !== undefined && aggregates.fred.benchmark_rate !== null) {
+          totalFredBench = aggregates.fred.benchmark_rate
+          fredBenchCount = 1
+        }
+      } else if (rows.length > 0) {
+        // Only fall back to rows if no aggregates exist (should not happen normally)
+        console.warn(`No aggregates found for ${template.id}, falling back to row-level data`)
         rows.forEach(row => {
-          // Portfolio summary rows have different field names
           const value = getVal(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
           const faceValue = getVal(row, 'Face Value', 'face_value', 'Amount', 'amount', 'Principal', 'principal', 'Total Principal', 'total_principal')
           const rate = getVal(row, 'Average Rate', 'average_rate', 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate')
@@ -869,7 +858,7 @@ async function loadSummary() {
         })
       }
 
-      const avgRate = totalAvgRate !== 0 ? totalAvgRate : (rows.length > 0 ? totalAvgRate / rows.length : null)
+      const avgRate = totalAvgRate
       const avgFredBench = fredBenchCount > 0 ? totalFredBench / fredBenchCount : null
       const completed = (rows.length > 0) || (totalValue > 0) || (instrumentCount > 0)
 
