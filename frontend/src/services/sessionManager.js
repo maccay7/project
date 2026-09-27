@@ -64,15 +64,20 @@ class SessionManager {
 
   async getAllSessions() {
     try {
-      const data = await api.sessionsAPI.list()
-      const backendSessions = Array.isArray(data) ? data : []
+      const response = await api.sessionsAPI.list()
+      const backendSessions = (response && response.success && Array.isArray(response.data)) ? response.data : []
       const merged = [...this.sessions]
       for (const bs of backendSessions) {
-        const idx = merged.findIndex(s => s.id === bs.id || s.session_id === bs.id)
+        // Normalize the ID field
+        const normalizedBs = {
+          ...bs,
+          id: bs.id || bs.session_id
+        }
+        const idx = merged.findIndex(s => s.id === normalizedBs.id || s.session_id === normalizedBs.id)
         if (idx !== -1) {
-          merged[idx] = { ...merged[idx], ...bs }
+          merged[idx] = { ...merged[idx], ...normalizedBs }
         } else {
-          merged.push(bs)
+          merged.push(normalizedBs)
         }
       }
       this.sessions = merged
@@ -90,7 +95,8 @@ class SessionManager {
       if (cached) return cached
     }
     try {
-      const data = await api.sessionsAPI.get(id)
+      const response = await api.sessionsAPI.get(id)
+      const data = response && response.success ? response.data : null
       if (data) {
         const mapped = {
           id: data.id || data.session_id,
@@ -101,7 +107,7 @@ class SessionManager {
           instrument_count: data.instrument_count || 0,
           version_count: data.version_count || 0,
           total_value: data.total_value || 0,
-          instrumentWorkflow: data.instrument_workflows || {},
+          instrumentWorkflow: data.instrument_workflows || data.instrument_workflow || {},
           versions: data.versions || [],
           worksheets: data.worksheets || {},
           workbookName: data.workbookName || null

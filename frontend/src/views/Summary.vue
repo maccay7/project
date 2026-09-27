@@ -704,10 +704,37 @@ async function loadSummary() {
         session = sessionManager.getActiveSession()
       }
     }
+    
+    // If still no session, try to get from URL query parameter
+    if (!session) {
+      const route = router.currentRoute.value
+      const sessionId = route.query.session || route.query.session_id
+      if (sessionId) {
+        console.log('Fetching session from backend with ID:', sessionId)
+        await sessionManager.getSession(sessionId, true)
+        session = sessionManager.getActiveSession()
+     }
+    }
+    
+    // If still no session, try localStorage/sessionStorage
+    if (!session) {
+      try {
+        const localSid = localStorage.getItem('dura_active_session_id') || sessionStorage.getItem('dura_active_session_id')
+        if (localSid) {
+          console.log('Fetching session from storage with ID:', localSid)
+          await sessionManager.getSession(localSid, true)
+          session = sessionManager.getActiveSession()
+        }
+      } catch (e) {
+        console.warn('Failed to get session from storage:', e)
+      }
+    }
+    
     activeSession.value = session
 
     if (!activeSession.value) {
       console.warn('No active session found')
+      console.warn('Session manager state:', sessionManager.getActiveSessionId())
       instruments.value = []
       instrumentsWithDetails.value = []
       loading.value = false
@@ -719,13 +746,18 @@ async function loadSummary() {
     console.log('Loading summary for session:', sid)
 
     const wf = await sessionManager.getInstrumentWorkflow(sid, 'money-market')
+    console.log('=== MONEY MARKET WORKFLOW ===')
     console.log('Money market workflow:', wf)
+    console.log('Money market workflow keys:', wf ? Object.keys(wf) : 'null')
+    console.log('Money market workflow allCalculations:', JSON.stringify(wf?.allCalculations, null, 2))
+    console.log('Money market workflow portfolioSummary:', wf?.portfolioSummary)
+    console.log('Money market workflow completedPortfolioSummary:', wf?.completedPortfolioSummary)
     const summary = wf?.instrumentSummary || { rows: [], columns: [] }
     const portfolioSummary = wf?.portfolioSummary || { rows: [], columns: [] }
     const completedPortfolioSummary = wf?.completedPortfolioSummary || { rows: [], columns: [] }
     const allCalculations = wf?.allCalculations || {}
 
-    console.log('Money market allCalculations:', allCalculations)
+    console.log('Money market allCalculations:', JSON.stringify(allCalculations, null, 2))
     console.log('Money market portfolioSummary rows:', portfolioSummary.rows)
     console.log('Money market completedPortfolioSummary rows:', completedPortfolioSummary.rows)
 

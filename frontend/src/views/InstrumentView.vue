@@ -2064,7 +2064,25 @@ function switchTab(tab) {
 
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToCalculations() { activeTab.value = 'calculations'; forceUpdate.value++ }
-function goToPortfolioSummary() { saveSessionData(); router.push('/summary') }
+function goToPortfolioSummary() { 
+  saveSessionData(); 
+  // Try multiple sources for session ID
+  const sessionId = activeSession.value?.id || sessionManager.getActiveSessionId() || localStorage.getItem('dura_active_session_id')
+  console.log('goToPortfolioSummary - sessionId:', sessionId)
+  console.log('goToPortfolioSummary - activeSession.value:', activeSession.value)
+  console.log('goToPortfolioSummary - sessionManager.getActiveSessionId():', sessionManager.getActiveSessionId())
+  console.log('goToPortfolioSummary - localStorage dura_active_session_id:', localStorage.getItem('dura_active_session_id'))
+  if (sessionId) {
+    // Ensure session is set as active in sessionManager before navigation
+    sessionManager.setActiveSession({ id: sessionId })
+    localStorage.setItem('dura_active_session_id', sessionId)
+    console.log('Session set as active:', sessionId)
+    router.push({ path: '/summary', query: { session: sessionId } })
+  } else {
+    console.error('No session ID available for navigation')
+    router.push('/summary')
+  }
+}
 
 async function goToReportTab() {
   saveSessionData()
@@ -5820,6 +5838,9 @@ function saveSessionData(explicitSave = false) {
     formulas: formulas.value
   }
   
+  // Ensure session is set as active
+  sessionManager.setActiveSession(activeSession.value)
+  
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
     .then(() => {
       if (explicitSave) {
@@ -6596,6 +6617,10 @@ async function checkAndReset() {
       if (currentSessionId) {
         const s = await sessionManager.getSession(String(currentSessionId))
         activeSession.value = s || null
+        if (s) {
+          sessionManager.setActiveSession(s)
+          console.log('Session set as active on mount:', s.id)
+        }
       } else {
         activeSession.value = null
       }
@@ -6639,6 +6664,7 @@ onMounted(async () => {
       }
       activeSession.value = s
       sessionManager.setActiveSession(s)
+      console.log('Session set as active from URL query:', s.id)
     }
   }
   if (!activeSession.value) {
@@ -6655,8 +6681,36 @@ onMounted(async () => {
           console.warn('Failed to fetch version count on mount:', e)
         }
         activeSession.value = refreshed
+        sessionManager.setActiveSession(refreshed)
+        console.log('Session refreshed and set as active:', refreshed.id)
       } else {
         activeSession.value = current
+        sessionManager.setActiveSession(current)
+        console.log('Session set as active from cache:', current.id)
+      }
+    } else {
+      // If no active session, try to load the most recent session from sessionManager
+      const allSessions = await sessionManager.getAllSessions()
+      console.log('All sessions from sessionManager:', allSessions)
+      if (allSessions.length > 0) {
+        const mostRecent = allSessions[0]
+        console.log('Most recent session:', mostRecent)
+        console.log('Most recent session.id:', mostRecent.id)
+        const s = await sessionManager.getSession(mostRecent.id, true)
+        console.log('Session fetched from backend:', s)
+        if (s) {
+          try {
+            const versionsRes = await api.versionAPI.getVersions(s.id)
+            if (versionsRes && versionsRes.success) {
+              s.version_count = versionsRes.total || 0
+            }
+          } catch (e) {
+            console.warn('Failed to fetch version count on mount:', e)
+          }
+          activeSession.value = s
+          sessionManager.setActiveSession(s)
+          console.log('Most recent session loaded and set as active:', s.id)
+        }
       }
     }
   }
