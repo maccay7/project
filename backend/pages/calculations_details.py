@@ -105,7 +105,9 @@ _DATE_FORMATS = (
     "%d/%m/%Y", "%d/%m/%y",
     "%Y/%m/%d",
     "%d-%m-%Y", "%m-%d-%Y",
+    "%d-%m-%y", "%m-%d-%y",
     "%d.%m.%Y", "%d %b %Y", "%d-%b-%Y",
+    "%d-%b-%y", "%d %b %y",
     "%Y-%m-%dT%H:%M:%S",
 )
 
@@ -647,61 +649,53 @@ def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
         if iss_d and mat_d:
             days = days_between(iss_d, mat_d)
 
-    if face is None:
-        return {"status": "cannot_calculate",
-                "error": "Missing required field: face_value",
-                "instrument_type": "tbills"}
-    if days is None or days <= 0:
-        return {"status": "cannot_calculate",
-                "error": "Missing/invalid term_days (or valuation/maturity dates)",
-                "instrument_type": "tbills"}
-
-    if purchase_price is None:
-        if discount_rate is None:
-            return {"status": "cannot_calculate",
-                    "error": "Missing purchase_price and discount_rate",
-                    "instrument_type": "tbills"}
-        purchase_price = face * (1.0 - discount_rate * days / 360.0)
-
-    if purchase_price <= 0:
-        return {"status": "cannot_calculate",
-                "error": "purchase_price must be > 0",
-                "instrument_type": "tbills"}
-
-    discount_amount = face - purchase_price
-    discount_yield = (discount_amount / face) * (360.0 / days) * 100.0
-    money_market_yield = (discount_amount / purchase_price) * (360.0 / days) * 100.0
-    bond_equivalent_yield = (discount_amount / purchase_price) * (365.0 / days) * 100.0
-    holding_period_yield = (discount_amount / purchase_price) * 100.0
-    effective_annual_yield = ((face / purchase_price) ** (365.0 / days) - 1.0) * 100.0
-
+    # Calculate partial results - don't fail completely if some fields are missing
     result = {
-        "status": "success",
+        "status": "partial" if (face is None or days is None or purchase_price is None) else "success",
         "instrument_type": "tbills",
         "face_value": round_money(face),
-        "purchase_price": round_money(purchase_price),
-        "term_days": round_time(days),
-        "discount_amount": round_money(discount_amount),
-        "discount_yield": round(discount_yield, 4),
-        "money_market_yield": round(money_market_yield, 4),
-        "bond_equivalent_yield": round(bond_equivalent_yield, 4),
-        "holding_period_yield": round(holding_period_yield, 4),
-        "effective_annual_yield": round(effective_annual_yield, 4),
-        "yield_curve_rate": round(money_market_yield, 4),
-        "total_value": round_money(face),
+        "term_days": round_time(days) if days is not None and days > 0 else None,
+        "discount_rate": round(discount_rate * 100.0, 4) if discount_rate is not None else None,
     }
+
+    # Calculate purchase price from discount rate if face and days are available
+    if face is not None and days is not None and days > 0 and discount_rate is not None:
+        if purchase_price is None:
+            purchase_price = face * (1.0 - discount_rate * days / 360.0)
+        result["purchase_price"] = round_money(purchase_price) if purchase_price is not None and purchase_price > 0 else None
+
+    # Calculate yields if face, purchase_price, and days are available
+    if face is not None and purchase_price is not None and purchase_price > 0 and days is not None and days > 0:
+        discount_amount = face - purchase_price
+        discount_yield = (discount_amount / face) * (360.0 / days) * 100.0
+        money_market_yield = (discount_amount / purchase_price) * (360.0 / days) * 100.0
+        bond_equivalent_yield = (discount_amount / purchase_price) * (365.0 / days) * 100.0
+        holding_period_yield = (discount_amount / purchase_price) * 100.0
+        effective_annual_yield = ((face / purchase_price) ** (365.0 / days) - 1.0) * 100.0
+
+        result["discount_amount"] = round_money(discount_amount)
+        result["discount_yield"] = round(discount_yield, 4)
+        result["money_market_yield"] = round(money_market_yield, 4)
+        result["bond_equivalent_yield"] = round(bond_equivalent_yield, 4)
+        result["holding_period_yield"] = round(holding_period_yield, 4)
+        result["effective_annual_yield"] = round(effective_annual_yield, 4)
+        result["yield_curve_rate"] = round(money_market_yield, 4)
+        result["total_value"] = round_money(face)
+        result["status"] = "success"
+
     # Add camelCase aliases for frontend compatibility
     result["faceValue"] = result["face_value"]
-    result["purchasePrice"] = result["purchase_price"]
+    result["purchasePrice"] = result.get("purchase_price")
     result["termDays"] = result["term_days"]
-    result["discountAmount"] = result["discount_amount"]
-    result["discountYield"] = result["discount_yield"]
-    result["moneyMarketYield"] = result["money_market_yield"]
-    result["bondEquivalentYield"] = result["bond_equivalent_yield"]
-    result["holdingPeriodYield"] = result["holding_period_yield"]
-    result["effectiveAnnualYield"] = result["effective_annual_yield"]
-    result["yieldCurveRate"] = result["yield_curve_rate"]
-    result["totalValue"] = result["total_value"]
+    result["discountAmount"] = result.get("discount_amount")
+    result["discountYield"] = result.get("discount_yield")
+    result["moneyMarketYield"] = result.get("money_market_yield")
+    result["bondEquivalentYield"] = result.get("bond_equivalent_yield")
+    result["holdingPeriodYield"] = result.get("holding_period_yield")
+    result["effectiveAnnualYield"] = result.get("effective_annual_yield")
+    result["yieldCurveRate"] = result.get("yield_curve_rate")
+    result["totalValue"] = result.get("total_value")
+
     return result
 
 
@@ -725,6 +719,12 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
         rl = str(item.get('frequency') or item.get('coupon_frequency') or '').lower()
         if rl in ("quarterly", "quarter", "4"): frequency = 4
         elif rl in ("monthly", "month", "12"): frequency = 12
+        elif rl in ("semiannual", "semi-annual", "semi", "2"): frequency = 2
+        elif rl in ("annual", "yearly", "1"): frequency = 1
+    
+    # Validate frequency - if it's an unreasonable value, set to null and add error
+    if frequency is not None and (frequency <= 0 or frequency > 365):
+        frequency = None
 
     if years is None:
         val_d = parse_date(item.get("valuation_date"))
@@ -736,112 +736,107 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
         if d2m is not None and d2m > 0:
             years = d2m / 365.0
 
-    if face is None:
-        return {"status": "cannot_calculate",
-                "error": "Missing required field: face_value",
-                "instrument_type": "bonds"}
-    if coupon_rate is None:
-        return {"status": "cannot_calculate",
-                "error": "Missing required field: coupon_rate",
-                "instrument_type": "bonds"}
-    if years is None or years <= 0:
-        return {"status": "cannot_calculate",
-                "error": "Missing years_to_maturity (or valuation/maturity dates)",
-                "instrument_type": "bonds"}
-    if frequency is None or frequency <= 0:
-        return {"status": "cannot_calculate",
-                "error": "Missing coupon_frequency",
-                "instrument_type": "bonds"}
-
-    frequency = int(frequency)
-
-    # ── NEW: if price is missing, derive it from the uploaded YTM ────────────
-    # validate_row accepts "price OR yield_to_maturity", but calculate_bond
-    # previously required price and errored when it was missing. That's why
-    # some bond rows silently failed.
-    ytm_input = (parse_percentage(item.get("yield"))
-                 or parse_percentage(item.get("yield_to_maturity")))
-
-    if price is None or price <= 0:
-        if ytm_input is not None:
-            price = _price_from_ytm(face, coupon_rate, ytm_input, years, frequency)
-        if price is None or price <= 0:
-            return {"status": "cannot_calculate",
-                    "error": "Missing/invalid price and could not derive from YTM",
-                    "instrument_type": "bonds"}
-
-    annual_coupon = coupon_rate * face
-    coupon_per_period = annual_coupon / frequency
-    periods = max(1, int(round(years * frequency)))
-
-    # Solve YTM from price (this is robust and returns the input YTM when the
-    # price was derived from it above).
-    ytm = _solve_ytm(price, face, coupon_rate, years, frequency)
-    if ytm is None and ytm_input is not None:
-        ytm = ytm_input
-    ytm_pct = ytm * 100.0 if ytm is not None else None
-
-    macaulay = None
-    modified = None
-    if ytm is not None and ytm > -0.99:
-        r = ytm / frequency
-        if r > -1:
-            pv_total = 0.0
-            weighted = 0.0
-            for t in range(1, periods + 1):
-                disc = (1 + r) ** t
-                pv_c = coupon_per_period / disc
-                pv_total += pv_c
-                weighted += t * pv_c
-            disc_n = (1 + r) ** periods
-            pv_f = face / disc_n
-            pv_total += pv_f
-            weighted += periods * pv_f
-            if pv_total > 0:
-                macaulay = (weighted / pv_total) / frequency
-                modified = macaulay / (1 + r)
-
-    current_yield = (annual_coupon / price) * 100.0 if price > 0 else None
-    accrued = None
-    iss_d = parse_date(item.get("issue_date"))
-    val_d = parse_date(item.get("valuation_date")) or parse_date(item.get("settlement_date"))
-    if iss_d and val_d:
-        days_accrued = days_between(iss_d, val_d)
-        days_in_period = 365.0 / frequency
-        accrued = coupon_per_period * (days_accrued / days_in_period)
-
+    # Calculate partial results - don't fail completely if some fields are missing
     result = {
-        "status": "success",
+        "status": "partial" if (face is None or coupon_rate is None or years is None or frequency is None or price is None) else "success",
         "instrument_type": "bonds",
         "face_value": round_money(face),
-        "current_price": round_money(price),
-        "coupon_rate": round(coupon_rate * 100.0, 4),
-        "years_to_maturity": round(years, 4),
-        "frequency": frequency,
-        "yield_to_maturity": round(ytm_pct, 4) if ytm_pct is not None else None,
-        "duration": round(macaulay, 4) if macaulay is not None else None,
-        "modified_duration": round(modified, 4) if modified is not None else None,
-        "current_yield": round(current_yield, 4) if current_yield is not None else None,
-        "accrued_interest": round_money(accrued),
-        "bond_equivalent_yield": round(ytm_pct, 4) if ytm_pct is not None else None,
-        "yield_curve_rate": round(ytm_pct, 4) if ytm_pct is not None else None,
-        "total_value": round_money(price),
-        "annual_coupon": round_money(annual_coupon),
+        "coupon_rate": round(coupon_rate * 100.0, 4) if coupon_rate is not None else None,
+        "years_to_maturity": round(years, 4) if years is not None else None,
+        "frequency": int(frequency) if frequency is not None and frequency > 0 else None,
     }
+
+    # Add error message if frequency is invalid
+    if frequency is None:
+        result["error"] = "Invalid or missing coupon frequency. Full calculations require valid frequency (1=annual, 2=semi-annual, 4=quarterly, 12=monthly)."
+        result["missing_field"] = "coupon_frequency"
+
+    # Calculate annual coupon if face and coupon_rate are available
+    if face is not None and coupon_rate is not None:
+        result["annual_coupon"] = round_money(face * coupon_rate)
+
+    # Calculate YTM and price if enough data is available
+    if face is not None and coupon_rate is not None and years is not None and years > 0 and frequency is not None and frequency > 0:
+        frequency = int(frequency)
+        
+        # Validate yield input - if it's > 1 (100%), it's likely a monetary value, not a percentage
+        ytm_input = (parse_percentage(item.get("yield"))
+                     or parse_percentage(item.get("yield_to_maturity")))
+        if ytm_input is not None and ytm_input > 1.0:
+            # Yield > 100% is likely a monetary value, reject it
+            ytm_input = None
+            result["error"] = "Invalid yield value (appears to be monetary, not percentage). Full calculations require valid yield or price."
+            result["missing_field"] = "yield_to_maturity"
+
+        if price is None or price <= 0:
+            if ytm_input is not None:
+                price = _price_from_ytm(face, coupon_rate, ytm_input, years, frequency)
+
+        if price is not None and price > 0:
+            result["current_price"] = round_money(price)
+            result["total_value"] = round_money(price)
+            
+            annual_coupon = coupon_rate * face
+            coupon_per_period = annual_coupon / frequency
+            periods = max(1, int(round(years * frequency)))
+
+            ytm = _solve_ytm(price, face, coupon_rate, years, frequency)
+            if ytm is None and ytm_input is not None:
+                ytm = ytm_input
+            ytm_pct = ytm * 100.0 if ytm is not None else None
+
+            macaulay = None
+            modified = None
+            if ytm is not None and ytm > -0.99:
+                r = ytm / frequency
+                if r > -1:
+                    pv_total = 0.0
+                    weighted = 0.0
+                    for t in range(1, periods + 1):
+                        disc = (1 + r) ** t
+                        pv_c = coupon_per_period / disc
+                        pv_total += pv_c
+                        weighted += t * pv_c
+                    disc_n = (1 + r) ** periods
+                    pv_f = face / disc_n
+                    pv_total += pv_f
+                    weighted += periods * pv_f
+                    if pv_total > 0:
+                        macaulay = (weighted / pv_total) / frequency
+                        modified = macaulay / (1 + r)
+
+            current_yield = (annual_coupon / price) * 100.0 if price > 0 else None
+            accrued = None
+            iss_d = parse_date(item.get("issue_date"))
+            val_d = parse_date(item.get("valuation_date")) or parse_date(item.get("settlement_date"))
+            if iss_d and val_d:
+                days_accrued = days_between(iss_d, val_d)
+                days_in_period = 365.0 / frequency
+                accrued = coupon_per_period * (days_accrued / days_in_period)
+
+            result["yield_to_maturity"] = round(ytm_pct, 4) if ytm_pct is not None else None
+            result["duration"] = round(macaulay, 4) if macaulay is not None else None
+            result["modified_duration"] = round(modified, 4) if modified is not None else None
+            result["current_yield"] = round(current_yield, 4) if current_yield is not None else None
+            result["accrued_interest"] = round_money(accrued)
+            result["bond_equivalent_yield"] = round(ytm_pct, 4) if ytm_pct is not None else None
+            result["yield_curve_rate"] = round(ytm_pct, 4) if ytm_pct is not None else None
+            result["status"] = "success"
+
     # Add camelCase aliases for frontend compatibility
     result["faceValue"] = result["face_value"]
-    result["currentPrice"] = result["current_price"]
+    result["currentPrice"] = result.get("current_price")
     result["couponRate"] = result["coupon_rate"]
     result["yearsToMaturity"] = result["years_to_maturity"]
-    result["yieldToMaturity"] = result["yield_to_maturity"]
-    result["duration"] = result["duration"]
-    result["modifiedDuration"] = result["modified_duration"]
-    result["currentYield"] = result["current_yield"]
-    result["accruedInterest"] = result["accrued_interest"]
-    result["bondEquivalentYield"] = result["bond_equivalent_yield"]
-    result["yieldCurveRate"] = result["yield_curve_rate"]
-    result["totalValue"] = result["total_value"]
-    result["annualCoupon"] = result["annual_coupon"]
+    result["yieldToMaturity"] = result.get("yield_to_maturity")
+    result["duration"] = result.get("duration")
+    result["modifiedDuration"] = result.get("modified_duration")
+    result["currentYield"] = result.get("current_yield")
+    result["accruedInterest"] = result.get("accrued_interest")
+    result["annualCoupon"] = result.get("annual_coupon")
+    result["bondEquivalentYield"] = result.get("bond_equivalent_yield")
+    result["yieldCurveRate"] = result.get("yield_curve_rate")
+
     return result
 
 
@@ -871,49 +866,44 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
 
     market_value = safe_float(item.get("market_value"))
 
-    if principal is None or principal <= 0:
-        return {"status": "cannot_calculate",
-                "error": "Missing/invalid principal",
-                "instrument_type": "money-market"}
-    if rate is None:
-        return {"status": "cannot_calculate",
-                "error": "Missing required field: interest_rate",
-                "instrument_type": "money-market"}
-    if days is None or days <= 0:
-        return {"status": "cannot_calculate",
-                "error": "Missing/invalid term_days (or valuation/maturity dates)",
-                "instrument_type": "money-market"}
-
-    interest = principal * rate * (days / 360.0)
-    total_value = principal + interest
-    discount_yield = (interest / total_value) * (360.0 / days) * 100.0 if total_value else None
-    effective_yield = (interest / principal) * (365.0 / days) * 100.0
-
+    # Calculate partial results - don't fail completely if some fields are missing
     result = {
-        "status": "success",
+        "status": "partial" if (principal is None or rate is None or days is None) else "success",
         "instrument_type": "money-market",
         "principal": round_money(principal),
-        "interest_rate": round(rate * 100.0, 4),
-        "term_days": round_time(days),
-        "interest_earned": round_money(interest),
-        "total_value": round_money(total_value),
-        "discount_yield": round(discount_yield, 4) if discount_yield is not None else None,
-        "effective_yield": round(effective_yield, 4),
-        "yield_curve_rate": round(effective_yield, 4),
+        "interest_rate": round(rate * 100.0, 4) if rate is not None else None,
+        "term_days": round_time(days) if days is not None and days > 0 else None,
     }
+
     if market_value is not None:
         result["market_value"] = round_money(market_value)
+
+    # Calculate interest and yields if principal, rate, and days are available
+    if principal is not None and principal > 0 and rate is not None and days is not None and days > 0:
+        interest = principal * rate * (days / 360.0)
+        total_value = principal + interest
+        discount_yield = (interest / total_value) * (360.0 / days) * 100.0 if total_value else None
+        effective_yield = (interest / principal) * (365.0 / days) * 100.0
+
+        result["interest_earned"] = round_money(interest)
+        result["total_value"] = round_money(total_value)
+        result["discount_yield"] = round(discount_yield, 4) if discount_yield is not None else None
+        result["effective_yield"] = round(effective_yield, 4)
+        result["yield_curve_rate"] = round(effective_yield, 4)
+        result["status"] = "success"
+
     # Add camelCase aliases for frontend compatibility
     result["principal"] = result["principal"]
     result["interestRate"] = result["interest_rate"]
     result["termDays"] = result["term_days"]
-    result["interestEarned"] = result["interest_earned"]
-    result["totalValue"] = result["total_value"]
-    result["discountYield"] = result["discount_yield"]
-    result["effectiveYield"] = result["effective_yield"]
-    result["yieldCurveRate"] = result["yield_curve_rate"]
+    result["interestEarned"] = result.get("interest_earned")
+    result["totalValue"] = result.get("total_value")
+    result["discountYield"] = result.get("discount_yield")
+    result["effectiveYield"] = result.get("effective_yield")
+    result["yieldCurveRate"] = result.get("yield_curve_rate")
     if "market_value" in result:
         result["marketValue"] = result["market_value"]
+
     return result
 
 

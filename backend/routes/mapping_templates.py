@@ -19,8 +19,7 @@ def create_mapping_template_table():
                 required_columns JSON,
                 file_columns JSON,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY unique_name_instrument (name, instrument_type)
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
         """)
         conn.commit()
@@ -34,28 +33,57 @@ def create_mapping_template_table():
 
 
 def save_mapping_template(name, instrument_type, column_mapping, required_columns=None, file_columns=None):
-    """Save a new mapping template to the database."""
+    """Save a new mapping template to the database. Update if exists."""
     conn = get_db()
     if not conn:
         return None
     try:
         cursor = conn.cursor()
+        
+        # Check if template with same name and instrument_type already exists
         cursor.execute(
-            """INSERT INTO mapping_templates 
-               (name, instrument_type, column_mapping, required_columns, file_columns) 
-               VALUES (%s, %s, %s, %s, %s)""",
-            (name, instrument_type, json.dumps(column_mapping), 
-             json.dumps(required_columns) if required_columns else None,
-             json.dumps(file_columns) if file_columns else None)
+            "SELECT id FROM mapping_templates WHERE name = %s AND instrument_type = %s",
+            (name, instrument_type)
         )
-        conn.commit()
-        template_id = cursor.lastrowid
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing template
+            print(f"Updating existing template: {name} (ID: {existing['id']})")
+            cursor.execute(
+                """UPDATE mapping_templates 
+                   SET column_mapping = %s, required_columns = %s, file_columns = %s 
+                   WHERE id = %s""",
+                (json.dumps(column_mapping),
+                 json.dumps(required_columns) if required_columns else None,
+                 json.dumps(file_columns) if file_columns else None,
+                 existing['id'])
+            )
+            conn.commit()
+            template_id = existing['id']
+        else:
+            # Insert new template
+            print(f"Creating new template: {name}")
+            cursor.execute(
+                """INSERT INTO mapping_templates 
+                   (name, instrument_type, column_mapping, required_columns, file_columns) 
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (name, instrument_type, json.dumps(column_mapping), 
+                 json.dumps(required_columns) if required_columns else None,
+                 json.dumps(file_columns) if file_columns else None)
+            )
+            conn.commit()
+            template_id = cursor.lastrowid
+        
         cursor.close()
         conn.close()
         return template_id
     except Exception as e:
         print(f"Error saving mapping template: {e}")
-        conn.close()
+        import traceback
+        traceback.print_exc()
+        if conn:
+            conn.close()
         return None
 
 
@@ -217,13 +245,17 @@ def mapping_templates_routes(app):
         required_columns = payload.get('required_columns')
         file_columns = payload.get('file_columns')
         
+        print(f"POST /api/mapping-templates - payload: {payload}")
+        
         if not name or not instrument_type or not column_mapping:
+            print("Missing required fields")
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
         
         template_id = save_mapping_template(name, instrument_type, column_mapping, required_columns, file_columns)
         if template_id:
             template = get_mapping_template_by_id(template_id)
             return jsonify({'success': True, 'data': template})
+        print(f"Failed to save template, template_id: {template_id}")
         return jsonify({'success': False, 'message': 'Failed to save template'}), 500
     
     @app.route('/api/mapping-templates/<int:template_id>', methods=['PUT', 'OPTIONS'])
