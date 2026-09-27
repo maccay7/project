@@ -1023,8 +1023,21 @@ def calculate_data(data: List[Dict],
             calc["instrument_name"] = name
 
         instrument_results.append(calc)
+        # Include partial calculations in successful for aggregation if they have meaningful data
         if calc.get("status") == "success":
             successful.append(calc)
+        elif calc.get("status") == "partial":
+            # Include partial calculations if they have at least face_value or principal
+            has_meaningful_data = (
+                calc.get("face_value") is not None and calc.get("face_value") > 0
+                or calc.get("principal") is not None and calc.get("principal") > 0
+                or calc.get("current_price") is not None and calc.get("current_price") > 0
+                or calc.get("total_value") is not None and calc.get("total_value") > 0
+            )
+            if has_meaningful_data:
+                successful.append(calc)
+            else:
+                failed.append(calc)
         else:
             failed.append(calc)
 
@@ -1085,7 +1098,11 @@ def calculate_data(data: List[Dict],
             aggregates["total_market_value"] = round_money(_sum("current_price"))
             # FIX: coupon income should come from annual_coupon, not accrued_interest.
             aggregates["total_coupon_income"] = round_money(_sum("annual_coupon"))
-            aggregates["total_value"] = round_money(_sum("current_price"))
+            # If current_price is 0 or null, use face_value as fallback for total_value
+            total_price = _sum("current_price")
+            if total_price is None or total_price == 0:
+                total_price = _sum("face_value")
+            aggregates["total_value"] = round_money(total_price)
             m = _mean("yield_to_maturity")
             aggregates["avg_ytm"] = round(m, 4) if m is not None else None
             m = _mean("duration")
@@ -1108,7 +1125,6 @@ def calculate_data(data: List[Dict],
         "totalCouponIncome":  "total_coupon_income",
         "totalAnnualIncome":  "total_coupon_income",   # frontend label for bonds
         "weightedAvgRate":    "weighted_avg_rate",
-        "avgRate":            "weighted_avg_rate",
         "weightedAvgCoupon":  "weighted_avg_coupon",
         "avgYTM":             "avg_ytm",
         "avgDiscountRate":    "avg_discount_rate",
@@ -1119,6 +1135,14 @@ def calculate_data(data: List[Dict],
     for camel, snake in camel_map.items():
         if snake in aggregates and camel not in aggregates:
             aggregates[camel] = aggregates[snake]
+    
+    # Special case: avgRate should map to weighted_avg_rate for money-market/tbills,
+    # but to weighted_avg_coupon for bonds
+    if "avgRate" not in aggregates:
+        if instrument_type == "bonds" and "weighted_avg_coupon" in aggregates:
+            aggregates["avgRate"] = aggregates["weighted_avg_coupon"]
+        elif "weighted_avg_rate" in aggregates:
+            aggregates["avgRate"] = aggregates["weighted_avg_rate"]
 
     mode = "single" if unique_instrument_count == 1 else "multiple"
 
