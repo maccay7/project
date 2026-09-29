@@ -3,9 +3,9 @@
 FRED API integration.
 
 Rules:
-|- Never fabricate benchmark data. If FRED returns nothing, benchmark_rate is None.
-|- Country and maturity default to US / 1Y when not supplied.
-|- Date range queries are supported via from_date / to_date.
+- Never fabricate benchmark data. If FRED returns nothing, benchmark_rate is None.
+- Country and maturity default to US / 1Y when not supplied.
+- Date range queries are supported via from_date / to_date.
 """
 
 import os
@@ -217,7 +217,7 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                     'observation_start': from_date,
                     'observation_end': to_date,
                     'sort_order': 'asc',
-                    'limit': 1000
+                    'limit': 1000  # Get up to 1000 data points
                 }
                 logger.info(f"Fetching FRED time series for {series_id} from {from_date} to {to_date}")
                 resp = requests.get(f'{FRED_BASE_URL}/series/observations',
@@ -228,15 +228,15 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                         for obs in data['observations']:
                             if obs.get('value') and obs.get('value') != '.':
                                 try:
-                                    val = float(obs['value'])
+                                    val = float(obs['value'))
                                     points.append({
                                         'maturity': maturity_map.get(used_mat, 10.0),
                                         'maturityLabel': used_mat,
                                         'rate': round(val, 4),
                                         'date': obs.get('date'),
                                         'source': 'fred',
-                                        'x': obs.get('date'),
-                                        'y': round(val, 4)
+                                        'x': obs.get('date'),  # Use date as x for time series
+                                        'y': round(val, 4)  # Use rate as y
                                     })
                                 except (ValueError, TypeError):
                                     continue

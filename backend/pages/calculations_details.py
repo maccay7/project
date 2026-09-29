@@ -629,7 +629,7 @@ def _price_from_ytm(face: float, coupon_rate: float, ytm: float,
 # TREASURY BILLS
 # =============================================================================
 
-def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
+def calculate_treasury_bill(item: Dict[str, Any], benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     item = normalize_row(item)
     face = safe_float(item.get("face_value")) or safe_float(item.get("principal"))
     purchase_price = (safe_float(item.get("purchase_price"))
@@ -679,7 +679,7 @@ def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
         result["bond_equivalent_yield"] = round(bond_equivalent_yield, 4)
         result["holding_period_yield"] = round(holding_period_yield, 4)
         result["effective_annual_yield"] = round(effective_annual_yield, 4)
-        result["yield_curve_rate"] = round(money_market_yield, 4)
+        result["yield_curve_rate"] = round(benchmark_yield * 100.0, 4) if benchmark_yield is not None else None
         result["total_value"] = round_money(face)
         result["status"] = "success"
 
@@ -703,7 +703,7 @@ def calculate_treasury_bill(item: Dict[str, Any]) -> Dict[str, Any]:
 # BONDS
 # =============================================================================
 
-def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
+def calculate_bond(item: Dict[str, Any], benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     item = normalize_row(item)
     face = safe_float(item.get("face_value")) or safe_float(item.get("principal"))
     coupon_rate = (parse_percentage(item.get("coupon_rate"))
@@ -820,7 +820,7 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
             result["current_yield"] = round(current_yield, 4) if current_yield is not None else None
             result["accrued_interest"] = round_money(accrued)
             result["bond_equivalent_yield"] = round(ytm_pct, 4) if ytm_pct is not None else None
-            result["yield_curve_rate"] = round(ytm_pct, 4) if ytm_pct is not None else None
+            result["yield_curve_rate"] = round(benchmark_yield * 100.0, 4) if benchmark_yield is not None else None
             result["status"] = "success"
 
     # Add camelCase aliases for frontend compatibility
@@ -844,7 +844,7 @@ def calculate_bond(item: Dict[str, Any]) -> Dict[str, Any]:
 # MONEY MARKET
 # =============================================================================
 
-def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
+def calculate_money_market(item: Dict[str, Any], benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     item = normalize_row(item)
     principal = (safe_float(item.get("principal"))
                  or safe_float(item.get("face_value"))
@@ -889,7 +889,7 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
         result["total_value"] = round_money(total_value)
         result["discount_yield"] = round(discount_yield, 4) if discount_yield is not None else None
         result["effective_yield"] = round(effective_yield, 4)
-        result["yield_curve_rate"] = round(effective_yield, 4)
+        result["yield_curve_rate"] = round(benchmark_yield * 100.0, 4) if benchmark_yield is not None else None
         result["status"] = "success"
 
     # Add camelCase aliases for frontend compatibility
@@ -912,7 +912,8 @@ def calculate_money_market(item: Dict[str, Any]) -> Dict[str, Any]:
 # =============================================================================
 
 def calc_single(row: Dict[str, Any], instrument_type: str,
-                valuation_date: Optional[str] = None) -> Dict[str, Any]:
+                valuation_date: Optional[str] = None,
+                benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     if valuation_date:
         row = {**row, "valuation_date": valuation_date}
 
@@ -937,11 +938,11 @@ def calc_single(row: Dict[str, Any], instrument_type: str,
 
     norm = validation["normalized_row"]
     if instrument_type == "bonds":
-        calc = calculate_bond(norm)
+        calc = calculate_bond(norm, benchmark_yield)
     elif instrument_type == "money-market":
-        calc = calculate_money_market(norm)
+        calc = calculate_money_market(norm, benchmark_yield)
     else:
-        calc = calculate_treasury_bill(norm)
+        calc = calculate_treasury_bill(norm, benchmark_yield)
 
     name = _extract_instrument_name(norm) or (row.get("Instrument Name")
                                               or row.get("instrument_name")
@@ -989,7 +990,8 @@ def _pick_name_column(first_row: Dict[str, Any]) -> Optional[str]:
 
 def calculate_data(data: List[Dict],
                    instrument_type: str = "tbills",
-                   valuation_date: Optional[str] = None) -> Dict[str, Any]:
+                   valuation_date: Optional[str] = None,
+                   benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     if not isinstance(data, list) or len(data) == 0:
         return {"status": "cannot_calculate", "mode": "unknown",
                 "instrument_type": instrument_type, "instrument_count": 0,
@@ -1013,11 +1015,11 @@ def calculate_data(data: List[Dict],
         name = _extract_instrument_name(row)
 
         if instrument_type == "bonds":
-            calc = calculate_bond(row)
+            calc = calculate_bond(row, benchmark_yield)
         elif instrument_type == "money-market":
-            calc = calculate_money_market(row)
+            calc = calculate_money_market(row, benchmark_yield)
         else:
-            calc = calculate_treasury_bill(row)
+            calc = calculate_treasury_bill(row, benchmark_yield)
 
         if name:
             calc["instrument_name"] = name

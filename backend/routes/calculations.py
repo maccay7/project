@@ -20,7 +20,7 @@ from pages.calculations_details import (
     calculate_data, normalize_row, validate_row, calc_single,
 )
 from utils.db import get_db
-from utils.fred_config import attach_fred_to_calculation
+from utils.fred_config import attach_fred_to_calculation, get_market_benchmark
 from utils.field_mapping_engine import create_field_mapping_engine, InstrumentType
 from utils.calculation_dependencies import create_calculation_dependency_engine
 from utils.instrument_detection import create_instrument_detector
@@ -339,6 +339,8 @@ def calculations_routes(app):
         inst_type = normalize_instrument_type(payload.get('instrument_type'))
         valuation_date = payload.get('valuationDate') or payload.get('valuation_date')
         currency = payload.get('currency')
+        maturity = payload.get('maturity')
+        country = payload.get('country')
 
         if not isinstance(row, dict) or not row:
             return jsonify({'status': 'error',
@@ -349,7 +351,17 @@ def calculations_routes(app):
                             'errors': [{'field': 'instrument_type', 'code': 'missing',
                                         'message': 'instrument_type is required'}]}), 400
 
-        result = calc_single(row, inst_type, valuation_date=valuation_date)
+        # Fetch FRED benchmark rate before calculation
+        benchmark_yield = None
+        try:
+            benchmark = get_market_benchmark(inst_type, maturity, country, currency)
+            if benchmark.get('benchmark_rate') is not None:
+                benchmark_yield = benchmark['benchmark_rate']
+        except Exception as e:
+            print(f"FRED benchmark fetch failed: {e}")
+
+        result = calc_single(row, inst_type, valuation_date=valuation_date,
+                           benchmark_yield=benchmark_yield)
         if result['status'] != 'success':
             return jsonify({
                 'status': 'error',
@@ -377,9 +389,7 @@ def calculations_routes(app):
             'warnings': [],
         }
         try:
-            attach_fred_to_calculation(response, inst_type,
-                                       payload.get('maturity'),
-                                       payload.get('country'), currency)
+            attach_fred_to_calculation(response, inst_type, maturity, country, currency)
         except Exception as e:
             print(f"FRED failed: {e}")
         return jsonify(response)
@@ -394,6 +404,8 @@ def calculations_routes(app):
         inst_type = normalize_instrument_type(payload.get('instrument_type'))
         valuation_date = payload.get('valuationDate') or payload.get('valuation_date')
         currency = payload.get('currency')
+        maturity = payload.get('maturity')
+        country = payload.get('country')
         session_id = payload.get('session_id')
         dataset_id = payload.get('dataset_id')
         sheet_name = payload.get('sheet_name')
@@ -419,11 +431,19 @@ def calculations_routes(app):
                 r['valuation_date'] = valuation_date
             merged.append(r)
 
-        calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date)
+        # Fetch FRED benchmark rate before calculation
+        benchmark_yield = None
         try:
-            attach_fred_to_calculation(calc_result, inst_type,
-                                       payload.get('maturity'),
-                                       payload.get('country'), currency)
+            benchmark = get_market_benchmark(inst_type, maturity, country, currency)
+            if benchmark.get('benchmark_rate') is not None:
+                benchmark_yield = benchmark['benchmark_rate']
+        except Exception as e:
+            print(f"FRED benchmark fetch failed: {e}")
+
+        calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date,
+                                     benchmark_yield=benchmark_yield)
+        try:
+            attach_fred_to_calculation(calc_result, inst_type, maturity, country, currency)
         except Exception as e:
             print(f"FRED failed: {e}")
 
@@ -570,6 +590,9 @@ def calculations_routes(app):
         data = payload.get('data', [])
         inst_type = normalize_instrument_type(payload.get('instrument_type'))
         valuation_date = payload.get('valuationDate') or payload.get('valuation_date')
+        currency = payload.get('currency')
+        maturity = payload.get('maturity')
+        country = payload.get('country')
         if not data:
             return jsonify({'status': 'error', 'errors': [
                 {'field': 'data', 'code': 'empty',
@@ -580,10 +603,20 @@ def calculations_routes(app):
             if valuation_date:
                 r['valuation_date'] = valuation_date
             merged.append(r)
-        calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date)
+
+        # Fetch FRED benchmark rate before calculation
+        benchmark_yield = None
         try:
-            attach_fred_to_calculation(calc_result, inst_type, payload.get('maturity'),
-                                       payload.get('country'), payload.get('currency'))
+            benchmark = get_market_benchmark(inst_type, maturity, country, currency)
+            if benchmark.get('benchmark_rate') is not None:
+                benchmark_yield = benchmark['benchmark_rate']
+        except Exception as e:
+            print(f"FRED benchmark fetch failed: {e}")
+
+        calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date,
+                                     benchmark_yield=benchmark_yield)
+        try:
+            attach_fred_to_calculation(calc_result, inst_type, maturity, country, currency)
         except Exception:
             pass
 
@@ -630,15 +663,26 @@ def calculations_routes(app):
             payload = request.get_json() or {}
             data = payload.get('data', [])
             valuation_date = payload.get('valuationDate') or payload.get('valuation_date')
+            currency = payload.get('currency')
+            maturity = payload.get('maturity')
+            country = payload.get('country')
             if not data:
                 return jsonify({'success': False, 'status': 'error',
                                 'message': 'No data provided'}), 400
-            result = calculate_data(data, inst_type, valuation_date=valuation_date)
+
+            # Fetch FRED benchmark rate before calculation
+            benchmark_yield = None
             try:
-                attach_fred_to_calculation(result, inst_type,
-                                           payload.get('maturity'),
-                                           payload.get('country'),
-                                           payload.get('currency'))
+                benchmark = get_market_benchmark(inst_type, maturity, country, currency)
+                if benchmark.get('benchmark_rate') is not None:
+                    benchmark_yield = benchmark['benchmark_rate']
+            except Exception as e:
+                print(f"FRED benchmark fetch failed: {e}")
+
+            result = calculate_data(data, inst_type, valuation_date=valuation_date,
+                                 benchmark_yield=benchmark_yield)
+            try:
+                attach_fred_to_calculation(result, inst_type, maturity, country, currency)
             except Exception:
                 pass
 
@@ -680,13 +724,26 @@ def calculations_routes(app):
         inst_type = normalize_instrument_type(payload.get('instrument_type'))
         data = payload.get('data', [])
         valuation_date = payload.get('valuationDate') or payload.get('valuation_date')
+        currency = payload.get('currency')
+        maturity = payload.get('maturity')
+        country = payload.get('country')
         if not data:
             return jsonify({'success': False, 'status': 'error',
                             'message': 'No uploaded data'}), 400
-        result = calculate_data(data, inst_type, valuation_date=valuation_date)
+
+        # Fetch FRED benchmark rate before calculation
+        benchmark_yield = None
         try:
-            attach_fred_to_calculation(result, inst_type, payload.get('maturity'),
-                                       payload.get('country'), payload.get('currency'))
+            benchmark = get_market_benchmark(inst_type, maturity, country, currency)
+            if benchmark.get('benchmark_rate') is not None:
+                benchmark_yield = benchmark['benchmark_rate']
+        except Exception as e:
+            print(f"FRED benchmark fetch failed: {e}")
+
+        result = calculate_data(data, inst_type, valuation_date=valuation_date,
+                             benchmark_yield=benchmark_yield)
+        try:
+            attach_fred_to_calculation(result, inst_type, maturity, country, currency)
         except Exception:
             pass
 
@@ -712,6 +769,9 @@ def calculations_routes(app):
         payload = request.get_json() or {}
         data = payload.get('data', [])
         valuation_date = payload.get('valuationDate') or payload.get('valuation_date')
+        currency = payload.get('currency')
+        maturity = payload.get('maturity')
+        country = payload.get('country')
         if not data:
             return jsonify({'success': False, 'status': 'error',
                             'message': 'No uploaded data'}), 400
@@ -722,7 +782,18 @@ def calculations_routes(app):
             for itype, subset in split.items():
                 if not subset:
                     continue
-                r = calculate_data(subset, itype, valuation_date=valuation_date)
+
+                # Fetch FRED benchmark rate before calculation
+                benchmark_yield = None
+                try:
+                    benchmark = get_market_benchmark(itype, maturity, country, currency)
+                    if benchmark.get('benchmark_rate') is not None:
+                        benchmark_yield = benchmark['benchmark_rate']
+                except Exception as e:
+                    print(f"FRED benchmark fetch failed: {e}")
+
+                r = calculate_data(subset, itype, valuation_date=valuation_date,
+                                 benchmark_yield=benchmark_yield)
 
                 calc_list = r.get('calculations', [])
                 individual = [{
@@ -745,7 +816,19 @@ def calculations_routes(app):
         detector = create_instrument_detector()
         det = detector.detect_from_data(data)
         inst_type = det.instrument_type or 'money-market'
-        result = calculate_data(data, inst_type, valuation_date=valuation_date)
+
+        # Fetch FRED benchmark rate before calculation
+        benchmark_yield = None
+        try:
+            benchmark = get_market_benchmark(inst_type, payload.get('maturity'),
+                                             payload.get('country'), payload.get('currency'))
+            if benchmark.get('benchmark_rate') is not None:
+                benchmark_yield = benchmark['benchmark_rate']
+        except Exception as e:
+            print(f"FRED benchmark fetch failed: {e}")
+
+        result = calculate_data(data, inst_type, valuation_date=valuation_date,
+                             benchmark_yield=benchmark_yield)
 
         calc_list = result.get('calculations', [])
         individual = [{

@@ -167,21 +167,33 @@ def fred_routes(app):
                     'note': 'Please try different filters or verify your FRED_API_KEY.'
                 }), 404
 
+            # Include dates in response for date range mode
+            # For date range mode, use dates as x-axis values instead of maturity
+            if from_date and to_date:
+                chart_data = [{'x': p['date'], 'y': p['rate'], 'date': p['date']} for p in points]
+                x_labels = [p['date'] for p in points]
+            else:
+                chart_data = [{'x': p['maturity'], 'y': p['rate'], 'date': p['date']} for p in points]
+                x_labels = [p['maturityLabel'] for p in points]
+
+            logger.info(f"Yield curve response: {len(points)} points, date range mode: {bool(from_date and to_date)}")
+
             return jsonify({
                 'success': True,
                 'data': {
                     'maturities': [p['maturity'] for p in points],
-                    'labels': [p['maturityLabel'] for p in points],
+                    'labels': x_labels,
                     'rates': [p['rate'] for p in points],
+                    'dates': [p['date'] for p in points],
                     'country': str(country).upper(),
                     'currency': currency,
                     'instrument_type': instrument_type,
                     'from_date': from_date,
                     'to_date': to_date,
-                    'note': f'Yield curve from FRED (real data only). Retrieved {len(points)} maturities.',
+                    'note': f'Yield curve from FRED (real data only). Retrieved {len(points)} points.',
                     'datasets': [{
                         'label': f'{country} Yield Curve',
-                        'data': [{'x': p['maturity'], 'y': p['rate']} for p in points],
+                        'data': chart_data,
                         'borderColor': '#0B2044',
                         'backgroundColor': 'rgba(11, 32, 68, 0.1)',
                         'tension': 0.1
