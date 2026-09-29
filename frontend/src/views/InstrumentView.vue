@@ -296,12 +296,14 @@
                       ({{ detectedInstrumentType }})
                     </div>
                     
-                    <!-- Currency Selection if currencies detected -->
-                    <div v-if="detectedCurrencies.length > 0" class="currency-selection-section">
-                      <label class="currency-label">Select Currency:</label>
+                    <!-- Currency Selection for Auto-Detection -->
+                    <div class="currency-selection-section">
+                      <label class="currency-label">Select Currency for Auto-Detection:</label>
                       <select v-model="selectedCurrency" class="currency-select">
                         <option value="">-- All Currencies --</option>
-                        <option v-for="currency in detectedCurrencies" :key="currency" :value="currency">{{ currency }}</option>
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                        <option value="ZWG">ZWG</option>
                         <option value="custom">-- Custom (type below) --</option>
                       </select>
                       <div v-if="selectedCurrency === 'custom'" class="custom-currency-input-wrapper">
@@ -952,7 +954,7 @@
                       Current Selection Summary
                       <span class="worksheet-badge">{{ currentSheetName || 'Current' }}</span>
                     </h3>
-                    <button class="btn-secondary btn-sm" @click="viewInstrumentSummaryExcel">
+                    <button class="btn-secondary btn-sm" @click="viewCurrentSummary">
                       <v-icon size="14">mdi-table-large</v-icon> View Excel
                     </button>
                   </div>
@@ -1097,8 +1099,8 @@
 
                 <div class="summary-report" v-if="activeSummaryTab === 'current'">
                   <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
-                    <button class="btn-primary" @click="viewInstrumentSummaryExcel" style="font-size: 18px; padding: 16px 40px;">
-                      📊 View Current Summary Excel
+                    <button class="btn-primary" @click="viewCurrentSummary" style="font-size: 18px; padding: 16px 40px;">
+                      📊 View Current Valuations
                     </button>
                   </div>
                   <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
@@ -1121,8 +1123,32 @@
 
                 <div class="summary-report" v-if="activeSummaryTab === 'previous'">
                   <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
-                    <button class="btn-primary" @click="exportSummary" style="font-size: 18px; padding: 16px 40px;">
-                      📥 Export All Previous Summaries
+                    <button class="btn-primary" @click="viewPreviousSummary" style="font-size: 18px; padding: 16px 40px;">
+                      📊 View Last Previous Valuation
+                    </button>
+                  </div>
+                  <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <h4 style="margin-bottom: 15px; color: #0B2044;">Continue Working</h4>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                      <button class="btn-secondary" @click="continueWorkingOnCurrent" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-pencil</v-icon>
+                        Continue on Current Sheet
+                      </button>
+                      <button class="btn-primary" @click="chooseAnotherSheet" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-table-multiple</v-icon>
+                        Choose Another Sheet
+                      </button>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 13px; color: #666;">
+                      Current worksheet: <strong>{{ currentSheetName || 'Not selected' }}</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div class="summary-report" v-if="activeSummaryTab === 'all'">
+                  <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
+                    <button class="btn-primary" @click="viewAllSummaries" style="font-size: 18px; padding: 16px 40px;">
+                      📊 View All Valuations
                     </button>
                   </div>
                   <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
@@ -1190,7 +1216,15 @@
                         />
                         <v-icon class="search-icon">mdi-magnify</v-icon>
                       </div>
-                      <p class="popup-instruction">Complete instrument summary with all calculated values.</p>
+                      <p class="popup-instruction" v-if="excelPopupMode === 'current'">
+                        <strong>Current Valuations:</strong> Calculations from the current worksheet/section
+                      </p>
+                      <p class="popup-instruction" v-else-if="excelPopupMode === 'previous'">
+                        <strong>Last Previous Valuation:</strong> Most recent previous calculation from this workbook
+                      </p>
+                      <p class="popup-instruction" v-else-if="excelPopupMode === 'all'">
+                        <strong>All Valuations:</strong> Current and all previous calculations from this workbook
+                      </p>
                       <div class="excel-table-wrapper">
                         <table class="excel-table">
                           <thead>
@@ -1202,11 +1236,18 @@
                             </tr>
                           </thead>
                           <tbody>
-                            <tr v-for="(row, idx) in sortedInstrumentSummaryRows" :key="idx">
+                            <tr v-for="(row, idx) in paginatedInstrumentSummaryRows" :key="idx">
                               <td v-for="col in instrumentSummaryColumnsForDisplay" :key="col">{{ formatCellValue(row[col], col) }}</td>
                             </tr>
                           </tbody>
                         </table>
+                      </div>
+                      <div v-if="totalPages > 1" class="pagination-controls">
+                        <button @click="currentPage = 1" :disabled="currentPage === 1">First</button>
+                        <button @click="currentPage--" :disabled="currentPage === 1">Previous</button>
+                        <span>Page {{ currentPage }} of {{ totalPages }}</span>
+                        <button @click="currentPage++" :disabled="currentPage === totalPages">Next</button>
+                        <button @click="currentPage = totalPages" :disabled="currentPage === totalPages">Last</button>
                       </div>
                     </div>
                     <div class="popup-footer">
@@ -1406,6 +1447,7 @@ import { autoMatchColumns, isColumnMapped, getMissingColumns } from '@/utils/ins
 import { detectSheetType, extractSingleInstrumentValues, getRequiredFieldMappings } from '@/utils/sheetTypeDetector'
 import { autoDetectInstrumentFields } from '@/utils/autoDetectInstrument.js'
 import Chart from 'chart.js/auto'
+import 'chartjs-adapter-date-fns'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
 
 function autoDetectTable(data) {
@@ -1437,6 +1479,176 @@ function autoDetectTable(data) {
 
 const router = useRouter()
 const route = useRoute()
+
+// Field mappings for converting backend field names to user-friendly column names
+const FIELD_MAPPINGS = {
+  'money-market': {
+    'discount_yield': 'Discount Yield',
+    'discountYield': 'Discount Yield',
+    'effective_yield': 'Effective Yield',
+    'effectiveYield': 'Effective Yield',
+    'interest_earned': 'Interest Earned',
+    'interestEarned': 'Interest Earned',
+    'interest_rate': 'Interest Rate',
+    'interestRate': 'Interest Rate',
+    'principal': 'Principal',
+    'term_days': 'Days to Maturity',
+    'termDays': 'Days to Maturity',
+    'total_value': 'Total Value',
+    'totalValue': 'Total Value',
+    'yield_curve_rate': 'Yield Curve Rate',
+    'yieldCurveRate': 'Yield Curve Rate',
+    'instrument_name': 'Instrument Name',
+    'instrument_type': 'Instrument Type',
+    'status': 'Status'
+  },
+  'bonds': {
+    'clean_price': 'Clean Price',
+    'dirty_price': 'Dirty Price',
+    'coupon_rate': 'Coupon Rate',
+    'couponRate': 'Coupon Rate',
+    'yield_to_maturity': 'Yield to Maturity',
+    'yieldToMaturity': 'Yield to Maturity',
+    'current_yield': 'Current Yield',
+    'currentYield': 'Current Yield',
+    'macaulay_duration': 'Macaulay Duration',
+    'macaulayDuration': 'Macaulay Duration',
+    'modified_duration': 'Modified Duration',
+    'modifiedDuration': 'Modified Duration',
+    'convexity': 'Convexity',
+    'accrued_interest': 'Accrued Interest',
+    'accruedInterest': 'Accrued Interest',
+    'face_value': 'Face Value',
+    'faceValue': 'Face Value',
+    'total_value': 'Total Value',
+    'totalValue': 'Total Value',
+    'instrument_name': 'Instrument Name',
+    'instrument_type': 'Instrument Type',
+    'status': 'Status'
+  },
+  'tbills': {
+    'discount_rate': 'Discount Rate',
+    'discountRate': 'Discount Rate',
+    'discount_yield': 'Discount Yield',
+    'discountYield': 'Discount Yield',
+    'investment_yield': 'Investment Yield',
+    'investmentYield': 'Investment Yield',
+    'bond_equivalent_yield': 'Bond Equivalent Yield',
+    'bondEquivalentYield': 'Bond Equivalent Yield',
+    'face_value': 'Face Value',
+    'faceValue': 'Face Value',
+    'purchase_price': 'Purchase Price',
+    'purchasePrice': 'Purchase Price',
+    'total_value': 'Total Value',
+    'totalValue': 'Total Value',
+    'days_to_maturity': 'Days to Maturity',
+    'daysToMaturity': 'Days to Maturity',
+    'instrument_name': 'Instrument Name',
+    'instrument_type': 'Instrument Type',
+    'status': 'Status'
+  }
+}
+
+// Input fields that should NOT be shown in summary (these are from cleaning page)
+// Use display names (after mapping) for filtering
+const INPUT_FIELDS = {
+  'money-market': [
+    'Principal', 'Interest Rate', 'Discount Rate', 'Purchase Price',
+    'Issue Date', 'Maturity Date', 'Settlement Date', 'Days to Maturity',
+    'Compounding Frequency', 'Day Count Convention',
+    'Status', 'Error', 'Instrument Name', 'Instrument Type'
+  ],
+  'bonds': [
+    'Face Value', 'Par Value', 'Coupon Rate', 'Coupon Frequency',
+    'Yield to Maturity', 'Issue Date', 'Maturity Date', 'Settlement Date',
+    'Years to Maturity', 'Frequency', 'Day Count Convention',
+    'Status', 'Error', 'Instrument Name', 'Instrument Type'
+  ],
+  'tbills': [
+    'Face Value', 'Discount Rate', 'Purchase Price',
+    'Issue Date', 'Maturity Date', 'Settlement Date', 'Days to Maturity',
+    'Day Count Convention',
+    'Status', 'Error', 'Instrument Name', 'Instrument Type'
+  ]
+}
+
+// Calculated fields that SHOULD be shown in summary (these are backend-calculated results)
+const CALCULATED_FIELDS = {
+  'money-market': [
+    'total_value', 'calculated_value', 'present_value', 'fair_value', 'market_value',
+    'interest_earned', 'simple_interest', 'compound_interest',
+    'discount_amount', 'discount_yield', 'money_market_yield',
+    'holding_period_yield', 'annualized_holding_period_yield',
+    'effective_yield', 'effective_annual_rate', 'annual_percentage_yield',
+    'current_yield', 'yield_to_maturity',
+    'yield_curve_rate', 'benchmark_valuation', 'real_yield',
+    'investment_return', 'investment_cost', 'net_investment', 'gross_investment'
+  ],
+  'bonds': [
+    'total_value', 'calculated_value', 'present_value', 'fair_value', 'market_value',
+    'clean_price', 'dirty_price', 'current_price',
+    'coupon_payment', 'annual_coupon',
+    'current_yield', 'yield_to_maturity', 'yield_to_call', 'yield_to_worst',
+    'macaulay_duration', 'modified_duration', 'effective_duration',
+    'dollar_duration', 'convexity', 'dv01', 'pvbp',
+    'accrued_interest', 'settlement_value', 'redemption_value',
+    'days_accrued', 'days_to_next_coupon', 'days_to_maturity',
+    'benchmark_spread', 'g_spread', 'i_spread', 'z_spread',
+    'real_yield', 'nominal_yield', 'effective_annual_yield',
+    'holding_period_return', 'total_return', 'capital_gain_loss',
+    'coupon_income', 'unrealized_gain_loss', 'realized_gain_loss',
+    'yield_curve_rate'
+  ],
+  'tbills': [
+    'total_value', 'calculated_value', 'present_value', 'fair_value', 'market_value',
+    'discount_amount', 'discount_yield', 'investment_yield',
+    'bond_equivalent_yield', 'holding_period_yield',
+    'annualized_holding_period_yield', 'money_market_yield',
+    'purchase_price', 'redemption_value',
+    'days_to_maturity', 'yield_curve_rate'
+  ]
+}
+
+// Function to map backend field names to user-friendly column names
+function mapBackendFieldsToDisplayNames(row, instrumentType) {
+  const mapping = FIELD_MAPPINGS[instrumentType] || {}
+  const mappedRow = {}
+  
+  for (const [key, value] of Object.entries(row)) {
+    // Use mapped name if available, otherwise use original key
+    const displayKey = mapping[key] || key
+    mappedRow[displayKey] = value
+  }
+  
+  return mappedRow
+}
+
+// Function to filter row to exclude only input fields (show everything else including calculated results)
+function filterToCalculatedFields(row, instrumentType) {
+  const inputFields = INPUT_FIELDS[instrumentType] || []
+  const filteredRow = {}
+  
+  // Always include Instrument Name, Instrument Type, Worksheet, Workbook
+  const alwaysInclude = ['Instrument Name', 'Instrument Type', 'Worksheet', 'Workbook']
+  
+  for (const [key, value] of Object.entries(row)) {
+    // Check if this is an always-include field
+    if (alwaysInclude.includes(key)) {
+      filteredRow[key] = value
+      continue
+    }
+    
+    // Check if this is an input field (by display name)
+    const isInput = inputFields.includes(key)
+    
+    // Include if it's NOT an input field (show calculated fields and any other backend fields)
+    if (!isInput) {
+      filteredRow[key] = value
+    }
+  }
+  
+  return filteredRow
+}
 
 const instrumentType = ref('')
 
@@ -1621,6 +1833,8 @@ const selectedWorkflowInstrument = ref(null)
 const selectedWorkflowIndex = ref(0)
 const sortColumn = ref('')
 const sortOrder = ref('asc')
+const currentPage = ref(1)
+const rowsPerPage = ref(10)
 const mappingApplied = ref(false)
 const cumulativeRecords = ref([])
 const showCumulativeHistory = ref(false)
@@ -1943,7 +2157,6 @@ function getDisplayColumns() {
   const exclude = [
     '_raw', '_source', 'index', '__v', 
     'instrument_name', 'instrument_type', 
-    'Worksheet', 'worksheet',
     'discount_yield', 'effective_yield', 'interest_earned', 
     '_row_index', 'term_days', 'total_value',
     'total_interest', 'avg_rate', 'weighted_avg_rate',
@@ -1955,7 +2168,17 @@ function getDisplayColumns() {
     'present_value', 'purchase_price', 'issue_price',
     'days_to_maturity', 'face_value', 'principal'
   ]
-  const cols = instrumentSummary.value.columns.filter(c => !exclude.includes(c))
+  
+  // Get columns from both current and completed summaries
+  let allColumns = [...(instrumentSummary.value.columns || [])]
+  if (completedInstrumentSummary.value.columns) {
+    allColumns = [...allColumns, ...completedInstrumentSummary.value.columns]
+  }
+  
+  // Add Valuation Type column
+  allColumns = [...allColumns, 'Valuation Type', 'Workbook', 'Worksheet']
+  
+  const cols = allColumns.filter(c => !exclude.includes(c))
   const seen = new Set()
   return cols.filter(c => {
     const base = c.replace(/_\d+$/, '').trim()
@@ -1974,13 +2197,35 @@ const sortedInstrumentSummaryRows = computed(() => {
   let rows = []
   
   if (excelPopupMode.value === 'current') {
-    rows = [...instrumentSummary.value.rows]
-    const sameWorkbookPrevious = (completedInstrumentSummary.value.rows || []).filter(
-      row => row['Workbook'] === currentWorkbookName.value
-    )
-    rows = [...rows, ...sameWorkbookPrevious]
-  } else {
-    rows = completedInstrumentSummary.value.rows || []
+    // Current tab: Show ONLY current valuations
+    rows = instrumentSummary.value.rows.map(row => ({
+      ...row,
+      'Valuation Type': 'Current'
+    }))
+  } else if (excelPopupMode.value === 'previous') {
+    // Previous tab: Show ONLY the last previous summary
+    const allPrevious = completedInstrumentSummary.value.rows || []
+    if (allPrevious.length > 0) {
+      // Get the last summary (most recent previous)
+      const lastSummary = allPrevious[allPrevious.length - 1]
+      rows = [lastSummary].map(row => ({
+        ...row,
+        'Valuation Type': 'Previous'
+      }))
+    }
+  } else if (excelPopupMode.value === 'all') {
+    // View All: Show all summaries
+    const currentRows = instrumentSummary.value.rows.map(row => ({
+      ...row,
+      'Valuation Type': 'Current'
+    }))
+    
+    const previousRows = (completedInstrumentSummary.value.rows || []).map(row => ({
+      ...row,
+      'Valuation Type': 'Previous'
+    }))
+    
+    rows = [...currentRows, ...previousRows]
   }
   
   if (instrumentSearchQuery.value) {
@@ -2003,6 +2248,17 @@ const sortedInstrumentSummaryRows = computed(() => {
     valB = String(valB || '')
     return sortOrder.value === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA)
   })
+})
+
+const paginatedInstrumentSummaryRows = computed(() => {
+  const rows = sortedInstrumentSummaryRows.value
+  const start = (currentPage.value - 1) * rowsPerPage.value
+  const end = start + rowsPerPage.value
+  return rows.slice(start, end)
+})
+
+const totalPages = computed(() => {
+  return Math.ceil(sortedInstrumentSummaryRows.value.length / rowsPerPage.value)
 })
 
 const currentWorkbookPreviousSummaries = computed(() => {
@@ -2565,21 +2821,17 @@ async function readFileData(file) {
     const result = await worksheetWorkflow.handleFileUpload(file)
 
     if (result.success) {
-      autoDetectedFields.value = {}
-      autoDetectedFieldsWithMetadata.value = {}
-      detectedCurrencies.value = []
-      detectedInstrumentType.value = ''
-      selectedCurrency.value = ''
-      customCurrency.value = ''
-      excludedDetectedFields.value.clear()
-      showDetectionSuccess.value = false
-      showMultiTableDetectionSuccess.value = false
-      multiTableDetectionResults.value = []
-
+      // Load the new workbook data FIRST
       workbookSheets.value = worksheetWorkflow.workbookSheets.value
       worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
       originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
-
+      worksheetStatuses.value = {}
+      
+      // Then clear all state for new active session (new workbook upload)
+      // Pass false to clear completed summaries (previous valuations) since this is a new workbook
+      // This will clear worksheet-specific data but preserve the newly loaded workbook data
+      clearActiveCache(false)
+      
       worksheetSelected.value = false
       currentSheetName.value = ''
       showPreview.value = false
@@ -2630,19 +2882,15 @@ function removeFile() {
 }
 
 function handleWorksheetSelect(sheetName) {
+  console.log(`🔄 handleWorksheetSelect: Selecting worksheet "${sheetName}"`)
+  
   const result = worksheetWorkflow.selectWorksheet(sheetName)
   if (result.success) {
     currentSheetName.value = sheetName
     worksheetSelected.value = true
     
-    cleanedData.value = []
-    calculations.value = {}
-    allCalculations.value = {}
-    selectedCalculations.value = {}
-    columnMapping.value = {}
-    instrumentSummary.value = { columns: [], rows: [] }
-    portfolioSummary.value = { columns: [], rows: [] }
-    fieldDetectionResults.value = { detected_fields: {}, summary: {} }
+    // Clear active cache but preserve previous valuations for comparison
+    clearActiveCache(true)
     
     const sheet = workbookSheets.value.find(s => s.name === sheetName)
     if (sheet) {
@@ -2655,21 +2903,79 @@ function handleWorksheetSelect(sheetName) {
         sheetTotalRows.value = previewResult.totalRows || 0
       }
       sheetType.value = 'multi'
+      
+      // Auto-detect sheet type and apply initial mapping
+      if (rawData.value.length > 0) {
+        const detection = detectSheetType(rawData.value, instrumentType.value)
+        sheetType.value = detection.type
+        if (detection.type === 'multi') {
+          columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+          showMappingDialog.value = true
+        } else {
+          columnMapping.value = {}
+          mappingApplied.value = true
+        }
+      }
+      
+      showPreview.value = true
+      activeTab.value = 'upload'
+      forceUpdate.value++
     }
   }
 }
 
-function handleSheetSelectedFromViewer(sheetName) {
-  currentSheetName.value = sheetName
-  worksheetSelected.value = true
+/**
+ * Clear Active Session Cache
+ * 
+ * Active Session Boundary:
+ * - The currently uploaded workbook is the active session
+ * - All worksheet, section, detection, calculation, and summary data must belong only to the active workbook
+ * - Changing worksheets/sections resets only the active calculation context/cache
+ * - Uploading a new workbook starts a new active session and must clear all unsaved data, cached calculations, and temporary state from the previous workbook
+ * - Do not carry values, calculations, or selections from a previous workbook into the new session
+ * - Previously saved historical summaries may remain available separately and must not be deleted
+ * 
+ * IMPORTANT: When changing worksheets/sections within the same workbook:
+ * - Save current summaries as completed summaries (previous valuations) for comparison
+ * - Clear only the current active calculation state
+ * - Current summaries will be repopulated with new worksheet/section data
+ * - Completed summaries will show previous valuations for comparison
+ * - Preserve workbook data (workbookSheets, originalFileBuffer) so viewer can display the workbook
+ * 
+ * Active session = current workbook + current worksheet/section + current instrument selection + current valuation parameters
+ */
+function clearActiveCache(preservePreviousValuations = true) {
+  console.log('🔄 Clearing active cache for worksheet/section change, preservePreviousValuations:', preservePreviousValuations)
   
+  // Save current summaries as completed summaries before clearing (for comparison)
+  if (preservePreviousValuations) {
+    if (instrumentSummary.value.rows.length > 0) {
+      completedInstrumentSummary.value = JSON.parse(JSON.stringify(instrumentSummary.value))
+      console.log('💾 Saved current instrument summary as completed (previous valuations)')
+    }
+    if (portfolioSummary.value.rows.length > 0) {
+      completedPortfolioSummary.value = JSON.parse(JSON.stringify(portfolioSummary.value))
+      console.log('💾 Saved current portfolio summary as completed (previous valuations)')
+    }
+  }
+  
+  // Clear all temporary calculation and detection state for active session
   cleanedData.value = []
   calculations.value = {}
   allCalculations.value = {}
   selectedCalculations.value = {}
   columnMapping.value = {}
+  
+  // Clear current summaries (will be repopulated with new data)
   instrumentSummary.value = { columns: [], rows: [] }
   portfolioSummary.value = { columns: [], rows: [] }
+  
+  // Clear completed summaries only if it's a new workbook upload
+  if (!preservePreviousValuations) {
+    completedInstrumentSummary.value = { columns: [], rows: [] }
+    completedPortfolioSummary.value = { columns: [], rows: [] }
+  }
+  
   fieldDetectionResults.value = { detected_fields: {}, summary: {} }
   
   autoDetectedFields.value = {}
@@ -2680,6 +2986,52 @@ function handleSheetSelectedFromViewer(sheetName) {
   customCurrency.value = ''
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
+  showMultiTableDetectionSuccess.value = false
+  multiTableDetectionResults.value = []
+  
+  // Clear worksheet-specific data but preserve workbook data
+  rawData.value = []
+  originalRawData.value = []
+  previewData.value = []
+  fileColumns.value = []
+  originalFileColumns.value = []
+  extractedValues.value = {}
+  singleInstrumentExtractedValues.value = {}
+  isolatedTableData.value = null
+  
+  // IMPORTANT: Do NOT clear workbookSheets or originalFileBuffer - these are needed for the workbook viewer
+  
+  mappingApplied.value = false
+  showMappingDialog.value = false
+  fixedValuesTracker.value.clear()
+  
+  cleaningStats.value = {
+    totalRows: 0,
+    cleanedRows: 0,
+    modifiedRows: 0,
+    duplicateRows: 0,
+    missingValueRows: 0
+  }
+  
+  formulas.value = {}
+  manualInputs.value = {}
+  
+  console.log('✅ Active cache cleared - workbook data preserved for viewer')
+}
+
+function handleSheetSelectedFromViewer(sheetName) {
+  console.log(`🔄 handleSheetSelectedFromViewer: Switching to worksheet "${sheetName}"`)
+  
+  currentSheetName.value = sheetName
+  worksheetSelected.value = true
+  
+  // Clear active cache but preserve previous valuations for comparison
+  clearActiveCache(true)
+  
+  // Keep workbook viewer open with the selected sheet
+  showWorkbookViewer.value = true
+  activeTab.value = 'upload'
+  forceUpdate.value++
 }
 
 function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
@@ -2688,23 +3040,12 @@ function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
 }
 
 function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }) {
-  cleanedData.value = []
-  calculations.value = {}
-  allCalculations.value = {}
-  selectedCalculations.value = {}
-  columnMapping.value = {}
-  instrumentSummary.value = { columns: [], rows: [] }
-  portfolioSummary.value = { columns: [], rows: [] }
-  fieldDetectionResults.value = { detected_fields: {}, summary: {} }
+  console.log(`🔄 handleTableIsolated: Switching to section "${tableName}" in worksheet "${sheetName}"`)
   
-  autoDetectedFields.value = {}
-  autoDetectedFieldsWithMetadata.value = {}
-  detectedCurrencies.value = []
-  detectedInstrumentType.value = ''
-  selectedCurrency.value = ''
-  customCurrency.value = ''
-  excludedDetectedFields.value.clear()
-  showDetectionSuccess.value = false
+  currentSheetName.value = sheetName
+  
+  // Clear active cache but preserve previous valuations for comparison
+  clearActiveCache(true)
   
   isolatedTableData.value = {
     sheetName,
@@ -2714,7 +3055,6 @@ function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }
     tableRange
   }
   
-  currentSheetName.value = sheetName
   showWorkbookViewer.value = false
   rawData.value = data
   originalRawData.value = JSON.parse(JSON.stringify(data))
@@ -2732,14 +3072,10 @@ async function handleWorkOnSheet(sheetName) {
   fileLoading.value = true
   uploadError.value = ''
   
-  cleanedData.value = []
-  calculations.value = {}
-  allCalculations.value = {}
-  selectedCalculations.value = {}
-  columnMapping.value = {}
-  instrumentSummary.value = { columns: [], rows: [] }
-  portfolioSummary.value = { columns: [], rows: [] }
-  fieldDetectionResults.value = { detected_fields: {}, summary: {} }
+  console.log(`🔄 handleWorkOnSheet: Switching to worksheet "${sheetName}"`)
+  
+  // Clear active cache but preserve previous valuations for comparison
+  clearActiveCache(true)
 
   try {
     const result = await worksheetWorkflow.processWorksheet(
@@ -3078,11 +3414,20 @@ async function autoDetectSingleInstrument() {
   autoDetectedFieldsWithMetadata.value = {}
   detectedCurrencies.value = []
   detectedInstrumentType.value = ''
-  selectedCurrency.value = ''
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
 
   try {
+    // Determine currency to use for filtering
+    let currencyFilter = null
+    if (selectedCurrency.value) {
+      if (selectedCurrency.value === 'custom') {
+        currencyFilter = customCurrency.value?.toUpperCase() || null
+      } else {
+        currencyFilter = selectedCurrency.value.toUpperCase()
+      }
+    }
+
     const detectionResult = await autoDetectInstrumentFields(
       originalFileBuffer.value,
       currentSheetName.value,
@@ -3090,7 +3435,7 @@ async function autoDetectSingleInstrument() {
       instrumentType.value,
       null,
       null,
-      selectedCurrency.value === 'custom' ? customCurrency.value : null
+      currencyFilter
     )
 
     if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
@@ -3136,6 +3481,16 @@ async function handleMultiTableDetect(event) {
   try {
     const detectedInstruments = []
     
+    // Determine currency to use for filtering
+    let currencyFilter = null
+    if (selectedCurrency.value) {
+      if (selectedCurrency.value === 'custom') {
+        currencyFilter = customCurrency.value?.toUpperCase() || null
+      } else {
+        currencyFilter = selectedCurrency.value.toUpperCase()
+      }
+    }
+    
     for (const table of event.tables) {
       console.log(`Processing table: ${table.tableName}`)
       console.log(`Table range: Row ${table.range.startRow + 1} - ${table.range.endRow + 1}, Col ${table.range.startCol} - ${table.range.endCol}`)
@@ -3158,7 +3513,7 @@ async function handleMultiTableDetect(event) {
           event.instrumentType,
           table.range,
           tableData,
-          selectedCurrency.value === 'custom' ? customCurrency.value : null
+          currencyFilter
         )
 
         console.log(`Detection result for ${table.tableName}:`, detectionResult)
@@ -3274,7 +3629,7 @@ async function handleCustomCurrencyInput() {
         instrumentType.value,
         null,
         null,
-        customCurrency.value
+        customCurrency.value // Already uppercased
       )
       
       if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
@@ -3325,7 +3680,12 @@ function useDetectedFields() {
 }
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
-  console.log('Processing sheet from viewer:', sheetName)
+  console.log(`🔄 handleProcessSheetFromViewer: Processing worksheet "${sheetName}"`)
+  
+  currentSheetName.value = sheetName
+  
+  // Clear active cache but preserve previous valuations for comparison
+  clearActiveCache(true)
   
   originalRawData.value = sheetData || []
   rawData.value = sheetData.map(row => {
@@ -3339,13 +3699,13 @@ function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
   
   fileColumns.value = sheetHeaders || []
   originalFileColumns.value = [...fileColumns.value]
-  currentSheetName.value = sheetName
   worksheetSelected.value = true
   showPreview.value = true
   const detection = detectSheetType(sheetData, instrumentType.value)
   sheetType.value = detection.type
   if (detection.type === 'multi') {
     columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+    showMappingDialog.value = true
   } else {
     columnMapping.value = {}
     mappingApplied.value = true
@@ -3667,11 +4027,40 @@ function exportSummary() {
   XLSX.writeFile(wb, `instrument_summary${suffix}.xlsx`)
 }
 
+function viewCurrentSummary() {
+  excelPopupMode.value = 'current'
+  showInstrumentExcelPopup.value = true
+  sortColumn.value = ''
+  sortOrder.value = 'asc'
+  currentPage.value = 1
+  console.log('Opening Current Valuations popup')
+  console.log('Current workbook:', currentWorkbookName.value)
+}
+
+function viewPreviousSummary() {
+  excelPopupMode.value = 'previous'
+  showInstrumentExcelPopup.value = true
+  sortColumn.value = ''
+  sortOrder.value = 'asc'
+  currentPage.value = 1
+  console.log('Opening Last Previous Valuation popup')
+}
+
+function viewAllSummaries() {
+  excelPopupMode.value = 'all'
+  showInstrumentExcelPopup.value = true
+  sortColumn.value = ''
+  sortOrder.value = 'asc'
+  currentPage.value = 1
+  console.log('Opening All Valuations popup')
+}
+
 function viewInstrumentSummaryExcel() {
   excelPopupMode.value = 'current'
   showInstrumentExcelPopup.value = true
   sortColumn.value = ''
   sortOrder.value = 'asc'
+  currentPage.value = 1
   console.log('Opening Instrument Summary Excel popup')
   console.log('Current workbook:', currentWorkbookName.value)
 }
@@ -3681,6 +4070,7 @@ function viewPreviousSummariesExcel() {
   showInstrumentExcelPopup.value = true
   sortColumn.value = ''
   sortOrder.value = 'asc'
+  currentPage.value = 1
   console.log('Opening Previous Summaries Excel popup')
 }
 
@@ -3697,46 +4087,30 @@ function continueWorkingOnCurrent() {
   console.log('Continue on Current Sheet - returning to workbook view:', currentSheetName.value)
   console.log('Current workbook:', currentWorkbookName.value)
   
-  cleanedData.value = []
-  autoDetectedFields.value = {}
-  excludedDetectedFields.value = new Set()
-  calculations.value = {}
-  selectedCalculations.value = {}
-  portfolioSummary.value = { columns: [], rows: [] }
+  // Clear only calculation/detection state, preserve workbook data
+  clearActiveCache(true)
   
-  selectedCurrency.value = ''
-  customCurrency.value = ''
-  
-  columnMapping.value = {}
-  mappingApplied.value = false
-  sheetType.value = 'single'
-  
+  // Keep workbook viewer open with the current sheet
   showWorkbookViewer.value = true
   activeTab.value = 'upload'
+  forceUpdate.value++
 }
 
 function chooseAnotherSheet() {
   console.log('Choose Another Sheet - returning to workbook view')
   console.log('Current workbook:', currentWorkbookName.value)
   
-  cleanedData.value = []
-  autoDetectedFields.value = {}
-  excludedDetectedFields.value = new Set()
-  calculations.value = {}
-  selectedCalculations.value = {}
-  portfolioSummary.value = { columns: [], rows: [] }
+  // Clear only calculation/detection state, preserve workbook data
+  clearActiveCache(true)
   
-  selectedCurrency.value = ''
-  customCurrency.value = ''
-  
-  columnMapping.value = {}
-  mappingApplied.value = false
-  sheetType.value = 'single'
-  
+  // Reset current sheet name so user can select a new one
   currentSheetName.value = ''
+  worksheetSelected.value = false
   
+  // Keep workbook viewer open so user can select another sheet
   showWorkbookViewer.value = true
   activeTab.value = 'upload'
+  forceUpdate.value++
 }
 
 function sortByColumn(col) {
@@ -4452,44 +4826,31 @@ async function calculateMetrics() {
       if (response?.is_multi_instrument) {
         console.log('=== MULTI-INSTRUMENT MODE ===')
         if (response?.instrument_summary) {
-          instrumentSummary.value = response.instrument_summary
-          console.log('Instrument summary rows:', response.instrument_summary.rows?.length)
+          // Map backend field names to display names and filter to calculated fields only
+          const mappedRows = response.instrument_summary.rows?.map(row => {
+            const mapped = mapBackendFieldsToDisplayNames(row, instrumentType.value)
+            return filterToCalculatedFields(mapped, instrumentType.value)
+          }) || []
           
-          const currentRows = response.instrument_summary.rows || []
-          const existingRows = completedInstrumentSummary.value.rows || []
-          
-          const currentRowsWithWorkbook = currentRows.map(row => ({
+          // Add workbook and worksheet info to current rows
+          const currentRowsWithWorkbook = mappedRows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
           
-          const existingRowsWithWorkbook = existingRows.map(row => ({
-            ...row,
-            'Workbook': row['Workbook'] || 'Unknown',
-            'Worksheet': row['Worksheet'] || row['worksheet'] || 'Unknown'
-          }))
-          
-          const mergedRows = [...existingRowsWithWorkbook, ...currentRowsWithWorkbook]
-          
-          const allCols = new Set()
-          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-          
-          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          instrumentSummary.value = { 
+            columns: response.instrument_summary.columns, 
+            rows: currentRowsWithWorkbook 
+          }
+          console.log('Instrument summary rows:', currentRowsWithWorkbook.length)
+          console.log('📊 Current summary updated with new worksheet data')
         }
         
         if (response?.portfolio_summary) {
           portfolioSummary.value = response.portfolio_summary
           console.log('Portfolio summary rows:', response.portfolio_summary.rows?.length)
-          
-          const currentRows = response.portfolio_summary.rows || []
-          const existingRows = completedPortfolioSummary.value.rows || []
-          const mergedRows = [...existingRows, ...currentRows]
-          
-          const allCols = new Set()
-          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-          
-          completedPortfolioSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          console.log('📊 Current portfolio summary updated with new worksheet data')
         }
         
         const results = response?.results || {}
@@ -4674,28 +5035,19 @@ async function calculateMetrics() {
           }
 
           const currentCols = new Set()
-          Object.keys(row).forEach(k => currentCols.add(k))
-          instrumentSummary.value = { columns: Array.from(currentCols), rows: [row] }
+          const mappedRow = mapBackendFieldsToDisplayNames(row, instrumentType.value)
+          const filteredRow = filterToCalculatedFields(mappedRow, instrumentType.value)
           
-          const existingRows = completedInstrumentSummary.value.rows || []
-          const rowsWithWorkbook = [{
-            ...row,
+          // Add workbook and worksheet info
+          const filteredRowWithWorkbook = {
+            ...filteredRow,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
-          }]
+          }
           
-          const existingRowsWithWorkbook = existingRows.map(row => ({
-            ...row,
-            'Workbook': row['Workbook'] || 'Unknown',
-            'Worksheet': row['Worksheet'] || row['worksheet'] || 'Unknown'
-          }))
-          
-          const mergedRows = [...existingRowsWithWorkbook, ...rowsWithWorkbook]
-          
-          const allCols = new Set()
-          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-          
-          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          Object.keys(filteredRowWithWorkbook).forEach(k => currentCols.add(k))
+          instrumentSummary.value = { columns: Array.from(currentCols), rows: [filteredRowWithWorkbook] }
+          console.log('📊 Current summary updated with new worksheet data (single instrument)')
         } else if (calcArray.length > 1) {
           // Handle case where backend returns multiple calculations but flags as single-instrument mode
           console.log('=== MULTIPLE CALCULATIONS IN SINGLE MODE ===')
@@ -4752,37 +5104,30 @@ async function calculateMetrics() {
           selectedCalculations.value = agg
           console.log('allCalculations set to agg from multi-calc single-mode')
           
-          // Build instrument summary from calculations
-          const rows = calcArray.map((calc, idx) => ({
-            'Instrument Name': backendInstrumentNames[idx] || calc.instrument_name || `Instrument ${idx + 1}`,
-            'Instrument Type': instrumentType.value,
-            ...calc,
-            'Worksheet': currentSheetName.value || 'Calculated'
-          }))
+          // Build instrument summary from calculations with field mapping and filtering
+          const rows = calcArray.map((calc, idx) => {
+            const mappedCalc = mapBackendFieldsToDisplayNames(calc, instrumentType.value)
+            const filteredCalc = filterToCalculatedFields(mappedCalc, instrumentType.value)
+            return {
+              'Instrument Name': backendInstrumentNames[idx] || calc.instrument_name || `Instrument ${idx + 1}`,
+              'Instrument Type': instrumentType.value,
+              ...filteredCalc,
+              'Worksheet': currentSheetName.value || 'Calculated'
+            }
+          })
           
           const currentCols = new Set()
           rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
-          instrumentSummary.value = { columns: Array.from(currentCols), rows }
           
-          const existingRows = completedInstrumentSummary.value.rows || []
+          // Add workbook and worksheet info to current rows
           const rowsWithWorkbook = rows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
           
-          const existingRowsWithWorkbook = existingRows.map(row => ({
-            ...row,
-            'Workbook': row['Workbook'] || 'Unknown',
-            'Worksheet': row['Worksheet'] || row['worksheet'] || 'Unknown'
-          }))
-          
-          const mergedRows = [...existingRowsWithWorkbook, ...rowsWithWorkbook]
-          
-          const allCols = new Set()
-          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-          
-          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          instrumentSummary.value = { columns: Array.from(currentCols), rows: rowsWithWorkbook }
+          console.log('📊 Current summary updated with new worksheet data (single mode multi-calc)')
           
           // Build portfolio summary from aggregates
           if (response.data.portfolio_summary) {
@@ -4816,37 +5161,30 @@ async function calculateMetrics() {
             completedPortfolioSummary.value = { columns: Array.from(allPortfolioCols), rows: mergedPortfolioRows }
           }
         } else if (calcArray.length) {
-          // Multi-instrument case
-          const rows = calcArray.map((calc, idx) => ({
-            'Instrument Name': backendInstrumentNames[idx] || calc.instrument_name || 'Instrument',
-            'Instrument Type': instrumentType.value,
-            ...calc,
-            'Worksheet': currentSheetName.value || 'Calculated'
-          }))
+          // Multi-instrument case with field mapping and filtering
+          const rows = calcArray.map((calc, idx) => {
+            const mappedCalc = mapBackendFieldsToDisplayNames(calc, instrumentType.value)
+            const filteredCalc = filterToCalculatedFields(mappedCalc, instrumentType.value)
+            return {
+              'Instrument Name': backendInstrumentNames[idx] || calc.instrument_name || 'Instrument',
+              'Instrument Type': instrumentType.value,
+              ...filteredCalc,
+              'Worksheet': currentSheetName.value || 'Calculated'
+            }
+          })
 
           const currentCols = new Set()
           rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
-          instrumentSummary.value = { columns: Array.from(currentCols), rows: rows }
           
-          const existingRows = completedInstrumentSummary.value.rows || []
+          // Add workbook and worksheet info to current rows
           const rowsWithWorkbook = rows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
           
-          const existingRowsWithWorkbook = existingRows.map(row => ({
-            ...row,
-            'Workbook': row['Workbook'] || 'Unknown',
-            'Worksheet': row['Worksheet'] || row['worksheet'] || 'Unknown'
-          }))
-          
-          const mergedRows = [...existingRowsWithWorkbook, ...rowsWithWorkbook]
-          
-          const allCols = new Set()
-          mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-          
-          completedInstrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
+          instrumentSummary.value = { columns: Array.from(currentCols), rows: rowsWithWorkbook }
+          console.log('📊 Current summary updated with new worksheet data (single mode)')
 
           const aggregates = response.data.aggregates || response.data || {}
           const agg = {
@@ -4888,14 +5226,7 @@ async function calculateMetrics() {
           const currentPortfolioCols = new Set()
           Object.keys(portfolioRow).forEach(k => currentPortfolioCols.add(k))
           portfolioSummary.value = { columns: Array.from(currentPortfolioCols), rows: [portfolioRow] }
-          
-          const existingPortfolioRows = completedPortfolioSummary.value.rows || []
-          const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
-          
-          const portfolioCols = new Set()
-          mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => portfolioCols.add(k)))
-          
-          completedPortfolioSummary.value = { columns: Array.from(portfolioCols), rows: mergedPortfolioRows }
+          console.log('📊 Current portfolio summary updated with new worksheet data')
         } else {
           // No calculations returned - show error
           console.warn('No calculations returned from backend')
@@ -5096,21 +5427,25 @@ async function fetchYieldCurve() {
         const points = curveData.maturities.map((m, idx) => ({
           maturity: parseFloat(m),
           maturityLabel: curveData.labels?.[idx] || m,
-          rate: curveData.rates?.[idx] || 0
+          rate: curveData.rates?.[idx] || 0,
+          date: curveData.dates?.[idx] || null // Include date for date range mode
         }))
         yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() })
         yieldCurveData.value = points
         chartSeriesLabel.value = `FRED Yield Curve (${curveData.country || normalizedCountry})`
         yieldCurveError.value = ''
+        console.log('Successfully loaded FRED yield curve data:', points.length, 'points')
       } else {
         yieldCurveData.value = []
         yieldCurveError.value = curveData.note || 'No yield curve data available for the selected filters.'
         chartSeriesLabel.value = ''
+        console.warn('No FRED data available in response:', curveData)
       }
     } else {
       yieldCurveData.value = []
       yieldCurveError.value = response?.data?.note || response?.message || 'Failed to fetch yield curve from FRED'
       chartSeriesLabel.value = ''
+      console.error('FRED API request failed:', response)
     }
   } catch (err) {
     console.error('Yield curve fetch error:', err)
@@ -5143,11 +5478,13 @@ function updateFredBenchmark() {
 }
 
 async function renderYieldCurveChart() {
+  // Destroy existing chart instance before creating a new one
+  if (chartInstanceRef.current) {
+    chartInstanceRef.current.destroy()
+    chartInstanceRef.current = null
+  }
+  
   if (!yieldCurveChart.value || !yieldCurveData.value.length) {
-    if (chartInstanceRef.current) {
-      chartInstanceRef.current.destroy()
-      chartInstanceRef.current = null
-    }
     return
   }
   const rect = yieldCurveChart.value.getBoundingClientRect()
@@ -5161,54 +5498,124 @@ async function renderYieldCurveChart() {
     chartInstanceRef.current = null
   }
 
-  const period = effectiveMaturity.value
-  let unitLabel = 'Years'
-  let stepSize = 1
-  let maxX = 0
+  // Handle date range mode vs maturity mode
+  let transformed = []
+  let xAxisType = 'linear'
+  let xAxisTitle = 'Maturity'
+  let xScaleOptions = {}
 
-  const match = period.match(/^(\d+)([YMW])$/)
-  if (match) {
-    const num = parseInt(match[1], 10)
-    const unit = match[2]
-    if (unit === 'Y') {
+  if (maturityMode.value === 'dateRange') {
+    // Date range mode: show dates on x-axis
+    xAxisType = 'time'
+    xAxisTitle = 'Date'
+
+    // Filter and sort by date
+    const dateFilteredData = yieldCurveData.value
+      .filter(d => d.date !== null && d.date !== undefined)
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+
+    // Use actual dates as x values (time scale)
+    transformed = dateFilteredData.map(d => {
+      const dateObj = new Date(d.date)
+      return {
+        x: dateObj.getTime(),  // Use timestamp for time scale
+        y: d.rate,
+        label: d.date,  // Keep original date string
+        originalDate: d.date
+      }
+    })
+
+    console.log('Date range mode data:', transformed.map(t => ({ 
+      x: new Date(t.x).toISOString().split('T')[0], 
+      y: t.y 
+    })))
+
+    xScaleOptions = {
+      type: 'time',
+      time: {
+        unit: 'month',
+        displayFormats: {
+          month: 'MMM yyyy'
+        }
+      },
+      title: { display: true, text: xAxisTitle },
+      ticks: {
+        maxRotation: 45,
+        minRotation: 45
+      }
+    }
+  } else {
+    // Maturity mode: show maturity labels on x-axis
+    const period = effectiveMaturity.value
+    let unitLabel = 'Years'
+    let stepSize = 1
+    let maxX = 0
+
+    const match = period.match(/^(\d+)([YMW])$/)
+    if (match) {
+      const num = parseInt(match[1], 10)
+      const unit = match[2]
+      if (unit === 'Y') {
+        unitLabel = 'Years'
+        stepSize = num > 5 ? 5 : 1
+        maxX = num + 0.5
+      } else if (unit === 'M') {
+        unitLabel = 'Months'
+        stepSize = num > 6 ? 6 : 1
+        maxX = num + 0.5
+      } else if (unit === 'W') {
+        unitLabel = 'Weeks'
+        stepSize = num > 4 ? 2 : 1
+        maxX = num + 0.5
+      }
+    } else {
+      const num = parseFloat(period) || 10
       unitLabel = 'Years'
       stepSize = num > 5 ? 5 : 1
       maxX = num + 0.5
-    } else if (unit === 'M') {
-      unitLabel = 'Months'
-      stepSize = num > 6 ? 6 : 1
-      maxX = num + 0.5
-    } else if (unit === 'W') {
-      unitLabel = 'Weeks'
-      stepSize = num > 4 ? 2 : 1
-      maxX = num + 0.5
     }
-  } else {
-    const num = parseFloat(period) || 10
-    unitLabel = 'Years'
-    stepSize = num > 5 ? 5 : 1
-    maxX = num + 0.5
-  }
 
-  const filterYears = parseMaturityToYears(period)
-  const filteredData = yieldCurveData.value.filter(d => d.maturity <= filterYears)
+    const filterYears = parseMaturityToYears(period)
+    const filteredData = yieldCurveData.value.filter(d => d.maturity <= filterYears)
 
-  if (!filteredData.length) {
-    console.warn('No yield curve data points for selected maturity:', period)
-    yieldCurveError.value = `No yield curve data available for maturity ${period}`
-    if (chartInstanceRef.current) {
-      chartInstanceRef.current.destroy()
-      chartInstanceRef.current = null
+    if (!filteredData.length) {
+      console.warn('No yield curve data points for selected maturity:', period)
+      yieldCurveError.value = `No yield curve data available for maturity ${period}`
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.destroy()
+        chartInstanceRef.current = null
+      }
+      return
     }
-    return
-  }
 
-  const transformed = filteredData.map(d => {
-    let xVal = d.maturity
-    if (unitLabel === 'Months') xVal = d.maturity * 12
-    else if (unitLabel === 'Weeks') xVal = d.maturity * 52
-    return { x: xVal, y: d.rate, label: d.maturityLabel }
-  })
+    transformed = filteredData.map(d => {
+      let xVal = d.maturity
+      if (unitLabel === 'Months') xVal = d.maturity * 12
+      else if (unitLabel === 'Weeks') xVal = d.maturity * 52
+      return { x: xVal, y: d.rate, label: d.maturityLabel }
+    })
+
+    xAxisTitle = unitLabel
+    xScaleOptions = {
+      type: 'linear',
+      title: { display: true, text: xAxisTitle },
+      min: 0,
+      max: maxX,
+      ticks: {
+        callback: function(value) {
+          const closest = filteredData.find(p => Math.abs(p.maturity - value) < 0.01)
+          if (closest && closest.maturityLabel) {
+            return closest.maturityLabel
+          }
+          if (Number.isInteger(value) && value >= 0) {
+            return value.toString()
+          }
+          return null
+        },
+        stepSize: stepSize
+      }
+    }
+  }
 
   const ctx = yieldCurveChart.value.getContext('2d')
   chartInstanceRef.current = new Chart(ctx, {
@@ -5241,25 +5648,7 @@ async function renderYieldCurveChart() {
         }
       },
       scales: {
-        x: {
-          type: 'linear',
-          title: { display: true, text: unitLabel },
-          min: 0,
-          max: maxX,
-          ticks: {
-            callback: function(value) {
-              const closest = filteredData.find(p => Math.abs(p.maturity - value) < 0.01)
-              if (closest && closest.maturityLabel) {
-                return closest.maturityLabel
-              }
-              if (Number.isInteger(value) && value >= 0) {
-                return value.toString()
-              }
-              return null
-            },
-            stepSize: stepSize
-          }
-        },
+        x: xScaleOptions,
         y: {
           title: { display: true, text: 'Yield (%)' },
           beginAtZero: false
@@ -6580,7 +6969,6 @@ watch([rawData, cleanedData], () => {
   }
   debouncedSave()
 }, { deep: true })
-watch(cleanedData, async (newVal) => { if (newVal.length) await calculateMetrics() }, { deep: true })
 
 watch(() => activeTab.value, async (newTab) => {
   if (newTab === 'calculations' && hasCleanedData.value) {
@@ -7096,6 +7484,11 @@ onBeforeUnmount(() => {
 .btn-secondary { background: white; color: #0B2044; border: 2px solid #0B2044; padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s; }
 .btn-secondary:hover { background: #0B2044; color: white; transform: translateY(-2px); }
 .excel-table-wrapper { overflow: auto; border: 1px solid #d4d4d4; border-radius: 4px; background: white; max-height: 500px; margin: 16px 0; }
+.pagination-controls { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 16px; background: #f8f9fa; border-radius: 8px; margin-top: 16px; }
+.pagination-controls button { padding: 8px 16px; border: 1px solid #0B2044; background: white; color: #0B2044; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+.pagination-controls button:hover:not(:disabled) { background: #0B2044; color: white; }
+.pagination-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+.pagination-controls span { font-size: 13px; font-weight: 600; color: #0B2044; min-width: 100px; text-align: center; }
 .excel-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #000; border: 1px solid #d0d0d0; }
 .excel-table thead { position: sticky; top: 0; z-index: 10; }
 .excel-table th { background: #0B2044; color: white; border: 1px solid #1a3a6e; padding: 10px 14px; text-align: left; font-weight: 600; font-size: 12px; white-space: nowrap; letter-spacing: 0.3px; }

@@ -12,15 +12,8 @@ export function toChartDatasets(apiData, fallbackLabel = 'Yield') {
       fill: false
     }))
   }
-  return [{
-    label: fallbackLabel,
-    data: apiData.current || [],
-    borderColor: '#0B2044',
-    backgroundColor: 'rgba(11, 42, 68, 0.1)',
-    borderWidth: 2,
-    tension: 0.35,
-    fill: true
-  }]
+  // NO FALLBACK - return empty if no valid FRED data
+  return []
 }
 
 export const INSTRUMENT_API_MAP = {

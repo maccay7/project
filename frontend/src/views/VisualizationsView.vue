@@ -223,6 +223,7 @@ import sessionManager from '@/services/sessionManager.js'
 import { markStepCompleted } from '@/utils/workflowProgress.js'
 import { useFredMarket } from '@/composables/useFredMarket'
 import { Chart, registerables } from 'chart.js'
+import 'chartjs-adapter-date-fns'
 
 Chart.register(...registerables)
 
@@ -397,6 +398,7 @@ async function loadYieldCurve() {
       params.maturity = fredFilters.value.maturity
     }
 
+    console.log('VisualizationsView: Fetching yield curve with params:', params)
     const res = await api.fredAPI.getYieldCurve(params)
 
     if (res?.success && res.data?.datasets?.length) {
@@ -416,7 +418,7 @@ async function loadYieldCurve() {
           const yieldCurvePoints = []
           if (res.data.datasets[0]?.data) {
             res.data.datasets[0].data.forEach(pt => {
-              yieldCurvePoints.push({ maturity: pt.x, rate: pt.y })
+              yieldCurvePoints.push({ maturity: pt.x, rate: pt.y, date: pt.date })
             })
           }
 
@@ -449,60 +451,124 @@ function renderYieldChart() {
   if (yieldChart) yieldChart.destroy()
   const ctx = yieldCanvas.value.getContext('2d')
 
-  const maturities = yieldData.value.maturities || []
-  const maxMaturity = maturities.length ? Math.max(...maturities) : 10
-  const selectedMaturityStr = fredFilters.value.maturity || '1Y'
-
-  let effectiveMax = maxMaturity
+  // Handle date range mode vs maturity mode
+  let xAxisType = 'linear'
   let xAxisTitle = 'Maturity'
-  let stepSize = 1
+  let xScaleOptions = {}
+  let filteredData = []
 
-  const match = selectedMaturityStr.match(/^(\d+)([YMW])$/)
   if (fredFilters.value.maturityMode === 'date') {
+    // Date range mode: show dates on x-axis
+    xAxisType = 'time'
     xAxisTitle = 'Date'
-  } else if (match) {
-    const num = parseInt(match[1], 10)
-    const unit = match[2]
-    if (unit === 'Y') {
-      xAxisTitle = 'Years'
-      stepSize = num > 5 ? 5 : 1
-      effectiveMax = Math.min(maxMaturity, num)
-    } else if (unit === 'M') {
-      xAxisTitle = 'Months'
-      effectiveMax = Math.min(maxMaturity, num)
-    } else if (unit === 'W') {
-      xAxisTitle = 'Weeks'
-      effectiveMax = Math.min(maxMaturity, num)
+
+    filteredData = yieldData.value.datasets.map(ds => {
+      // Filter out data points without dates and sort by date
+      const dateFilteredData = ds.data
+        .filter(pt => pt.date !== null && pt.date !== undefined)
+        .sort((a, b) => new Date(a.date) - new Date(b.date))
+
+      // Use actual dates as x values (time scale)
+      const data = dateFilteredData.map(pt => {
+        const dateObj = new Date(pt.date)
+        return {
+          x: dateObj.getTime(),  // Use timestamp for time scale
+          y: pt.y,
+          label: pt.date,  // Keep original date string
+          originalDate: pt.date
+        }
+      })
+      return { ...ds, data }
+    })
+
+    console.log('Date range mode data:', filteredData[0]?.data?.map(t => ({ 
+      x: new Date(t.x).toISOString().split('T')[0], 
+      y: t.y 
+    })))
+
+    xScaleOptions = {
+      type: 'time',
+      time: {
+        unit: 'month',
+        displayFormats: {
+          month: 'MMM yyyy'
+        }
+      },
+      title: { display: true, text: xAxisTitle },
+      ticks: {
+        maxRotation: 45,
+        minRotation: 45
+      }
     }
   } else {
-    xAxisTitle = 'Years'
-    const num = parseFloat(selectedMaturityStr) || 10
-    effectiveMax = Math.min(maxMaturity, num)
-    stepSize = num > 5 ? 5 : 1
-  }
+    // Maturity mode: show maturity labels on x-axis
+    const maturities = yieldData.value.maturities || []
+    const maxMaturity = maturities.length ? Math.max(...maturities) : 10
+    const selectedMaturityStr = fredFilters.value.maturity || '1Y'
 
-  const filteredData = yieldData.value.datasets.map(ds => {
-    let data = ds.data.filter(pt => pt.x <= effectiveMax)
-    if (!data.some(pt => pt.x === 0)) {
-      data = [{ x: 0, y: data[0]?.y || 0 }, ...data]
+    let effectiveMax = maxMaturity
+    let stepSize = 1
+
+    const match = selectedMaturityStr.match(/^(\d+)([YMW])$/)
+    if (match) {
+      const num = parseInt(match[1], 10)
+      const unit = match[2]
+      if (unit === 'Y') {
+        xAxisTitle = 'Years'
+        stepSize = num > 5 ? 5 : 1
+        effectiveMax = Math.min(maxMaturity, num)
+      } else if (unit === 'M') {
+        xAxisTitle = 'Months'
+        effectiveMax = Math.min(maxMaturity, num)
+      } else if (unit === 'W') {
+        xAxisTitle = 'Weeks'
+        effectiveMax = Math.min(maxMaturity, num)
+      }
+    } else {
+      xAxisTitle = 'Years'
+      const num = parseFloat(selectedMaturityStr) || 10
+      effectiveMax = Math.min(maxMaturity, num)
+      stepSize = num > 5 ? 5 : 1
     }
-    return { ...ds, data }
-  })
+
+    filteredData = yieldData.value.datasets.map(ds => {
+      let data = ds.data.filter(pt => pt.x <= effectiveMax)
+      if (!data.some(pt => pt.x === 0)) {
+        data = [{ x: 0, y: data[0]?.y || 0 }, ...data]
+      }
+      return { ...ds, data }
+    })
+
+    const dataPoints = filteredData[0]?.data || []
+    const labelsMap = {}
+    dataPoints.forEach(pt => {
+      const xVal = pt.x
+      const labelIndex = yieldData.value.maturities.findIndex(m => Math.abs(m - xVal) < 0.01)
+      if (labelIndex !== -1 && yieldData.value.labels && yieldData.value.labels[labelIndex]) {
+        labelsMap[xVal] = yieldData.value.labels[labelIndex]
+      }
+    })
+
+    xScaleOptions = {
+      type: 'linear',
+      title: { display: true, text: xAxisTitle },
+      min: 0,
+      max: effectiveMax,
+      ticks: {
+        callback: function(value) {
+          if (labelsMap[value]) return labelsMap[value]
+          if (Number.isInteger(value) && value >= 0) return value.toString()
+          return null
+        },
+        stepSize: stepSize
+      }
+    }
+  }
 
   if (filteredData.every(ds => ds.data.length === 0)) {
     yieldError.value = 'No yield curve data available for selected range'
     return
   }
-
-  const dataPoints = filteredData[0]?.data || []
-  const labelsMap = {}
-  dataPoints.forEach(pt => {
-    const xVal = pt.x
-    const labelIndex = yieldData.value.maturities.findIndex(m => Math.abs(m - xVal) < 0.01)
-    if (labelIndex !== -1 && yieldData.value.labels && yieldData.value.labels[labelIndex]) {
-      labelsMap[xVal] = yieldData.value.labels[labelIndex]
-    }
-  })
 
   yieldChart = new Chart(ctx, {
     type: 'line',
@@ -516,7 +582,7 @@ function renderYieldChart() {
           callbacks: {
             label: (ctx) => {
               const pt = ctx.raw
-              const label = labelsMap[pt.x] || pt.x.toFixed(0)
+              const label = pt.label || pt.x
               return `${label}: ${pt.y.toFixed(2)}%`
             }
           }
@@ -524,20 +590,7 @@ function renderYieldChart() {
       },
       scales: {
         y: { title: { display: true, text: 'Yield (%)' } },
-        x: {
-          type: 'linear',
-          title: { display: true, text: xAxisTitle },
-          min: 0,
-          max: effectiveMax,
-          ticks: {
-            callback: function(value) {
-              if (labelsMap[value]) return labelsMap[value]
-              if (Number.isInteger(value) && value >= 0) return value.toString()
-              return null
-            },
-            stepSize: stepSize
-          }
-        }
+        x: xScaleOptions
       }
     }
   })
