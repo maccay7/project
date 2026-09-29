@@ -1,637 +1,952 @@
 import * as XLSX from 'xlsx'
 
-/**
- * Detect table boundaries in a worksheet
- * Finds the actual data table by identifying non-empty cell clusters
- * @param {Array} data - 2D array of worksheet data
- * @returns {Object} Table boundaries { startRow, endRow, startCol, endCol }
- */
+// ============================================================================
+// Currency constants
+// ============================================================================
+const CURRENCY_SYMBOLS = {
+  USD: ['$', 'US$', 'USD$'],
+  EUR: ['€'],
+  GBP: ['£'],
+  JPY: ['¥', 'JP¥'],
+  CNY: ['¥', 'CN¥', 'RMB', '元'],
+  INR: ['₹'],
+  ZAR: ['R'],
+  ZWL: ['Z$', 'ZWL$'],
+  ZWG: ['ZWG$', 'ZiG'],
+  AUD: ['A$', 'AU$'],
+  CAD: ['C$', 'CA$'],
+  CHF: ['CHF', 'Fr'],
+  NZD: ['NZ$'],
+  HKD: ['HK$'],
+  SGD: ['S$'],
+  ZMW: ['ZK'],
+  BWP: ['P'],
+  NGN: ['₦'],
+  KES: ['KSh'],
+  EGP: ['E£'],
+  AED: ['د.إ'],
+  SAR: ['﷼'],
+  TRY: ['₺'],
+  RUB: ['₽'],
+  BRL: ['R$'],
+  KRW: ['₩'],
+  THB: ['฿'],
+  VND: ['₫'],
+  PHP: ['₱'],
+  IDR: ['Rp'],
+  MYR: ['RM']
+}
+
+const CURRENCY_NAMES = {
+  USD: ['dollar', 'us dollar', 'united states dollar', 'american dollar'],
+  EUR: ['euro', 'euros'],
+  GBP: ['pound', 'pounds', 'british pound', 'sterling'],
+  JPY: ['yen', 'japanese yen'],
+  CNY: ['yuan', 'renminbi', 'chinese yuan'],
+  INR: ['rupee', 'indian rupee', 'rupees'],
+  ZAR: ['rand', 'south african rand'],
+  ZWL: ['zimbabwe dollar', 'zimbabwean dollar'],
+  ZWG: ['zimbabwe gold', 'zig'],
+  AUD: ['australian dollar'],
+  CAD: ['canadian dollar'],
+  CHF: ['swiss franc', 'franc'],
+  NZD: ['new zealand dollar'],
+  HKD: ['hong kong dollar'],
+  SGD: ['singapore dollar'],
+  NGN: ['naira'],
+  KES: ['kenyan shilling', 'shilling'],
+  BWP: ['pula'],
+  EGP: ['egyptian pound'],
+  AED: ['dirham', 'uae dirham'],
+  SAR: ['riyal', 'saudi riyal'],
+  TRY: ['lira', 'turkish lira'],
+  RUB: ['ruble', 'russian ruble'],
+  BRL: ['real', 'brazilian real'],
+  KRW: ['won', 'korean won'],
+  THB: ['baht', 'thai baht'],
+  VND: ['dong', 'vietnamese dong'],
+  PHP: ['peso', 'philippine peso'],
+  IDR: ['rupiah', 'indonesian rupiah'],
+  MYR: ['ringgit', 'malaysian ringgit']
+}
+
+const KNOWN_ISO_CODES = new Set([
+  'USD','EUR','GBP','JPY','CNY','INR','AUD','CAD','CHF','MXN',
+  'BRL','KRW','RUB','ZAR','TRY','SGD','HKD','NOK','SEK','DKK',
+  'PLN','THB','IDR','MYR','PHP','VND','CZK','HUF','RON','ILS',
+  'CLP','COP','PEN','ARS','UYU','BOB','PYG','CRC','GTQ','HNL',
+  'NIO','PAB','DOP','JMD','TTD','BBD','XCD','BZD','GYD','SRD',
+  'AWG','ANG','CUP','HTG','XAF','XOF','XPF','CDF','BIF','DJF',
+  'ERN','ETB','KES','MGF','MWK','MZN','RWF','SOS','TZS','UGX',
+  'ZMW','BWP','SZL','LSL','NAD','AOA','BGN','HRK','CYP','EEK',
+  'LTL','LVL','MKD','RSD','SKK','SIT','UAH','ALL','BYN','MDL',
+  'AMD','AZN','GEL','KZT','KGS','TJS','TMT','UZS','AFN','IRR',
+  'IQD','JOD','KWD','LBP','OMR','QAR','SAR','SYP','AED','YER',
+  'BHD','DZD','EGP','LYD','MAD','MRU','SDG','TND','MVR','NPR',
+  'PKR','LKR','BDT','BTN','MMK','BND','KHR','LAK','MOP','TWD',
+  'MNT','KPW','FJD','PGK','SBD','VUV','WST','NZD','TOP','ISK',
+  'SVC','VEF','ZWL','ZWG'
+])
+
+const NON_CURRENCY_WORDS = new Set([
+  'AND','BUT','FOR','NOR','NOT','NOW','OUT','PUT','SET','SHE','THE',
+  'TWO','USE','VIA','YES','YOU','ALL','ANY','ARE','BIG','CAN','DAY',
+  'END','EYE','FEW','GET','HAS','HER','HIS','HOW','ITS','LET','MAN',
+  'MAY','NEW','OFF','OLD','ONE','OUR','OWN','RUN','SAW','SAY','SEE',
+  'SIR','SIT','SIX','SON','SUN','TEN','TOO','TRY','WAR','WAY','WHO',
+  'WHY','WIN','WON','YET'
+])
+
+const ENUM_FIELD_NAMES = new Set([
+  'Frequency', 'Coupon Frequency', 'Interest Pmt Frequency',
+  'InterestPmtFrequency', 'Payment Frequency', 'CouponFrequency',
+  'Interest Payment Frequency', 'Coupon Payment Frequency',
+  'InterestFrequency', 'PaymentFrequency'
+])
+
+// ============================================================================
+// Currency helpers
+// ============================================================================
+function normalizeCurrencyToCode(input) {
+  if (!input) return null
+  const raw = String(input).trim()
+  if (!raw) return null
+  const upper = raw.toUpperCase()
+
+  if (/^[A-Z]{3}$/.test(upper)) return upper
+
+  for (const [code, syms] of Object.entries(CURRENCY_SYMBOLS)) {
+    if (syms.some(s => s === raw)) return code
+  }
+
+  const lower = raw.toLowerCase()
+  for (const [code, names] of Object.entries(CURRENCY_NAMES)) {
+    if (names.some(n => lower === n || lower.includes(n))) return code
+  }
+
+  if (/^[A-Z]{3}$/i.test(raw)) return upper
+  return null
+}
+
+function buildCurrencyTokens(code) {
+  const symbols = CURRENCY_SYMBOLS[code] || []
+  const names = CURRENCY_NAMES[code] || []
+  return { code, symbols, names }
+}
+
+function isCurrencyCodeStrict(value) {
+  if (!value) return false
+  const s = String(value).trim().toUpperCase()
+  if (!/^[A-Z]{3}$/.test(s)) return false
+  if (NON_CURRENCY_WORDS.has(s)) return false
+  return KNOWN_ISO_CODES.has(s)
+}
+
+function findCurrenciesInText(text) {
+  if (!text) return []
+  const s = String(text)
+  const found = new Set()
+  const upper = s.toUpperCase()
+
+  const wordRe = /\b([A-Z]{3})\b/g
+  let m
+  while ((m = wordRe.exec(upper)) !== null) {
+    const code = m[1]
+    if (KNOWN_ISO_CODES.has(code)) found.add(code)
+  }
+
+  for (const [code, syms] of Object.entries(CURRENCY_SYMBOLS)) {
+    for (const sym of syms) {
+      if (sym && s.includes(sym)) { found.add(code); break }
+    }
+  }
+
+  const lower = s.toLowerCase()
+  for (const [code, names] of Object.entries(CURRENCY_NAMES)) {
+    for (const n of names) {
+      if (!n) continue
+      const re = new RegExp(`(^|[^a-z])${n}([^a-z]|$)`)
+      if (re.test(lower)) { found.add(code); break }
+    }
+  }
+
+  return Array.from(found)
+}
+
+// ============================================================================
+// Currency filter
+// ============================================================================
+function scanForCurrencyMentions(data, code, tokens) {
+  const mentions = []
+  for (let R = 0; R < data.length; R++) {
+    const row = data[R]
+    if (!row) continue
+    for (let C = 0; C < row.length; C++) {
+      const cell = row[C]
+      if (cell === null || cell === undefined || cell === '') continue
+      const s = String(cell).trim()
+      if (s === '') continue
+
+      const upper = s.toUpperCase()
+      const codeWordBoundary = new RegExp(`(^|[^A-Z])${code}([^A-Z]|$)`)
+      if (codeWordBoundary.test(upper)) {
+        mentions.push({ row: R, col: C, raw: s, type: 'code', code })
+        continue
+      }
+
+      if (tokens.symbols.length) {
+        const hitSymbol = tokens.symbols.some(sym => sym && s.includes(sym))
+        if (hitSymbol) {
+          mentions.push({ row: R, col: C, raw: s, type: 'symbol', code })
+          continue
+        }
+      }
+
+      if (tokens.names.length) {
+        const lower = s.toLowerCase()
+        const hitName = tokens.names.some(n =>
+          n && (lower === n || new RegExp(`(^|[^a-z])${n}([^a-z]|$)`).test(lower))
+        )
+        if (hitName) {
+          mentions.push({ row: R, col: C, raw: s, type: 'name', code })
+          continue
+        }
+      }
+    }
+  }
+  return mentions
+}
+
+function findSectionEnd(data, startRow) {
+  for (let R = startRow + 1; R < data.length; R++) {
+    const row = data[R] || []
+    const nonEmpty = row.filter(c => c !== null && c !== undefined && String(c).trim() !== '').length
+    if (nonEmpty === 0) return R - 1
+
+    if (nonEmpty <= 2) {
+      const cellTexts = row
+        .filter(c => c !== null && c !== undefined && String(c).trim() !== '')
+        .map(c => String(c).trim())
+      const looksLikeTitle = cellTexts.length > 0 && cellTexts.every(t =>
+        t.length < 60 && !/^[\d.,%$€£¥₹-]+$/.test(t)
+      )
+      if (looksLikeTitle) return R - 1
+    }
+  }
+  return data.length - 1
+}
+
+function isExchangeRateSectionTitle(titleText, currenciesInTitle) {
+  if (!titleText) return false
+  if (!currenciesInTitle || currenciesInTitle.length < 2) return false
+  const lower = titleText.toLowerCase()
+  return /(exch|exchange|fx\b|forex|conversion|convert|\brate\b|\bto\b|→|=|\/)/i.test(lower)
+}
+
+function determineMentionScope(data, mention, selectedCode) {
+  if (mention.type === 'symbol') {
+    return {
+      start: Math.max(0, mention.row - 1),
+      end: Math.min(data.length - 1, mention.row + 1),
+      source: mention,
+      skip: false
+    }
+  }
+
+  const row = data[mention.row] || []
+  const nonEmpty = row.filter(c => c !== null && c !== undefined && String(c).trim() !== '').length
+  const isSectionTitleLike = nonEmpty <= 3 && mention.col < 3
+
+  if (isSectionTitleLike) {
+    const titleText = row.map(c => String(c == null ? '' : c).trim()).filter(Boolean).join(' ')
+    const currenciesInTitle = findCurrenciesInText(titleText)
+
+    if (isExchangeRateSectionTitle(titleText, currenciesInTitle)) {
+      if (!(currenciesInTitle.length === 1 && currenciesInTitle[0] === selectedCode)) {
+        return { start: -1, end: -1, source: mention, skip: true }
+      }
+    }
+
+    const sectionEnd = findSectionEnd(data, mention.row)
+    return { start: mention.row, end: sectionEnd, source: mention, skip: false }
+  }
+
+  return {
+    start: Math.max(0, mention.row - 2),
+    end: Math.min(data.length - 1, mention.row + 2),
+    source: mention,
+    skip: false
+  }
+}
+
+function mergeRanges(ranges) {
+  if (!ranges.length) return []
+  const sorted = [...ranges].sort((a, b) => a.start - b.start)
+  const merged = [{ start: sorted[0].start, end: sorted[0].end }]
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1]
+    const curr = sorted[i]
+    if (curr.start <= last.end + 1) {
+      last.end = Math.max(last.end, curr.end)
+    } else {
+      merged.push({ start: curr.start, end: curr.end })
+    }
+  }
+  return merged
+}
+
+function filterDataByCurrency(data, currencyFilter) {
+  const targetCode = normalizeCurrencyToCode(currencyFilter)
+  if (!targetCode) {
+    return { data, usedFilter: false, matchedMentions: [] }
+  }
+
+  const tokens = buildCurrencyTokens(targetCode)
+  const mentions = scanForCurrencyMentions(data, targetCode, tokens)
+
+  if (mentions.length === 0) {
+    return { data: [], usedFilter: true, matchedMentions: [] }
+  }
+
+  const scopes = mentions.map(m => determineMentionScope(data, m, targetCode))
+  const keptScopes = scopes.filter(s => !s.skip)
+
+  if (keptScopes.length === 0) {
+    return { data: [], usedFilter: true, matchedMentions: mentions }
+  }
+
+  const merged = mergeRanges(keptScopes.map(s => ({ start: s.start, end: s.end })))
+
+  const keep = new Set()
+  for (const r of merged) {
+    for (let i = r.start; i <= r.end; i++) keep.add(i)
+  }
+
+  const filtered = data.filter((_, i) => keep.has(i))
+  return { data: filtered, usedFilter: true, matchedMentions: mentions }
+}
+
+// ============================================================================
+// Table boundary / orientation
+// ============================================================================
 function detectTableBoundaries(data) {
-  console.log('=== Detecting Table Boundaries ===')
-  
   if (!data || data.length === 0) {
     return { startRow: 0, endRow: data.length - 1, startCol: 0, endCol: 0 }
   }
 
-  // Find the first non-empty row
   let startRow = 0
   for (let r = 0; r < data.length; r++) {
-    if (data[r].some(cell => cell && String(cell).trim() !== '')) {
-      startRow = r
-      break
-    }
+    if (data[r].some(cell => cell && String(cell).trim() !== '')) { startRow = r; break }
   }
 
-  // Find the last non-empty row
   let endRow = data.length - 1
   for (let r = data.length - 1; r >= startRow; r--) {
-    if (data[r].some(cell => cell && String(cell).trim() !== '')) {
-      endRow = r
-      break
-    }
+    if (data[r].some(cell => cell && String(cell).trim() !== '')) { endRow = r; break }
   }
 
-  // Find the first non-empty column
   let startCol = 0
   for (let c = 0; c < data[0].length; c++) {
     let hasContent = false
     for (let r = startRow; r <= endRow; r++) {
-      if (data[r] && data[r][c] && String(data[r][c]).trim() !== '') {
-        hasContent = true
-        break
-      }
+      if (data[r] && data[r][c] && String(data[r][c]).trim() !== '') { hasContent = true; break }
     }
-    if (hasContent) {
-      startCol = c
-      break
-    }
+    if (hasContent) { startCol = c; break }
   }
 
-  // Find the last non-empty column
   let endCol = data[0].length - 1
   for (let c = data[0].length - 1; c >= startCol; c--) {
     let hasContent = false
     for (let r = startRow; r <= endRow; r++) {
-      if (data[r] && data[r][c] && String(data[r][c]).trim() !== '') {
-        hasContent = true
-        break
-      }
+      if (data[r] && data[r][c] && String(data[r][c]).trim() !== '') { hasContent = true; break }
     }
-    if (hasContent) {
-      endCol = c
-      break
-    }
+    if (hasContent) { endCol = c; break }
   }
 
-  const boundaries = { startRow, endRow, startCol, endCol }
-  console.log('Table boundaries:', boundaries)
-  console.log('Table size:', endRow - startRow + 1, 'rows x', endCol - startCol + 1, 'cols')
-  
-  return boundaries
+  return { startRow, endRow, startCol, endCol }
 }
 
-/**
- * Detect table orientation (vertical vs horizontal)
- * @param {Array} data - 2D array of worksheet data
- * @param {Object} boundaries - Table boundaries
- * @returns {string} 'vertical' or 'horizontal'
- */
-function detectTableOrientation(data, boundaries) {
-  const { startRow, endRow, startCol, endCol } = boundaries
-  
-  // Count label-like cells in first column vs first row
-  let firstColLabels = 0
-  let firstRowLabels = 0
-  
-  // Check first column for label-like content
-  for (let r = startRow; r <= endRow; r++) {
-    const cell = data[r] && data[r][startCol] ? String(data[r][startCol]).trim() : ''
-    if (cell && cell.length > 0 && cell.length < 50 && !isNumeric(cell)) {
-      firstColLabels++
-    }
-  }
-  
-  // Check first row for label-like content
-  for (let c = startCol; c <= endCol; c++) {
-    const cell = data[startRow] && data[startRow][c] ? String(data[startRow][c]).trim() : ''
-    if (cell && cell.length > 0 && cell.length < 50 && !isNumeric(cell)) {
-      firstRowLabels++
-    }
-  }
-  
-  const orientation = firstColLabels > firstRowLabels ? 'vertical' : 'horizontal'
-  console.log('Table orientation:', orientation, `(firstColLabels: ${firstColLabels}, firstRowLabels: ${firstRowLabels})`)
-  
-  return orientation
-}
-
-/**
- * Check if a value is numeric
- */
 function isNumeric(value) {
   if (value === null || value === undefined || value === '') return false
   const str = String(value).replace(/[%,\s]/g, '')
   return !isNaN(parseFloat(str)) && isFinite(str)
 }
 
-/**
- * Check if a value looks like a date
- */
+function detectTableOrientation(data, boundaries) {
+  const { startRow, endRow, startCol, endCol } = boundaries
+  let firstColLabels = 0
+  let firstRowLabels = 0
+  for (let r = startRow; r <= endRow; r++) {
+    const cell = data[r] && data[r][startCol] ? String(data[r][startCol]).trim() : ''
+    if (cell && cell.length > 0 && cell.length < 50 && !isNumeric(cell)) firstColLabels++
+  }
+  for (let c = startCol; c <= endCol; c++) {
+    const cell = data[startRow] && data[startRow][c] ? String(data[startRow][c]).trim() : ''
+    if (cell && cell.length > 0 && cell.length < 50 && !isNumeric(cell)) firstRowLabels++
+  }
+  return firstColLabels > firstRowLabels ? 'vertical' : 'horizontal'
+}
+
 function isDateLike(value) {
   if (!value || value === '') return false
   const str = String(value).trim()
-  
-  // Check for common date patterns
   const datePatterns = [
-    /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/, // DD-MM-YYYY, MM/DD/YYYY
-    /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/, // YYYY-MM-DD
-    /^[A-Za-z]{3}[-/]\d{1,2}[-/]\d{2,4}$/, // Dec-31-2024
-    /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/, // 31-Dec-2024
-    /^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/ // Dec 31, 2024
+    /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/,
+    /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/,
+    /^[A-Za-z]{3}[-/]\d{1,2}[-/]\d{2,4}$/,
+    /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/,
+    /^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/
   ]
-  
   if (datePatterns.some(pattern => pattern.test(str))) return true
-  
-  // Check if it can be parsed as a date
   const date = new Date(str)
-  if (!isNaN(date.getTime())) {
-    // Check if it's not just a number (e.g., 2024 could be a year, not a date)
-    if (!/^\d{4}$/.test(str)) return true
-  }
-  
+  if (!isNaN(date.getTime())) { if (!/^\d{4}$/.test(str)) return true }
   return false
 }
 
-/**
- * Auto-detect instrument fields from a worksheet
- * Scans the entire worksheet for label-value pairs in various layouts
- * @param {ArrayBuffer} fileBuffer - Excel file buffer
- * @param {string} sheetName - Name of the sheet to analyze
- * @param {Array} requiredColumns - Array of required column names for the instrument
- * @param {string} instrumentType - Type of instrument (bonds, money-market, treasury-bills)
- * @param {Object} tableRange - Optional table boundaries {startRow, endRow, startCol, endCol}
- * @param {Array} tableData - Optional pre-extracted table data (2D array)
- * @returns {Object} Detected fields, currencies, and missing fields
- */
+// ============================================================================
+// Header regions
+// ============================================================================
+function detectHeaderRegions(data, boundaries) {
+  const { startRow, endRow, startCol, endCol } = boundaries
+
+  const rowAnalysis = []
+  for (let R = startRow; R <= endRow; R++) {
+    let textCells = 0, totalCells = 0
+    const cells = []
+    const rowLen = data[R]?.length || 0
+    for (let C = startCol; C <= endCol && C < rowLen; C++) {
+      const v = data[R][C]
+      const s = v === null || v === undefined ? '' : String(v).trim()
+      if (s === '') continue
+      totalCells++
+      const cleaned = s.replace(/[%,\s$€£¥₹]/g, '')
+      const numeric = !isNaN(parseFloat(cleaned)) && isFinite(cleaned)
+      if (!numeric) textCells++
+      cells.push({ row: R, col: C, value: v })
+    }
+    const isHeaderRow = totalCells >= 2 && (textCells / totalCells) >= 0.6
+    rowAnalysis.push({ row: R, isHeaderRow, cells, totalCells, textCells })
+  }
+
+  const colAnalysis = []
+  for (let C = startCol; C <= endCol; C++) {
+    let textCells = 0, totalCells = 0
+    const cells = []
+    for (let R = startRow; R <= endRow; R++) {
+      if (!data[R] || C >= data[R].length) continue
+      const v = data[R][C]
+      const s = v === null || v === undefined ? '' : String(v).trim()
+      if (s === '') continue
+      totalCells++
+      const cleaned = s.replace(/[%,\s$€£¥₹]/g, '')
+      const numeric = !isNaN(parseFloat(cleaned)) && isFinite(cleaned)
+      if (!numeric) textCells++
+      cells.push({ row: R, col: C, value: v })
+    }
+    const isHeaderCol = totalCells >= 2 && (textCells / totalCells) >= 0.6
+    colAnalysis.push({ col: C, isHeaderCol, cells, totalCells, textCells })
+  }
+
+  const horizontalHeaderCells = []
+  let rowGroup = []
+  const flushRowGroup = () => {
+    if (rowGroup.length === 0 || rowGroup.length > 2) { rowGroup = []; return }
+    for (const ra of rowGroup) {
+      for (const c of ra.cells) {
+        if (c.col < startCol || c.col > endCol) continue
+        horizontalHeaderCells.push({ row: c.row, col: c.col, value: c.value })
+      }
+    }
+    rowGroup = []
+  }
+  for (const ra of rowAnalysis) { if (ra.isHeaderRow) rowGroup.push(ra); else flushRowGroup() }
+  flushRowGroup()
+
+  const verticalHeaderCells = []
+  let colGroup = []
+  const flushColGroup = () => {
+    if (colGroup.length === 0 || colGroup.length > 2) { colGroup = []; return }
+    for (const ca of colGroup) {
+      for (const c of ca.cells) {
+        if (c.row < startRow || c.row > endRow) continue
+        verticalHeaderCells.push({ row: c.row, col: c.col, value: c.value })
+      }
+    }
+    colGroup = []
+  }
+  for (const ca of colAnalysis) { if (ca.isHeaderCol) colGroup.push(ca); else flushColGroup() }
+  flushColGroup()
+
+  return { horizontalHeaderCells, verticalHeaderCells, rowAnalysis, colAnalysis }
+}
+
+// ============================================================================
+// Label-like value detection
+// ============================================================================
+function isLabelLikeValue(value) {
+  if (value === null || value === undefined) return false
+  const s = String(value).trim()
+  if (!s) return false
+
+  if (/^[\d.,%$€£¥₹+\-()\s]+$/.test(s)) return false
+  if (isDateLike(s)) return false
+
+  const keywordRe = /\b(name|date|rate|value|amount|price|yield|coupon|discount|maturity|issue|currency|days|count|total|instrument|bond|security|frequency|principal|face|par|tenor|term|spread|margin|duration|convexity|payment|redemption|settlement|valuation|status|type|code|id|number|balance|period|month|year|week|day)\b/i
+  if (keywordRe.test(s) && s.length < 60) return true
+
+  const words = s.split(/\s+/).filter(Boolean)
+  if (words.length >= 2 && words.length <= 6 && !/\d/.test(s)) {
+    const titleCaseCount = words.filter(w => /^[A-Z][a-z]/.test(w)).length
+    if (titleCaseCount >= Math.ceil(words.length * 0.6)) return true
+  }
+
+  return false
+}
+
+// ============================================================================
+// Split a field name into words
+// ============================================================================
+function splitIntoWords(str) {
+  if (!str) return []
+  const withSpaces = String(str)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/[_\-]+/g, ' ')
+    .trim()
+  return withSpaces.split(/\s+/).filter(Boolean)
+}
+
+// ============================================================================
+// Auto-expand a required column into a rich set of variations
+// ============================================================================
+function expandFieldNameVariations(fieldName) {
+  if (!fieldName) return []
+  const variations = new Set()
+  const raw = String(fieldName).trim()
+  if (!raw) return []
+
+  variations.add(raw.toLowerCase())
+
+  const words = splitIntoWords(raw)
+  if (words.length > 1) {
+    variations.add(words.join(' ').toLowerCase())
+    variations.add(words.join('').toLowerCase())
+    variations.add(words.join('-').toLowerCase())
+    variations.add(words.join('_').toLowerCase())
+  }
+
+  const lower = raw.toLowerCase()
+
+  if (lower.includes('face') || lower.includes('principal') ||
+      lower.includes('par') || lower.includes('notional') || lower.includes('nominal')) {
+    ;[
+      'face value','facevalue','face-value','face_value','face amount','faceamount',
+      'principal','principal amount','principalamount','par value','parvalue','par',
+      'notional amount','notionalamount','notional','nominal value','nominalvalue','nominal'
+    ].forEach(v => variations.add(v))
+  }
+
+  if (lower.includes('couponrate') || lower === 'couponrate' ||
+      lower.includes('coupon rate') || lower.includes('interest rate') ||
+      lower === 'interestrate' || lower === 'rate' || lower === 'coupon') {
+    ;[
+      'coupon rate','couponrate','coupon-rate','coupon_rate','coupon',
+      'interest rate','interestrate','interest-rate','interest_rate',
+      'rate','annual rate','annualrate','nominal rate','nominalrate',
+      'fixed rate','fixedrate','floating rate','floatingrate'
+    ].forEach(v => variations.add(v))
+  }
+
+  if (lower.includes('yield') || lower === 'ytm' || lower === 'ytc' || lower === 'ytw') {
+    ;['yield','ytm','yield to maturity','yieldtomaturity','yield-to-maturity','ytc','ytw'].forEach(v => variations.add(v))
+  }
+
+  if (lower.includes('frequency') || lower.includes('freq') || lower.includes('fequency')) {
+    ;[
+      'frequency','freq','fequency',
+      'coupon frequency','couponfrequency','coupon-frequency',
+      'interest frequency','interestfrequency','interest-frequency',
+      'interest pmt frequency','interest pmt fequency',
+      'interest payment frequency','interestpaymentfrequency',
+      'payment frequency','paymentfrequency','pmt frequency','pmtfrequency'
+    ].forEach(v => variations.add(v))
+  }
+
+  if (lower.includes('maturity')) {
+    ;['maturity date','maturitydate','maturity-date','maturity',
+      'redemption date','redemptiondate','due date','duedate',
+      'expiry date','expirydate','maturity_date'].forEach(v => variations.add(v))
+  }
+
+  if (lower.includes('issue') && lower.includes('date')) {
+    ;['issue date','issuedate','issue-date','issue_date','issuance date','issuancedate',
+      'start date','startdate','effective date','effectivedate'].forEach(v => variations.add(v))
+  }
+
+  if (lower.includes('valuation') && lower.includes('date')) {
+    ;['valuation date','valuationdate','valuation-date','valuation_date',
+      'pricing date','pricingdate','as of date','asofdate',
+      'value date','valuedate'].forEach(v => variations.add(v))
+  }
+
+  if (lower.includes('settlement') && lower.includes('date')) {
+    ;['settlement date','settlementdate','settle date','settledate'].forEach(v => variations.add(v))
+  }
+
+  if ((lower.includes('accrued') && lower.includes('interest')) ||
+      lower === 'accruedinterest' || lower === 'accrued interest') {
+    ;['accrued interest','accruedinterest','accrued-interest','accrued_interest',
+      'interest accrued','interestaccrued','interest-accrued',
+      'accrued coupon','accruedcoupon','interest accrual','interestaccrual'].forEach(v => variations.add(v))
+  }
+
+  if (lower.includes('bondname') || (lower.includes('bond') && lower.includes('name'))) {
+    ;['bond name','bondname','counterparty','issuer','instrument name','instrumentname',
+      'security name','securityname','name'].forEach(v => variations.add(v))
+  }
+  if (lower.includes('tbillname') || lower.includes('tbill') || lower.includes('t-bill')) {
+    ;['t-bill name','tbillname','t bill name','counterparty','issuer',
+      'instrument name','instrumentname','name'].forEach(v => variations.add(v))
+  }
+  if (lower === 'instrumentname' || lower === 'instrument name' || lower === 'instrument') {
+    ;['instrument name','instrumentname','instrument','counterparty','issuer',
+      'bond name','bondname','security name','securityname','name'].forEach(v => variations.add(v))
+  }
+
+  return Array.from(variations)
+}
+
+// ============================================================================
+// Best-match selection
+// ============================================================================
+function findBestMatchingField(label, candidateFields, fieldVariations) {
+  const normalizedLabel = String(label).toLowerCase().trim()
+  if (!normalizedLabel) return null
+
+  let bestField = null
+  let bestScore = 0
+
+  for (const fieldName of candidateFields) {
+    const variations = fieldVariations[fieldName] || []
+    for (const variation of variations) {
+      const nv = String(variation).toLowerCase().trim()
+      if (!nv) continue
+
+      let score = 0
+      if (normalizedLabel === nv) {
+        score = nv.length + 1000
+      } else if (normalizedLabel.includes(nv)) {
+        score = nv.length
+        if (normalizedLabel.startsWith(nv)) score += 5
+      } else if (nv.includes(' ') && normalizedLabel.includes(nv.split(' ')[0])) {
+        score = nv.split(' ')[0].length
+      }
+
+      if (score > bestScore) {
+        bestScore = score
+        bestField = fieldName
+      }
+    }
+  }
+
+  return bestField
+}
+
+// ============================================================================
+// NEW — find the first non-empty value cell to the right of a label,
+// checking up to `maxOffset` columns. Fixes the "gap" layout issue.
+// ============================================================================
+function findAdjacentValueRight(data, R, C, maxOffset, endCol) {
+  for (let offset = 1; offset <= maxOffset && C + offset <= endCol; offset++) {
+    const v = data[R][C + offset]
+    if (v !== null && v !== undefined && String(v).trim() !== '') {
+      return { value: v, offset }
+    }
+  }
+  return null
+}
+
+function findAdjacentValueDown(data, R, C, maxOffset, endRow) {
+  for (let offset = 1; offset <= maxOffset && R + offset <= endRow; offset++) {
+    const v = data[R + offset]?.[C]
+    if (v !== null && v !== undefined && String(v).trim() !== '') {
+      return { value: v, offset }
+    }
+  }
+  return null
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
 export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumns, instrumentType, tableRange = null, tableData = null, customCurrency = null) {
-  // Parse workbook from buffer
   console.log('=== autoDetectInstrumentFields Started ===')
-  console.log('Sheet Name:', sheetName)
-  console.log('Instrument Type:', instrumentType)
+  console.log('Sheet Name:', sheetName, '| Instrument:', instrumentType)
   console.log('Required Columns:', requiredColumns)
-  console.log('Table Range:', tableRange)
-  console.log('Table Data Provided:', !!tableData)
-  console.log('Custom Currency:', customCurrency)
-  console.log('File Buffer Type:', fileBuffer?.constructor?.name)
-  console.log('File Buffer Length:', fileBuffer?.byteLength || 0)
-  console.log('File Buffer First 20 bytes:', fileBuffer ? Array.from(new Uint8Array(fileBuffer.slice(0, 20))) : 'N/A')
+  console.log('Table Range:', tableRange, '| Table Data Provided:', !!tableData)
+  console.log('Custom Currency Filter:', customCurrency)
 
   if (!fileBuffer || !sheetName) {
     throw new Error('File buffer and sheet name are required')
   }
 
+  const currencyFilter = customCurrency ? String(customCurrency).trim() : null
+  const normalizedCurrencyCode = currencyFilter ? normalizeCurrencyToCode(currencyFilter) : null
+
   let data = []
-  
-  // If tableData is provided, use it directly (for multi-table detection)
+
   if (tableData && Array.isArray(tableData) && tableData.length > 0) {
-    console.log('Using provided table data:', tableData.length, 'rows')
-    console.log('Table data sample:', tableData.slice(0, 3))
     data = tableData
   } else {
-    // Otherwise, parse the entire worksheet (for single-table detection)
     const workbook = XLSX.read(fileBuffer, { type: 'array', cellStyles: true, cellFormula: true, cellDates: true, cellNF: true })
     const worksheet = workbook.Sheets[sheetName]
-    
+
     if (!worksheet) {
-      console.error('Worksheet not found:', sheetName)
-      return { fields: {}, currencies: [], missingFields: requiredColumns }
+      return {
+        fields: {}, fieldsWithMetadata: {}, currencies: [],
+        missingFields: requiredColumns,
+        headerRegions: { horizontalHeaderCells: [], verticalHeaderCells: [], rowAnalysis: [], colAnalysis: [] },
+        additionalFields: {}
+      }
     }
 
-    // Get the full range of the worksheet - expand to capture all data
-    let range
-    if (worksheet['!ref']) {
-      range = XLSX.utils.decode_range(worksheet['!ref'])
-    } else {
-      // If no ref defined, scan the entire sheet to find actual content boundaries
-      range = { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } }
-    }
-    
-    // Expand range to capture all data by scanning for actual content
-    let maxRow = 0
-    let maxCol = 0
+    let range = worksheet['!ref']
+      ? XLSX.utils.decode_range(worksheet['!ref'])
+      : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } }
+
+    let maxRow = 0, maxCol = 0
     for (const cellAddress in worksheet) {
       if (cellAddress.startsWith('!')) continue
       const cellRef = XLSX.utils.decode_cell(cellAddress)
       if (cellRef.r > maxRow) maxRow = cellRef.r
       if (cellRef.c > maxCol) maxCol = cellRef.c
     }
-    
-    // Use the expanded range if it's larger than the defined range
     if (maxRow > range.e.r) range.e.r = maxRow
     if (maxCol > range.e.c) range.e.c = maxCol
-    
-    // CRITICAL: Limit range for extremely large worksheets to prevent performance issues
-    // Most instrument data is in the top portion of worksheets
-    const MAX_ROWS = 1000
-    const MAX_COLS = 100
-    if (range.e.r >= MAX_ROWS) {
-      console.log(`Worksheet has ${range.e.r + 1} rows - limiting scan to first ${MAX_ROWS} rows for performance`)
-      range.e.r = MAX_ROWS - 1
-    }
-    if (range.e.c >= MAX_COLS) {
-      console.log(`Worksheet has ${range.e.c + 1} columns - limiting scan to first ${MAX_COLS} columns for performance`)
-      range.e.c = MAX_COLS - 1
-    }
-    
-    console.log('Worksheet Range:', worksheet['!ref'], 'Expanded to:', XLSX.utils.encode_range(range))
-    console.log('Rows:', range.e.r + 1, 'Cols:', range.e.c + 1)
 
-    // Convert worksheet to 2D array for scanning
+    const MAX_ROWS = 1000, MAX_COLS = 100
+    if (range.e.r >= MAX_ROWS) range.e.r = MAX_ROWS - 1
+    if (range.e.c >= MAX_COLS) range.e.c = MAX_COLS - 1
+
     for (let R = range.s.r; R <= range.e.r; R++) {
       const row = []
       for (let C = range.s.c; C <= range.e.c; C++) {
         const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
         const cell = worksheet[cellAddress]
-        if (cell) {
-          row.push(cell.w ?? cell.v ?? '')
-        } else {
-          row.push('')
-        }
+        row.push(cell ? (cell.w ?? cell.v ?? '') : '')
       }
       data.push(row)
     }
   }
-  
-  console.log('Extracted Data Dimensions:', data.length, 'rows x', data[0]?.length || 0, 'cols')
-  console.log('Sample Data (first 3 rows):', data.slice(0, 3))
 
-  // Detect table boundaries for single-instrument detection
-  // If tableRange is provided (multi-table mode), use it directly
+  if (currencyFilter) {
+    const filterResult = filterDataByCurrency(data, currencyFilter)
+    if (filterResult.usedFilter) {
+      data = filterResult.data
+    }
+  }
+
+  // DETECTION MODE
   let tableBoundaries
-  if (tableRange) {
-    // When tableData is provided, the data is already extracted as a 0-based array
-    // So we need to adjust boundaries to be relative to the table data (0-based)
-    if (tableData) {
-      tableBoundaries = {
-        startRow: 0,
-        endRow: data.length - 1,
-        startCol: 0,
-        endCol: data[0]?.length - 1 || 0
-      }
-      console.log('Using relative table boundaries for multi-table detection:', tableBoundaries)
-    } else {
-      // When no tableData, use absolute coordinates (single-table mode with range)
-      tableBoundaries = {
-        startRow: tableRange.startRow,
-        endRow: tableRange.endRow,
-        startCol: tableRange.startCol,
-        endCol: tableRange.endCol
-      }
-      console.log('Using provided table range for single-table detection:', tableBoundaries)
+  const isWholeSheetScan = (!tableRange && !tableData)
+  const isSelectedTableScan = (tableRange && tableData)
+
+  if (isWholeSheetScan) {
+    let maxRow = data.length - 1
+    let maxCol = 0
+    for (let i = 0; i < data.length; i++) {
+      const len = (data[i] && data[i].length) || 0
+      if (len - 1 > maxCol) maxCol = len - 1
     }
+    tableBoundaries = { startRow: 0, endRow: maxRow, startCol: 0, endCol: maxCol }
+    console.log('=== MODE: WHOLE SHEET SCAN ===')
+  } else if (isSelectedTableScan) {
+    tableBoundaries = {
+      startRow: 0, endRow: data.length - 1,
+      startCol: 0, endCol: data[0]?.length - 1 || 0
+    }
+    console.log('=== MODE: SELECTED TABLE SCAN ===')
+  } else if (tableRange) {
+    tableBoundaries = {
+      startRow: tableRange.startRow, endRow: tableRange.endRow,
+      startCol: tableRange.startCol, endCol: tableRange.endCol
+    }
+    console.log('=== MODE: PROVIDED RANGE ===')
   } else {
-    // Otherwise, detect boundaries from the data (single-table mode)
     tableBoundaries = detectTableBoundaries(data)
+    console.log('=== MODE: FALLBACK ===')
   }
-  
-  const tableOrientation = detectTableOrientation(data, tableBoundaries)
-  
-  console.log('=== SINGLE INSTRUMENT DETECTION CONTEXT ===')
-  console.log('Worksheet Name (Instrument Name):', sheetName)
-  console.log('Table Boundaries:', tableBoundaries)
-  console.log('Table Orientation:', tableOrientation)
-  console.log('Detection will be limited to table boundaries only')
 
-  // Define comprehensive field variations for detection - instrument-specific
+  detectTableOrientation(data, tableBoundaries)
+  const headerRegions = detectHeaderRegions(data, tableBoundaries)
+
+  // ---- field variations ----
   const fieldVariations = {
-    // Common fields across all instruments
-    'Instrument Name': ['instrument name', 'name', 'bond name', 'security name', 'security', 'bond name', 't-bill name'],
-    'Instrument ID': ['instrument id', 'id', 'instrument id', 'security id', 'bond id', 't-bill id'],
-    'Instrument Code': ['instrument code', 'code', 'security code'],
-    'Security ID': ['security id', 'security identifier', 'sec id'],
-    'ISIN': ['isin', 'isin code'],
-    'CUSIP': ['cusip', 'cusip code'],
-    'Bloomberg Ticker': ['bloomberg ticker', 'bloomberg', 'bbg ticker'],
-    'Reuters/Refinitiv Ticker': ['reuters ticker', 'refinitiv ticker', 'reuters'],
-    'Counterparty': ['counterparty', 'issuer', 'borrower', 'party', 'entity', 'counter party', 'client', 'customer'],
-    'Issuer': ['issuer', 'borrower', 'counterparty', 'issuing entity', 'issuing party'],
-    'Parent Company': ['parent company', 'parent', 'holding company'],
-    'Issuer Country': ['issuer country', 'country of issue', 'issuing country'],
-    'Country': ['country', 'jurisdiction', 'nation'],
-    'Currency': ['currency', 'denomination', 'ccy', 'currency code', 'curr', 'base currency', 'local currency', 'reporting currency'],
-    'Currency Code': ['currency code', 'currency', 'ccy', 'curr'],
-    'Base Currency': ['base currency', 'reporting currency', 'functional currency'],
-    'Local Currency': ['local currency', 'denomination currency'],
-    'Reporting Currency': ['reporting currency', 'base currency', 'functional currency'],
-    'Exchange Rate': ['exchange rate', 'exch rate', 'fx rate', 'forex rate', 'conversion rate', 'exch', 'spot rate', 'forward rate', 'fx pair'],
-    'FX Rate': ['fx rate', 'exchange rate', 'forex rate', 'conversion rate'],
-    'FX Pair': ['fx pair', 'currency pair'],
-    'Valuation Date': ['valuation date', 'pricing date', 'as of date', 'value date'],
-    'Pricing Date': ['pricing date', 'valuation date', 'price date'],
-    'Trade Date': ['trade date', 'transaction date', 'deal date'],
-    'Settlement Date': ['settlement date', 'settle date'],
-    'Issue Date': ['issue date', 'issuance date', 'start date', 'effective date', 'origination date', 'issue', 'issuing date', 'commencement date'],
-    'Effective Date': ['effective date', 'start date', 'issue date', 'commencement date', 'value date'],
-    'Start Date': ['start date', 'effective date', 'issue date', 'accrual start date', 'commencement date'],
-    'End Date': ['end date', 'maturity date', 'termination date', 'expiry date'],
-    'Maturity Date': ['maturity date', 'maturity', 'due date', 'expiry date', 'redemption date', 'maturity', 'repayment date', 'final maturity date'],
-    'Tenor': ['tenor', 'term', 'duration'],
-    'Term': ['term', 'tenor', 'duration'],
-    'Term in Days': ['term in days', 'tenor days', 'days', 'duration days'],
-    'Term in Months': ['term in months', 'tenor months', 'months'],
-    'Term in Years': ['term in years', 'tenor years', 'years'],
-    'Business Day Convention': ['business day convention', 'bdc', 'day convention'],
-    'Day Count Convention': ['day count convention', 'day count', 'dcc', 'day count basis'],
-    'Calendar': ['calendar', 'holiday calendar'],
-    'Settlement Lag': ['settlement lag', 'settlement days'],
-    // Note: Instrument Type is NOT detected from worksheet - it comes from current page context only
-    'Asset Class': ['asset class', 'classification'],
-    'Classification': ['classification', 'category'],
-    'Market': ['market', 'exchange', 'venue'],
-    'Market Sector': ['market sector', 'sector', 'industry'],
-    'Portfolio': ['portfolio', 'portfolio name', 'book'],
-    'Portfolio Name': ['portfolio name', 'portfolio'],
-    'Book': ['book', 'portfolio', 'trading book'],
-    'Position': ['position', 'holding'],
-    'Quantity': ['quantity', 'amount', 'units', 'position'],
-    'Units': ['units', 'quantity', 'amount'],
-    'Nominal Amount': ['nominal amount', 'notional amount', 'face value', 'principal', 'par value'],
-    'Face Value': ['face value', 'par value', 'principal', 'face amount', 'par amount', 'nominal value', 'notional', 'nominal amount', 'principal amount', 'investment amount'],
-    'Principal': ['principal', 'face value', 'par value', 'nominal amount', 'notional', 'investment amount', 'principal amount'],
-    'Par Value': ['par value', 'face value', 'principal', 'par amount'],
-    'Nominal Value': ['nominal value', 'face value', 'par value', 'notional', 'nominal amount'],
-    'Notional': ['notional', 'nominal value', 'face value', 'principal', 'notional amount'],
-    'Outstanding Principal': ['outstanding principal', 'current principal', 'remaining principal'],
-    'Current Principal': ['current principal', 'outstanding principal', 'remaining principal'],
-    'Original Principal': ['original principal', 'issue amount', 'initial principal'],
-    'Carrying Value': ['carrying value', 'book value', 'carrying amount', 'carrying', 'book amount', 'amortised cost'],
-    'Book Value': ['book value', 'carrying value', 'amortised cost'],
-    'Fair Value': ['fair value', 'fv', 'market value', 'fair market value', 'current value'],
-    'Market Value': ['market value', 'fair value', 'current value', 'fair market value'],
-    'Present Value': ['present value', 'pv', 'current value', 'present amount'],
-    'Amortised Cost': ['amortised cost', 'carrying value', 'book value'],
-    'Impairment': ['impairment', 'impairment loss', 'impairment charge', 'credit impairment', 'provision'],
-    'Accrued Interest': ['accrued interest', 'accrued', 'interest accrued', 'accrued coupon', 'interest accrual', 'accrued amount'],
-    'Clean Price': ['clean price', 'price', 'bond price', 'quoted price'],
-    'Dirty Price': ['dirty price', 'full price', 'gross price'],
-    'Price': ['price', 'market price', 'clean price', 'dirty price', 'bond price', 'purchase price', 'unit price'],
-    'Yield': ['yield', 'ytm', 'yield to maturity', 'rate', 'current yield', 'running yield', 'internal rate of return'],
-    'Discount Rate': ['discount rate', 'discount', 'discount yield'],
-    'DiscountRate': ['discount rate', 'discount', 'discount yield', 'rate', 'yield'],
-    'Interest Rate': ['interest rate', 'rate', 'coupon rate', 'coupon', 'annual rate', 'interest', 'yield', 'nominal rate', 'fixed rate', 'floating rate'],
-    'InterestRate': ['interest rate', 'rate', 'coupon rate', 'coupon', 'annual rate', 'interest', 'yield', 'nominal rate', 'fixed rate', 'floating rate', 'discount rate'],
-    'Interest Accrued': ['interest accrued', 'accrued interest', 'interest accrued to', 'accrued interest to', 'interest accrued to 30 june 2024'],
-    'InterestAccrued': ['interest accrued', 'accrued interest', 'interest accrued to', 'accrued interest to', 'interest accrued to 30 june 2024'],
-    'Interest Pmt Frequency': ['interest pmt frequency', 'interest payment frequency', 'coupon frequency', 'payment frequency', 'frequency', 'pmt frequency', 'interest pmt fequency', 'annually', 'semi-annually', 'quarterly', 'monthly'],
-    'InterestPmtFrequency': ['interest pmt frequency', 'interest payment frequency', 'coupon frequency', 'payment frequency', 'frequency', 'pmt frequency', 'interest pmt fequency', 'annually', 'semi-annually', 'quarterly', 'monthly'],
-    'Frequency': ['frequency', 'interest pmt frequency', 'interest payment frequency', 'coupon frequency', 'payment frequency', 'pmt frequency', 'annually', 'semi-annually', 'quarterly', 'monthly', 'fequency'],
-    'Reference Rate': ['reference rate', 'benchmark rate', 'index rate', 'base rate'],
-    'Benchmark Rate': ['benchmark rate', 'reference rate', 'index rate', 'base rate'],
-    'Spread': ['spread', 'margin', 'credit spread', 'currency spread', 'basis points'],
-    'Margin': ['margin', 'spread', 'index margin', 'basis points'],
-    'Credit Spread': ['credit spread', 'spread', 'yield spread', 'credit margin'],
-    'Currency Spread': ['currency spread', 'spread', 'fx spread'],
-    'Valuation Method': ['valuation method', 'pricing method'],
-    'Pricing Method': ['pricing method', 'valuation method'],
-    'Status': ['status', 'state'],
-    'Transaction Type': ['transaction type'],
-    'Buy/Sell': ['buy/sell', 'direction', 'side'],
-    'Long/Short': ['long/short', 'position'],
-    'Quantity Held': ['quantity held', 'position', 'holding'],
-    'Purchase Price': ['purchase price', 'buying price', 'acquisition price', 'cost'],
-    'Purchase Value': ['purchase value', 'purchase amount', 'investment amount'],
-    'Total Cost': ['total cost', 'acquisition cost'],
-    'Transaction Cost': ['transaction cost', 'fees', 'commission'],
-    'Fees': ['fees', 'transaction cost', 'commission'],
-    'Commission': ['commission', 'fees'],
-    'Settlement Amount': ['settlement amount', 'proceeds'],
-    'Cash Flow': ['cash flow', 'cf'],
-    'Cash Flow Date': ['cash flow date', 'payment date'],
-    'Cash Flow Frequency': ['cash flow frequency', 'payment frequency', 'frequency'],
-    'Payment Date': ['payment date', 'cash flow date'],
-    'Payment Frequency': ['payment frequency', 'frequency', 'cash flow frequency', 'coupon frequency'],
-    
-    // Bond-specific fields
-    'Bond Name': ['bond name', 'instrument name', 'name', 'security name'],
-    'Bond ID': ['bond id', 'instrument id', 'security id'],
-    'Bond Type': ['bond type', 'classification'],
-    'Seniority': ['seniority', 'ranking'],
-    'Secured/Unsecured': ['secured/unsecured', 'collateral type', 'security'],
-    'Coupon Rate': ['coupon rate', 'interest rate', 'coupon', 'rate', 'annual coupon', 'fixed rate', 'nominal rate'],
-    'Coupon Frequency': ['coupon frequency', 'frequency', 'payment frequency', 'interest frequency', 'coupon freq', 'pmt frequency', 'interest pmt frequency'],
-    'Coupon Date': ['coupon date', 'payment date', 'interest payment date'],
-    'First Coupon Date': ['first coupon date', 'next coupon date', 'upcoming coupon date'],
-    'Next Coupon Date': ['next coupon date', 'upcoming coupon date', 'first coupon date'],
-    'Previous Coupon Date': ['previous coupon date', 'last coupon date'],
-    'Last Coupon Date': ['last coupon date', 'previous coupon date'],
-    'Call Date': ['call date', 'optional redemption date'],
-    'Put Date': ['put date', 'optional put date'],
-    'Reset Date': ['reset date', 'rate reset date'],
-    'Accrual End Date': ['accrual end date', 'end date'],
-    'Settlement Days': ['settlement days', 'settlement lag'],
-    'Days Accrued': ['days accrued', 'accrual days'],
-    'Days to Maturity': ['days to maturity', 'remaining days', 'term in days'],
-    'Remaining Term': ['remaining term', 'days to maturity', 'remaining days'],
-    'Coupon Rate': ['coupon rate', 'coupon', 'interest rate', 'coupon/interest rate', 'annual rate', 'rate'],
-    'Coupon': ['coupon', 'coupon rate', 'interest rate'],
-    'Fixed Rate': ['fixed rate', 'coupon rate'],
-    'Floating Rate': ['floating rate', 'variable rate'],
-    'Coupon Frequency': ['coupon payment frequency', 'coupon frequency', 'payment frequency', 'frequency', 'payment schedule'],
-    'Coupon Amount': ['coupon amount', 'interest amount'],
-    'Interest Amount': ['interest amount', 'coupon amount'],
-    'Accrued Coupon': ['accrued coupon', 'accrued interest'],
-    'Interest Accrual': ['interest accrual', 'accrued interest'],
-    'Accrual Factor': ['accrual factor', 'day count fraction'],
-    'Clean Price': ['clean price', 'price'],
-    'Dirty Price': ['dirty price', 'full price'],
-    'Full Price': ['full price', 'dirty price'],
-    'Market Price': ['market price', 'price'],
-    'Redemption Price': ['redemption price', 'redemption value'],
-    'Yield to Maturity': ['yield to maturity', 'ytm', 'yield'],
-    'YTM': ['ytm', 'yield to maturity', 'yield'],
-    'Yield to Call': ['yield to call', 'ytc'],
-    'Yield to Worst': ['yield to worst', 'ytw'],
-    'Current Yield': ['current yield', 'running yield'],
-    'Running Yield': ['running yield', 'current yield'],
-    'Required Return': ['required return', 'discount rate'],
-    'Internal Rate of Return': ['internal rate of return', 'irr', 'yield'],
-    'Effective Yield': ['effective yield', 'annualised yield'],
-    'Coupon Cash Flow': ['coupon cash flow', 'interest cash flow'],
-    'Principal Cash Flow': ['principal cash flow', 'redemption cash flow'],
-    'Redemption Cash Flow': ['redemption cash flow', 'principal cash flow'],
-    'Total Cash Flow': ['total cash flow', 'cash flow'],
-    'Discount Factor': ['discount factor', 'pv factor'],
-    'Present Value of Coupon': ['present value of coupon', 'pv of coupon'],
-    'Present Value of Principal': ['present value of principal', 'pv of principal'],
-    'Present Value of Cash Flows': ['present value of cash flows', 'pv of cash flows'],
-    'Expected Cash Flow': ['expected cash flow', 'projected cash flow'],
-    'Duration': ['duration', 'macaulay duration'],
-    'Macaulay Duration': ['macaulay duration', 'duration'],
-    'Modified Duration': ['modified duration', 'mod duration'],
-    'Effective Duration': ['effective duration'],
-    'Key Rate Duration': ['key rate duration', 'krd'],
-    'Convexity': ['convexity', 'effective convexity'],
-    'Effective Convexity': ['effective convexity', 'convexity'],
-    'DV01': ['dv01', 'dollar duration', 'pv01'],
-    'PV01': ['pv01', 'dv01', 'dollar duration'],
-    'Z-Spread': ['z-spread', 'zero volatility spread'],
-    'OAS': ['oas', 'option adjusted spread'],
-    'Benchmark Spread': ['benchmark spread', 'yield spread'],
-    'Yield Spread': ['yield spread', 'benchmark spread'],
-    'Credit Rating': ['credit rating', 'rating'],
-    'Rating Agency': ['rating agency', 'rating provider'],
-    'Default Probability': ['default probability', 'pd'],
-    'Recovery Rate': ['recovery rate', 'rr'],
-    'Loss Given Default': ['loss given default', 'lgd'],
-    'Hazard Rate': ['hazard rate', 'default intensity'],
-    'Credit Curve': ['credit curve', 'default curve'],
-    'Yield Curve': ['yield curve', 'benchmark curve'],
-    'Benchmark Curve': ['benchmark curve', 'yield curve'],
-    'Reset Frequency': ['reset frequency', 'rate reset frequency'],
-    'Reference Index': ['reference index', 'index'],
-    'Index Rate': ['index rate', 'reference rate'],
-    'Rate Floor': ['rate floor', 'minimum rate', 'floor'],
-    'Rate Cap': ['rate cap', 'maximum rate', 'cap'],
-    'Minimum Rate': ['minimum rate', 'rate floor', 'floor'],
-    'Maximum Rate': ['maximum rate', 'rate cap', 'cap'],
-    'Next Reset Rate': ['next reset rate', 'upcoming reset rate'],
-    
-    // Money Market-specific fields
-    'Investment Amount': ['investment amount', 'purchase amount', 'principal'],
-    'Purchase Amount': ['purchase amount', 'investment amount', 'principal'],
-    'Current Value': ['current value', 'market value', 'fair value'],
-    'Redemption Value': ['redemption value', 'maturity value'],
-    'Maturity Value': ['maturity value', 'redemption value'],
-    'Par Value': ['par value', 'face value', 'principal'],
-    'Discount Yield': ['discount yield', 'discount rate'],
-    'Money Market Yield': ['money market yield', 'mm yield'],
-    'Annualised Yield': ['annualised yield', 'effective yield'],
-    'Effective Rate': ['effective rate', 'annualised yield'],
-    'Interest Amount': ['interest amount', 'interest income'],
-    'Discount Amount': ['discount amount', 'discount'],
-    'Interest Income': ['interest income', 'interest amount'],
-    'Discount Income': ['discount income', 'discount amount'],
-    'Accrual Days': ['accrual days', 'days accrued'],
-    'Days in Year': ['days in year', 'day count basis'],
-    'Compounding Frequency': ['compounding frequency', 'frequency'],
-    'Deposit Rate': ['deposit rate', 'interest rate'],
-    'Deposit Term': ['deposit term', 'tenor'],
-    'Maturity Amount': ['maturity amount', 'redemption amount'],
-    'Certificate Number': ['certificate number', 'cert number'],
-    'Deposit Type': ['deposit'],
-    'Principal Amount': ['principal amount', 'principal'],
-    'Call Date': ['call date', 'notice date'],
-    'Notice Period': ['notice period', 'call period'],
-    'Rate Reset Date': ['rate reset date', 'reset date'],
-    'Index Margin': ['index margin', 'spread', 'margin'],
-    
-    // Treasury Bill-specific fields
-    'T-Bill Name': ['t-bill name', 'instrument name', 'name'],
-    'TBillName': ['t-bill name', 'instrument name', 'name', 'counterparty', 'issuer', 'borrower', 'party', 'entity'],
-    'T-Bill ID': ['t-bill id', 'instrument id', 'security id'],
-    'Government': ['government', 'issuer'],
-    'Discount Yield': ['discount yield', 'discount rate'],
-    'Investment Yield': ['investment yield', 'bond equivalent yield'],
-    'Bond Equivalent Yield': ['bond equivalent yield', 'investment yield'],
-    'Price per 100': ['price per 100', 'clean price'],
-    'Accrued Discount': ['accrued discount', 'discount amount'],
-    'Maturity Proceeds': ['maturity proceeds', 'redemption amount'],
-    'Interest Equivalent': ['interest equivalent', 'yield equivalent'],
-    'Number of Days': ['number of days', 'days'],
-    'Actual Days': ['actual days', 'days'],
-    '360-Day Basis': ['360-day basis', 'actual/360'],
-    '365-Day Basis': ['365-day basis', 'actual/365'],
-    'Actual/360': ['actual/360', '360-day basis'],
-    'Actual/365': ['actual/365', '365-day basis'],
-    'Actual/Actual': ['actual/actual', 'day count convention'],
-    
-    // FX/Currency specific fields
-    'Source Currency': ['source currency', 'from currency'],
-    'Target Currency': ['target currency', 'to currency'],
-    'Spot Rate': ['spot rate', 'exchange rate'],
-    'Forward Rate': ['forward rate', 'fx forward'],
-    'USD Value': ['usd value', 'dollar value'],
-    'ZWG Value': ['zwg value', 'zimbabwe dollar value'],
-    'EUR Value': ['eur value', 'euro value'],
-    'GBP Value': ['gbp value', 'pound value'],
-    'ZAR Value': ['zar value', 'rand value'],
-    'Converted Fair Value': ['converted fair value', 'fx adjusted fair value'],
-    'Converted Carrying Value': ['converted carrying value', 'fx adjusted carrying value'],
-    'Converted Present Value': ['converted present value', 'fx adjusted present value'],
-    'Converted Market Value': ['converted market value', 'fx adjusted market value'],
-    'Converted Impairment': ['converted impairment', 'fx adjusted impairment'],
-    'Converted Interest': ['converted interest', 'fx adjusted interest'],
-    'Converted Principal': ['converted principal', 'fx adjusted principal'],
-    
-    // Additional fields that may appear
-    'Total Value': ['total value', 'value', 'calculated value'],
-    'Instrument Count': ['instrument count', 'count', 'number of instruments', 'quantity'],
-    'Foreign Currency Value': ['foreign currency value', 'fcv', 'foreign value', 'local currency value'],
-    'Local Currency Value': ['local currency value', 'lcv', 'local value']
+    'Instrument Name': ['instrument name','name','bond name','security name','security','t-bill name'],
+    'Instrument ID': ['instrument id','id','security id','bond id','t-bill id'],
+    'Instrument Code': ['instrument code','code','security code'],
+    'Security ID': ['security id','security identifier','sec id'],
+    'ISIN': ['isin','isin code'],
+    'CUSIP': ['cusip','cusip code'],
+    'Bloomberg Ticker': ['bloomberg ticker','bloomberg','bbg ticker'],
+    'Reuters/Refinitiv Ticker': ['reuters ticker','refinitiv ticker','reuters'],
+    'Counterparty': ['counterparty','issuer','borrower','party','entity','counter party','client','customer'],
+    'Issuer': ['issuer','borrower','counterparty','issuing entity','issuing party'],
+    'Parent Company': ['parent company','parent','holding company'],
+    'Issuer Country': ['issuer country','country of issue','issuing country'],
+    'Country': ['country','jurisdiction','nation'],
+    'Currency': ['currency','denomination','ccy','currency code','curr','base currency','local currency','reporting currency'],
+    'Currency Code': ['currency code','currency','ccy','curr'],
+    'Base Currency': ['base currency','reporting currency','functional currency'],
+    'Local Currency': ['local currency','denomination currency'],
+    'Reporting Currency': ['reporting currency','base currency','functional currency'],
+    'Exchange Rate': ['exchange rate','exch rate','fx rate','forex rate','conversion rate','exch','spot rate','forward rate','fx pair'],
+    'FX Rate': ['fx rate','exchange rate','forex rate','conversion rate'],
+    'FX Pair': ['fx pair','currency pair'],
+    'Valuation Date': ['valuation date','pricing date','as of date','value date'],
+    'Pricing Date': ['pricing date','valuation date','price date'],
+    'Trade Date': ['trade date','transaction date','deal date'],
+    'Settlement Date': ['settlement date','settle date'],
+    'Issue Date': ['issue date','issuance date','start date','effective date','origination date','issue','issuing date','commencement date'],
+    'Effective Date': ['effective date','start date','issue date','commencement date','value date'],
+    'Start Date': ['start date','effective date','issue date','accrual start date','commencement date'],
+    'End Date': ['end date','maturity date','termination date','expiry date'],
+    'Maturity Date': ['maturity date','maturity','due date','expiry date','redemption date','repayment date','final maturity date'],
+    'Tenor': ['tenor','term','duration'],
+    'Term': ['term','tenor','duration'],
+    'Term in Days': ['term in days','tenor days','days','duration days'],
+    'Term in Months': ['term in months','tenor months','months'],
+    'Term in Years': ['term in years','tenor years','years'],
+    'Business Day Convention': ['business day convention','bdc','day convention'],
+    'Day Count Convention': ['day count convention','day count','dcc','day count basis'],
+    'Calendar': ['calendar','holiday calendar'],
+    'Settlement Lag': ['settlement lag','settlement days'],
+    'Asset Class': ['asset class','classification'],
+    'Classification': ['classification','category'],
+    'Market': ['market','exchange','venue'],
+    'Market Sector': ['market sector','sector','industry'],
+    'Portfolio': ['portfolio','portfolio name','book'],
+    'Portfolio Name': ['portfolio name','portfolio'],
+    'Book': ['book','portfolio','trading book'],
+    'Position': ['position','holding'],
+    'Quantity': ['quantity','amount','units','position'],
+    'Units': ['units','quantity','amount'],
+    'Nominal Amount': ['nominal amount','notional amount','face value','principal','par value'],
+    'Face Value': ['face value','par value','principal','face amount','par amount','nominal value','notional','nominal amount','principal amount','investment amount'],
+    'FaceValue': ['face value','principal','par value','notional','facevalue'],
+    'Principal': ['principal','face value','par value','nominal amount','notional','investment amount','principal amount'],
+    'Par Value': ['par value','face value','principal','par amount'],
+    'Nominal Value': ['nominal value','face value','par value','notional','nominal amount'],
+    'Notional': ['notional','nominal value','face value','principal','notional amount'],
+    'Outstanding Principal': ['outstanding principal','current principal','remaining principal'],
+    'Current Principal': ['current principal','outstanding principal','remaining principal'],
+    'Original Principal': ['original principal','issue amount','initial principal'],
+    'Carrying Value': ['carrying value','book value','carrying amount','carrying','book amount','amortised cost'],
+    'Book Value': ['book value','carrying value','amortised cost'],
+    'Fair Value': ['fair value','fv','market value','fair market value','current value'],
+    'Market Value': ['market value','fair value','current value','fair market value'],
+    'Present Value': ['present value','pv','current value','present amount'],
+    'Amortised Cost': ['amortised cost','carrying value','book value'],
+    'Impairment': ['impairment','impairment loss','impairment charge','credit impairment','provision'],
+    'Accrued Interest': ['accrued interest','accrued','interest accrued','accrued coupon','interest accrual','accrued amount'],
+    'Clean Price': ['clean price','price','bond price','quoted price'],
+    'Dirty Price': ['dirty price','full price','gross price'],
+    'Price': ['price','market price','clean price','dirty price','bond price','purchase price','unit price'],
+    'Yield': ['yield','ytm','yield to maturity','current yield','running yield','internal rate of return'],
+    'Discount Rate': ['discount rate','discount','discount yield'],
+    'DiscountRate': ['discount rate','discount','discount yield'],
+    'Interest Rate': ['interest rate','coupon rate','coupon','annual rate','interest','nominal rate','fixed rate','floating rate'],
+    'InterestRate': ['interest rate','coupon rate','coupon','annual rate','interest','nominal rate','fixed rate','floating rate'],
+    'Interest Accrued': ['interest accrued','accrued interest','interest accrued to','accrued interest to'],
+    'InterestAccrued': ['interest accrued','accrued interest','interest accrued to','accrued interest to'],
+    'Interest Pmt Frequency': ['interest pmt frequency','interest payment frequency','coupon frequency','payment frequency','pmt frequency','interest pmt fequency'],
+    'InterestPmtFrequency': ['interest pmt frequency','interest payment frequency','coupon frequency','payment frequency','pmt frequency','interest pmt fequency'],
+    'Frequency': ['frequency','interest pmt frequency','interest payment frequency','coupon frequency','payment frequency','pmt frequency','interest pmt fequency'],
+    'Reference Rate': ['reference rate','benchmark rate','index rate','base rate'],
+    'Benchmark Rate': ['benchmark rate','reference rate','index rate','base rate'],
+    'Spread': ['spread','margin','credit spread','currency spread','basis points'],
+    'Margin': ['margin','spread','index margin','basis points'],
+    'Credit Spread': ['credit spread','spread','yield spread','credit margin'],
+    'Currency Spread': ['currency spread','spread','fx spread'],
+    'Status': ['status','state'],
+    'Bond Name': ['bond name','instrument name','name','security name'],
+    'BondName': ['bond name','instrument name','name','security name','counterparty','issuer'],
+    'TBillName': ['t-bill name','instrument name','name','security name','counterparty','issuer'],
+    'Coupon Rate': ['coupon rate','interest rate','coupon','annual coupon','fixed rate','nominal rate'],
+    'CouponRate': ['coupon rate','interest rate','coupon','annual coupon','fixed rate','nominal rate'],
+    'Coupon Frequency': ['coupon frequency','frequency','payment frequency','interest frequency','coupon freq','pmt frequency','interest pmt frequency'],
+    'CouponFrequency': ['coupon frequency','frequency','payment frequency','interest frequency','coupon freq','pmt frequency','interest pmt frequency'],
+    'Coupon Date': ['coupon date','payment date','interest payment date'],
+    'Coupon': ['coupon','coupon rate','interest rate'],
+    'Coupon Amount': ['coupon amount','interest amount'],
+    'Coupon Payment': ['coupon payment','coupon amount','interest amount'],
+    'Annual Coupon': ['annual coupon','annual interest','coupon amount'],
+    'Accrued Coupon': ['accrued coupon','accrued interest'],
+    'Redemption Value': ['redemption value','maturity value','redemption amount','principal','face value','par value','maturity amount','redemption','principal amount'],
+    'RedemptionValue': ['redemption value','maturity value','redemption amount','principal','face value','par value','maturity amount','redemption','principal amount'],
+    'Maturity Value': ['maturity value','redemption value','redemption amount'],
+    'MaturityDate': ['maturity date','maturity','due date','expiry date','redemption date'],
+    'IssueDate': ['issue date','issuance date','start date','effective date'],
+    'ValuationDate': ['valuation date','pricing date','as of date','value date'],
+    'Total Value': ['total value','value','calculated value'],
+    'Instrument Count': ['instrument count','count','number of instruments','quantity'],
+    'Amount': ['amount','value','investment amount','purchase amount','total amount'],
+    'Instrument': ['counterparty','instrument name','bond name','t-bill name','security name','issuer','borrower','party','entity','counter party']
   }
 
-  // Add exact required column names as fallback variations
   for (const requiredField of requiredColumns) {
+    const autoVars = expandFieldNameVariations(requiredField)
     if (!fieldVariations[requiredField]) {
-      fieldVariations[requiredField] = [requiredField.toLowerCase()]
+      fieldVariations[requiredField] = autoVars
     } else {
-      // Add the exact name as a variation if not already present
-      const lowerName = requiredField.toLowerCase()
-      if (!fieldVariations[requiredField].includes(lowerName)) {
-        fieldVariations[requiredField].push(lowerName)
+      for (const v of autoVars) {
+        if (!fieldVariations[requiredField].includes(v)) fieldVariations[requiredField].push(v)
       }
     }
   }
 
-  // Define synonym mapping for equivalent field names
   const synonymMapping = {
-    'Face Value': ['Principal', 'Par Value', 'Nominal Value', 'Notional Amount'],
-    'Principal': ['Face Value', 'Par Value', 'Nominal Value', 'Notional Amount'],
-    'Par Value': ['Face Value', 'Principal', 'Nominal Value', 'Notional Amount'],
-    'Nominal Value': ['Face Value', 'Principal', 'Par Value', 'Notional Amount'],
-    'Notional Amount': ['Face Value', 'Principal', 'Par Value', 'Nominal Value'],
-    'Maturity Date': ['Redemption Date', 'Due Date', 'Expiry Date'],
-    'Redemption Date': ['Maturity Date', 'Due Date', 'Expiry Date'],
-    'Due Date': ['Maturity Date', 'Redemption Date', 'Expiry Date'],
-    'Interest Rate': ['Coupon Rate', 'Coupon', 'Rate'],
-    'Coupon Rate': ['Interest Rate', 'Coupon', 'Rate'],
-    'Coupon': ['Interest Rate', 'Coupon Rate', 'Rate'],
-    'Fair Value': ['Market Value', 'Current Value'],
-    'Market Value': ['Fair Value', 'Current Value'],
-    'Current Value': ['Fair Value', 'Market Value'],
-    'Carrying Value': ['Book Value', 'Amortised Cost'],
-    'Book Value': ['Carrying Value', 'Amortised Cost'],
-    'Amortised Cost': ['Carrying Value', 'Book Value'],
+    'Face Value': ['Principal','Par Value','Nominal Value','Notional Amount'],
+    'Principal': ['Face Value','Par Value','Nominal Value','Notional Amount'],
+    'Par Value': ['Face Value','Principal','Nominal Value','Notional Amount'],
+    'Nominal Value': ['Face Value','Principal','Par Value','Notional Amount'],
+    'Notional Amount': ['Face Value','Principal','Par Value','Nominal Value'],
+    'Maturity Date': ['Redemption Date','Due Date','Expiry Date'],
+    'Redemption Date': ['Maturity Date','Due Date','Expiry Date'],
+    'Due Date': ['Maturity Date','Redemption Date','Expiry Date'],
+    'Interest Rate': ['Coupon Rate','Coupon','Rate'],
+    'Coupon Rate': ['Interest Rate','Coupon','Rate'],
+    'Coupon': ['Interest Rate','Coupon Rate','Rate'],
+    'Fair Value': ['Market Value','Current Value'],
+    'Market Value': ['Fair Value','Current Value'],
+    'Current Value': ['Fair Value','Market Value'],
+    'Carrying Value': ['Book Value','Amortised Cost'],
+    'Book Value': ['Carrying Value','Amortised Cost'],
+    'Amortised Cost': ['Carrying Value','Book Value'],
     'Present Value': ['PV'],
     'PV': ['Present Value'],
-    'Exchange Rate': ['FX Rate', 'Conversion Rate'],
-    'FX Rate': ['Exchange Rate', 'Conversion Rate'],
-    'Conversion Rate': ['Exchange Rate', 'FX Rate'],
-    'Maturity Value': ['Redemption Value', 'Redemption Amount'],
-    'Redemption Value': ['Maturity Value', 'Redemption Amount'],
-    'Redemption Amount': ['Maturity Value', 'Redemption Value'],
-    'Accrued Interest': ['Accrued Coupon', 'Interest Accrued'],
-    'Accrued Coupon': ['Accrued Interest', 'Interest Accrued'],
-    'Interest Accrued': ['Accrued Interest', 'Accrued Coupon'],
-    'Yield': ['YTM', 'Yield to Maturity'],
-    'YTM': ['Yield', 'Yield to Maturity'],
-    'Yield to Maturity': ['Yield', 'YTM']
+    'Exchange Rate': ['FX Rate','Conversion Rate'],
+    'FX Rate': ['Exchange Rate','Conversion Rate'],
+    'Conversion Rate': ['Exchange Rate','FX Rate'],
+    'Maturity Value': ['Redemption Value','Redemption Amount'],
+    'Redemption Value': ['Maturity Value','Redemption Amount'],
+    'Redemption Amount': ['Maturity Value','Redemption Value'],
+    'Accrued Interest': ['Accrued Coupon','Interest Accrued'],
+    'Accrued Coupon': ['Accrued Interest','Interest Accrued'],
+    'Interest Accrued': ['Accrued Interest','Accrued Coupon'],
+    'Yield': ['YTM','Yield to Maturity'],
+    'YTM': ['Yield','Yield to Maturity'],
+    'Yield to Maturity': ['Yield','YTM']
   }
 
-  console.log('Field variations configured:', Object.keys(fieldVariations).length, 'fields')
-  console.log('Synonym mappings configured:', Object.keys(synonymMapping).length, 'groups')
-
-  // Use the provided instrument type from the current page context ONLY
-  // Do NOT auto-detect from worksheet - trust the current page/route
-  const effectiveInstrumentType = instrumentType || 'bonds'
-  console.log('=== INSTRUMENT CONTEXT LOCKED ===')
-  console.log('Instrument Type from page context:', effectiveInstrumentType)
-  console.log('Required Columns for this instrument:', requiredColumns)
-  console.log('Worksheet content will NOT override instrument type')
-
-  // Debug check - AUTO DETECT CONTEXT
-  console.log('AUTO DETECT CONTEXT:', {
-    instrumentType: effectiveInstrumentType,
-    requiredFields: requiredColumns,
-    detectedFields: 'will be populated after detection',
-    missingFields: 'will be calculated after detection'
-  })
-
-  // Don't filter required columns - use all provided columns
-  // The instrument-specific filtering was too aggressive and removed important fields
   const filteredRequiredColumns = requiredColumns
-  console.log('Using all required columns:', filteredRequiredColumns.length, 'fields')
-
-  // Normalize required columns to lowercase for matching
-  const normalizedRequired = filteredRequiredColumns.map(col => col.toLowerCase())
-  const detectedFields = {} // { fieldName: { value, location, confidence } }
+  const detectedFields = {}
   const detectedCurrencies = new Set()
-  const usedLabelValuePairs = new Set() // Track used label-value pairs to prevent reuse
+  const usedLabelValuePairs = new Set()
 
-  console.log('Starting detection with', filteredRequiredColumns.length, 'required fields')
-  console.log('Required fields:', filteredRequiredColumns)
+  if (normalizedCurrencyCode) {
+    detectedCurrencies.add(normalizedCurrencyCode)
+  }
 
-  // Helper function to convert row/col to Excel cell reference
   function rowColToCellRef(row, col) {
     const colLetters = []
     let c = col
@@ -642,880 +957,471 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     return colLetters.join('') + (row + 1)
   }
 
-  // Helper function to calculate confidence score
-  function calculateConfidence(label, matchedVariation, value, fieldName) {
-    let score = 0.3 // Base score (lowered from 0.5)
-    
-    const dateFields = ['Date', 'Issue Date', 'Maturity Date', 'Valuation Date', 'Trade Date', 'Settlement Date', 'MaturityDate']
-    const principalFields = ['Principal', 'Face Value', 'FaceValue', 'Nominal Value', 'Notional Amount', 'Redemption Value', 'RedemptionValue']
-    
-    // Exact match gets higher score
-    if (label.toLowerCase() === matchedVariation.toLowerCase()) {
-      score += 0.2
-    }
-    
-    // Value looks valid (not empty, not just whitespace)
-    if (value && String(value).trim() !== '') {
-      score += 0.2
-    }
-    
-    // Value validation based on field type (made more lenient)
-    if (isValidValueForField(fieldName, value)) {
-      score += 0.2
-    }
-    
-    // Bonus for values that look like actual data (not headings)
-    if (!isTableHeading(value)) {
-      score += 0.1
-    }
-    
-    // CRITICAL: For principal/face value fields, prefer larger numeric values
-    // Small decimals like "2.00" are likely not the actual principal amount
-    if (principalFields.includes(fieldName)) {
-      const numValue = parseFloat(String(value).replace(/[%,\s$€£¥₹]/g, ''))
-      if (!isNaN(numValue)) {
-        // If the value is very small (< 1000), reduce confidence significantly
-        // Real principal amounts are typically in thousands or millions
-        if (numValue < 1000) {
-          score -= 0.3
-          console.log(`Reduced confidence for "${fieldName}": "${value}" (value too small for principal: ${numValue})`)
-        }
-        // If the value is in reasonable range for principal (> 1000), increase confidence
-        else if (numValue >= 1000) {
-          score += 0.1
-        }
-      }
-    }
-    
-    return Math.max(0.1, Math.min(score, 1.0))
-  }
-
-  // Helper function to check if a value is a table heading (should not be used as data value)
-  function isTableHeading(value) {
-    const strValue = String(value).trim().toUpperCase()
-    
-    // Common table headings that should never be used as data values
-    const tableHeadings = [
-      'CF', 'PV', 'FV', 'NPV', 'IRR', 'BALANCE', 'PRINCIPAL', 'INTEREST',
-      'CASH FLOW', 'PRESENT VALUE', 'FUTURE VALUE', 'NET PRESENT VALUE',
-      'INTERNAL RATE OF RETURN', 'PAYMENT', 'PMT', 'RATE', 'NPER',
-      'TOTAL', 'SUM', 'SUBTOTAL', 'GRAND TOTAL', 'AVERAGE', 'AVG',
-      'MAX', 'MIN', 'COUNT', 'HEADER', 'LABEL', 'VALUE', 'AMOUNT',
-      'DATE', 'PERIOD', 'YEAR', 'MONTH', 'QUARTER', 'DAY',
-      'BEGINNING', 'ENDING', 'OPENING', 'CLOSING', 'START', 'END',
-      'IN', 'OUT', 'INFLOW', 'OUTFLOW', 'DEBIT', 'CREDIT',
-      'ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE',
-      'BUY', 'SELL', 'PURCHASE', 'SALE', 'TRANSACTION',
-      'ROW', 'COLUMN', 'CELL', 'SHEET', 'WORKSHEET',
-      'YES', 'NO', 'TRUE', 'FALSE', 'N/A', 'NA', 'NULL',
-      'CATEGORY', 'TYPE', 'CLASS', 'GROUP', 'SECTION',
-      'INPUT', 'OUTPUT', 'RESULT', 'CALCULATION', 'FORMULA',
-      'PVIF', 'PV', 'COUPON DATES', 'ACCRUED INTERESTPAID', 'ACCRUED INTEREST BALANCE',
-      'REDUCING BALANCE', 'CAPITALISED BALANCE-EQUAL INSTALMENTS', 'INTEREST PAYMENT DATES',
-      'BUSINESS DESCRIPTION', 'TERM', 'DISCOUNT RATE', 'SPREAD', 'PREMIUM',
-      'BLOOMBERG', 'COUNTRY RISK PREMIUM', 'SOLAR COMPANIES CREDIT SPREAD'
-    ]
-    
-    // Check if value matches any table heading
-    if (tableHeadings.includes(strValue)) return true
-    
-    // Check if value is a very short abbreviation (likely a heading)
-    if (strValue.length <= 3 && /^[A-Z]+$/.test(strValue)) {
-      // Allow common currency codes
-      if (!['USD', 'EUR', 'GBP', 'ZAR', 'ZWG', 'JPY', 'CAD', 'AUD'].includes(strValue)) {
-        return true
-      }
-    }
-    
-    // Check if value looks like a column header (all caps, short)
-    if (strValue.length <= 10 && /^[A-Z\s]+$/.test(strValue) && strValue.includes(' ')) {
-      return true
-    }
-    
-    // Check for mixed case with hyphens and spaces (common in table headers)
-    if (strValue.includes('-') && strValue.includes(' ')) {
-      return true
-    }
-    
+  function isFieldNumeric(fieldName) {
+    if (ENUM_FIELD_NAMES.has(fieldName)) return false
+    const lower = String(fieldName).toLowerCase()
+    if (/(rate|yield|coupon|discount|price|value|amount|principal|face|par|notional|spread|margin|duration|convexity|payment|fee|cost)/.test(lower)) return true
     return false
   }
 
-  // Helper function to check if value looks like a date
+  function isFieldEnum(fieldName) {
+    return ENUM_FIELD_NAMES.has(fieldName)
+  }
+
+  function calculateConfidence(label, matchedVariation, value, fieldName) {
+    let score = 0.3
+    if (label.toLowerCase() === matchedVariation.toLowerCase()) score += 0.2
+    if (value && String(value).trim() !== '') score += 0.2
+    if (isValidValueForField(fieldName, value)) score += 0.2
+    if (!isTableHeading(value)) score += 0.1
+
+    const principalFields = ['Principal','Face Value','FaceValue','Nominal Value','Notional Amount','Redemption Value','RedemptionValue']
+    if (principalFields.includes(fieldName)) {
+      const numValue = parseFloat(String(value).replace(/[%,\s$€£¥₹]/g, ''))
+      if (!isNaN(numValue)) {
+        if (numValue < 1000) score -= 0.3
+        else if (numValue >= 1000) score += 0.1
+      }
+    }
+    return Math.max(0.1, Math.min(score, 1.0))
+  }
+
+  function isTableHeading(value) {
+    const strValue = String(value).trim().toUpperCase()
+    const tableHeadings = [
+      'CF','PV','FV','NPV','IRR','BALANCE','PRINCIPAL','INTEREST',
+      'CASH FLOW','PRESENT VALUE','FUTURE VALUE','NET PRESENT VALUE',
+      'INTERNAL RATE OF RETURN','PAYMENT','PMT','RATE','NPER',
+      'TOTAL','SUM','SUBTOTAL','GRAND TOTAL','AVERAGE','AVG',
+      'MAX','MIN','COUNT','HEADER','LABEL','VALUE','AMOUNT',
+      'DATE','PERIOD','YEAR','MONTH','QUARTER','DAY',
+      'BEGINNING','ENDING','OPENING','CLOSING','START','END',
+      'IN','OUT','INFLOW','OUTFLOW','DEBIT','CREDIT',
+      'ASSET','LIABILITY','EQUITY','REVENUE','EXPENSE',
+      'BUY','SELL','PURCHASE','SALE','TRANSACTION',
+      'ROW','COLUMN','CELL','SHEET','WORKSHEET',
+      'YES','NO','TRUE','FALSE','N/A','NA','NULL',
+      'CATEGORY','TYPE','CLASS','GROUP','SECTION',
+      'INPUT','OUTPUT','RESULT','CALCULATION','FORMULA',
+      'COUPON DATES','INTEREST PAYMENT DATES','BUSINESS DESCRIPTION'
+    ]
+    if (tableHeadings.includes(strValue)) return true
+    if (strValue.length <= 3 && /^[A-Z]+$/.test(strValue)) {
+      if (!KNOWN_ISO_CODES.has(strValue)) return true
+    }
+    if (strValue.length <= 10 && /^[A-Z\s]+$/.test(strValue) && strValue.includes(' ')) return true
+    if (strValue.includes('-') && strValue.includes(' ')) return true
+    return false
+  }
+
   function looksLikeDate(value) {
     const strValue = String(value).trim()
-    return !isNaN(Date.parse(strValue)) || 
-           /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(strValue) || 
-           /^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/.test(strValue) ||
-           /^[A-Za-z]{3}[-/]\d{1,2}[-/]\d{2,4}$/.test(strValue) ||
-           /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/.test(strValue) ||
-           /^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/.test(strValue)
+    return !isNaN(Date.parse(strValue)) ||
+      /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(strValue) ||
+      /^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/.test(strValue) ||
+      /^[A-Za-z]{3}[-/]\d{1,2}[-/]\d{2,4}$/.test(strValue) ||
+      /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/.test(strValue) ||
+      /^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/.test(strValue)
   }
 
-  // Helper function to check if value is valid for field type
   function isValidValueForField(fieldName, value) {
-    if (!value || value === '') return false
-    
-    // Reject table headings
+    if (value === null || value === undefined || value === '') return false
     if (isTableHeading(value)) return false
-    
-    const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
-    const dateFields = ['Date', 'Issue Date', 'Maturity Date', 'Valuation Date', 'Trade Date', 'Settlement Date', 'MaturityDate']
-    const textFields = ['Instrument', 'Instrument Name', 'Bond Name', 'Issuer', 'Counterparty', 'Currency']
-    
-    if (numericFields.includes(fieldName)) {
-      // CRITICAL: Reject dates for numeric fields (e.g., "31-Dec-24" should not be detected as Price)
-      if (looksLikeDate(value)) {
-        console.log(`Rejected "${fieldName}": "${value}" (value looks like a date, not numeric)`)
-        return false
-      }
-      
-      // Made more lenient - just check if it can be parsed as a number
-      const strValue = String(value).trim()
-      const currencySymbolRegex = /[%,\s$€£¥₹]/g
-      const numericValue = strValue.replace(currencySymbolRegex, '')
-      
-      // Allow any numeric value, even if it looks like a date or text
-      if (!isNaN(parseFloat(numericValue))) {
-        return true
-      }
-      
-      return false
+
+    const s = String(value).trim()
+    if (!s) return false
+
+    if (isFieldEnum(fieldName)) {
+      if (/^[\d.,%$€£¥₹+\-()\s]+$/.test(s)) return false
+      if (isLabelLikeValue(s)) return false
+      return true
     }
-    
-    if (dateFields.includes(fieldName)) {
-      // Check if value looks like a date
-      return looksLikeDate(value)
+
+    if (isFieldNumeric(fieldName)) {
+      if (looksLikeDate(s)) return false
+      if (isCurrencyCodeStrict(s)) return false
+      if (isLabelLikeValue(s)) return false
+      const numericValue = s.replace(/[%,\s$€£¥₹()\-]/g, '')
+      const num = parseFloat(numericValue)
+      if (isNaN(num)) return false
+      return true
     }
-    
+
+    const dateFields = ['Date','Issue Date','Maturity Date','Valuation Date','Trade Date','Settlement Date','MaturityDate','Pricing Date','Effective Date','Start Date','End Date','IssueDate','ValuationDate']
+    if (dateFields.includes(fieldName)) return looksLikeDate(value)
+
+    const textFields = ['Instrument','Instrument Name','Bond Name','Issuer','Counterparty','Currency','BondName','TBillName','InstrumentName','Currency Code','Base Currency','Local Currency','Reporting Currency','Status','Type']
     if (textFields.includes(fieldName)) {
-      // Accept any text value
-      return String(value).trim().length > 0
+      if (!s) return false
+      return true
     }
-    
-    return true // Accept any value for other fields
+
+    return true
   }
 
-  // Helper function to check if field expects numeric value
-  function isNumericField(fieldName) {
-    const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
-    return numericFields.includes(fieldName)
-  }
-
-  // Helper function to check if field expects text value
-  function isTextField(fieldName) {
-    const textFields = ['Instrument', 'Instrument Name', 'Bond Name', 'Issuer', 'Counterparty', 'Currency']
-    return textFields.includes(fieldName)
-  }
-
-  // Add comprehensive field variations for valuation fields
-  const valuationFieldVariations = {
-    'Face Value': ['face value', 'principal', 'par value', 'nominal value', 'notional amount', 'facevalue', 'face', 'principal amount', 'nominal', 'notional'],
-    'Principal': ['principal', 'face value', 'par value', 'nominal value', 'notional amount', 'principal amount', 'nominal', 'notional', 'face'],
-    'FaceValue': ['principal', 'face value', 'par value', 'nominal value', 'notional amount', 'facevalue', 'face', 'principal amount', 'nominal', 'notional'],
-    'Interest Rate': ['interest rate', 'coupon rate', 'rate', 'coupon', 'interest', 'interestrate', 'couponrate', 'annual rate'],
-    'InterestRate': ['interest rate', 'coupon rate', 'rate', 'coupon', 'interest', 'interestrate', 'couponrate', 'annual rate', 'yield', 'discount rate'],
-    'Coupon Rate': ['coupon rate', 'interest rate', 'coupon', 'rate', 'couponrate', 'interestrate'],
-    'CouponRate': ['interest rate', 'coupon rate', 'rate', 'coupon', 'interest', 'interestrate', 'couponrate', 'annual rate'],
-    'Yield': ['yield', 'ytm', 'yield to maturity', 'rate of return', 'ytm'],
-    'Discount Rate': ['discount rate', 'discount', 'discount yield', 'rate'],
-    'DiscountRate': ['discount rate', 'discount', 'discount yield', 'rate', 'yield'],
-    'YTM': ['ytm', 'yield', 'yield to maturity'],
-    'Price': ['price', 'clean price', 'dirty price', 'market price', 'current price', 'valuation price'],
-    'Clean Price': ['clean price', 'price', 'market price'],
-    'Dirty Price': ['dirty price', 'gross price', 'full price'],
-    'Maturity Date': ['maturity date', 'redemption date', 'due date', 'expiry date', 'maturity', 'maturitydate', 'redemption', 'due'],
-    'MaturityDate': ['maturity date', 'redemption date', 'due date', 'expiry date', 'maturity', 'maturitydate', 'redemption', 'due'],
-    'Issue Date': ['issue date', 'issuance date', 'start date', 'effective date', 'issuedate', 'issuance'],
-    'IssueDate': ['issue date', 'issuance date', 'start date', 'effective date', 'issuedate', 'issuance'],
-    'Present Value': ['present value', 'pv', 'current value', 'discounted value', 'presentvalue'],
-    'Carrying Value': ['carrying value', 'book value', 'amortised cost', 'carryingvalue', 'bookvalue', 'amortisedcost'],
-    'Fair Value': ['fair value', 'market value', 'current value', 'fairvalue', 'marketvalue'],
-    'Impairment': ['impairment', 'impairment loss', 'credit impairment', 'impairment loss'],
-    'Currency': ['currency', 'denomination', 'ccy', 'currency code', 'curr', 'base currency', 'local currency'],
-    'Exchange Rate': ['exchange rate', 'exch rate', 'fx rate', 'forex rate', 'conversion rate', 'exch', 'spot rate', 'exchangerate', 'fxrate'],
-    'Amount': ['amount', 'value', 'investment amount', 'purchase amount', 'total amount'],
-    'BondName': ['counterparty', 'instrument name', 'bond name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party'],
-    'TBillName': ['counterparty', 'instrument name', 't-bill name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party'],
-    'Instrument': ['counterparty', 'instrument name', 'bond name', 't-bill name', 'security name', 'issuer', 'borrower', 'party', 'entity', 'counter party'],
-    'Frequency': ['frequency', 'interest pmt frequency', 'interest payment frequency', 'interest pmt fequency', 'coupon frequency', 'payment frequency', 'pmt frequency', 'annually', 'semi-annually', 'quarterly', 'monthly', 'fequency'],
-    'Accrued Interest': ['accrued interest', 'interest accrued', 'accrued coupon', 'interest accrued to', 'accruedinterest'],
-    'AccruedInterest': ['interest accrued', 'accrued interest', 'accrued coupon', 'interest accrued to', 'interest accrued to 30 june 2024'],
-    'Redemption Value': ['redemption value', 'maturity value', 'redemption amount', 'principal', 'face value', 'par value', 'maturity amount', 'redemption', 'principal amount'],
-    'RedemptionValue': ['redemption value', 'maturity value', 'redemption amount', 'principal', 'face value', 'par value', 'maturity amount', 'redemption', 'principal amount', 'facevalue', 'principal'],
-    'Date': ['date', 'valuation date', 'pricing date', 'as of date', 'value date', 'valuationdate']
-  }
-
-  // Merge valuation field variations with existing field variations
-  for (const [field, variations] of Object.entries(valuationFieldVariations)) {
-    if (!fieldVariations[field]) {
-      fieldVariations[field] = variations
-    } else {
-      // Add new variations to existing ones
-      for (const variation of variations) {
-        if (!fieldVariations[field].includes(variation)) {
-          fieldVariations[field].push(variation)
-        }
+  function bestVariationFor(label, fieldName) {
+    const variations = fieldVariations[fieldName] || []
+    const normalizedLabel = String(label).toLowerCase().trim()
+    let best = null, bestLen = 0
+    for (const v of variations) {
+      const nv = String(v).toLowerCase().trim()
+      if (normalizedLabel.includes(nv) && nv.length > bestLen) {
+        best = v; bestLen = nv.length
       }
     }
+    return best || fieldName
   }
 
-  console.log('Valuation field variations added:', Object.keys(valuationFieldVariations).length, 'fields')
-
-  // Helper function to check if label matches field variations
-  function labelMatchesField(label, fieldVariations) {
-    const normalizedLabel = label.toLowerCase().trim()
-    return fieldVariations.some(v => {
-      const normalizedVariation = v.toLowerCase().trim()
-      // Exact match
-      if (normalizedLabel === normalizedVariation) return true
-      // Contains match
-      if (normalizedLabel.includes(normalizedVariation)) return true
-      // Word boundary match (e.g., "Issue Date" matches "Issue")
-      if (normalizedVariation.includes(' ') && normalizedLabel.includes(normalizedVariation.split(' ')[0])) return true
-      return false
-    })
-  }
-
-  // First pass: Scan for label-value pairs within table boundaries
-  // This handles the most common pattern: label in one cell, value in adjacent cell
-  console.log('=== Pass 1: Horizontal label-value pairs (within table boundaries) ===')
-  console.log('Table boundaries:', tableBoundaries)
-  console.log('Data dimensions:', data.length, 'rows x', data[0]?.length || 0, 'cols')
-  
+  // ---------- Pass 1: Horizontal label-value pairs (WITH GAP TOLERANCE) ----------
+  console.log('=== Pass 1: Horizontal label-value pairs (gap-tolerant) ===')
   for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
     for (let C = tableBoundaries.startCol; C < tableBoundaries.endCol; C++) {
       const label = String(data[R][C]).toLowerCase().trim()
-      const value = data[R][C + 1]
-      
-      // Skip empty labels or values
-      if (!label || !value || value === '') continue
-      
-      // Check each required field
-      for (const requiredField of filteredRequiredColumns) {
-        const variations = fieldVariations[requiredField] || [requiredField.toLowerCase()]
-        
-        // Check if label matches any variation
-        if (labelMatchesField(label, variations)) {
-          // Create a unique key for this label-value pair
-          const pairKey = `${label}_${value}_${R}_${C}`
-          
-          // Skip if this label-value pair is already used
-          if (usedLabelValuePairs.has(pairKey)) continue
-          
-          // Only assign if not already detected (first match wins)
-          if (!detectedFields[requiredField]) {
-            // CRITICAL: Reject dates for numeric fields before assignment
-            const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
-            if (numericFields.includes(requiredField) && looksLikeDate(value)) {
-              console.log(`Skipped "${requiredField}": "${value}" at ${rowColToCellRef(R, C + 1)} (value is a date, not numeric)`)
-              continue
-            }
-            
-            const location = rowColToCellRef(R, C + 1)
-            const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
-            const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
-            
-            // Accept all matches regardless of confidence - log low confidence for debugging
-            if (confidence < 0.3) {
-              console.log(`Low confidence "${requiredField}": "${value}" at ${location} (confidence: ${confidence.toFixed(2)}) - ACCEPTING ANYWAY`)
-            }
-            
-            detectedFields[requiredField] = {
-              value: value,
-              location: location,
-              confidence: confidence
-            }
-            usedLabelValuePairs.add(pairKey)
-            console.log(`Detected "${requiredField}": "${value}" at ${location} (confidence: ${confidence.toFixed(2)})`)
-            
-            // Detect currency codes (only when Currency field is required)
-            if (requiredField === 'Currency') {
-              detectedCurrencies.add(String(value).toUpperCase())
-            }
-          }
-        }
+      if (!label) continue
+      if (isTableHeading(label)) continue
+
+      const valueHit = findAdjacentValueRight(data, R, C, 5, tableBoundaries.endCol)
+      if (!valueHit) continue
+
+      const value = valueHit.value
+      const valueColOffset = valueHit.offset
+
+      const matchedField = findBestMatchingField(label, filteredRequiredColumns, fieldVariations)
+      if (!matchedField) continue
+      if (detectedFields[matchedField]) continue
+
+      const pairKey = `${label}_${value}_${R}_${C}`
+      if (usedLabelValuePairs.has(pairKey)) continue
+
+      if (!isValidValueForField(matchedField, value)) {
+        console.log(`Rejected "${matchedField}": "${value}" at ${rowColToCellRef(R, C + valueColOffset)} (invalid value)`)
+        continue
       }
+
+      const location = rowColToCellRef(R, C + valueColOffset)
+      const matchedVariation = bestVariationFor(label, matchedField)
+      const confidence = calculateConfidence(label, matchedVariation, value, matchedField)
+
+      detectedFields[matchedField] = { value, location, confidence, detectedFrom: 'horizontal_label_value' }
+      usedLabelValuePairs.add(pairKey)
+      console.log(`Detected "${matchedField}": "${value}" at ${location} (via "${matchedVariation}")`)
+
+      if (matchedField === 'Currency') detectedCurrencies.add(String(value).toUpperCase())
     }
   }
-  console.log('Pass 1 detected fields:', Object.keys(detectedFields))
 
-  // Second pass: Scan for vertical label-value pairs within table boundaries (label above value)
-  console.log('=== Pass 2: Vertical label-value pairs (within table boundaries) ===')
+  // ---------- Pass 2: Vertical label-value pairs (WITH GAP TOLERANCE) ----------
+  console.log('=== Pass 2: Vertical label-value pairs (gap-tolerant) ===')
   for (let R = tableBoundaries.startRow; R < tableBoundaries.endRow; R++) {
     for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol; C++) {
       const label = String(data[R][C]).toLowerCase().trim()
-      const value = data[R + 1][C]
-      
-      // Skip empty labels or values
-      if (!label || !value || value === '') continue
-      
-      // Check each required field
-      for (const requiredField of filteredRequiredColumns) {
-        const variations = fieldVariations[requiredField] || [requiredField.toLowerCase()]
-        
-        // Check if label matches any variation
-        if (labelMatchesField(label, variations)) {
-          // Create a unique key for this label-value pair
-          const pairKey = `${label}_${value}_${R}_${C}`
-          
-          // Skip if this label-value pair is already used
-          if (usedLabelValuePairs.has(pairKey)) continue
-          
-          // Only assign if not already detected
-          if (!detectedFields[requiredField]) {
-            // CRITICAL: Reject dates for numeric fields before assignment
-            const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
-            if (numericFields.includes(requiredField) && looksLikeDate(value)) {
-              console.log(`Skipped "${requiredField}": "${value}" at ${rowColToCellRef(R + 1, C)} (vertical, value is a date, not numeric)`)
-              continue
-            }
-            
-            const location = rowColToCellRef(R + 1, C)
-            const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
-            const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
-            
-            // Accept all matches regardless of confidence - log low confidence for debugging
-            if (confidence < 0.3) {
-              console.log(`Low confidence "${requiredField}": "${value}" at ${location} (vertical, confidence: ${confidence.toFixed(2)}) - ACCEPTING ANYWAY`)
-            }
-            
-            detectedFields[requiredField] = {
-              value: value,
-              location: location,
-              confidence: confidence
-            }
-            usedLabelValuePairs.add(pairKey)
-            console.log(`Detected "${requiredField}": "${value}" at ${location} (vertical, confidence: ${confidence.toFixed(2)})`)
-            
-            // Detect currency codes (only when Currency field is required)
-            if (requiredField === 'Currency') {
-              detectedCurrencies.add(String(value).toUpperCase())
-            }
-          }
-        }
+      if (!label) continue
+      if (isTableHeading(label)) continue
+
+      const valueHit = findAdjacentValueDown(data, R, C, 5, tableBoundaries.endRow)
+      if (!valueHit) continue
+
+      const value = valueHit.value
+      const valueRowOffset = valueHit.offset
+
+      const matchedField = findBestMatchingField(label, filteredRequiredColumns, fieldVariations)
+      if (!matchedField) continue
+      if (detectedFields[matchedField]) continue
+
+      const pairKey = `${label}_${value}_${R}_${C}`
+      if (usedLabelValuePairs.has(pairKey)) continue
+
+      if (!isValidValueForField(matchedField, value)) {
+        console.log(`Rejected "${matchedField}": "${value}" at ${rowColToCellRef(R + valueRowOffset, C)} (invalid value)`)
+        continue
       }
+
+      const location = rowColToCellRef(R + valueRowOffset, C)
+      const matchedVariation = bestVariationFor(label, matchedField)
+      const confidence = calculateConfidence(label, matchedVariation, value, matchedField)
+
+      detectedFields[matchedField] = { value, location, confidence, detectedFrom: 'vertical_label_value' }
+      usedLabelValuePairs.add(pairKey)
+      console.log(`Detected "${matchedField}": "${value}" at ${location} (vertical)`)
+
+      if (matchedField === 'Currency') detectedCurrencies.add(String(value).toUpperCase())
     }
   }
-  console.log('Pass 2 detected fields:', Object.keys(detectedFields))
 
-  // Third pass: Scan for table-like structures with headers within table boundaries
-  // This handles structured tables where field names are in a header row
-  console.log('=== Pass 3: Table header structures (within table boundaries) ===')
+  // ---------- Pass 3: Table header structures (BEST MATCH, gap-tolerant) ----------
+  console.log('=== Pass 3: Table header structures ===')
   for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
     const row = data[R]
     if (!row || row.length === 0) continue
-    
-    // Check if this row looks like a header (contains field-like labels)
+
     const headerLabels = row.map(cell => String(cell).toLowerCase().trim())
-    const hasFieldLabels = headerLabels.some(label => 
+    const hasFieldLabels = headerLabels.some(label =>
       Object.values(fieldVariations).flat().some(v => label.includes(v))
     )
-    
+
     if (hasFieldLabels && R + 1 <= tableBoundaries.endRow) {
-      // This is likely a header row, get values from next row
       const valueRow = data[R + 1]
-      
       for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol && C < valueRow.length; C++) {
         const label = headerLabels[C]
         const value = valueRow[C]
-        
         if (!label || !value || value === '') continue
-        
-        // Check each required field
-        for (const requiredField of filteredRequiredColumns) {
-          const variations = fieldVariations[requiredField] || [requiredField.toLowerCase()]
-          
-          if (labelMatchesField(label, variations)) {
-            // Create a unique key for this label-value pair
-            const pairKey = `${label}_${value}_${R}_${C}`
-            
-            // Skip if this label-value pair is already used
-            if (usedLabelValuePairs.has(pairKey)) continue
-            
-            if (!detectedFields[requiredField]) {
-              // CRITICAL: Reject dates for numeric fields before assignment
-              const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
-              if (numericFields.includes(requiredField) && looksLikeDate(value)) {
-                console.log(`Skipped "${requiredField}": "${value}" at ${rowColToCellRef(R + 1, C)} (table, value is a date, not numeric)`)
-                continue
-              }
-              
-              const location = rowColToCellRef(R + 1, C)
-              const matchedVariation = variations.find(v => labelMatchesField(label, [v]))
-              const confidence = calculateConfidence(label, matchedVariation, value, requiredField)
-              
-              // Accept all matches regardless of confidence - log low confidence for debugging
-              if (confidence < 0.3) {
-                console.log(`Low confidence "${requiredField}": "${value}" at ${location} (table, confidence: ${confidence.toFixed(2)}) - ACCEPTING ANYWAY`)
-              }
-              
-              detectedFields[requiredField] = {
-                value: value,
-                location: location,
-                confidence: confidence
-              }
-              usedLabelValuePairs.add(pairKey)
-              console.log(`Detected "${requiredField}": "${value}" at ${location} (table, confidence: ${confidence.toFixed(2)})`)
-              
-              if (requiredField === 'Currency') {
-                detectedCurrencies.add(String(value).toUpperCase())
-              }
-            }
-          }
-        }
+
+        const matchedField = findBestMatchingField(label, filteredRequiredColumns, fieldVariations)
+        if (!matchedField) continue
+        if (detectedFields[matchedField]) continue
+
+        const pairKey = `${label}_${value}_${R}_${C}`
+        if (usedLabelValuePairs.has(pairKey)) continue
+
+        if (!isValidValueForField(matchedField, value)) continue
+
+        const location = rowColToCellRef(R + 1, C)
+        const matchedVariation = bestVariationFor(label, matchedField)
+        const confidence = calculateConfidence(label, matchedVariation, value, matchedField)
+
+        detectedFields[matchedField] = { value, location, confidence, detectedFrom: 'table_header' }
+        usedLabelValuePairs.add(pairKey)
+        if (matchedField === 'Currency') detectedCurrencies.add(String(value).toUpperCase())
       }
     }
   }
-  console.log('Pass 3 detected fields:', Object.keys(detectedFields))
 
-  // Fourth pass: Scan for currency codes and exchange rates within table boundaries
-  console.log('=== Pass 4: Currency codes and exchange rates (within table boundaries) ===')
-  
-  // Valid ISO 4217 currency codes - only these should be detected as currencies
-  const validCurrencyCodes = new Set([
-    'USD', 'EUR', 'GBP', 'JPY', 'CNY', 'INR', 'AUD', 'CAD', 'CHF', 'MXN',
-    'BRL', 'KRW', 'RUB', 'ZAR', 'TRY', 'SGD', 'HKD', 'NOK', 'SEK', 'DKK',
-    'PLN', 'THB', 'IDR', 'MYR', 'PHP', 'VND', 'CZK', 'HUF', 'RON', 'ILS',
-    'CLP', 'COP', 'PEN', 'ARS', 'UYU', 'BOB', 'PYG', 'CRC', 'GTQ', 'HNL',
-    'NIO', 'PAB', 'DOP', 'JMD', 'TTD', 'BBD', 'XCD', 'BZD', 'GYD', 'SRD',
-    'AWG', 'ANG', 'CUP', 'HTG', 'XAF', 'XOF', 'XPF', 'CDF', 'BIF', 'DJF',
-    'ERN', 'ETB', 'KES', 'MGF', 'MWK', 'MZN', 'RWF', 'SOS', 'TZS', 'UGX',
-    'ZMW', 'BWP', 'SZL', 'LSL', 'NAD', 'AOA', 'BGN', 'HRK', 'CYP', 'CZK',
-    'EEK', 'HUF', 'LTL', 'LVL', 'MKD', 'RON', 'RSD', 'SKK', 'SIT', 'UAH',
-    'ALL', 'BYN', 'MDL', 'RUB', 'AMD', 'AZN', 'GEL', 'KZT', 'KGS', 'TJS',
-    'TMT', 'UZS', 'AFN', 'IRR', 'IQD', 'JOD', 'KWD', 'LBP', 'OMR', 'QAR',
-    'SAR', 'SYP', 'AED', 'YER', 'BHD', 'DZD', 'EGP', 'LYD', 'MAD', 'MRU',
-    'SDG', 'TND', 'MVR', 'NPR', 'PKR', 'LKR', 'BDT', 'BTN', 'BTN', 'INR',
-    'MMK', 'BND', 'KHR', 'IDR', 'LAK', 'MYR', 'PHP', 'SGD', 'THB', 'VND',
-    'CNY', 'HKD', 'MOP', 'TWD', 'KRW', 'JPY', 'MNT', 'KPW', 'AUD', 'FJD',
-    'PGK', 'SBD', 'VUV', 'WST', 'NZD', 'TOP', 'NOK', 'SEK', 'DKK', 'ISK',
-    'CAD', 'USD', 'MXN', 'GTQ', 'BZD', 'SVC', 'NIO', 'HNL', 'CRC', 'PAB',
-    'COP', 'VEF', 'BOB', 'PYG', 'UYU', 'ARS', 'CLP', 'PEN', 'ZWL', 'ZWG'
-  ])
-  
-  // Add custom currency to valid codes if provided
-  if (customCurrency && customCurrency.length === 3) {
-    validCurrencyCodes.add(customCurrency.toUpperCase())
-    console.log(`Added custom currency "${customCurrency.toUpperCase()}" to valid currency codes`)
-  }
-  
-  // Common non-currency 3-letter words to exclude
-  const nonCurrencyWords = new Set([
-    'AND', 'BUT', 'FOR', 'NOR', 'NOT', 'NOW', 'OUT', 'PUT', 'SET', 'SHE',
-    'THE', 'TWO', 'USE', 'VIA', 'YES', 'YOU', 'ALL', 'ANY', 'ARE', 'BIG',
-    'CAN', 'DAY', 'END', 'EYE', 'FEW', 'GET', 'HAS', 'HER', 'HIS', 'HOW',
-    'ITS', 'LET', 'MAN', 'MAY', 'NEW', 'OFF', 'OLD', 'ONE', 'OUR', 'OWN',
-    'RUN', 'SAW', 'SAY', 'SEE', 'SHE', 'SIR', 'SIT', 'SIX', 'SON', 'SUN',
-    'TEN', 'THE', 'TOO', 'TRY', 'USE', 'WAR', 'WAY', 'WHO', 'WHY', 'WIN',
-    'WON', 'YES', 'YET'
-  ])
-  
+  // ---------- Pass 4: Currency codes ----------
+  console.log('=== Pass 4: Currency codes ===')
   for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
     for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol; C++) {
       const cellValue = data[R][C]
-      
-      // CRITICAL: Only detect valid ISO 4217 currency codes
       if (cellValue && /^[A-Z]{3}$/.test(String(cellValue))) {
         const currencyCode = String(cellValue).toUpperCase()
-        
-        // Skip if it's a common non-currency word
-        if (nonCurrencyWords.has(currencyCode)) {
-          console.log(`Skipped "${currencyCode}" - common non-currency word`)
-          continue
-        }
-        
-        // Only add if it's a valid ISO currency code
-        if (validCurrencyCodes.has(currencyCode)) {
-          // Additional context check: verify this is actually being used as a currency
-          // Check if nearby cells contain currency-related labels or numeric values
+        if (NON_CURRENCY_WORDS.has(currencyCode)) continue
+        if (KNOWN_ISO_CODES.has(currencyCode)) {
           let isCurrencyContext = false
-          
-          // Check adjacent cells for currency-related labels
-          const adjacentLabels = ['currency', 'currencies', 'money', 'cash', 'amount', 'value', 'price', 'cost', 'fee', 'charge']
+          const adjacentLabels = ['currency','currencies','money','cash','amount','value','price','cost','fee','charge']
           for (let dr = -1; dr <= 1; dr++) {
             for (let dc = -1; dc <= 1; dc++) {
               if (dr === 0 && dc === 0) continue
-              const checkR = R + dr
-              const checkC = C + dc
-              if (checkR >= 0 && checkR < data.length && checkC >= 0 && checkC < data[checkR].length) {
-                const adjacentValue = String(data[checkR][checkC]).toLowerCase()
-                if (adjacentLabels.some(label => adjacentValue.includes(label))) {
-                  isCurrencyContext = true
-                  break
-                }
+              const cR = R + dr, cC = C + dc
+              if (cR >= 0 && cR < data.length && cC >= 0 && cC < data[cR].length) {
+                const adj = String(data[cR][cC]).toLowerCase()
+                if (adjacentLabels.some(l => adj.includes(l))) { isCurrencyContext = true; break }
               }
             }
             if (isCurrencyContext) break
           }
-          
-          // Also accept if it's near a numeric value (currency amounts)
-          if (!isCurrencyContext) {
-            for (let dr = -1; dr <= 1; dr++) {
-              for (let dc = -1; dc <= 1; dc++) {
-                if (dr === 0 && dc === 0) continue
-                const checkR = R + dr
-                const checkC = C + dc
-                if (checkR >= 0 && checkR < data.length && checkC >= 0 && checkC < data[checkR].length) {
-                  const adjacentValue = data[checkR][checkC]
-                  if (adjacentValue && !isNaN(parseFloat(adjacentValue))) {
-                    isCurrencyContext = true
-                    break
-                  }
-                }
-              }
-              if (isCurrencyContext) break
-            }
-          }
-          
-          if (isCurrencyContext) {
-            detectedCurrencies.add(currencyCode)
-            console.log(`Detected currency "${currencyCode}" at ${rowColToCellRef(R, C)} (valid ISO code with context)`)
-          } else {
-            console.log(`Skipped "${currencyCode}" at ${rowColToCellRef(R, C)} - valid ISO code but no currency context`)
-          }
-        } else {
-          console.log(`Skipped "${currencyCode}" at ${rowColToCellRef(R, C)} - not a valid ISO currency code`)
-        }
-      }
-      
-      // Check if this looks like an exchange rate (decimal number)
-      if (cellValue && !isNaN(parseFloat(cellValue)) && parseFloat(cellValue) > 0 && parseFloat(cellValue) < 1000) {
-        // Check if there's a label nearby that indicates this is an exchange rate
-        if (C > 0 && String(data[R][C-1]).toLowerCase().includes('exch')) {
-          if (!detectedFields['Exchange Rate']) {
-            const location = rowColToCellRef(R, C)
-            detectedFields['Exchange Rate'] = {
-              value: cellValue,
-              location: location,
-              confidence: 0.7
-            }
-            console.log(`Detected "Exchange Rate": "${cellValue}" at ${location} (confidence: 0.70)`)
-          }
-        }
-        if (C < data[R].length - 1 && String(data[R][C+1]).toLowerCase().includes('exch')) {
-          if (!detectedFields['Exchange Rate']) {
-            const location = rowColToCellRef(R, C)
-            detectedFields['Exchange Rate'] = {
-              value: cellValue,
-              location: location,
-              confidence: 0.7
-            }
-            console.log(`Detected "Exchange Rate": "${cellValue}" at ${location} (confidence: 0.70)`)
-          }
+          if (isCurrencyContext) detectedCurrencies.add(currencyCode)
         }
       }
     }
   }
-  console.log('Pass 4 detected fields:', Object.keys(detectedFields))
-  console.log('Detected currencies:', Array.from(detectedCurrencies))
 
-  // Pass 5: Comprehensive scattered field search within table boundaries - look for values near labels in any direction
-  console.log('=== Pass 5: Comprehensive scattered field search (within table boundaries) ===')
+  // ---------- Pass 5: Scattered search ----------
+  console.log('=== Pass 5: Scattered search ===')
   for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
     for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol; C++) {
       const cellValue = data[R][C]
       if (!cellValue || String(cellValue).trim() === '') continue
-      
       const cellLower = String(cellValue).toLowerCase().trim()
-      
-      // Check if this cell could be a label for any required field
-      for (const requiredField of filteredRequiredColumns) {
-        if (detectedFields[requiredField]) continue // Already detected
-        
-        const variations = fieldVariations[requiredField] || [requiredField.toLowerCase()]
-        
-        // Check if current cell matches a field label
-        if (labelMatchesField(cellLower, variations)) {
-          // Search in all 8 directions for a value
-          const directions = [
-            { dr: 0, dc: 1 },   // Right
-            { dr: 1, dc: 0 },   // Down
-            { dr: 0, dc: -1 },  // Left
-            { dr: -1, dc: 0 },  // Up
-            { dr: 1, dc: 1 },   // Down-right
-            { dr: 1, dc: -1 },  // Down-left
-            { dr: -1, dc: 1 },  // Up-right
-            { dr: -1, dc: -1 }  // Up-left
-          ]
-          
-          let valueFound = false
-          for (const { dr, dc } of directions) {
-            const searchR = R + dr
-            const searchC = C + dc
-            
-            if (searchR >= 0 && searchR < data.length && searchC >= 0 && searchC < data[searchR].length) {
-              const nearbyValue = data[searchR][searchC]
-              if (nearbyValue && String(nearbyValue).trim() !== '') {
-                // Validate the value for this field type
-                if (isValidValueForField(requiredField, nearbyValue)) {
-                  // CRITICAL: Reject dates for numeric fields before assignment
-                  const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
-                  if (numericFields.includes(requiredField) && looksLikeDate(nearbyValue)) {
-                    console.log(`Skipped "${requiredField}": "${nearbyValue}" at ${rowColToCellRef(searchR, searchC)} (scattered, value is a date, not numeric)`)
-                    continue
-                  }
-                  
-                  // CRITICAL: Check if this value is already assigned to another field
-                  const valueStr = String(nearbyValue).trim()
-                  let isDuplicate = false
-                  for (const [existingField, existingData] of Object.entries(detectedFields)) {
-                    if (existingField !== requiredField && String(existingData.value).trim() === valueStr) {
-                      console.log(`Rejected "${requiredField}": "${nearbyValue}" (value already assigned to "${existingField}")`)
-                      isDuplicate = true
-                      break // Break out of duplicate check loop
-                    }
-                  }
-                  
-                  // If duplicate, skip this value entirely and continue to next direction
-                  if (isDuplicate) continue
-                  
-                  // Create a unique key for this label-value pair
-                  const pairKey = `${cellLower}_${nearbyValue}_${searchR}_${searchC}`
-                  
-                  // Skip if this label-value pair is already used
-                  if (usedLabelValuePairs.has(pairKey)) continue
-                  
-                  const location = rowColToCellRef(searchR, searchC)
-                  const confidence = calculateConfidence(cellLower, cellLower, nearbyValue, requiredField)
-                  
-                  // Only assign if confidence is high enough (removed threshold to catch all fields)
-                  // Accept all matches regardless of confidence
-                  if (confidence >= 0.0) {
-                    detectedFields[requiredField] = {
-                      value: nearbyValue,
-                      location: location,
-                      confidence: confidence
-                    }
-                    usedLabelValuePairs.add(pairKey)
-                    console.log(`Detected "${requiredField}": "${nearbyValue}" at ${location} (scattered, confidence: ${confidence.toFixed(2)})`)
-                    
-                    // Detect currency codes (only when Currency field is required)
-                    if (requiredField === 'Currency') {
-                      detectedCurrencies.add(String(nearbyValue).toUpperCase())
-                    }
-                    valueFound = true
-                    break // Found a valid value, stop searching directions
-                  }
-                }
-              }
+      if (isTableHeading(cellLower)) continue
+
+      const matchedField = findBestMatchingField(cellLower, filteredRequiredColumns, fieldVariations)
+      if (!matchedField) continue
+      if (detectedFields[matchedField]) continue
+
+      const directions = [
+        { dr: 0, dc: 1 }, { dr: 1, dc: 0 }, { dr: 0, dc: -1 }, { dr: -1, dc: 0 },
+        { dr: 1, dc: 1 }, { dr: 1, dc: -1 }, { dr: -1, dc: 1 }, { dr: -1, dc: -1 }
+      ]
+      let valueFound = false
+      for (const { dr, dc } of directions) {
+        for (let dist = 1; dist <= 5; dist++) {
+          const sR = R + dr * dist, sC = C + dc * dist
+          if (sR >= 0 && sR < data.length && sC >= 0 && sC < data[sR].length) {
+            const nearbyValue = data[sR][sC]
+            if (!nearbyValue || String(nearbyValue).trim() === '') continue
+            if (!isValidValueForField(matchedField, nearbyValue)) continue
+
+            const valueStr = String(nearbyValue).trim()
+            let isDuplicate = false
+            for (const [ef, ed] of Object.entries(detectedFields)) {
+              if (ef !== matchedField && String(ed.value).trim() === valueStr) { isDuplicate = true; break }
             }
+            if (isDuplicate) continue
+
+            const location = rowColToCellRef(sR, sC)
+            const confidence = calculateConfidence(cellLower, bestVariationFor(cellLower, matchedField), nearbyValue, matchedField)
+            detectedFields[matchedField] = { value: nearbyValue, location, confidence, detectedFrom: 'scattered' }
+            usedLabelValuePairs.add(`${cellLower}_${nearbyValue}_${sR}_${sC}`)
+            if (matchedField === 'Currency') detectedCurrencies.add(String(nearbyValue).toUpperCase())
+            valueFound = true
+            break
           }
-          
-          // If we found a value, move to next required field
-          if (valueFound) break
         }
+        if (valueFound) break
       }
     }
   }
-  console.log('Pass 5 detected fields:', Object.keys(detectedFields))
 
-  // Pass 6: Full worksheet scan for remaining fields (outside table boundaries)
-  // This is a catch-all for fields that might be outside detected table boundaries
-  console.log('=== Pass 6: Full worksheet scan for remaining fields ===')
-  const stillMissingFields = filteredRequiredColumns.filter(col => !detectedFields[col])
-  console.log('Fields still missing after Pass 5:', stillMissingFields)
-  
-  if (stillMissingFields.length > 0) {
+  // ---------- Pass 6: Full worksheet scan ----------
+  console.log('=== Pass 6: Full worksheet scan ===')
+  const stillMissing = filteredRequiredColumns.filter(col => !detectedFields[col])
+  if (stillMissing.length > 0) {
     for (let R = 0; R < data.length; R++) {
       for (let C = 0; C < (data[R]?.length || 0); C++) {
         const label = String(data[R][C]).toLowerCase().trim()
-        
-        // Check each missing field
-        for (const requiredField of stillMissingFields) {
-          if (detectedFields[requiredField]) continue // Already detected in this pass
-          
-          const variations = fieldVariations[requiredField] || [requiredField.toLowerCase()]
-          
-          // Check if label matches any variation
-          if (labelMatchesField(label, variations)) {
-            // Search in all 8 directions for a value
-            const directions = [
-              { dr: 0, dc: 1 },   // Right
-              { dr: 1, dc: 0 },   // Down
-              { dr: 0, dc: -1 },  // Left
-              { dr: -1, dc: 0 },  // Up
-              { dr: 1, dc: 1 },   // Down-right
-              { dr: 1, dc: -1 },  // Down-left
-              { dr: -1, dc: 1 },  // Up-right
-              { dr: -1, dc: -1 }  // Up-left
-            ]
-            
-            for (const { dr, dc } of directions) {
-              const searchR = R + dr
-              const searchC = C + dc
-              
-              if (searchR >= 0 && searchR < data.length && searchC >= 0 && searchC < data[searchR].length) {
-                const nearbyValue = data[searchR][searchC]
-                if (nearbyValue && String(nearbyValue).trim() !== '') {
-                  // CRITICAL: Reject dates for numeric fields before assignment
-                  const numericFields = ['Principal', 'Face Value', 'Amount', 'Price', 'Interest Rate', 'Discount Rate', 'Yield', 'Coupon Rate', 'Present Value', 'Carrying Value', 'Fair Value', 'Impairment', 'Exchange Rate', 'Rate', 'FaceValue', 'InterestRate', 'DiscountRate']
-                  if (numericFields.includes(requiredField) && looksLikeDate(nearbyValue)) {
-                    console.log(`Skipped "${requiredField}": "${nearbyValue}" at ${rowColToCellRef(searchR, searchC)} (pass6, value is a date, not numeric)`)
-                    continue
-                  }
-                  
-                  // Check if this value is already assigned to another field
-                  const valueStr = String(nearbyValue).trim()
-                  let isDuplicate = false
-                  for (const [existingField, existingData] of Object.entries(detectedFields)) {
-                    if (String(existingData.value).trim() === valueStr) {
-                      isDuplicate = true
-                      break
-                    }
-                  }
-                  
-                  if (!isDuplicate) {
-                    const location = rowColToCellRef(searchR, searchC)
-                    detectedFields[requiredField] = {
-                      value: nearbyValue,
-                      location: location,
-                      confidence: 0.5 // Moderate confidence for full worksheet scan
-                    }
-                    console.log(`Detected "${requiredField}" in full worksheet scan: "${nearbyValue}" at ${location}`)
-                    
-                    // Detect currency codes (only when Currency field is required)
-                    if (requiredField === 'Currency') {
-                      detectedCurrencies.add(String(nearbyValue).toUpperCase())
-                    }
-                    break // Found a value, stop searching directions
-                  }
-                }
+        if (isTableHeading(label)) continue
+
+        const matchedField = findBestMatchingField(label, stillMissing, fieldVariations)
+        if (!matchedField) continue
+        if (detectedFields[matchedField]) continue
+
+        const directions = [
+          { dr: 0, dc: 1 }, { dr: 1, dc: 0 }, { dr: 0, dc: -1 }, { dr: -1, dc: 0 },
+          { dr: 1, dc: 1 }, { dr: 1, dc: -1 }, { dr: -1, dc: 1 }, { dr: -1, dc: -1 }
+        ]
+        for (const { dr, dc } of directions) {
+          for (let dist = 1; dist <= 5; dist++) {
+            const sR = R + dr * dist, sC = C + dc * dist
+            if (sR >= 0 && sR < data.length && sC >= 0 && sC < data[sR].length) {
+              const nearbyValue = data[sR][sC]
+              if (!nearbyValue || String(nearbyValue).trim() === '') continue
+              if (!isValidValueForField(matchedField, nearbyValue)) continue
+
+              const valueStr = String(nearbyValue).trim()
+              let isDuplicate = false
+              for (const [, ed] of Object.entries(detectedFields)) {
+                if (String(ed.value).trim() === valueStr) { isDuplicate = true; break }
               }
+              if (isDuplicate) continue
+
+              detectedFields[matchedField] = {
+                value: nearbyValue,
+                location: rowColToCellRef(sR, sC),
+                confidence: 0.5,
+                detectedFrom: 'full_scan'
+              }
+              if (matchedField === 'Currency') detectedCurrencies.add(String(nearbyValue).toUpperCase())
+              break
             }
           }
         }
       }
     }
   }
-  console.log('Pass 6 detected fields:', Object.keys(detectedFields))
 
-  console.log('=== Final Detection Results ===')
-  console.log('Total detected fields:', Object.keys(detectedFields).length)
-  console.log('Missing fields:', requiredColumns.filter(col => !detectedFields[col]))
-  
-  // CRITICAL: Log all detected values with their sources for debugging
-  console.log('=== ALL DETECTED VALUES WITH SOURCES ===')
-  for (const [field, data] of Object.entries(detectedFields)) {
-    console.log(`Field: "${field}" | Value: "${data.value}" | Location: "${data.location}" | Confidence: ${data.confidence.toFixed(2)}`)
-  }
-
-  // CRITICAL: Use synonym mapping to consolidate detected fields
-  // If a synonym field was detected but the primary field is required, map it
-  console.log('=== Applying Synonym Mapping ===')
+  // Synonym mapping
   for (const [primaryField, synonyms] of Object.entries(synonymMapping)) {
-    // Only process if the primary field is required
     if (!requiredColumns.includes(primaryField)) continue
-    
-    // Check if any synonym was detected instead of the primary
-    for (const synonym of synonyms) {
-      if (detectedFields[synonym] && !detectedFields[primaryField]) {
-        detectedFields[primaryField] = detectedFields[synonym]
-        console.log(`Mapped synonym "${synonym}" to primary field "${primaryField}"`)
-        delete detectedFields[synonym]
+    for (const syn of synonyms) {
+      if (detectedFields[syn] && !detectedFields[primaryField]) {
+        detectedFields[primaryField] = detectedFields[syn]
+        delete detectedFields[syn]
       }
     }
   }
 
-  // CRITICAL: Instrument name handling
-  // For single-instrument detection (no tableData provided), instrument name MUST come from worksheet name
-  // For multi-table detection (tableData provided), use detected "Instrument" field or table name
+  // Instrument name handling — STRICT, no fallback
   if (requiredColumns.includes('Instrument Name') || requiredColumns.includes('BondName') || requiredColumns.includes('TBillName')) {
-    const instrumentNameField = requiredColumns.includes('Instrument Name') ? 'Instrument Name' : 
-                                requiredColumns.includes('BondName') ? 'BondName' : 'TBillName'
-    
-    if (tableData) {
-      // Multi-table mode: use detected Instrument field if available, otherwise use Counterparty
+    const nameField = requiredColumns.includes('Instrument Name') ? 'Instrument Name'
+                    : requiredColumns.includes('BondName') ? 'BondName' : 'TBillName'
+    if (!detectedFields[nameField]) {
       if (detectedFields['Instrument']) {
-        detectedFields[instrumentNameField] = detectedFields['Instrument']
+        detectedFields[nameField] = detectedFields['Instrument']
       } else if (detectedFields['Counterparty']) {
-        detectedFields[instrumentNameField] = detectedFields['Counterparty']
+        detectedFields[nameField] = detectedFields['Counterparty']
       }
-      // If neither is detected, leave the field undetected - do NOT use fallback/mock data
-    } else {
-      // Single-table mode: Force instrument name to be the worksheet name
-      detectedFields[instrumentNameField] = {
-        value: sheetName,
-        location: 'Worksheet Name',
-        confidence: 1.0
-      }
-      console.log(`FORCED: ${instrumentNameField} = "${sheetName}" (from worksheet name)`)
+      // Otherwise: leave undetected. No fallback.
     }
   }
 
-  // Convert detected fields to simple value format for backward compatibility
   const simpleDetectedFields = {}
-  for (const [key, fieldData] of Object.entries(detectedFields)) {
-    simpleDetectedFields[key] = fieldData.value
+  for (const [k, fd] of Object.entries(detectedFields)) simpleDetectedFields[k] = fd.value
+
+  const missingFields = requiredColumns.filter(col => !detectedFields[col])
+
+  // ==========================================================================
+  // NEW Pass 7: Additional label-value pairs (everything else in the sheet)
+  // --------------------------------------------------------------------------
+  // Detects any label → value pair whose label does NOT match a required
+  // field. This is what makes the popup show the WHOLE sheet, not just the
+  // required fields. Returns as `additionalFields` — no calculations use it.
+  // ==========================================================================
+  console.log('=== Pass 7: Additional label-value pairs (all other sheet content) ===')
+  const additionalFields = {}
+  const additionalUsedPairs = new Set()
+
+  for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
+    for (let C = tableBoundaries.startCol; C < tableBoundaries.endCol; C++) {
+      const labelRaw = data[R][C]
+      if (labelRaw === null || labelRaw === undefined) continue
+      const label = String(labelRaw).trim()
+      if (!label) continue
+      if (label.length > 80) continue
+      if (isTableHeading(label)) continue
+      if (/^[\d.,%$€£¥₹+\-()\s]+$/.test(label)) continue
+      if (isDateLike(label)) continue
+      if (isCurrencyCodeStrict(label)) continue
+
+      const valueHit = findAdjacentValueRight(data, R, C, 5, tableBoundaries.endCol)
+      if (!valueHit) continue
+      const value = valueHit.value
+      const valueColOffset = valueHit.offset
+
+      // Skip if this label already matched a required field (already handled)
+      const matchedReq = findBestMatchingField(label.toLowerCase(), filteredRequiredColumns, fieldVariations)
+      if (matchedReq) continue
+
+      // Skip overly long value text (likely a paragraph, not a scalar)
+      if (typeof value === 'string' && value.length > 200) continue
+
+      // Skip if this exact label already captured
+      if (additionalFields[label]) continue
+
+      const pairKey = `${label}_${value}_${R}_${C}`
+      if (additionalUsedPairs.has(pairKey)) continue
+
+      additionalFields[label] = {
+        value,
+        location: rowColToCellRef(R, C + valueColOffset),
+        section: currentSectionName(data, R, tableBoundaries.startRow)
+      }
+      additionalUsedPairs.add(pairKey)
+    }
   }
 
-  // Return both detected fields and currencies
-  const missingFields = requiredColumns.filter(col => !detectedFields[col])
-  console.log('AUTO DETECT CONTEXT (FINAL):', {
-    instrumentType: effectiveInstrumentType,
-    requiredFields: requiredColumns,
-    detectedFields: simpleDetectedFields,
-    missingFields: missingFields
-  })
-  
+  function currentSectionName(data, R, startRow) {
+    // Walk upward from R to find the nearest text-only row (a section title)
+    for (let r = R - 1; r >= startRow; r--) {
+      const row = data[r] || []
+      const nonEmpty = row.filter(c => c !== null && c !== undefined && String(c).trim() !== '')
+      if (nonEmpty.length === 1 && String(nonEmpty[0]).trim().length < 60) {
+        const t = String(nonEmpty[0]).trim()
+        if (!/^[\d.,%$€£¥₹-]+$/.test(t)) return t
+      }
+      if (nonEmpty.length === 0) break
+    }
+    return ''
+  }
+
+  console.log('Additional fields detected:', Object.keys(additionalFields))
+
+  console.log('=== Final Detection ===')
+  console.log('Detected (required):', Object.keys(detectedFields))
+  console.log('Missing (required):', missingFields)
+  console.log('Additional (informational):', Object.keys(additionalFields))
+  console.log('Currencies:', Array.from(detectedCurrencies))
+
   return {
     fields: simpleDetectedFields,
-    fieldsWithMetadata: detectedFields, // Full metadata including location and confidence
+    fieldsWithMetadata: detectedFields,
     currencies: Array.from(detectedCurrencies),
-    missingFields: missingFields
+    missingFields,
+    headerRegions,
+    additionalFields
   }
 }
 
-/**
- * Extract value from adjacent cells around a label
- * @param {Array} data - 2D array of worksheet data
- * @param {number} row - Row index of the label
- * @param {number} col - Column index of the label
- * @param {string} fieldType - Type of field being detected
- * @returns {string|null} Extracted value or null
- */
-function extractValueFromAdjacent(data, row, col, fieldType) {
-  // Check right cell (most common pattern)
-  if (col + 1 < data[row].length) {
-    const rightValue = data[row][col + 1]
-    if (rightValue && rightValue !== '' && !isLabelLike(rightValue)) {
-      return rightValue
-    }
-  }
-  
-  // Check left cell
-  if (col - 1 >= 0) {
-    const leftValue = data[row][col - 1]
-    if (leftValue && leftValue !== '' && !isLabelLike(leftValue)) {
-      return leftValue
-    }
-  }
-  
-  // Check below cell
-  if (row + 1 < data.length && col < data[row + 1].length) {
-    const belowValue = data[row + 1][col]
-    if (belowValue && belowValue !== '' && !isLabelLike(belowValue)) {
-      return belowValue
-    }
-  }
-  
-  // Check above cell
-  if (row - 1 >= 0 && col < data[row - 1].length) {
-    const aboveValue = data[row - 1][col]
-    if (aboveValue && aboveValue !== '' && !isLabelLike(aboveValue)) {
-      return aboveValue
-    }
-  }
-  
-  return null
-}
-
-/**
- * Check if a value looks like a label (not a data value)
- * @param {string} value - Value to check
- * @returns {boolean} True if value looks like a label
- */
 function isLabelLike(value) {
   const str = String(value).toLowerCase().trim()
-  const labelWords = ['name', 'value', 'rate', 'date', 'amount', 'price', 'yield', 'coupon', 'discount', 'maturity', 'issue', 'currency', 'days', 'count', 'total', 'instrument', 'bond', 'security']
+  const labelWords = ['name','value','rate','date','amount','price','yield','coupon','discount','maturity','issue','currency','days','count','total','instrument','bond','security']
   return labelWords.some(word => str.includes(word) && str.length < 20)
 }

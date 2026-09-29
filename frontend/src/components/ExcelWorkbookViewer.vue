@@ -131,6 +131,7 @@
           </span>
           <v-icon v-if="table.type === 'table'" size="12" class="type-icon">mdi-table</v-icon>
           <v-icon v-else-if="table.type === 'section'" size="12" class="type-icon">mdi-text-box</v-icon>
+          <v-icon v-else-if="table.type === 'vertical_table'" size="12" class="type-icon">mdi-format-vertical-align-center</v-icon>
           <v-icon v-else-if="table.type === 'values'" size="12" class="type-icon">mdi-chart-bar</v-icon>
           {{ table.name }} (Row {{ table.startRow + 1 }} - {{ table.endRow + 1 }})
         </button>
@@ -382,6 +383,9 @@ function createCustomTableFromRows() {
     startCol: 0,
     endCol: activeSheet.value.fullData[0]?.length - 1 || 0,
     headerRow: startRow,
+    headerRowEnd: startRow,
+    headerRows: [startRow],
+    headerRowCount: 1,
     type: 'custom',
     name: `Custom Table (Rows ${startRow + 1} - ${endRow + 1})`
   }
@@ -439,6 +443,11 @@ function isMergedCell(row, col) {
   return false
 }
 
+// FIX #8: Highlight ONLY the actual detected header cells.
+// - Never highlight entire rows/columns.
+// - Never highlight empty cells outside the header.
+// - Never extend highlighting outside the actual table/section bounds.
+// - Supports BOTH horizontal and vertical header structures.
 function getCellStyle(row, col) {
   const styles = {
     width: getColumnWidth(col),
@@ -460,24 +469,81 @@ function getCellStyle(row, col) {
     fontSize: '13px'
   }
 
-  const currentRow = visibleRows.value[row]
-  const prevRow = row > 0 ? visibleRows.value[row - 1] : null
-  
-  if (currentRow && currentRow.length >= 1) {
-    const currentHasData = currentRow.some(cell => cell && String(cell).trim() !== '')
-    
-    if (currentHasData) {
-      const prevHasData = prevRow && prevRow.some(cell => cell && String(cell).trim() !== '')
-      
-      if (!prevHasData || row === 0) {
-        styles.backgroundColor = 'rgba(227, 242, 253, 0.3)'
-        styles.fontWeight = '600'
-        styles.color = '#0d47a1'
-        styles.borderBottom = '2px solid #0d47a1'
+  // Determine if this cell is an actual header cell of a detected structure.
+  let headerDepth = -1         // 0 = first horizontal header row, 1 = second header row
+  let isVerticalHeaderCell = false
+
+  for (const table of detectedTables.value) {
+    // Hard boundary: this cell must sit inside the table's bounding box.
+    if (row < table.startRow || row > table.endRow) continue
+    if (col < table.startCol || col > table.endCol) continue
+
+    // A header cell must actually contain a value — never highlight empty cells.
+    const rawValue = activeSheet.value?.fullData?.[row]?.[col]
+    const hasValue = rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== ''
+    if (!hasValue) continue
+
+    // ---- Horizontal header check ----
+    const headerRows = Array.isArray(table.headerRows) && table.headerRows.length
+      ? table.headerRows
+      : (table.headerRow !== undefined ? [table.headerRow] : [])
+    const hIdx = headerRows.indexOf(row)
+
+    if (hIdx !== -1) {
+      headerDepth = hIdx
+      break
+    }
+
+    // ---- Vertical header check ----
+    // For a vertical table, only the label column (table.startCol) is the header column,
+    // and only cells that actually contain a value are part of the header.
+    if (table.type === 'vertical_table' && col === table.startCol) {
+      isVerticalHeaderCell = true
+      break
+    }
+  }
+
+  if (headerDepth === 0) {
+    // First horizontal header row: strong highlight
+    styles.backgroundColor = 'rgba(227, 242, 253, 0.5)'
+    styles.fontWeight = '700'
+    styles.color = '#0d47a1'
+    styles.borderBottom = '2px solid #0d47a1'
+  } else if (headerDepth > 0) {
+    // Second (or later) horizontal header row: lighter highlight
+    styles.backgroundColor = 'rgba(227, 242, 253, 0.35)'
+    styles.fontWeight = '600'
+    styles.color = '#1565c0'
+    styles.borderBottom = '1px solid #0d47a1'
+  } else if (isVerticalHeaderCell) {
+    // Vertical header cell: highlight only that cell, with a right border
+    styles.backgroundColor = 'rgba(227, 242, 253, 0.5)'
+    styles.fontWeight = '700'
+    styles.color = '#0d47a1'
+    styles.borderRight = '2px solid #0d47a1'
+  } else {
+    // No detected header for this cell. Only fall back to the legacy heuristic
+    // when the row is a "first content row after a blank", and only when no
+    // table has been detected at all (to avoid stray highlights inside tables).
+    if (detectedTables.value.length === 0) {
+      const currentRow = visibleRows.value[row]
+      const prevRow = row > 0 ? visibleRows.value[row - 1] : null
+      if (currentRow && currentRow.length >= 1) {
+        const currentHasData = currentRow.some(cell => cell && String(cell).trim() !== '')
+        if (currentHasData) {
+          const prevHasData = prevRow && prevRow.some(cell => cell && String(cell).trim() !== '')
+          if (!prevHasData || row === 0) {
+            styles.backgroundColor = 'rgba(227, 242, 253, 0.3)'
+            styles.fontWeight = '600'
+            styles.color = '#0d47a1'
+            styles.borderBottom = '2px solid #0d47a1'
+          }
+        }
       }
     }
   }
 
+  // Merged cell handling (unchanged)
   let isInMergedRange = false
   for (const range of mergedRanges.value) {
     if (row >= range.min_row && row <= range.max_row &&
@@ -670,8 +736,12 @@ function detectTables() {
       startCol: structure.startCol,
       endCol: structure.endCol,
       headerRow: structure.headerRow,
+      headerRowEnd: structure.headerRowEnd !== undefined ? structure.headerRowEnd : structure.headerRow,
+      headerRows: Array.isArray(structure.headerRows) ? structure.headerRows : [structure.headerRow],
+      headerRowCount: Array.isArray(structure.headerRows) ? structure.headerRows.length : 1,
       type: structure.type,
-      name: structure.name
+      name: structure.name,
+      fields: structure.fields || null
     })
   })
 }
@@ -731,134 +801,207 @@ function classifyCellContent(cell, row, col) {
 
 function detectLabelValuePairs(data, cellAnalysis) {
   const pairs = []
-  
+
+  // ---- Horizontal label/value pairs (label above value) ----
   for (let row = 0; row < data.length - 1; row++) {
     for (let col = 0; col < (data[row]?.length || 0); col++) {
-      const currentCell = cellAnalysis[row][col]
-      const nextCell = cellAnalysis[row + 1][col]
-      
-      if (currentCell.isLabel && nextCell.isData) {
+      const currentCell = cellAnalysis[row]?.[col]
+      const nextCell = cellAnalysis[row + 1]?.[col]
+      if (currentCell && nextCell && currentCell.isLabel && nextCell.isData) {
         pairs.push({
           startRow: row,
           endRow: row + 1,
           startCol: col,
           endCol: col,
           headerRow: row,
+          headerRowEnd: row,
+          headerRows: [row],
           type: 'values',
           name: `${data[row][col]}: ${data[row + 1][col]}`.substring(0, 30)
         })
       }
     }
   }
-  
+
+  // ---- FIX #3 / FIX #8: Vertical tables ----
+  // (label in one column, corresponding value in the next column, repeated down rows)
+  const pairMap = new Map()
   for (let row = 0; row < data.length; row++) {
-    for (let col = 0; col < (data[row]?.length - 1); col++) {
-      const currentCell = cellAnalysis[row][col]
-      const nextCell = cellAnalysis[row][col + 1]
-      
-      if (currentCell.isLabel && nextCell.isData) {
+    const rowLen = data[row]?.length || 0
+    for (let col = 0; col < rowLen - 1; col++) {
+      const currentCell = cellAnalysis[row]?.[col]
+      const nextCell = cellAnalysis[row]?.[col + 1]
+      if (currentCell && nextCell && currentCell.isLabel && nextCell.isData) {
+        pairMap.set(`${row},${col}`, true)
+      }
+    }
+  }
+
+  const consumed = new Set()
+  for (let row = 0; row < data.length; row++) {
+    const rowLen = data[row]?.length || 0
+    for (let col = 0; col < rowLen - 1; col++) {
+      const key = `${row},${col}`
+      if (!pairMap.has(key) || consumed.has(key)) continue
+
+      const groupRows = [row]
+      consumed.add(key)
+
+      // Expand downward
+      let nextRow = row + 1
+      while (pairMap.has(`${nextRow},${col}`) && !consumed.has(`${nextRow},${col}`)) {
+        consumed.add(`${nextRow},${col}`)
+        groupRows.push(nextRow)
+        nextRow++
+      }
+      // Expand upward
+      let prevRow = row - 1
+      while (pairMap.has(`${prevRow},${col}`) && !consumed.has(`${prevRow},${col}`)) {
+        consumed.add(`${prevRow},${col}`)
+        groupRows.unshift(prevRow)
+        prevRow--
+      }
+
+      if (groupRows.length >= 2) {
+        const firstLabel = data[groupRows[0]]?.[col]
+        pairs.push({
+          startRow: groupRows[0],
+          endRow: groupRows[groupRows.length - 1],
+          startCol: col,
+          endCol: col + 1,
+          headerRow: groupRows[0],
+          headerRowEnd: groupRows[0],
+          headerRows: [groupRows[0]],
+          type: 'vertical_table',
+          name: `${firstLabel} (vertical, ${groupRows.length} fields)`.substring(0, 40),
+          fields: groupRows.map(r => ({
+            label: data[r]?.[col],
+            value: data[r]?.[col + 1],
+            labelCell: { row: r, col: col },
+            valueCell: { row: r, col: col + 1 }
+          }))
+        })
+      } else {
         pairs.push({
           startRow: row,
           endRow: row,
           startCol: col,
           endCol: col + 1,
           headerRow: row,
+          headerRowEnd: row,
+          headerRows: [row],
           type: 'values',
           name: `${data[row][col]}: ${data[row][col + 1]}`.substring(0, 30)
         })
       }
     }
   }
-  
+
   return pairs
 }
 
 function detectContentBasedTables(data, cellAnalysis) {
+  // FIX #3 / FIX #8: Rewritten to support both single-row and two-row (multi-level) headers.
   const tables = []
-  
-  const potentialHeaderRows = []
+
+  const rowMeta = []
   for (let row = 0; row < data.length; row++) {
-    let headerCount = 0
-    let totalCells = 0
-    
-    for (let col = 0; col < (data[row]?.length || 0); col++) {
-      if (cellAnalysis[row][col].type !== 'empty') {
-        totalCells++
-        if (cellAnalysis[row][col].isHeader) {
-          headerCount++
-        }
-      }
-    }
-    
     let textCount = 0
-    for (let col = 0; col < (data[row]?.length || 0); col++) {
-      if (cellAnalysis[row][col].type === 'text' && cellAnalysis[row][col].type !== 'empty') {
-        textCount++
+    let headerKeywordCount = 0
+    let totalCells = 0
+    const rowLen = data[row]?.length || 0
+    for (let col = 0; col < rowLen; col++) {
+      const c = cellAnalysis[row]?.[col]
+      if (c && c.type !== 'empty') {
+        totalCells++
+        if (c.type === 'text') textCount++
+        if (c.isHeader) headerKeywordCount++
       }
     }
-    const isMostlyText = totalCells >= 2 && (textCount / totalCells >= 0.5)
-    
-    if (totalCells >= 2 && (isMostlyText || headerCount >= 1)) {
-      const isCovered = potentialHeaderRows.some(existingRow => 
-        Math.abs(existingRow - row) <= 1
-      )
-      if (!isCovered) {
-        potentialHeaderRows.push(row)
+    const isTextHeavy =
+      totalCells >= 2 &&
+      ((textCount / totalCells) >= 0.6 || headerKeywordCount >= 1)
+    rowMeta.push({ row, totalCells, textCount, headerKeywordCount, isTextHeavy })
+  }
+
+  const headerGroups = []
+  let currentGroup = []
+  for (const meta of rowMeta) {
+    if (meta.isTextHeavy) {
+      if (currentGroup.length === 0 || meta.row === currentGroup[currentGroup.length - 1] + 1) {
+        currentGroup.push(meta.row)
+      } else {
+        if (currentGroup.length > 0) headerGroups.push([...currentGroup])
+        currentGroup = [meta.row]
+      }
+    } else {
+      if (currentGroup.length > 0) {
+        headerGroups.push([...currentGroup])
+        currentGroup = []
       }
     }
   }
-  
-  for (const headerRow of potentialHeaderRows) {
+  if (currentGroup.length > 0) headerGroups.push([...currentGroup])
+
+  for (const group of headerGroups) {
+    const headerRowStart = group[0]
+    const headerRowEnd = group[group.length - 1]
+
     let startCol = -1
     let endCol = -1
-    
-    for (let col = 0; col < (data[headerRow]?.length || 0); col++) {
-      if (cellAnalysis[headerRow][col].type !== 'empty') {
-        if (startCol === -1) startCol = col
-        endCol = col
-      }
-    }
-    
-    if (startCol === -1) continue
-    
-    let endRow = headerRow
-    
-    for (let row = headerRow + 1; row < data.length; row++) {
-      let hasData = false
-      
-      for (let col = startCol; col <= endCol; col++) {
-        if (cellAnalysis[row][col]?.type !== 'empty') {
-          hasData = true
-          break
+    for (let r = headerRowStart; r <= headerRowEnd; r++) {
+      const rowLen = data[r]?.length || 0
+      for (let col = 0; col < rowLen; col++) {
+        const c = cellAnalysis[r]?.[col]
+        if (c && c.type !== 'empty') {
+          if (startCol === -1 || col < startCol) startCol = col
+          if (col > endCol) endCol = col
         }
       }
-      
-      if (hasData) {
-        endRow = row
-      } else {
-        break
-      }
     }
-    
-    if (endRow > headerRow) {
-      const headerContent = data[headerRow].slice(startCol, endCol + 1)
-        .filter(cell => cell && cell !== '')
+    if (startCol === -1 || endCol === -1) continue
+
+    let endRow = headerRowEnd
+    for (let row = headerRowEnd + 1; row < data.length; row++) {
+      let hasContent = false
+      let textCount = 0
+      let totalCells = 0
+      for (let col = startCol; col <= endCol; col++) {
+        const c = cellAnalysis[row]?.[col]
+        if (c && c.type !== 'empty') {
+          hasContent = true
+          totalCells++
+          if (c.type === 'text') textCount++
+        }
+      }
+      if (!hasContent) break
+      const isTextHeavy = totalCells >= 2 && (textCount / totalCells) >= 0.7
+      if (isTextHeavy) break
+      endRow = row
+    }
+
+    if (endRow > headerRowEnd) {
+      const headerContent = data[headerRowStart].slice(startCol, endCol + 1)
+        .filter(cell => cell !== null && cell !== undefined && String(cell).trim() !== '')
         .join(' - ')
         .substring(0, 40)
       const tableName = headerContent || `Table ${tables.length + 1}`
-      
+
       tables.push({
-        startRow: headerRow,
+        startRow: headerRowStart,
         endRow: endRow,
         startCol: startCol,
         endCol: endCol,
-        headerRow: headerRow,
+        headerRow: headerRowStart,
+        headerRowEnd: headerRowEnd,
+        headerRows: [...group],
+        headerRowCount: group.length,
         type: 'table',
         name: tableName
       })
     }
   }
-  
+
   return tables
 }
 
@@ -911,6 +1054,8 @@ function detectContentSections(data, cellAnalysis) {
               startCol: sectionStartCol,
               endCol: sectionEndCol,
               headerRow: sectionStartRow,
+              headerRowEnd: sectionStartRow,
+              headerRows: [sectionStartRow],
               type: 'section',
               name: sectionName
             })
@@ -942,6 +1087,8 @@ function detectContentSections(data, cellAnalysis) {
             startCol: sectionStartCol,
             endCol: sectionEndCol,
             headerRow: sectionStartRow,
+            headerRowEnd: sectionStartRow,
+            headerRows: [sectionStartRow],
             type: 'section',
             name: sectionName
           })
@@ -965,6 +1112,8 @@ function detectContentSections(data, cellAnalysis) {
       startCol: sectionStartCol,
       endCol: sectionEndCol,
       headerRow: sectionStartRow,
+      headerRowEnd: sectionStartRow,
+      headerRows: [sectionStartRow],
       type: 'section',
       name: sectionName
     })
@@ -1027,13 +1176,24 @@ function selectTable(table) {
     const isolatedData = []
     const headers = []
     
-    const headerRowIndex = table.headerRow !== undefined ? table.headerRow : table.startRow
+    // FIX #3 / FIX #8: Support 1-row and 2-row headers. Combined header labels for multi-row.
+    const headerRows = Array.isArray(table.headerRows) && table.headerRows.length
+      ? table.headerRows
+      : [table.headerRow !== undefined ? table.headerRow : table.startRow]
+    const headerRowEnd = headerRows[headerRows.length - 1]
+    
     for (let col = table.startCol; col <= table.endCol; col++) {
-      const headerCell = activeSheet.value.fullData[headerRowIndex]?.[col]
-      headers.push(headerCell || `Column ${col}`)
+      const parts = []
+      for (const hr of headerRows) {
+        const v = activeSheet.value.fullData[hr]?.[col]
+        if (v !== undefined && v !== null && String(v).trim() !== '') {
+          parts.push(String(v).trim())
+        }
+      }
+      headers.push(parts.join(' ') || `Column ${col}`)
     }
     
-    for (let row = headerRowIndex + 1; row <= table.endRow; row++) {
+    for (let row = headerRowEnd + 1; row <= table.endRow; row++) {
       const rowData = {}
       for (let col = table.startCol; col <= table.endCol; col++) {
         const cellValue = activeSheet.value.fullData[row]?.[col]
@@ -1050,12 +1210,15 @@ function selectTable(table) {
       type: table.type || 'table',
       data: isolatedData,
       headers: headers,
+      headerRows: [...headerRows],
+      headerRowCount: headerRows.length,
       tableRange: {
         startRow: table.startRow,
         endRow: table.endRow,
         startCol: table.startCol,
         endCol: table.endCol,
-        headerRow: headerRowIndex
+        headerRow: headerRows[0],
+        headerRowEnd: headerRowEnd
       }
     })
   }
@@ -1084,23 +1247,50 @@ function autoDetectSelectedTables() {
     return
   }
 
+  // FIX #2 / #4 / #5 / #8: Emit EVERY selected table with full source metadata.
   const selectedTableData = []
   for (const index of selectedTables.value) {
     const table = detectedTables.value[index]
     if (table && activeSheet.value && activeSheet.value.fullData) {
+      const headerRows = Array.isArray(table.headerRows) && table.headerRows.length
+        ? table.headerRows
+        : [table.headerRow !== undefined ? table.headerRow : table.startRow]
+      const headerRowEnd = headerRows[headerRows.length - 1]
+
+      // Combined header labels for each column (handles 2-row headers).
+      // Only include cells that actually contain a value — never fabricate labels.
+      const headerLabels = []
+      for (let col = table.startCol; col <= table.endCol; col++) {
+        const parts = []
+        for (const hr of headerRows) {
+          const v = activeSheet.value.fullData[hr]?.[col]
+          if (v !== undefined && v !== null && String(v).trim() !== '') {
+            parts.push(String(v).trim())
+          }
+        }
+        headerLabels.push(parts.join(' ') || `Col ${col - table.startCol + 1}`)
+      }
+
       const tableData = {
         tableIndex: index,
         tableName: table.name,
         sheetName: activeSheet.value.name,
+        type: table.type || 'table',
+        headerRows: [...headerRows],
+        headerRowCount: headerRows.length,
+        headerLabels: headerLabels,
         range: {
           startRow: table.startRow,
           endRow: table.endRow,
           startCol: table.startCol,
-          endCol: table.endCol
+          endCol: table.endCol,
+          headerRow: headerRows[0],
+          headerRowEnd: headerRowEnd
         },
         data: []
       }
 
+      // Include the full table block preserving original cell order
       for (let row = table.startRow; row <= table.endRow; row++) {
         if (activeSheet.value.fullData[row]) {
           tableData.data.push(
@@ -1116,6 +1306,7 @@ function autoDetectSelectedTables() {
   emit('multi-table-detect', {
     sheetName: activeSheet.value.name,
     tables: selectedTableData,
+    selectedCount: selectedTableData.length,
     instrumentType: props.instrumentType
   })
 }

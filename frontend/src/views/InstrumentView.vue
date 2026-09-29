@@ -251,6 +251,51 @@
                       <strong>Instrument:</strong> {{ instrumentType === 'money-market' ? 'Money Market' : instrumentType === 'treasury-bills' ? 'Treasury Bills' : 'Bonds' }}
                       ({{ instrumentType }})
                     </div>
+                    
+                    <!-- Currency Selection for Auto-Detection -->
+                    <div class="currency-selection-section">
+                      <label class="currency-label">Select Currency to Include in Auto-Detected Values:</label>
+                      <v-select
+                        v-model="selectedCurrency"
+                        @update:model-value="handleCurrencyChange"
+                        :items="currencyOptions"
+                        label="Currency"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        class="currency-select-vuetify"
+                      ></v-select>
+                      <div v-if="selectedCurrency === 'custom'" class="custom-currency-input-wrapper">
+                        <v-text-field
+                          v-model="customCurrency"
+                          label="Custom Currency Code"
+                          placeholder="e.g., ZWG"
+                          variant="outlined"
+                          density="compact"
+                          maxlength="3"
+                          hide-details
+                          @input="handleCustomCurrencyInput"
+                          class="custom-currency-field-vuetify"
+                        >
+                          <template v-slot:append>
+                            <span class="currency-code-badge">{{ customCurrency.length }}/3</span>
+                          </template>
+                        </v-text-field>
+                      </div>
+                      <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
+                        <strong>Detected Currencies in Section:</strong> {{ detectedCurrencies.join(', ') }}
+                      </div>
+                      <div v-if="selectedCurrency && selectedCurrency !== 'custom'" class="selected-currency-info">
+                        Including values for: <strong>{{ selectedCurrency }}</strong>
+                      </div>
+                      <div v-else-if="selectedCurrency === 'custom' && customCurrency" class="selected-currency-info">
+                        Including values for custom currency: <strong>{{ customCurrency.toUpperCase() }}</strong>
+                      </div>
+                      <div v-else class="selected-currency-info">
+                        Including values for all detected currencies
+                      </div>
+                    </div>
+                    
                     <div class="multi-table-summary">
                       <strong>{{ multiTableDetectionResults.length }} table(s) selected</strong>
                       <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">All detected fields from selected tables will be combined into a single instrument for calculations.</p>
@@ -298,32 +343,45 @@
                     
                     <!-- Currency Selection for Auto-Detection -->
                     <div class="currency-selection-section">
-                      <label class="currency-label">Select Currency for Auto-Detection:</label>
-                      <select v-model="selectedCurrency" class="currency-select">
-                        <option value="">-- All Currencies --</option>
-                        <option value="USD">USD</option>
-                        <option value="EUR">EUR</option>
-                        <option value="ZWG">ZWG</option>
-                        <option value="custom">-- Custom (type below) --</option>
-                      </select>
+                      <label class="currency-label">Select Currency to Include in Auto-Detected Values:</label>
+                      <v-select
+                        v-model="selectedCurrency"
+                        @update:model-value="handleCurrencyChange"
+                        :items="currencyOptions"
+                        label="Currency"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        class="currency-select-vuetify"
+                      ></v-select>
                       <div v-if="selectedCurrency === 'custom'" class="custom-currency-input-wrapper">
-                        <input 
-                          v-model="customCurrency" 
-                          placeholder="e.g., ZWG" 
-                          class="custom-currency-field"
+                        <v-text-field
+                          v-model="customCurrency"
+                          label="Custom Currency Code"
+                          placeholder="e.g., ZWG"
+                          variant="outlined"
+                          density="compact"
                           maxlength="3"
+                          hide-details
                           @input="handleCustomCurrencyInput"
-                        />
-                        <span class="currency-code-badge">{{ customCurrency.length }}/3</span>
+                          class="custom-currency-field-vuetify"
+                        >
+                          <template v-slot:append>
+                            <span class="currency-code-badge">{{ customCurrency.length }}/3</span>
+                          </template>
+                        </v-text-field>
+                      </div>
+                      <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
+                        <strong>Detected Currencies in Section:</strong> {{ detectedCurrencies.join(', ') }}
                       </div>
                       <div v-if="selectedCurrency && selectedCurrency !== 'custom'" class="selected-currency-info">
-                        Filtering for: <strong>{{ selectedCurrency }}</strong>
+                        Including values for: <strong>{{ selectedCurrency }}</strong>
                       </div>
                       <div v-else-if="selectedCurrency === 'custom' && customCurrency" class="selected-currency-info">
-                        Filtering for custom currency: <strong>{{ customCurrency.toUpperCase() }}</strong>
+                        Including values for custom currency: <strong>{{ customCurrency.toUpperCase() }}</strong>
                       </div>
                       <div v-else class="selected-currency-info">
-                        Showing all detected currencies
+                        Including values for all detected currencies
                       </div>
                     </div>
                     
@@ -1650,6 +1708,130 @@ function filterToCalculatedFields(row, instrumentType) {
   return filteredRow
 }
 
+// ============================================================
+// DETECTION NORMALIZATION — no mockdata, no fallbacks.
+// Re-labels ONLY what the detector already found, using a
+// strict per-instrument alias map, and rejects impossible values.
+// ============================================================
+const DETECTION_ALIASES = {
+  'money-market': {
+    'InstrumentName':  ['Instrument Name', 'InstrumentName', 'Name', 'Counterparty'],
+    'InstrumentType':  ['Instrument Type', 'Type'],
+    'FaceValue':       ['Face Value', 'FaceValue', 'Principal', 'Notional', 'Nominal', 'Amount'],
+    'InterestRate':    ['Interest Rate', 'InterestRate', 'Rate', 'Coupon Rate', 'CouponRate'],
+    'IssueDate':       ['Issue Date', 'IssueDate'],
+    'MaturityDate':    ['Maturity Date', 'MaturityDate', 'Maturity'],
+    'SettlementDate':  ['Settlement Date', 'SettlementDate', 'Valuation Date', 'ValuationDate'],
+    'DaysToMaturity':  ['Days to Maturity', 'DaysToMaturity', 'Term', 'Tenor'],
+    'PurchasePrice':   ['Purchase Price', 'PurchasePrice', 'Price'],
+  },
+  'bonds': {
+    'InstrumentName':  ['Instrument Name', 'InstrumentName', 'BondName', 'Bond Name', 'Name', 'Counterparty'],
+    'InstrumentType':  ['Instrument Type', 'Type'],
+    'FaceValue':       ['Face Value', 'FaceValue', 'Principal', 'Par Value', 'ParValue', 'Notional', 'Nominal', 'Amount'],
+    'CouponRate':      ['Coupon Rate', 'CouponRate', 'Interest Rate', 'InterestRate', 'Coupon', 'Rate'],
+    'CouponFrequency': ['Coupon Frequency', 'CouponFrequency', 'Interest Pmt Frequency', 'Interest Payment Frequency', 'Interest Pmt Fequency', 'Payment Frequency', 'Frequency'],
+    'IssueDate':       ['Issue Date', 'IssueDate'],
+    'MaturityDate':    ['Maturity Date', 'MaturityDate', 'Maturity'],
+    'NextCouponDate':  ['Next Coupon Payment Date', 'NextCouponPaymentDate', 'Next Coupon Date'],
+    'SettlementDate':  ['Settlement Date', 'SettlementDate', 'Valuation Date', 'ValuationDate'],
+    'YieldToMaturity': ['Yield to Maturity', 'YieldToMaturity', 'YTM'],
+  },
+  'tbills': {
+    'InstrumentName':  ['Instrument Name', 'InstrumentName', 'Name', 'Counterparty'],
+    'InstrumentType':  ['Instrument Type', 'Type'],
+    'FaceValue':       ['Face Value', 'FaceValue', 'Principal', 'Notional', 'Nominal', 'Amount'],
+    'DiscountRate':    ['Discount Rate', 'DiscountRate', 'Rate'],
+    'IssueDate':       ['Issue Date', 'IssueDate'],
+    'MaturityDate':    ['Maturity Date', 'MaturityDate', 'Maturity'],
+    'SettlementDate':  ['Settlement Date', 'SettlementDate', 'Valuation Date', 'ValuationDate'],
+    'DaysToMaturity':  ['Days to Maturity', 'DaysToMaturity', 'Term', 'Tenor'],
+  }
+}
+
+// Recognised frequency tokens (rejects numeric garbage)
+const VALID_FREQUENCIES = /^(annual(ly)?|semi[- ]?annual(ly)?|quarter(ly)?|month(ly)?|weekly|daily|at maturity|zero|bullet|1|2|4|12|52|365)$/i
+
+// Normalise a raw detector key to a canonical required-column key for a given instrument
+function canonicalKeyFor(rawKey, instrumentType) {
+  const aliases = DETECTION_ALIASES[instrumentType] || {}
+  const norm = String(rawKey).toLowerCase().replace(/[\s_\-()]+/g, '')
+  for (const [canonical, aliasList] of Object.entries(aliases)) {
+    for (const alias of aliasList) {
+      if (alias.toLowerCase().replace(/[\s_\-()]+/g, '') === norm) return canonical
+    }
+  }
+  return null
+}
+
+// Reject garbage values that the detector incorrectly attached to a field
+function isPlausibleValue(canonicalKey, value) {
+  if (value === null || value === undefined || value === '') return false
+
+  if (canonicalKey === 'CouponFrequency') {
+    return VALID_FREQUENCIES.test(String(value).trim())
+  }
+
+  const numericKeys = [
+    'FaceValue', 'InterestRate', 'CouponRate', 'DiscountRate',
+    'YieldToMaturity', 'DaysToMaturity', 'PurchasePrice'
+  ]
+  if (numericKeys.includes(canonicalKey)) {
+    const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[%,$\s]/g, ''))
+    if (isNaN(n)) return false
+    // Rates are 0–100 %, values are >= 0
+    if (canonicalKey.endsWith('Rate') || canonicalKey === 'YieldToMaturity') {
+      return n >= 0 && n <= 100
+    }
+    return n >= 0
+  }
+
+  if (canonicalKey.endsWith('Date')) {
+    const d = new Date(value)
+    return !isNaN(d.getTime())
+  }
+
+  return true
+}
+
+/**
+ * Normalise the detector output into canonical required-column keys.
+ * - Never invents values
+ * - Re-labels only what was actually detected
+ * - Drops implausible/garbage values
+ */
+function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType) {
+  const normalised = {}
+  const normalisedMeta = {}
+  const usedCanonical = new Set()
+
+  // Stable iteration order: longest raw keys first (more specific first)
+  const rawEntries = Object.entries(fields || {}).sort(
+    (a, b) => String(b[0]).length - String(a[0]).length
+  )
+
+  for (const [rawKey, rawValue] of rawEntries) {
+    const canonical = canonicalKeyFor(rawKey, instrumentType)
+    if (!canonical) continue                       // not a required field — skip
+    if (usedCanonical.has(canonical)) continue     // already mapped — skip duplicate
+
+    const actualValue =
+      rawValue && typeof rawValue === 'object' && 'value' in rawValue
+        ? rawValue.value
+        : rawValue
+
+    if (!isPlausibleValue(canonical, actualValue)) continue  // reject garbage
+
+    normalised[canonical] = actualValue
+    usedCanonical.add(canonical)
+
+    const meta = fieldsWithMetadata ? fieldsWithMetadata[rawKey] : null
+    if (meta) normalisedMeta[canonical] = meta
+  }
+
+  return { fields: normalised, fieldsWithMetadata: normalisedMeta }
+}
+
 const instrumentType = ref('')
 
 const instrumentConfigs = ref({
@@ -2190,6 +2372,14 @@ function getDisplayColumns() {
 }
 
 const instrumentSummaryColumnsForDisplay = computed(() => getDisplayColumns())
+
+const currencyOptions = computed(() => [
+  { title: '-- All Currencies --', value: '' },
+  { title: 'USD', value: 'USD' },
+  { title: 'EUR', value: 'EUR' },
+  { title: 'ZWG', value: 'ZWG' },
+  { title: '-- Custom (type below) --', value: 'custom' }
+])
 
 const instrumentSearchQuery = ref('')
 
@@ -3414,6 +3604,7 @@ async function autoDetectSingleInstrument() {
   autoDetectedFieldsWithMetadata.value = {}
   detectedCurrencies.value = []
   detectedInstrumentType.value = ''
+  // Don't reset selectedCurrency - preserve user's choice
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
 
@@ -3438,23 +3629,32 @@ async function autoDetectSingleInstrument() {
       currencyFilter
     )
 
-    if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
-      autoDetectedFields.value = detectionResult.fields
-      autoDetectedFieldsWithMetadata.value = detectionResult.fieldsWithMetadata
+    // ⬇️ NEW: normalise detector output into canonical required-column keys
+    const normalized = normalizeDetectedFields(
+      detectionResult?.fields,
+      detectionResult?.fieldsWithMetadata,
+      instrumentType.value
+    )
+
+    if (Object.keys(normalized.fields).length > 0) {
+      autoDetectedFields.value = normalized.fields
+      autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
       detectedCurrencies.value = detectionResult.currencies || []
       detectedInstrumentType.value = instrumentType.value
       
-      if (detectedCurrencies.value.length === 1) {
-        selectedCurrency.value = detectedCurrencies.value[0]
-      } else if (detectedCurrencies.value.length > 1) {
-        selectedCurrency.value = ''
-      } else {
-        selectedCurrency.value = ''
+      // Only auto-select currency if user hasn't already selected one
+      if (!selectedCurrency.value) {
+        if (detectedCurrencies.value.length === 1) {
+          selectedCurrency.value = detectedCurrencies.value[0]
+        } else if (detectedCurrencies.value.length > 1) {
+          // Keep empty so user can choose
+          selectedCurrency.value = ''
+        }
       }
       
       showDetectionSuccess.value = true
     } else {
-      alert('Auto Detect could not identify required fields. Please try manual entry.')
+      alert('Auto Detect could not identify any required fields. Please try manual entry.')
     }
   } catch (error) {
     console.error('Auto Detect error:', error)
@@ -3500,12 +3700,6 @@ async function handleMultiTableDetect(event) {
       try {
         const tableData = table.data
         
-        const tableWorksheet = {
-          name: table.tableName,
-          data: tableData,
-          range: table.range
-        }
-        
         const detectionResult = await autoDetectInstrumentFields(
           originalFileBuffer.value,
           event.sheetName,
@@ -3518,14 +3712,21 @@ async function handleMultiTableDetect(event) {
 
         console.log(`Detection result for ${table.tableName}:`, detectionResult)
 
-        if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
+        // ⬇️ NEW: normalise per-table detector output
+        const normalized = normalizeDetectedFields(
+          detectionResult?.fields,
+          detectionResult?.fieldsWithMetadata,
+          event.instrumentType
+        )
+
+        if (Object.keys(normalized.fields).length > 0) {
           detectedInstruments.push({
             tableName: table.tableName,
-            instrumentName: detectionResult.fields.Instrument || table.tableName,
-            fields: detectionResult.fields,
-            fieldsWithMetadata: detectionResult.fieldsWithMetadata,
+            instrumentName: normalized.fields.InstrumentName || table.tableName,
+            fields: normalized.fields,
+            fieldsWithMetadata: normalized.fieldsWithMetadata,
             currencies: detectionResult.currencies || [],
-            missingFields: detectionResult.missingFields || [],
+            missingFields: requiredColumns.value.filter(c => !normalized.fields[c]),
             range: table.range
           })
         }
@@ -3554,14 +3755,14 @@ function useMultiTableDetectedFields() {
   for (const instrument of multiTableDetectionResults.value) {
     for (const [key, fieldObj] of Object.entries(instrument.fields)) {
       const actualValue = typeof fieldObj === 'object' && fieldObj !== null ? fieldObj.value : fieldObj
-      if (!combinedFields[key]) {
+      if (!(key in combinedFields)) {
         combinedFields[key] = actualValue
       }
     }
   }
 
-  if (!combinedFields.Instrument && multiTableDetectionResults.value.length > 0) {
-    combinedFields.Instrument = multiTableDetectionResults.value[0].instrumentName || 'Combined Instrument'
+  if (!combinedFields.InstrumentName && multiTableDetectionResults.value.length > 0) {
+    combinedFields.InstrumentName = multiTableDetectionResults.value[0].instrumentName || ''
   }
 
   const tabularData = [combinedFields]
@@ -3587,31 +3788,33 @@ function useMultiTableDetectedFields() {
 
 function formatDetectedValue(field, value) {
   if (value === null || value === undefined) return '—'
-  
-  if (field.toLowerCase().includes('date') || field.toLowerCase().includes('maturity')) {
+
+  const lc = String(field).toLowerCase()
+
+  // Frequency must render as text, never as %
+  if (lc.includes('frequency')) {
+    return String(value)
+  }
+
+  if (lc.includes('date') || lc.includes('maturity')) {
     try {
       const date = new Date(value)
       if (!isNaN(date.getTime())) {
         return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
       }
-    } catch {
-    }
+    } catch {}
   }
-  
-  if (field.toLowerCase().includes('rate') || field.toLowerCase().includes('yield') || field.toLowerCase().includes('coupon') || field.toLowerCase().includes('discount')) {
+
+  if (lc.includes('rate') || lc.includes('yield') || lc.includes('coupon') || lc.includes('discount')) {
     const num = parseFloat(value)
-    if (!isNaN(num)) {
-      return num.toFixed(2) + '%'
-    }
+    if (!isNaN(num)) return num.toFixed(2) + '%'
   }
-  
-  if (field.toLowerCase().includes('value') || field.toLowerCase().includes('amount') || field.toLowerCase().includes('price') || field.toLowerCase().includes('principal')) {
+
+  if (lc.includes('value') || lc.includes('amount') || lc.includes('price') || lc.includes('principal')) {
     const num = parseFloat(value)
-    if (!isNaN(num)) {
-      return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    }
+    if (!isNaN(num)) return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
-  
+
   return String(value)
 }
 
@@ -3631,10 +3834,17 @@ async function handleCustomCurrencyInput() {
         null,
         customCurrency.value // Already uppercased
       )
-      
-      if (detectionResult && detectionResult.fields && Object.keys(detectionResult.fields).length > 0) {
-        autoDetectedFields.value = detectionResult.fields
-        autoDetectedFieldsWithMetadata.value = detectionResult.fieldsWithMetadata
+
+      // ⬇️ NEW: normalise
+      const normalized = normalizeDetectedFields(
+        detectionResult?.fields,
+        detectionResult?.fieldsWithMetadata,
+        instrumentType.value
+      )
+
+      if (Object.keys(normalized.fields).length > 0) {
+        autoDetectedFields.value = normalized.fields
+        autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
         detectedCurrencies.value = detectionResult.currencies || []
       }
     } catch (error) {
@@ -3643,32 +3853,89 @@ async function handleCustomCurrencyInput() {
   }
 }
 
+async function handleCurrencyChange() {
+  console.log('handleCurrencyChange called with selectedCurrency:', selectedCurrency.value)
+  
+  if (!currentSheetName.value || !originalFileBuffer.value) {
+    console.log('Missing sheet name or file buffer')
+    return
+  }
+
+  if (isDetecting.value) {
+    console.log('Detection already in progress')
+    return
+  }
+  isDetecting.value = true
+
+  try {
+    // Determine currency to use for filtering
+    let currencyFilter = null
+    if (selectedCurrency.value) {
+      if (selectedCurrency.value === 'custom') {
+        currencyFilter = customCurrency.value?.toUpperCase() || null
+      } else {
+        currencyFilter = selectedCurrency.value.toUpperCase()
+      }
+    }
+    
+    console.log('Currency filter for re-detection:', currencyFilter)
+
+    const detectionResult = await autoDetectInstrumentFields(
+      originalFileBuffer.value,
+      currentSheetName.value,
+      requiredColumns.value,
+      instrumentType.value,
+      null,
+      null,
+      currencyFilter
+    )
+
+    console.log('Detection result after currency change:', detectionResult)
+
+    // ⬇️ NEW: normalise
+    const normalized = normalizeDetectedFields(
+      detectionResult?.fields,
+      detectionResult?.fieldsWithMetadata,
+      instrumentType.value
+    )
+
+    if (Object.keys(normalized.fields).length > 0) {
+      autoDetectedFields.value = normalized.fields
+      autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
+      detectedCurrencies.value = detectionResult.currencies || []
+      detectedInstrumentType.value = instrumentType.value
+      console.log('Updated detected fields:', autoDetectedFields.value)
+    } else {
+      console.log('No fields detected with currency filter')
+    }
+  } catch (error) {
+    console.error('Error re-running detection with currency change:', error)
+  } finally {
+    isDetecting.value = false
+  }
+}
+
 function useDetectedFields() {
   showDetectionSuccess.value = false
   showWorkbookViewer.value = false
   
-  const extractedValues = {}
+  const values = {}
   for (const [key, value] of Object.entries(autoDetectedFields.value)) {
-    extractedValues[key] = typeof value === 'object' && value !== null ? value.value : value
+    values[key] = typeof value === 'object' && value !== null ? value.value : value
   }
-  
-  extractedValues.value = extractedValues
   
   if (selectedCurrency.value && selectedCurrency.value !== 'custom') {
-    extractedValues.value['Currency'] = selectedCurrency.value
+    values['Currency'] = selectedCurrency.value
   } else if (selectedCurrency.value === 'custom' && customCurrency.value) {
-    extractedValues.value['Currency'] = customCurrency.value.toUpperCase()
+    values['Currency'] = customCurrency.value.toUpperCase()
   }
   
-  const previewRow = {}
-  for (const [key, value] of Object.entries(extractedValues)) {
-    previewRow[key] = value
-  }
+  extractedValues.value = values
   
-  rawData.value = [previewRow]
-  originalRawData.value = [{ ...previewRow }]
-  cleanedData.value = [{ ...previewRow }]
-  fileColumns.value = Object.keys(previewRow)
+  rawData.value = [{ ...values }]
+  originalRawData.value = [{ ...values }]
+  cleanedData.value = [{ ...values }]
+  fileColumns.value = Object.keys(values)
   originalFileColumns.value = [...fileColumns.value]
   
   worksheetSelected.value = true
@@ -7287,9 +7554,13 @@ onBeforeUnmount(() => {
 .detection-success-title { background: #4CAF50; color: white; padding: 16px 24px; display: flex; align-items: center; }
 .detection-success-body { padding: 20px 24px; }
 .currency-selection-section { margin-bottom: 20px; padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
-.currency-label { display: block; font-weight: 600; color: #0B2044; margin-bottom: 8px; font-size: 14px; }
-.currency-select { width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: white; cursor: pointer; }
-.currency-select:focus { outline: none; border-color: #4CAF50; box-shadow: 0 0 0 2px rgba(76,175,80,0.2); }
+.currency-label { display: block; font-weight: 600; color: #0B2044; margin-bottom: 12px; font-size: 14px; }
+.currency-select-vuetify { margin-bottom: 12px; }
+.custom-currency-input-wrapper { margin-top: 12px; }
+.custom-currency-field-vuetify { margin-bottom: 8px; }
+.currency-code-badge { font-size: 12px; color: #666; font-weight: 500; }
+.detected-currencies-info { margin-top: 12px; padding: 8px 12px; background: #e8f5e9; border-radius: 6px; font-size: 13px; color: #2E7D32; }
+.selected-currency-info { margin-top: 8px; padding: 8px 12px; background: #e3f2fd; border-radius: 6px; font-size: 13px; color: #1976D2; }
 .detected-fields-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
 .detected-field-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #4CAF50; }
 .detected-field-label { font-weight: 600; color: #0B2044; font-size: 14px; }
