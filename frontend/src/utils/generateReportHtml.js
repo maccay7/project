@@ -9,7 +9,7 @@
  * @param {Object} fredFilters - { country, currency, maturity } from session.
  * @param {Array} yieldCurveData - Array of { maturity, maturityLabel, rate }.
  * @param {Object} allInstrumentsData - Object with instrument types as keys and their data arrays as values.
- * @param {Object} options - Optional overrides: { currencySymbol, logoUrl, backgroundUrl }.
+ * @param {Object} options - Optional overrides: { currencySymbol, logoBase64, backgroundBase64 }.
  * @returns {string} Full HTML report.
  */
 export function generateReportHtml(
@@ -26,8 +26,9 @@ export function generateReportHtml(
 ) {
   const valDate = valuationDate || ''
   const currencySymbol = options.currencySymbol || ''
-  const logoUrl = options.logoUrl || '/DuraCapital logo.png'
-  const backgroundCoverUrl = options.backgroundUrl || '/reportbackground.png'
+  // Use base64 data URLs if provided, otherwise use relative URLs
+  const logoUrl = options.logoBase64 || '/DuraCapital%20logo.png'
+  const backgroundCoverUrl = options.backgroundBase64 || '/reportbackground.png'
 
   // Normalized FRED filters (no hardcoded defaults)
   const filters = fredFilters || {}
@@ -116,7 +117,8 @@ export function generateReportHtml(
     body { font-family: 'Arial', sans-serif; color: #000; background: white; line-height: 1.6; margin: 0; padding: 0; }
     .page { page-break-after: always; padding: 40px 50px; min-height: 100vh; position: relative; width: 210mm; margin: 0 auto; background: white; }
     .page:last-child { page-break-after: auto; }
-    .cover-page { background-color: white; background-image: url('${backgroundCoverUrl}'); background-size: 30%; background-position: right center; background-repeat: no-repeat; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; position: relative; min-height: 100vh; width: 210mm; margin: 0 auto; }
+    .cover-page { background-color: white; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; position: relative; min-height: 100vh; width: 210mm; margin: 0 auto; }
+    .cover-bg-img { position: absolute; top: 0; right: 0; width: 30%; height: 100%; object-fit: contain; z-index: 1; }
     .cover-content { max-width: 70%; position: relative; z-index: 2; color: black; }
     .cover-logo { position: absolute; top: 30px; left: 40px; z-index: 3; }
     .cover-logo img { max-width: 140px; height: auto; background: white; padding: 4px; }
@@ -152,6 +154,7 @@ export function generateReportHtml(
 <button class="close-button" onclick="window.close()">×</button>
 
 <div class="page cover-page">
+  <img class="cover-bg-img" src="${backgroundCoverUrl}" alt="Background" />
   <div class="cover-logo"><img src="${logoUrl}" alt="Company Logo" /></div>
   <div class="cover-content">
     <div class="cover-session-name">${session}</div>

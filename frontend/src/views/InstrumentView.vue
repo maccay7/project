@@ -257,7 +257,7 @@
                       <label class="currency-label">Select Currency to Include in Auto-Detected Values:</label>
                       <v-select
                         v-model="selectedCurrency"
-                        @update:model-value="handleCurrencyChange"
+                        @change="handleCurrencyChange"
                         :items="currencyOptions"
                         label="Currency"
                         variant="outlined"
@@ -346,7 +346,7 @@
                       <label class="currency-label">Select Currency to Include in Auto-Detected Values:</label>
                       <v-select
                         v-model="selectedCurrency"
-                        @update:model-value="handleCurrencyChange"
+                        @change="handleCurrencyChange"
                         :items="currencyOptions"
                         label="Currency"
                         variant="outlined"
@@ -1709,86 +1709,48 @@ function filterToCalculatedFields(row, instrumentType) {
 }
 
 // ============================================================
-// DETECTION NORMALIZATION — no mockdata, no fallbacks.
-// Re-labels ONLY what the detector already found, using a
-// strict per-instrument alias map, and rejects impossible values.
-// ============================================================
-const DETECTION_ALIASES = {
-  'money-market': {
-    'InstrumentName':  ['Instrument Name', 'InstrumentName', 'Name', 'Counterparty'],
-    'InstrumentType':  ['Instrument Type', 'Type'],
-    'FaceValue':       ['Face Value', 'FaceValue', 'Principal', 'Notional', 'Nominal', 'Amount'],
-    'InterestRate':    ['Interest Rate', 'InterestRate', 'Rate', 'Coupon Rate', 'CouponRate'],
-    'IssueDate':       ['Issue Date', 'IssueDate'],
-    'MaturityDate':    ['Maturity Date', 'MaturityDate', 'Maturity'],
-    'SettlementDate':  ['Settlement Date', 'SettlementDate', 'Valuation Date', 'ValuationDate'],
-    'DaysToMaturity':  ['Days to Maturity', 'DaysToMaturity', 'Term', 'Tenor'],
-    'PurchasePrice':   ['Purchase Price', 'PurchasePrice', 'Price'],
-  },
-  'bonds': {
-    'InstrumentName':  ['Instrument Name', 'InstrumentName', 'BondName', 'Bond Name', 'Name', 'Counterparty'],
-    'InstrumentType':  ['Instrument Type', 'Type'],
-    'FaceValue':       ['Face Value', 'FaceValue', 'Principal', 'Par Value', 'ParValue', 'Notional', 'Nominal', 'Amount'],
-    'CouponRate':      ['Coupon Rate', 'CouponRate', 'Interest Rate', 'InterestRate', 'Coupon', 'Rate'],
-    'CouponFrequency': ['Coupon Frequency', 'CouponFrequency', 'Interest Pmt Frequency', 'Interest Payment Frequency', 'Interest Pmt Fequency', 'Payment Frequency', 'Frequency'],
-    'IssueDate':       ['Issue Date', 'IssueDate'],
-    'MaturityDate':    ['Maturity Date', 'MaturityDate', 'Maturity'],
-    'NextCouponDate':  ['Next Coupon Payment Date', 'NextCouponPaymentDate', 'Next Coupon Date'],
-    'SettlementDate':  ['Settlement Date', 'SettlementDate', 'Valuation Date', 'ValuationDate'],
-    'YieldToMaturity': ['Yield to Maturity', 'YieldToMaturity', 'YTM'],
-  },
-  'tbills': {
-    'InstrumentName':  ['Instrument Name', 'InstrumentName', 'Name', 'Counterparty'],
-    'InstrumentType':  ['Instrument Type', 'Type'],
-    'FaceValue':       ['Face Value', 'FaceValue', 'Principal', 'Notional', 'Nominal', 'Amount'],
-    'DiscountRate':    ['Discount Rate', 'DiscountRate', 'Rate'],
-    'IssueDate':       ['Issue Date', 'IssueDate'],
-    'MaturityDate':    ['Maturity Date', 'MaturityDate', 'Maturity'],
-    'SettlementDate':  ['Settlement Date', 'SettlementDate', 'Valuation Date', 'ValuationDate'],
-    'DaysToMaturity':  ['Days to Maturity', 'DaysToMaturity', 'Term', 'Tenor'],
-  }
-}
-
+// DETECTION NORMALIZATION — pure re-labelling + plausibility
+// gating. No mock values, no invented defaults. Every value
+// returned here was actually present in the detector output.
 // Recognised frequency tokens (rejects numeric garbage)
 const VALID_FREQUENCIES = /^(annual(ly)?|semi[- ]?annual(ly)?|quarter(ly)?|month(ly)?|weekly|daily|at maturity|zero|bullet|1|2|4|12|52|365)$/i
-
-// Normalise a raw detector key to a canonical required-column key for a given instrument
-function canonicalKeyFor(rawKey, instrumentType) {
-  const aliases = DETECTION_ALIASES[instrumentType] || {}
-  const norm = String(rawKey).toLowerCase().replace(/[\s_\-()]+/g, '')
-  for (const [canonical, aliasList] of Object.entries(aliases)) {
-    for (const alias of aliasList) {
-      if (alias.toLowerCase().replace(/[\s_\-()]+/g, '') === norm) return canonical
-    }
-  }
-  return null
-}
 
 // Reject garbage values that the detector incorrectly attached to a field
 function isPlausibleValue(canonicalKey, value) {
   if (value === null || value === undefined || value === '') return false
 
-  if (canonicalKey === 'CouponFrequency') {
+  const lc = String(canonicalKey).toLowerCase()
+
+  // Frequency field validation
+  if (lc.includes('frequency') || lc.includes('interest') && lc.includes('payment') && lc.includes('frequency') || lc.includes('payment') && lc.includes('frequency')) {
     return VALID_FREQUENCIES.test(String(value).trim())
   }
 
-  const numericKeys = [
-    'FaceValue', 'InterestRate', 'CouponRate', 'DiscountRate',
-    'YieldToMaturity', 'DaysToMaturity', 'PurchasePrice'
-  ]
-  if (numericKeys.includes(canonicalKey)) {
+  // Rate/yield/coupon validation: must be 0-100
+  if (lc.includes('rate') || lc.includes('yield') || lc.includes('coupon') || lc.includes('discount')) {
     const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[%,$\s]/g, ''))
     if (isNaN(n)) return false
-    // Rates are 0–100 %, values are >= 0
-    if (canonicalKey.endsWith('Rate') || canonicalKey === 'YieldToMaturity') {
-      return n >= 0 && n <= 100
-    }
+    return n >= 0 && n <= 100
+  }
+
+  // Face/principal/value/price validation: must be non-negative
+  if (lc.includes('value') || lc.includes('amount') || lc.includes('price') || lc.includes('principal') || lc.includes('face') || lc.includes('notional') || lc.includes('nominal') || lc.includes('par')) {
+    const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[$,\s]/g, ''))
+    if (isNaN(n)) return false
     return n >= 0
   }
 
-  if (canonicalKey.endsWith('Date')) {
+  // Date validation
+  if (lc.includes('date') || lc.includes('maturity') || lc.includes('auction') || lc.includes('settlement') || lc.includes('issue') || lc.includes('coupon') && lc.includes('date')) {
     const d = new Date(value)
     return !isNaN(d.getTime())
+  }
+
+  // Days/term validation: must be non-negative integer
+  if (lc.includes('days') || lc.includes('term') || lc.includes('tenor') || lc.includes('maturity') && !lc.includes('date')) {
+    const n = typeof value === 'number' ? value : parseFloat(String(value))
+    if (isNaN(n)) return false
+    return n >= 0 && Number.isInteger(n)
   }
 
   return true
@@ -1799,11 +1761,95 @@ function isPlausibleValue(canonicalKey, value) {
  * - Never invents values
  * - Re-labels only what was actually detected
  * - Drops implausible/garbage values
+ * - Uses semantic compatibility for key resolution
+ * - Outputs keys that are literally in requiredColumns.value
  */
-function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType) {
+function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, requiredColsOverride = null) {
   const normalised = {}
   const normalisedMeta = {}
   const usedCanonical = new Set()
+  
+  // Use override if provided, otherwise read from requiredColumns.value
+  const targetColumns = requiredColsOverride || requiredColumns.value || []
+  console.log('normalizeDetectedFields target columns:', targetColumns)
+  console.log('normalizeDetectedFields input fields:', Object.keys(fields || {}))
+
+  // Semantic compatibility groups - expanded with more variations
+  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name']
+  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value']
+  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate']
+  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date']
+  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency']
+  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity']
+
+  // Helper function to check if two strings are semantically similar
+  function isSemanticMatch(detectedKey, targetField, semanticType) {
+    const detectedLower = String(detectedKey).toLowerCase().replace(/[\s_\-()]+/g, '')
+    const targetLower = String(targetField).toLowerCase().replace(/[\s_\-()]+/g, '')
+    
+    // Exact match
+    if (detectedLower === targetLower) return true
+    
+    // Substring match (detected contains target or vice versa)
+    if (detectedLower.includes(targetLower) || targetLower.includes(detectedLower)) return true
+    
+    // Check against semantic field list
+    const semanticFields = {
+      'name': nameStyleFields,
+      'faceValue': faceValueFields,
+      'rate': rateFields,
+      'date': dateFields,
+      'frequency': frequencyFields,
+      'term': termFields
+    }
+    
+    const fields = semanticFields[semanticType] || []
+    const detectedInList = fields.some(f => f.toLowerCase().replace(/[\s_\-()]+/g, '') === detectedLower)
+    const targetInList = fields.some(f => f.toLowerCase().replace(/[\s_\-()]+/g, '') === targetLower)
+    
+    return detectedInList && targetInList
+  }
+
+  // Build semantic map for detected keys
+  const detectedSemantics = {}
+  for (const [rawKey, rawValue] of Object.entries(fields || {})) {
+    const keyLower = String(rawKey).toLowerCase().replace(/[\s_\-()]+/g, '')
+    
+    // Classify detected key by semantic type (substring match instead of exact)
+    if (nameStyleFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'name'
+    } else if (faceValueFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'faceValue'
+    } else if (rateFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'rate'
+    } else if (dateFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'date'
+    } else if (frequencyFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'frequency'
+    } else if (termFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'term'
+    }
+  }
+
+  console.log('Detected semantics:', detectedSemantics)
 
   // Stable iteration order: longest raw keys first (more specific first)
   const rawEntries = Object.entries(fields || {}).sort(
@@ -1811,25 +1857,256 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType) {
   )
 
   for (const [rawKey, rawValue] of rawEntries) {
-    const canonical = canonicalKeyFor(rawKey, instrumentType)
-    if (!canonical) continue                       // not a required field — skip
-    if (usedCanonical.has(canonical)) continue     // already mapped — skip duplicate
+    const semantic = detectedSemantics[rawKey]
+    if (!semantic) {
+      console.log(`Skipping "${rawKey}" - no semantic match`)
+      continue
+    }
+    
+    // Find matching target column by semantic type
+    let matchedCanonical = null
+    for (const targetCol of targetColumns) {
+      if (isSemanticMatch(rawKey, targetCol, semantic)) {
+        matchedCanonical = targetCol
+        console.log(`Matched "${rawKey}" to "${targetCol}" (${semantic})`)
+        break
+      }
+    }
+    
+    if (!matchedCanonical) {
+      console.log(`No match found for "${rawKey}" (${semantic})`)
+      continue
+    }
+    if (usedCanonical.has(matchedCanonical)) {
+      console.log(`Skipping "${matchedCanonical}" - already mapped`)
+      continue
+    }
 
     const actualValue =
       rawValue && typeof rawValue === 'object' && 'value' in rawValue
         ? rawValue.value
         : rawValue
 
-    if (!isPlausibleValue(canonical, actualValue)) continue  // reject garbage
+    if (!isPlausibleValue(matchedCanonical, actualValue)) {
+      console.log(`Rejected "${matchedCanonical}": "${actualValue}" (implausible value)`)
+      continue
+    }
 
-    normalised[canonical] = actualValue
-    usedCanonical.add(canonical)
+    normalised[matchedCanonical] = actualValue
+    usedCanonical.add(matchedCanonical)
 
     const meta = fieldsWithMetadata ? fieldsWithMetadata[rawKey] : null
-    if (meta) normalisedMeta[canonical] = meta
+    if (meta) normalisedMeta[matchedCanonical] = meta
   }
 
+  console.log('Normalized fields:', normalised)
   return { fields: normalised, fieldsWithMetadata: normalisedMeta }
+}
+
+/**
+ * Secondary raw-sheet scan for required fields the primary detector missed.
+ * Reads the actual workbook buffer directly and searches every cell in the
+ * sheet for a label matching an alias of a missing required field.
+ *
+ * This is NOT a mock/fallback: every value returned here was physically
+ * present in the uploaded workbook at the exact cell coordinates it was
+ * found. It only compensates for the primary detector's limited internal
+ * label dictionary (e.g. it doesn't know "Principal" or "Issue Date").
+ *
+ * Uses semantic compatibility for label matching.
+ * Only returns values that pass isPlausibleValue().
+ * No row limit - scans entire sheet.
+ */
+function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOverride = null) {
+  if (!originalFileBuffer.value || !currentSheetName.value) return {}
+  if (!missingFields || missingFields.length === 0) return {}
+
+  const targetColumns = requiredColsOverride || requiredColumns.value || []
+  console.log('Secondary scan for missing fields:', missingFields)
+  console.log('Target columns:', targetColumns)
+
+  // Semantic compatibility groups - expanded with more variations
+  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name']
+  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value']
+  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate']
+  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date']
+  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency']
+  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity']
+
+  // Helper function to check if two strings are semantically similar
+  function isSemanticMatch(detectedKey, targetField, semanticType) {
+    const detectedLower = String(detectedKey).toLowerCase().replace(/[\s_\-()]+/g, '')
+    const targetLower = String(targetField).toLowerCase().replace(/[\s_\-()]+/g, '')
+    
+    // Exact match
+    if (detectedLower === targetLower) return true
+    
+    // Substring match (detected contains target or vice versa)
+    if (detectedLower.includes(targetLower) || targetLower.includes(detectedLower)) return true
+    
+    // Check against semantic field list
+    const semanticFields = {
+      'name': nameStyleFields,
+      'faceValue': faceValueFields,
+      'rate': rateFields,
+      'date': dateFields,
+      'frequency': frequencyFields,
+      'term': termFields
+    }
+    
+    const fields = semanticFields[semanticType] || []
+    const detectedInList = fields.some(f => f.toLowerCase().replace(/[\s_\-()]+/g, '') === detectedLower)
+    const targetInList = fields.some(f => f.toLowerCase().replace(/[\s_\-()]+/g, '') === targetLower)
+    
+    return detectedInList && targetInList
+  }
+
+  // Build semantic map for target columns
+  const targetSemantics = {}
+  for (const targetCol of targetColumns) {
+    const targetLower = targetCol.toLowerCase().replace(/[\s_\-()]+/g, '')
+    
+    if (nameStyleFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'name'
+    } else if (faceValueFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'faceValue'
+    } else if (rateFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'rate'
+    } else if (dateFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'date'
+    } else if (frequencyFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'frequency'
+    } else if (termFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'term'
+    }
+  }
+
+  console.log('Target semantics:', targetSemantics)
+
+  const found = {}
+
+  try {
+    const wb = XLSX.read(originalFileBuffer.value, {
+      type: 'array',
+      cellDates: true,
+      cellNF: false,
+      cellText: true
+    })
+    const sheet = wb.Sheets[currentSheetName.value]
+    if (!sheet) return {}
+
+    const aoa = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      raw: false,
+      defval: '',
+      blankrows: false
+    })
+
+    console.log(`Secondary scan scanning all ${aoa.length} rows`)
+
+    for (let r = 0; r < aoa.length; r++) {
+      const row = aoa[r]
+      if (!row) continue
+      for (let c = 0; c < row.length; c++) {
+        const cell = row[c]
+        if (cell === null || cell === undefined || cell === '') continue
+
+        const cellLower = String(cell).toLowerCase().replace(/[\s_\-()]+/g, '')
+
+        // Classify cell by semantic type (substring match)
+        let cellSemantic = null
+        
+        if (nameStyleFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'name'
+        } else if (faceValueFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'faceValue'
+        } else if (rateFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'rate'
+        } else if (dateFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'date'
+        } else if (frequencyFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'frequency'
+        } else if (termFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'term'
+        }
+
+        if (!cellSemantic) continue
+
+        // Find matching missing field by semantic type
+        for (const missingField of missingFields) {
+          if (found[missingField] !== undefined) continue
+          if (!targetSemantics[missingField]) continue
+          if (targetSemantics[missingField] !== cellSemantic) continue
+
+          // Check semantic match
+          if (!isSemanticMatch(cell, missingField, cellSemantic)) continue
+
+          // Look to the right (up to 6 cells) for the value
+          let value = null
+          for (let cc = c + 1; cc < Math.min(c + 7, row.length); cc++) {
+            const next = row[cc]
+            if (next !== null && next !== undefined && next !== '') {
+              value = next
+              break
+            }
+          }
+          // Fall back to directly below
+          if (value === null && r + 1 < aoa.length) {
+            const below = aoa[r + 1] ? aoa[r + 1][c] : ''
+            if (below !== null && below !== undefined && below !== '') {
+              value = below
+            }
+          }
+
+          if (value !== null && isPlausibleValue(missingField, value)) {
+            found[missingField] = value
+            console.log(`[secondary scan] recovered "${missingField}": "${value}" at row ${r}, col ${c}`)
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('scanSheetForMissingFields failed:', e)
+  }
+
+  console.log('Secondary scan found:', found)
+  return found
 }
 
 const instrumentType = ref('')
@@ -2897,13 +3174,14 @@ function saveUploadHistory() {
   localStorage.setItem(key, JSON.stringify(uploadHistory.value))
 }
 
-function addToHistory(filename, data) {
+function addToHistory(filename, data, fileData = null) {
   const existing = uploadHistory.value.find(h => h.name === filename && (Date.now() - h.date) < 5000)
   if (existing) return
   uploadHistory.value.unshift({
     name: filename,
     date: Date.now(),
-    data: JSON.stringify(data)
+    data: JSON.stringify(data),
+    fileData: fileData
   })
   if (uploadHistory.value.length > 5) uploadHistory.value.pop()
   saveUploadHistory()
@@ -2916,45 +3194,45 @@ async function loadHistoryFile(item) {
   }
   
   if (confirm(`Load ${item.name}? Current unsaved data will be lost.`)) {
-    const data = JSON.parse(item.data)
-    rawData.value = data
-    originalRawData.value = JSON.parse(JSON.stringify(data))
-    originalFileColumns.value = Object.keys(data[0] || {})
-    fileColumns.value = [...originalFileColumns.value]
+    // Convert base64 back to ArrayBuffer
+    const base64String = item.fileData.split(',')[1]
+    const binaryString = atob(base64String)
+    const bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+    const arrayBuffer = bytes.buffer
 
-    if (item.fileData) {
-      uploadedFileBase64.value = item.fileData
-      try {
-        const response = await fetch(item.fileData)
-        const blob = await response.blob()
-        uploadedFile.value = new File([blob], item.name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    // Restore file buffer
+    originalFileBuffer.value = arrayBuffer
+    uploadedFile.value = { name: item.name, size: arrayBuffer.byteLength }
+
+    // Re-parse workbook to get sheets
+    try {
+      const result = await worksheetWorkflow.handleFileUpload(new File([arrayBuffer], item.name))
+      if (result.success) {
+        workbookSheets.value = worksheetWorkflow.workbookSheets.value
+        worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
+        originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
+        showSnackbar(`Loaded ${item.name} from history`, 'success')
         
-        const result = await worksheetWorkflow.handleFileUpload(uploadedFile.value)
-        if (result.success) {
-          workbookSheets.value = worksheetWorkflow.workbookSheets.value
-          worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
-          originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
-          showSnackbar(`Loaded ${item.name} from history`, 'success')
-        } else {
-          console.error('Workbook parse failed:', result.error)
-          showSnackbar('Failed to parse workbook', 'error')
-        }
-      } catch (err) {
-        console.error('Failed to restore file from base64:', err)
-        uploadedFile.value = { name: item.name, size: 0 }
-        showSnackbar('Failed to load file', 'error')
+        // Clear active cache but preserve workbook data
+        clearActiveCache(true)
+        
+        // Open workbook viewer so user can select a sheet
+        showWorkbookViewer.value = true
+        activeTab.value = 'upload'
+        forceUpdate.value++
+      } else {
+        console.error('Workbook parse failed:', result.error)
+        showSnackbar('Failed to parse workbook', 'error')
       }
-    } else {
-      uploadedFile.value = { name: item.name, size: 0 }
-      uploadedFileBase64.value = null
+    } catch (err) {
+      console.error('Failed to parse workbook from history:', err)
+      showSnackbar('Failed to load file', 'error')
     }
 
-    columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-    applyCurrentMapping()
-    worksheetSelected.value = false
-    showPreview.value = false
     saveSessionData()
-    forceUpdate.value++
   }
 }
 
@@ -3027,7 +3305,7 @@ async function readFileData(file) {
       showPreview.value = false
       sheetType.value = 'multi'
 
-      addToHistory(file.name, result.sheets[0]?.data || [])
+      addToHistory(file.name, result.sheets[0]?.data || [], uploadedFileBase64.value)
       debouncedSave()
       forceUpdate.value++
     } else {
@@ -3608,6 +3886,8 @@ async function autoDetectSingleInstrument() {
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
 
+  console.log(`🔍 Starting auto-detection on sheet: "${currentSheetName.value}"`)
+
   try {
     // Determine currency to use for filtering
     let currencyFilter = null
@@ -3629,33 +3909,43 @@ async function autoDetectSingleInstrument() {
       currencyFilter
     )
 
-    // ⬇️ NEW: normalise detector output into canonical required-column keys
+    // 1) Normalise detector output into canonical keys with runtime key resolution
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
       detectionResult?.fieldsWithMetadata,
-      instrumentType.value
+      instrumentType.value,
+      requiredColumns.value
     )
 
-    if (Object.keys(normalized.fields).length > 0) {
-      autoDetectedFields.value = normalized.fields
-      autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
-      detectedCurrencies.value = detectionResult.currencies || []
-      detectedInstrumentType.value = instrumentType.value
-      
-      // Only auto-select currency if user hasn't already selected one
-      if (!selectedCurrency.value) {
-        if (detectedCurrencies.value.length === 1) {
-          selectedCurrency.value = detectedCurrencies.value[0]
-        } else if (detectedCurrencies.value.length > 1) {
-          // Keep empty so user can choose
-          selectedCurrency.value = ''
+    // 2) Secondary scan for any required field the detector missed
+    const missing = requiredColumns.value.filter(c => !(c in normalized.fields))
+    if (missing.length > 0) {
+      const scanResult = scanSheetForMissingFields(missing, instrumentType.value, requiredColumns.value)
+      for (const [k, v] of Object.entries(scanResult)) {
+        if (!(k in normalized.fields)) {
+          normalized.fields[k] = v
+          console.log(`[secondary scan] recovered "${k}":`, v)
         }
       }
-      
-      showDetectionSuccess.value = true
-    } else {
-      alert('Auto Detect could not identify any required fields. Please try manual entry.')
     }
+
+    // ALWAYS show popup, even if zero fields detected
+    autoDetectedFields.value = normalized.fields
+    autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
+    detectedCurrencies.value = detectionResult?.currencies || []
+    detectedInstrumentType.value = instrumentType.value
+    
+    // Only auto-select currency if user hasn't already selected one
+    if (!selectedCurrency.value) {
+      if (detectedCurrencies.value.length === 1) {
+        selectedCurrency.value = detectedCurrencies.value[0]
+      } else if (detectedCurrencies.value.length > 1) {
+        // Keep empty so user can choose
+        selectedCurrency.value = ''
+      }
+    }
+    
+    showDetectionSuccess.value = true
   } catch (error) {
     console.error('Auto Detect error:', error)
     alert('Auto Detect failed: ' + error.message)
@@ -3712,12 +4002,25 @@ async function handleMultiTableDetect(event) {
 
         console.log(`Detection result for ${table.tableName}:`, detectionResult)
 
-        // ⬇️ NEW: normalise per-table detector output
+        // 1) Normalise per-table detector output with runtime key resolution
         const normalized = normalizeDetectedFields(
           detectionResult?.fields,
           detectionResult?.fieldsWithMetadata,
-          event.instrumentType
+          event.instrumentType,
+          requiredColumns.value
         )
+
+        // 2) Secondary scan for missing fields
+        const missing = requiredColumns.value.filter(c => !(c in normalized.fields))
+        if (missing.length > 0) {
+          const scanResult = scanSheetForMissingFields(missing, event.instrumentType, requiredColumns.value)
+          for (const [k, v] of Object.entries(scanResult)) {
+            if (!(k in normalized.fields)) {
+              normalized.fields[k] = v
+              console.log(`[secondary scan] recovered "${k}":`, v)
+            }
+          }
+        }
 
         if (Object.keys(normalized.fields).length > 0) {
           detectedInstruments.push({
@@ -3740,7 +4043,9 @@ async function handleMultiTableDetect(event) {
       showMultiTableDetectionSuccess.value = true
       showWorkbookViewer.value = false
     } else {
-      alert('Auto Detect could not identify required fields in the selected sections. Please try manual entry.')
+      // Always show popup even if zero fields detected
+      showMultiTableDetectionSuccess.value = true
+      showWorkbookViewer.value = false
     }
   } finally {
     isDetecting.value = false
@@ -3792,7 +4097,15 @@ function formatDetectedValue(field, value) {
   const lc = String(field).toLowerCase()
 
   // Frequency must render as text, never as %
-  if (lc.includes('frequency')) {
+  if (lc.includes('frequency') || lc.includes('coupon') && lc.includes('frequency')) {
+    return String(value)
+  }
+  
+  // Also check for frequency-related keys
+  if (lc.includes('interest') && lc.includes('payment') && lc.includes('frequency')) {
+    return String(value)
+  }
+  if (lc.includes('payment') && lc.includes('frequency')) {
     return String(value)
   }
 
@@ -3835,17 +4148,30 @@ async function handleCustomCurrencyInput() {
         customCurrency.value // Already uppercased
       )
 
-      // ⬇️ NEW: normalise
+      // 1) Normalise with runtime key resolution
       const normalized = normalizeDetectedFields(
         detectionResult?.fields,
         detectionResult?.fieldsWithMetadata,
-        instrumentType.value
+        instrumentType.value,
+        requiredColumns.value
       )
+
+      // 2) Secondary scan for missing fields
+      const missing = requiredColumns.value.filter(c => !(c in normalized.fields))
+      if (missing.length > 0) {
+        const scanResult = scanSheetForMissingFields(missing, instrumentType.value, requiredColumns.value)
+        for (const [k, v] of Object.entries(scanResult)) {
+          if (!(k in normalized.fields)) {
+            normalized.fields[k] = v
+            console.log(`[secondary scan] recovered "${k}":`, v)
+          }
+        }
+      }
 
       if (Object.keys(normalized.fields).length > 0) {
         autoDetectedFields.value = normalized.fields
         autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
-        detectedCurrencies.value = detectionResult.currencies || []
+        detectedCurrencies.value = detectionResult?.currencies || []
       }
     } catch (error) {
       console.error('Error re-running detection with custom currency:', error)
@@ -3892,22 +4218,38 @@ async function handleCurrencyChange() {
 
     console.log('Detection result after currency change:', detectionResult)
 
-    // ⬇️ NEW: normalise
+    // 1) Normalise with runtime key resolution
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
       detectionResult?.fieldsWithMetadata,
-      instrumentType.value
+      instrumentType.value,
+      requiredColumns.value
     )
+
+    // 2) Secondary scan for missing fields
+    const missing = requiredColumns.value.filter(c => !(c in normalized.fields))
+    if (missing.length > 0) {
+      const scanResult = scanSheetForMissingFields(missing, instrumentType.value, requiredColumns.value)
+      for (const [k, v] of Object.entries(scanResult)) {
+        if (!(k in normalized.fields)) {
+          normalized.fields[k] = v
+          console.log(`[secondary scan] recovered "${k}":`, v)
+        }
+      }
+    }
 
     if (Object.keys(normalized.fields).length > 0) {
       autoDetectedFields.value = normalized.fields
       autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
-      detectedCurrencies.value = detectionResult.currencies || []
+      detectedCurrencies.value = detectionResult?.currencies || []
       detectedInstrumentType.value = instrumentType.value
       console.log('Updated detected fields:', autoDetectedFields.value)
     } else {
       console.log('No fields detected with currency filter')
     }
+    
+    // ALWAYS show popup, even if zero fields detected
+    showDetectionSuccess.value = true
   } catch (error) {
     console.error('Error re-running detection with currency change:', error)
   } finally {
@@ -4571,7 +4913,7 @@ function handleSheetSelection(sheetData) {
     columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
     applyCurrentMapping()
     showPreview.value = true
-    addToHistory(`${uploadedFile.value.name} - ${sheetData.sheetName}`, sheetData.data)
+    addToHistory(`${uploadedFile.value.name} - ${sheetData.sheetName}`, sheetData.data, uploadedFileBase64.value)
     debouncedSave()
     forceUpdate.value++
   }
@@ -6888,7 +7230,7 @@ async function generateReportHtml() {
     .page { page-break-after: always; padding: 30px 40px; min-height: 100vh; position: relative; width: 210mm; margin: 0 auto; background: white; }
     .cover-page { background-color: white; background-image: url('${backgroundCoverUrl}'); background-size: 45%; background-position: right center; background-repeat: no-repeat; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; min-height: 100vh; position: relative; }
     .cover-logo { position: absolute; top: 30px; left: 40px; z-index: 3; }
-    .cover-logo img { max-width: 140px; height: auto; background: white; padding: 4px; }
+    .cover-logo img { max-width: 280px; height: auto; background: white; padding: 4px; }
     .close-button { position: fixed; top: 20px; right: 20px; z-index: 9999; background: #0B2044; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
     .close-button:hover { background: #1a3a6e; }
     .cover-content { max-width: 70%; position: relative; z-index: 2; color: black; }
@@ -7213,7 +7555,56 @@ async function downloadCombinedReport(format) {
     downloadBlob(csv, `${filename}.csv`, 'text/csv')
   } else if (format === 'html') downloadBlob(html, `${filename}.html`, 'text/html')
   else if (format === 'pdf') { const win = window.open(); win.document.write(html); win.print() }
-  else if (format === 'word') downloadBlob(html, `${filename}.doc`, 'application/msword')
+  else if (format === 'word') {
+    // Use backend API to generate Word with proper image rendering
+    try {
+      const session = sessionManager.getActiveSession()
+      const sessionId = session?.id || sessionManager.getActiveSessionId() || localStorage.getItem('dura_active_session_id')
+      
+      if (!sessionId) {
+        alert('No active session found')
+        return
+      }
+      
+      console.log('Downloading Word report for session:', sessionId)
+      
+      const response = await fetch('http://localhost:5000/api/report/generate-word', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          report_html: html,
+          instrument_type: route.params.type || null,
+          file_name: `Dura-Capital-Combined-Report-${Date.now()}.docx`
+        })
+      })
+      
+      const result = await response.json()
+      
+      if (!result.success) {
+        alert('Failed to generate Word report: ' + (result.message || 'Unknown error'))
+        return
+      }
+      
+      const downloadPath = `http://localhost:5000/api/report/download-word/${sessionId}`
+      const downloadResponse = await fetch(downloadPath)
+      if (!downloadResponse.ok) {
+        alert('Failed to download the generated report')
+        return
+      }
+      
+      const blob = await downloadResponse.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = result.data?.file_name || `Dura-Capital-Combined-Report-${Date.now()}.docx`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Error downloading Word report:', err)
+      alert('Error downloading Word report: ' + err.message)
+    }
+  }
 }
 
 function downloadBlob(content, filename, mimeType) {

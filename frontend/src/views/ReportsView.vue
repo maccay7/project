@@ -90,7 +90,7 @@
         </div>
 
         <div class="download-row">
-          <button class="btn-primary" @click="downloadReport('word')">
+          <button class="btn-primary" @click="downloadReport()">
             <v-icon>mdi-download</v-icon> Download
           </button>
         </div>
@@ -153,6 +153,26 @@ function showSnackbar(message, color = 'error', timeout = 4000) {
 }
 
 // ===== Helper Functions =====
+async function fetchImageAsBase64(url) {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) {
+      console.warn(`Failed to fetch image ${url}: ${response.status}`)
+      return null
+    }
+    const blob = await response.blob()
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result)
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
+  } catch (e) {
+    console.warn(`Error fetching image ${url}:`, e)
+    return null
+  }
+}
+
 async function resolveSession() {
   let session = sessionManager.getActiveSession()
   if (!session) {
@@ -409,7 +429,7 @@ async function generatePreview() {
     }
     preview.instruments = allData
     preview.totalRows = Object.values(allData).reduce((sum, arr) => sum + arr.length, 0)
-    preview.totalValue = Object.values(allData).reduce((sum, arr) => arr.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['Calculated Value'] || 0)), 0), 0)
+    preview.totalValue = Object.values(allData).reduce((sum, arr) => sum + arr.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['Calculated Value'] || 0)), 0), 0)
   }
   previewData.value = preview
   reportError.value = ''
@@ -450,6 +470,7 @@ async function generatePreview() {
         }
       }
       console.log('Using chart image for report:', chartImage ? 'yes' : 'no')
+
       reportHtml.value = generateReportHtml(
         fullData,
         instrumentName,
@@ -459,7 +480,8 @@ async function generatePreview() {
         chartImage,
         data.fredFilters || null,
         data.yieldCurveData || [],
-        data.allWorkedData || {}
+        data.allWorkedData || {},
+        {}  // No base64 options - using HTTP URLs instead
       )
     } else {
       reportHtml.value = '<p>No data available for report. Please run calculations first.</p>'
@@ -501,120 +523,73 @@ function formatRowForExcel(row) {
   return formatted
 }
 
-async function downloadReport(format = 'word') {
-  if (!previewData.value) {
+async function downloadReport() {
+  console.log('=== DOWNLOAD REPORT CLICKED ===')
+  console.log('previewData.value:', previewData.value)
+  console.log('reportHtml.value:', reportHtml.value ? 'exists' : 'null')
+  
+  // The preview HTML is the single source of truth.
+  if (!previewData.value || !reportHtml.value) {
+    console.log('ERROR: No report preview available')
+    showSnackbar('No report preview available to export.', 'warning')
     return
   }
-  
+
   const data = previewData.value
-  
-  if (format === 'word') {
-    try {
-      // Get session ID
-      const session = await resolveSession()
-      if (!session) {
-        return
-      }
-      
-      // Capture chart image from DOM
-      let chartImageBase64 = ''
-      try {
-        const canvas = document.querySelector('.chart-container--fred canvas')
-        if (canvas && canvas.toDataURL) {
-          chartImageBase64 = canvas.toDataURL('image/png', 1.0)
-        }
-      } catch (e) {
-        console.warn('Could not capture chart from DOM:', e)
-      }
-      
-      // Load logo and background images as base64
-      let logoBase64 = ''
-      let backgroundBase64 = ''
-      try {
-        const logoResponse = await fetch('/DuraCapital%20logo.png')
-        if (logoResponse.ok) {
-          const logoBlob = await logoResponse.blob()
-          logoBase64 = await new Promise((resolve) => {
-            const reader = new FileReader()
-            reader.onloadend = () => resolve(reader.result)
-            reader.readAsDataURL(logoBlob)
-          })
-        }
-      } catch (e) {
-        console.warn('Could not load logo:', e)
-      }
-      
-      try {
-        const bgResponse = await fetch('/reportbackground.png')
-        if (bgResponse.ok) {
-          const bgBlob = await bgResponse.blob()
-          backgroundBase64 = await new Promise((resolve) => {
-            const reader = new FileReader()
-            reader.onloadend = () => resolve(reader.result)
-            reader.readAsDataURL(bgBlob)
-          })
-        }
-      } catch (e) {
-        console.warn('Could not load background:', e)
-      }
-      
-      // Prepare report data for backend
-      const reportData = {
-        session: data.session || session.name || 'Current Session',
-        valuationDate: data.valuationDate || null,
-        data: data.allWorkedData?.[route.query.instrument] || data.sample || []
-      }
-      
-      // If session report, combine all instrument data
-      if (selectedType.value === 'session' && data.instruments) {
-        reportData.data = []
-        for (const [inst, rows] of Object.entries(data.instruments)) {
-          if (rows && rows.length) {
-            reportData.data = reportData.data.concat(rows)
-          }
-        }
-      }
-      
-      // Call backend to generate Word document
-      const response = await fetch('http://localhost:5000/api/report/generate-word', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: session.id,
-          report_data: reportData,
-          instrument_type: route.query.instrument || null,
-          fred_filters: data.fredFilters || null,
-          yield_curve_data: data.yieldCurveData || [],
-          chart_image_base64: chartImageBase64,
-          logo_base64: logoBase64,
-          background_base64: backgroundBase64
-        })
+  console.log('Starting download process...')
+
+  try {
+    const session = await resolveSession()
+    if (!session) return
+
+    const filenameSuffix = data.valuationDate ? `-${data.valuationDate}` : ''
+
+    // Send the EXACT rendered preview HTML — no re-rendering, no raw data,
+    // no separate chart/logo/background capture. The backend only converts.
+    const endpoint = 'http://localhost:5000/api/report/generate-word'
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: session.id,
+        report_html: reportHtml.value,
+        instrument_type: route.query.instrument || null,
+        file_name: `Dura-Capital-Valuation-Report${filenameSuffix}.docx`
       })
-      
-      const result = await response.json()
-      
-      if (result.success) {
-        // Download the generated file
-        const downloadResponse = await fetch(`http://localhost:5000/api/report/download-word/${session.id}`)
-        if (downloadResponse.ok) {
-          const blob = await downloadResponse.blob()
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          const filenameSuffix = data.valuationDate ? `-${data.valuationDate}` : ''
-          a.download = result.data.file_name || `Dura-Capital-Valuation-Report${filenameSuffix}.docx`
-          a.click()
-          URL.revokeObjectURL(url)
-        } else {
-          showSnackbar('Failed to download the generated report.', 'error')
-        }
-      } else {
-        showSnackbar('Failed to generate Word report: ' + (result.message || 'Unknown error'), 'error')
-      }
-    } catch (err) {
-      console.error('Error downloading Word report:', err)
-      showSnackbar('Error downloading Word report: ' + err.message, 'error')
+    })
+
+    const result = await response.json()
+
+    if (!result.success) {
+      showSnackbar(
+        `Failed to generate Word report: ` +
+          (result.message || 'Unknown error'),
+        'error'
+      )
+      return
     }
+
+    const downloadPath = `http://localhost:5000/api/report/download-word/${session.id}`
+
+    const downloadResponse = await fetch(downloadPath)
+    if (!downloadResponse.ok) {
+      showSnackbar('Failed to download the generated report.', 'error')
+      return
+    }
+
+    const blob = await downloadResponse.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download =
+      result.data?.file_name ||
+      `Dura-Capital-Valuation-Report${filenameSuffix}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    console.error('Error downloading Word report:', err)
+    showSnackbar('Error downloading Word report: ' + err.message, 'error')
   }
 }
 

@@ -473,6 +473,8 @@ function getCellStyle(row, col) {
   let headerDepth = -1         // 0 = first horizontal header row, 1 = second header row
   let isVerticalHeaderCell = false
 
+  const headerKeywords = ['name', 'date', 'rate', 'value', 'amount', 'price', 'yield', 'coupon', 'maturity', 'issue', 'principal', 'face', 'discount', 'interest', 'term', 'tenor', 'frequency', 'currency', 'country', 'instrument', 'bond', 'bill', 'security', 'type', 'status', 'code', 'id', 'number', 'total', 'balance', 'payment', 'period', 'year', 'month', 'day', 'description', 'category', 'account', 'reference', 'transaction', 'debit', 'credit', 'asset', 'liability', 'equity', 'revenue', 'expense', 'income', 'cost', 'profit', 'loss', 'margin', 'ratio', 'percentage', 'quantity', 'unit', 'measure', 'location', 'address', 'contact', 'phone', 'email', 'customer', 'client', 'vendor', 'supplier', 'product', 'service', 'item', 'sku', 'barcode', 'serial', 'batch', 'lot', 'expiry', 'valid', 'active', 'inactive', 'pending', 'complete', 'open', 'closed', 'approved', 'rejected', 'submitted', 'draft', 'final', 'original', 'current', 'previous', 'next', 'first', 'last', 'beginning', 'ending', 'start', 'end', 'min', 'max', 'avg', 'sum', 'count']
+
   for (const table of detectedTables.value) {
     // Hard boundary: this cell must sit inside the table's bounding box.
     if (row < table.startRow || row > table.endRow) continue
@@ -482,6 +484,11 @@ function getCellStyle(row, col) {
     const rawValue = activeSheet.value?.fullData?.[row]?.[col]
     const hasValue = rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== ''
     if (!hasValue) continue
+
+    // Additional check: cell value must contain a header keyword to be highlighted
+    const cellText = String(rawValue).trim().toLowerCase()
+    const hasHeaderKeyword = headerKeywords.some(keyword => cellText.includes(keyword))
+    if (!hasHeaderKeyword) continue
 
     // ---- Horizontal header check ----
     const headerRows = Array.isArray(table.headerRows) && table.headerRows.length
@@ -521,27 +528,8 @@ function getCellStyle(row, col) {
     styles.fontWeight = '700'
     styles.color = '#0d47a1'
     styles.borderRight = '2px solid #0d47a1'
-  } else {
-    // No detected header for this cell. Only fall back to the legacy heuristic
-    // when the row is a "first content row after a blank", and only when no
-    // table has been detected at all (to avoid stray highlights inside tables).
-    if (detectedTables.value.length === 0) {
-      const currentRow = visibleRows.value[row]
-      const prevRow = row > 0 ? visibleRows.value[row - 1] : null
-      if (currentRow && currentRow.length >= 1) {
-        const currentHasData = currentRow.some(cell => cell && String(cell).trim() !== '')
-        if (currentHasData) {
-          const prevHasData = prevRow && prevRow.some(cell => cell && String(cell).trim() !== '')
-          if (!prevHasData || row === 0) {
-            styles.backgroundColor = 'rgba(227, 242, 253, 0.3)'
-            styles.fontWeight = '600'
-            styles.color = '#0d47a1'
-            styles.borderBottom = '2px solid #0d47a1'
-          }
-        }
-      }
-    }
   }
+  // No other highlighting - only actual detected header cells are highlighted
 
   // Merged cell handling (unchanged)
   let isInMergedRange = false
