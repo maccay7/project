@@ -65,6 +65,16 @@
           Work on Sheet
         </button>
         <button
+          v-if="worksheetStatus[sheet.name] !== 'completed'"
+          class="btn-auto-detect-sheet"
+          @click.stop="autoDetectSheet(sheet.name)"
+          :disabled="worksheetStatus[sheet.name] === 'in-progress' || isDetecting"
+        >
+          <v-icon v-if="!isDetecting" small>mdi-magnify</v-icon>
+          <v-icon v-else small class="spin-animation">mdi-loading</v-icon>
+          Auto Detect
+        </button>
+        <button
           v-else
           class="btn-view-results"
           @click.stop="viewResults(sheet.name)"
@@ -100,10 +110,14 @@ const props = defineProps({
   error: {
     type: String,
     default: ''
+  },
+  isDetecting: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['select-sheet', 'work-on-sheet', 'view-results'])
+const emit = defineEmits(['select-sheet', 'work-on-sheet', 'view-results', 'auto-detect-sheet'])
 
 const hasWorkbook = computed(() => props.workbookSheets.length > 0)
 const completedSheets = computed(() => 
@@ -147,6 +161,10 @@ function selectSheet(sheetName) {
 
 function workOnSheet(sheetName) {
   emit('work-on-sheet', sheetName)
+}
+
+function autoDetectSheet(sheetName) {
+  emit('auto-detect-sheet', sheetName)
 }
 
 function viewResults(sheetName) {

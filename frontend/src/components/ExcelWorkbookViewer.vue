@@ -137,9 +137,10 @@
         </button>
       </div>
       <div v-if="isMultiTableMode && selectedTables.size > 0" class="multi-table-actions">
-        <button class="btn-auto-detect-multi" @click="autoDetectSelectedTables">
-          <v-icon size="16">mdi-magnify</v-icon>
-          Auto Detect Selected Tables ({{ selectedTables.size }})
+        <button class="btn-auto-detect-multi" @click="autoDetectSelectedTables" :disabled="isDetecting">
+          <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
+          <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
+          {{ isDetecting ? 'Scanning...' : `Auto Detect Selected Tables (${selectedTables.size})` }}
         </button>
         <button class="btn-clear-selection" @click="clearTableSelection">
           <v-icon size="16">mdi-close</v-icon>
@@ -227,7 +228,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'workbook-loaded'])
+const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'workbook-loaded', 'detect-start', 'detect-end'])
 
 // ===== STATE =====
 const sheets = ref([])
@@ -246,6 +247,7 @@ const isTableIsolationMode = ref(false)
 const isSingleInstrumentSheet = ref(false)
 const extractedPreviewValues = ref({})
 const selectedTables = ref(new Set())
+const isDetecting = ref(false)
 const isMultiTableMode = ref(false)
 
 // Viewer resize
@@ -1235,6 +1237,9 @@ function autoDetectSelectedTables() {
     return
   }
 
+  isDetecting.value = true
+  emit('detect-start')
+
   // FIX #2 / #4 / #5 / #8: Emit EVERY selected table with full source metadata.
   const selectedTableData = []
   for (const index of selectedTables.value) {
@@ -1297,6 +1302,8 @@ function autoDetectSelectedTables() {
     selectedCount: selectedTableData.length,
     instrumentType: props.instrumentType
   })
+  
+  // Note: isDetecting is reset by the parent component when detection completes
 }
 
 function formatFieldName(key) {
@@ -1817,8 +1824,22 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
   transition: background 0.2s;
 }
 
-.btn-auto-detect-multi:hover {
+.btn-auto-detect-multi:hover:not(:disabled) {
   background: #1a3a6e;
+}
+
+.btn-auto-detect-multi:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.spin-animation {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .btn-clear-selection {

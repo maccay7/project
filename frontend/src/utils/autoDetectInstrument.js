@@ -1188,31 +1188,39 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
 
   // ---------- Pass 4: Currency codes ----------
   console.log('=== Pass 4: Currency codes ===')
+  console.log('Currency filter:', currencyFilter, 'Normalized:', normalizedCurrencyCode)
+  
+  // Also scan for currency symbols in the data
   for (let R = tableBoundaries.startRow; R <= tableBoundaries.endRow; R++) {
     for (let C = tableBoundaries.startCol; C <= tableBoundaries.endCol; C++) {
       const cellValue = data[R][C]
-      if (cellValue && /^[A-Z]{3}$/.test(String(cellValue))) {
-        const currencyCode = String(cellValue).toUpperCase()
+      if (!cellValue) continue
+      
+      const strValue = String(cellValue).trim()
+      
+      // Check for currency symbols ($, €, £, ¥, etc.)
+      for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
+        for (const symbol of symbols) {
+          if (strValue.includes(symbol)) {
+            console.log(`Detected currency symbol "${symbol}" -> ${code} at row ${R}, col ${C}`)
+            detectedCurrencies.add(code)
+          }
+        }
+      }
+      
+      // Check for 3-letter ISO codes
+      if (/^[A-Z]{3}$/.test(strValue)) {
+        const currencyCode = strValue.toUpperCase()
         if (NON_CURRENCY_WORDS.has(currencyCode)) continue
         if (KNOWN_ISO_CODES.has(currencyCode)) {
-          let isCurrencyContext = false
-          const adjacentLabels = ['currency','currencies','money','cash','amount','value','price','cost','fee','charge']
-          for (let dr = -1; dr <= 1; dr++) {
-            for (let dc = -1; dc <= 1; dc++) {
-              if (dr === 0 && dc === 0) continue
-              const cR = R + dr, cC = C + dc
-              if (cR >= 0 && cR < data.length && cC >= 0 && cC < data[cR].length) {
-                const adj = String(data[cR][cC]).toLowerCase()
-                if (adjacentLabels.some(l => adj.includes(l))) { isCurrencyContext = true; break }
-              }
-            }
-            if (isCurrencyContext) break
-          }
-          if (isCurrencyContext) detectedCurrencies.add(currencyCode)
+          console.log(`Detected ISO code "${currencyCode}" at row ${R}, col ${C}`)
+          detectedCurrencies.add(currencyCode)
         }
       }
     }
   }
+  
+  console.log('Detected currencies:', Array.from(detectedCurrencies))
 
   // ---------- Pass 5: Scattered search ----------
   console.log('=== Pass 5: Scattered search ===')

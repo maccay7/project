@@ -91,6 +91,11 @@
                 <span>{{ uploadedFile.name }}</span>
                 <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
+                <button class="btn-auto-detect-green" @click="autoDetectSingleInstrument" :disabled="isDetecting || !currentSheetName" v-if="currentSheetName">
+                  <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
+                  <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
+                  {{ isDetecting ? 'Scanning...' : 'Auto Detect' }}
+                </button>
                 <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
                 <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
                 <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!worksheetSelected">Review Excel</button>
@@ -305,11 +310,13 @@
                       <div v-for="(instrument, index) in multiTableDetectionResults" :key="index" class="multi-instrument-item">
                         <div class="multi-instrument-header">
                           <strong>Table {{ index + 1 }}: {{ instrument.tableName }}</strong>
+                          <span class="field-count-badge">{{ Object.keys(instrument.fields).length }} fields</span>
                         </div>
                         <div class="multi-instrument-fields">
                           <div v-for="(value, field) in instrument.fields" :key="field" class="multi-detected-field-item">
                             <span class="multi-detected-field-label">{{ field }}:</span>
                             <span class="multi-detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                            <span v-if="instrument.fieldsWithMetadata?.[field]?.location" class="multi-detected-field-location">@ {{ instrument.fieldsWithMetadata[field].location }}</span>
                           </div>
                         </div>
                         <div v-if="instrument.missingFields.length > 0" class="multi-missing-fields">
@@ -386,10 +393,20 @@
                     </div>
                     
                     <div class="detected-fields-list">
-                      <div v-for="(value, field) in autoDetectedFields" :key="field" class="detected-field-item">
-                        <span class="detected-field-label">{{ field }}:</span>
-                        <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                      <div v-if="Object.keys(autoDetectedFields).length > 0">
+                        <h4>Detected Fields ({{ Object.keys(autoDetectedFields).length }})</h4>
+                        <div v-for="(value, field) in autoDetectedFields" :key="field" class="detected-field-item">
+                          <span class="detected-field-label">{{ field }}:</span>
+                          <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                          <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="detected-field-location">@ {{ autoDetectedFieldsWithMetadata[field].location }}</span>
+                        </div>
                       </div>
+                      
+                      <div v-if="Object.keys(autoDetectedFields).length === 0" class="no-detection-message">
+                        <p>No required fields detected in this worksheet.</p>
+                        <p>Try selecting a different section or check if the field names match the expected format.</p>
+                      </div>
+                      
                       <div v-if="detectedCurrencies.length > 1 && selectedCurrency" class="currency-filter-info">
                         <em>Note: Showing fields for {{ selectedCurrency }} only. Select "All Currencies" to see all detected fields.</em>
                       </div>
@@ -401,6 +418,17 @@
                       <ul>
                         <li v-for="col in requiredColumns.filter(c => !autoDetectedFields[c])" :key="col">{{ col }}</li>
                       </ul>
+                    </div>
+                    
+                    <!-- Show additional detected fields that aren't in required columns -->
+                    <div v-if="autoDetectedAdditionalFields && Object.keys(autoDetectedAdditionalFields).length > 0" class="additional-fields-section">
+                      <h4>Additional Detected Fields ({{ Object.keys(autoDetectedAdditionalFields).length }})</h4>
+                      <p class="section-hint">These fields were detected but are not required for calculations.</p>
+                      <div v-for="(field, label) in autoDetectedAdditionalFields" :key="label" class="additional-field-item">
+                        <span class="additional-field-label">{{ label }}:</span>
+                        <span class="additional-field-value">{{ typeof field === 'object' && field !== null ? field.value : field }}</span>
+                        <span v-if="typeof field === 'object' && field?.location" class="additional-field-location">@ {{ field.location }}</span>
+                      </div>
                     </div>
                   </v-card-text>
                   <v-card-actions>
@@ -416,8 +444,10 @@
                   <v-card-title class="excel-dialog-title-no-logo">
                     <span>Excel Workbook – {{ currentSheetName || 'Select a sheet' }}</span>
                     <v-spacer></v-spacer>
-                    <button class="btn-auto-detect" @click="autoDetectSingleInstrument" v-if="currentSheetName && workbookSheets.length">
-                      Auto Detect
+                    <button class="btn-auto-detect" @click="autoDetectSingleInstrument" v-if="currentSheetName && workbookSheets.length" :disabled="isDetecting">
+                      <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
+                      <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
+                      {{ isDetecting ? 'Scanning...' : 'Auto Detect' }}
                     </button>
                     <button class="btn-work-on-sheet" @click="workOnSelectedSheet" v-if="currentSheetName && workbookSheets.length">
                       Work on This Sheet
@@ -436,6 +466,8 @@
                       @table-isolated="handleTableIsolated"
                       @multi-table-detect="handleMultiTableDetect"
                       @workbook-loaded="handleWorkbookLoaded"
+                      @detect-start="isDetecting = true"
+                      @detect-end="isDetecting = false"
                     />
                   </v-card-text>
                   <div class="popup-footer">
@@ -1775,12 +1807,14 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
   console.log('normalizeDetectedFields input fields:', Object.keys(fields || {}))
 
   // Semantic compatibility groups - expanded with more variations
-  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name']
-  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value']
-  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate']
-  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date']
-  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency']
-  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity']
+  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name']
+  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount']
+  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon']
+  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date']
+  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency']
+  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years']
+  const currencyFields = ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency']
+  const statusFields = ['Status', 'State', 'Type', 'Category', 'Classification']
 
   // Helper function to check if two strings are semantically similar
   function isSemanticMatch(detectedKey, targetField, semanticType) {
@@ -1800,7 +1834,9 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
       'rate': rateFields,
       'date': dateFields,
       'frequency': frequencyFields,
-      'term': termFields
+      'term': termFields,
+      'currency': currencyFields,
+      'status': statusFields
     }
     
     const fields = semanticFields[semanticType] || []
@@ -1846,6 +1882,19 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
       return keyLower.includes(fLower) || fLower.includes(keyLower)
     })) {
       detectedSemantics[rawKey] = 'term'
+    } else if (currencyFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'currency'
+    } else if (statusFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'status'
+    } else {
+      // If no semantic match, allow it anyway if it matches a target column exactly
+      detectedSemantics[rawKey] = 'generic'
     }
   }
 
@@ -1858,25 +1907,41 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
 
   for (const [rawKey, rawValue] of rawEntries) {
     const semantic = detectedSemantics[rawKey]
-    if (!semantic) {
-      console.log(`Skipping "${rawKey}" - no semantic match`)
-      continue
-    }
     
-    // Find matching target column by semantic type
+    // Find matching target column by semantic type or exact match
     let matchedCanonical = null
     for (const targetCol of targetColumns) {
-      if (isSemanticMatch(rawKey, targetCol, semantic)) {
+      const targetLower = String(targetCol).toLowerCase().replace(/[\s_\-()]+/g, '')
+      const rawKeyLower = String(rawKey).toLowerCase().replace(/[\s_\-()]+/g, '')
+      
+      // Exact match
+      if (rawKeyLower === targetLower) {
+        matchedCanonical = targetCol
+        console.log(`Exact match "${rawKey}" to "${targetCol}"`)
+        break
+      }
+      
+      // Semantic match
+      if (semantic && isSemanticMatch(rawKey, targetCol, semantic)) {
         matchedCanonical = targetCol
         console.log(`Matched "${rawKey}" to "${targetCol}" (${semantic})`)
+        break
+      }
+      
+      // Generic: if target column name is contained in detected key or vice versa
+      if (rawKeyLower.includes(targetLower) || targetLower.includes(rawKeyLower)) {
+        matchedCanonical = targetCol
+        console.log(`Generic match "${rawKey}" to "${targetCol}"`)
         break
       }
     }
     
     if (!matchedCanonical) {
-      console.log(`No match found for "${rawKey}" (${semantic})`)
-      continue
+      console.log(`No match found for "${rawKey}" - will keep as-is`)
+      // Keep the field as-is even if it doesn't match a required column
+      matchedCanonical = rawKey
     }
+    
     if (usedCanonical.has(matchedCanonical)) {
       console.log(`Skipping "${matchedCanonical}" - already mapped`)
       continue
@@ -1887,7 +1952,8 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
         ? rawValue.value
         : rawValue
 
-    if (!isPlausibleValue(matchedCanonical, actualValue)) {
+    // Skip implausible value check for generic fields - allow them through
+    if (semantic !== 'generic' && !isPlausibleValue(matchedCanonical, actualValue)) {
       console.log(`Rejected "${matchedCanonical}": "${actualValue}" (implausible value)`)
       continue
     }
@@ -1926,12 +1992,14 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
   console.log('Target columns:', targetColumns)
 
   // Semantic compatibility groups - expanded with more variations
-  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name']
-  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value']
-  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate']
-  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date']
-  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency']
-  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity']
+  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name']
+  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount']
+  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon']
+  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date']
+  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency']
+  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years']
+  const currencyFields = ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency']
+  const statusFields = ['Status', 'State', 'Type', 'Category', 'Classification']
 
   // Helper function to check if two strings are semantically similar
   function isSemanticMatch(detectedKey, targetField, semanticType) {
@@ -1951,7 +2019,9 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
       'rate': rateFields,
       'date': dateFields,
       'frequency': frequencyFields,
-      'term': termFields
+      'term': termFields,
+      'currency': currencyFields,
+      'status': statusFields
     }
     
     const fields = semanticFields[semanticType] || []
@@ -1996,6 +2066,16 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
       return targetLower.includes(fLower) || fLower.includes(targetLower)
     })) {
       targetSemantics[targetCol] = 'term'
+    } else if (currencyFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'currency'
+    } else if (statusFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'status'
     }
   }
 
@@ -2064,6 +2144,16 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
           return cellLower.includes(fLower) || fLower.includes(cellLower)
         })) {
           cellSemantic = 'term'
+        } else if (currencyFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'currency'
+        } else if (statusFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'status'
         }
 
         if (!cellSemantic) continue
@@ -2382,6 +2472,7 @@ const singleInstrumentExtractedValues = ref({})
 const isolatedTableData = ref(null)
 const autoDetectedFields = ref({})
 const autoDetectedFieldsWithMetadata = ref({})
+const autoDetectedAdditionalFields = ref({})
 const detectedCurrencies = ref([])
 const detectedInstrumentType = ref('')
 const selectedCurrency = ref('')
@@ -3880,6 +3971,7 @@ async function autoDetectSingleInstrument() {
 
   autoDetectedFields.value = {}
   autoDetectedFieldsWithMetadata.value = {}
+  autoDetectedAdditionalFields.value = {}
   detectedCurrencies.value = []
   detectedInstrumentType.value = ''
   // Don't reset selectedCurrency - preserve user's choice
@@ -3932,6 +4024,7 @@ async function autoDetectSingleInstrument() {
     // ALWAYS show popup, even if zero fields detected
     autoDetectedFields.value = normalized.fields
     autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
+    autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
     detectedCurrencies.value = detectionResult?.currencies || []
     detectedInstrumentType.value = instrumentType.value
     
@@ -3962,6 +4055,7 @@ async function handleMultiTableDetect(event) {
 
   autoDetectedFields.value = {}
   autoDetectedFieldsWithMetadata.value = {}
+  autoDetectedAdditionalFields.value = {}
   detectedCurrencies.value = []
   detectedInstrumentType.value = ''
   selectedCurrency.value = ''
@@ -4241,6 +4335,7 @@ async function handleCurrencyChange() {
     if (Object.keys(normalized.fields).length > 0) {
       autoDetectedFields.value = normalized.fields
       autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
+      autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
       detectedCurrencies.value = detectionResult?.currencies || []
       detectedInstrumentType.value = instrumentType.value
       console.log('Updated detected fields:', autoDetectedFields.value)
@@ -7941,7 +8036,13 @@ onBeforeUnmount(() => {
 .btn-work-on-sheet { background: #0B2044; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 12px; }
 .btn-work-on-sheet:hover { background: #1a3a6e; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(11,32,68,0.2); }
 .btn-auto-detect { background: #4CAF50; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 12px; }
-.btn-auto-detect:hover { background: #45a049; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76,175,80,0.3); }
+.btn-auto-detect:hover:not(:disabled) { background: #45a049; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76,175,80,0.3); }
+.btn-auto-detect:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-auto-detect-green { background: #4CAF50; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 8px; }
+.btn-auto-detect-green:hover:not(:disabled) { background: #45a049; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76,175,80,0.3); }
+.btn-auto-detect-green:disabled { opacity: 0.6; cursor: not-allowed; }
+.spin-animation { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .detection-success-title { background: #4CAF50; color: white; padding: 16px 24px; display: flex; align-items: center; }
 .detection-success-body { padding: 20px 24px; }
 .currency-selection-section { margin-bottom: 20px; padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
@@ -7957,7 +8058,16 @@ onBeforeUnmount(() => {
 .detected-field-label { font-weight: 600; color: #0B2044; font-size: 14px; }
 .detected-field-value { font-weight: 700; color: #2E7D32; font-size: 15px; }
 .detected-field-location { font-size: 11px; color: #999; font-style: italic; margin-left: 8px; }
+.no-detection-message { padding: 16px; background: #FFF3E0; border-radius: 8px; border-left: 4px solid #FF9800; text-align: center; }
+.no-detection-message p { margin: 4px 0; color: #E65100; }
 .missing-fields-warning { padding: 12px 16px; background: #FFF3E0; border-radius: 8px; border-left: 4px solid #FF9800; }
+.additional-fields-section { margin-top: 20px; padding: 16px; background: #f0f8ff; border-radius: 8px; border-left: 4px solid #2196F3; }
+.additional-fields-section h4 { margin: 0 0 8px 0; font-size: 14px; color: #1976D2; }
+.additional-fields-section .section-hint { margin: 0 0 12px 0; font-size: 12px; color: #666; }
+.additional-field-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-radius: 6px; border-left: 3px solid #2196F3; margin-bottom: 6px; }
+.additional-field-label { font-weight: 600; color: #0B2044; font-size: 13px; }
+.additional-field-value { font-weight: 600; color: #1976D2; font-size: 13px; }
+.additional-field-location { font-size: 10px; color: #999; font-style: italic; margin-left: 8px; }
 .missing-fields-warning p { margin: 0 0 8px 0; font-weight: 600; color: #E65100; font-size: 14px; }
 .missing-fields-warning ul { margin: 0; padding-left: 20px; }
 .missing-fields-warning li { color: #E65100; font-size: 13px; margin-bottom: 4px; }
@@ -7967,10 +8077,12 @@ onBeforeUnmount(() => {
 .multi-instrument-item { padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
 .multi-instrument-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e0e0e0; }
 .table-name-badge { background: #0B2044; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+.field-count-badge { background: #4CAF50; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; }
 .multi-instrument-fields { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .multi-detected-field-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-radius: 6px; border-left: 3px solid #4CAF50; }
 .multi-detected-field-label { font-weight: 600; color: #0B2044; font-size: 13px; }
 .multi-detected-field-value { font-weight: 700; color: #2E7D32; font-size: 14px; }
+.multi-detected-field-location { font-size: 10px; color: #999; font-style: italic; margin-left: 8px; }
 .multi-missing-fields { padding: 8px 12px; background: #FFF3E0; border-radius: 6px; border-left: 3px solid #FF9800; font-size: 12px; }
 .multi-missing-fields .missing-label { font-weight: 600; color: #E65100; margin-right: 6px; }
 
