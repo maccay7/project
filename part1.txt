@@ -1,0 +1,1632 @@
+﻿<template>
+  <FixedLayout>
+    <div class="instrument-page">
+      <!-- Page Header -->
+      <div class="page-header">
+        <div class="header-left">
+          <h1>{{ instrumentLabel }}</h1>
+          <p>{{ instrumentDescription }}</p>
+          <div v-if="activeSession" class="session-badge">
+            <v-icon small>mdi-folder-outline</v-icon>
+            Session: <strong>{{ activeSession.name }}</strong>
+            <span class="version-badge" v-if="activeSession.version_count !== undefined">
+              (v{{ activeSession.version_count }})
+            </span>
+          </div>
+          <div v-else class="session-badge warning">
+            <v-icon small>mdi-alert-outline</v-icon>
+            No active session – please select a session from Dashboard
+          </div>
+        </div>
+        <div class="header-right">
+          <button v-if="activeSession" class="btn-save-session" @click="saveToSession" :disabled="isSaving">
+            <v-icon small>mdi-content-save</v-icon> Save to Session
+          </button>
+          <div class="step-indicator">Step {{ currentStepIndex + 1 }} of {{ totalSteps }}</div>
+        </div>
+      </div>
+
+      <!-- Progress Bar -->
+      <div class="progress-bar-container">
+        <div class="progress-steps">
+          <div
+            v-for="(step, index) in steps"
+            :key="step.tab"
+            class="progress-step"
+            :class="{ active: activeTab === step.tab, completed: isStepComplete(step.tab), disabled: index > farthestAllowedIndex }"
+            @click="switchTab(step.tab)"
+          >
+            <div class="step-circle">{{ index + 1 }}</div>
+            <div class="step-label">{{ step.name }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab content wrapper with overflow scroll -->
+      <div class="tab-content-wrapper">
+        <!-- ===== UPLOAD ===== -->
+        <div v-if="activeTab === 'upload'" class="content-card">
+          <v-card>
+            <v-card-title>Upload {{ instrumentLabel }} Dataset</v-card-title>
+            <v-card-text>
+              <!-- Valuation Date Selector -->
+              <div class="valuation-date-section">
+                <label class="filter-label">Valuation Date</label>
+                <input 
+                  type="date" 
+                  v-model="valuationDate" 
+                  class="date-input"
+                />
+              </div>
+
+              <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
+                <input
+                  type="file"
+                  ref="fileInput"
+                  @change="handleFileUpload"
+                  accept=".csv,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.xlam,.ods,.xml,.html,.prn,.dif,.slk,.dbf"
+                  style="display: none"
+                />
+                <p>Drag & drop or <span class="browse-link" @click="$refs.fileInput.click()">browse</span></p>
+                <small>Supported: CSV, Excel (including .xlsm, .xlsb, .ods), and many other spreadsheet formats</small>
+              </div>
+
+              <div v-if="uploadHistory.length" class="upload-history">
+                <h4>Upload History ({{ uploadHistory.length }} files)</h4>
+                <div class="history-list">
+                  <div v-for="(item, idx) in uploadHistory" :key="idx" class="history-item" @click="loadHistoryFile(item)">
+                    <span>{{ item.name }}</span>
+                    <small>{{ new Date(item.date).toLocaleString() }}</small>
+                    <button class="btn-delete-history" @click.stop="deleteHistoryItem(idx)">×</button>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="fileLoading" class="loading-container">
+                <p>{{ uploadProgress > 0 ? `Processing file... ${uploadProgress}%` : 'Parsing file... Please wait.' }}</p>
+                <v-progress-linear v-if="uploadProgress > 0" :value="uploadProgress" color="#0B2044" height="6"></v-progress-linear>
+              </div>
+
+              <div v-if="uploadedFile" class="file-info">
+                <span>{{ uploadedFile.name }}</span>
+                <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
+                <button class="remove-btn" @click="removeFile">×</button>
+                <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
+                <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
+                <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!worksheetSelected">Review Excel</button>
+                <button v-if="sheetType === 'multi'" class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
+              </div>
+
+              <!-- Worksheet Selector - hidden after a sheet is processed -->
+              <div v-if="worksheetWorkflow.workbookSheets.length > 0 && !worksheetSelected" class="worksheet-selector-section">
+                <WorksheetSelector
+                  :workbook-sheets="worksheetWorkflow.workbookSheets"
+                  :worksheet-status="worksheetWorkflow.worksheetStatus"
+                  :selected-worksheet="worksheetWorkflow.selectedWorksheet"
+                  :loading="fileLoading"
+                  :error="uploadError"
+                  @select-sheet="handleWorksheetSelect"
+                  @work-on-sheet="handleWorkOnSheet"
+                  @view-results="handleViewResults"
+                />
+              </div>
+
+              <!-- ===== PREVIEW SECTION ===== -->
+              <div v-if="rawData.length && showPreview" class="excel-preview-section">
+                <h4 v-if="sheetType === 'single'">File Preview – {{ currentSheetName || 'Selected Sheet' }}</h4>
+                <h4 v-else>File Preview – {{ currentSheetName || 'Selected Sheet' }}</h4>
+                <p v-if="sheetType === 'single'" class="preview-info">
+                  {{ rawData.length }} total rows — edit cells below like Excel
+                </p>
+                <p v-else class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
+                
+                <!-- Multiple Instruments: Show mapped dataset in Excel viewer with mapping controls -->
+                <ExcelViewer
+                  v-if="sheetType === 'multi' && rawData.length"
+                  :data="rawData.slice(0, 500)"
+                  :headers="uploadPreviewHeaders"
+                  :original-data="originalRawData.slice(0, 500)"
+                  :original-headers="originalFileColumns"
+                  :show-mapping-controls="true"
+                  :column-mapping="columnMapping"
+                  :available-file-columns="fileColumns"
+                  :required-columns="requiredColumns"
+                  :workbook-sheets="[]"
+                  :current-sheet-name="currentSheetName"
+                  @data-update="onRawExcelUpdate"
+                  @mapping-update="updateColumnMapping"
+                ></ExcelViewer>
+                
+                <!-- Single Instrument: Show extracted values in Excel viewer -->
+                <ExcelViewer
+                  v-else-if="sheetType === 'single' && rawData.length"
+                  :data="rawData.slice(0, 500)"
+                  :headers="uploadPreviewHeaders"
+                  :original-data="originalRawData.slice(0, 500)"
+                  :original-headers="originalFileColumns"
+                  :show-mapping-controls="false"
+                  :column-mapping="{}"
+                  :available-file-columns="fileColumns"
+                  :required-columns="requiredColumns"
+                  :workbook-sheets="[]"
+                  :current-sheet-name="currentSheetName"
+                  @data-update="onRawExcelUpdate"
+                ></ExcelViewer>
+                
+                <!-- Preview actions - removed "Full Screen" button -->
+                <div v-if="sheetType === 'multi'" class="preview-actions">
+                  <button class="btn-primary" @click="saveFinalMapping">Save Mapping</button>
+                </div>
+              </div>
+
+              <!-- ===== MAPPING DIALOG (only shown for multi) ===== -->
+              <v-dialog v-model="showMappingDialog" max-width="650px">
+                <v-card>
+                  <v-card-title class="mapping-dialog-title">
+                    Map Columns – {{ instrumentLabel }}
+                    <v-spacer></v-spacer>
+                    <span class="mapping-count">{{ requiredColumns.length }} required fields</span>
+                  </v-card-title>
+                  <v-card-text class="mapping-dialog-body">
+                    <div class="mapping-grid">
+                      <div v-for="reqCol in requiredColumns" :key="reqCol" class="mapping-row">
+                        <label class="required-label">{{ reqCol }}</label>
+                        <div class="dropdown-wrapper">
+                          <select v-model="columnMapping[reqCol]" class="mapping-select">
+                            <option :value="null">— Select a column —</option>
+                            <option v-for="fileCol in fileColumns" :key="fileCol" :value="fileCol">{{ fileCol }}</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div v-if="missingColumns.length" class="warning-message">
+                      <span>Missing mappings for: {{ missingColumns.join(', ') }}</span>
+                    </div>
+                    <div v-if="!missingColumns.length && Object.values(columnMapping).some(v => v)" class="success-message">
+                      <span>All columns mapped! Ready to continue.</span>
+                    </div>
+
+                    <div style="margin-top: 16px; text-align: right;">
+                      <button class="btn-secondary small" @click="showSavedMappingsDialog = true">Manage Saved Mappings</button>
+                    </div>
+                  </v-card-text>
+                  <v-card-actions>
+                    <button class="btn-secondary" @click="closeMappingDialog">Cancel</button>
+                    <button class="btn-primary" @click="applyColumnMappingAndClose">Apply Mapping</button>
+                  </v-card-actions>
+                </v-card>
+              </v-dialog>
+
+              <!-- Saved Mappings Popup -->
+              <v-dialog v-model="showSavedMappingsDialog" max-width="700px">
+                <v-card>
+                  <v-card-title class="saved-mappings-popup-title">
+                    Saved Mappings
+                    <v-spacer></v-spacer>
+                    <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">×</button>
+                  </v-card-title>
+                  <v-card-text class="saved-mappings-popup-body">
+                    <!-- Save New Mapping Section -->
+                    <div class="save-section">
+                      <div class="save-row">
+                        <input 
+                          v-model="newTemplateName" 
+                          class="template-input" 
+                          placeholder="Enter mapping name..." 
+                          @keyup.enter="saveCurrentMappingAsTemplate"
+                        />
+                        <button class="btn-primary" @click="saveCurrentMappingAsTemplate">Save Mapping</button>
+                      </div>
+                    </div>
+
+                    <!-- Saved Mappings List -->
+                    <div v-if="!savedTemplates.length" class="empty-state">
+                      <p>No saved mappings yet.</p>
+                    </div>
+                    <div v-else class="saved-mappings-list">
+                      <div v-for="template in savedTemplates" :key="template.id" class="saved-mapping-item">
+                        <div class="mapping-name">{{ template.name }}</div>
+                        <div class="mapping-meta">Saved: {{ new Date(template.created_at).toLocaleDateString() }}</div>
+                        <div class="mapping-actions">
+                          <button class="btn-secondary small" @click="loadTemplateFromPopup(template.id)">Load</button>
+                          <button class="btn-secondary small danger" @click="deleteTemplateFromPopup(template.id)">Delete</button>
+                        </div>
+                      </div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+              </v-dialog>
+
+              <!-- Multi-Table Detection Success Popup -->
+              <v-dialog v-model="showMultiTableDetectionSuccess" max-width="700px">
+                <v-card>
+                  <v-card-title class="detection-success-title">
+                    Multi-Table Detection Successful ✓
+                    <v-spacer></v-spacer>
+                    <button class="btn-close-dialog" @click="showMultiTableDetectionSuccess = false">×</button>
+                  </v-card-title>
+                  <v-card-text class="detection-success-body">
+                    <div class="instrument-type-display">
+                      <strong>Instrument:</strong> {{ instrumentType === 'money-market' ? 'Money Market' : instrumentType === 'treasury-bills' ? 'Treasury Bills' : 'Bonds' }}
+                      ({{ instrumentType }})
+                    </div>
+                    
+                    <!-- Currency Selection for Auto-Detection -->
+                    <div class="currency-selection-section">
+                      <label class="currency-label">Select Currency to Include in Auto-Detected Values:</label>
+                      <v-select
+                        v-model="selectedCurrency"
+                        @change="handleCurrencyChange"
+                        :items="currencyOptions"
+                        label="Currency"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        class="currency-select-vuetify"
+                      ></v-select>
+                      <div v-if="selectedCurrency === 'custom'" class="custom-currency-input-wrapper">
+                        <v-text-field
+                          v-model="customCurrency"
+                          label="Custom Currency Code"
+                          placeholder="e.g., ZWG"
+                          variant="outlined"
+                          density="compact"
+                          maxlength="3"
+                          hide-details
+                          @input="handleCustomCurrencyInput"
+                          class="custom-currency-field-vuetify"
+                        >
+                          <template v-slot:append>
+                            <span class="currency-code-badge">{{ customCurrency.length }}/3</span>
+                          </template>
+                        </v-text-field>
+                      </div>
+                      <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
+                        <strong>Detected Currencies in Section:</strong> {{ detectedCurrencies.join(', ') }}
+                      </div>
+                      <div v-if="selectedCurrency && selectedCurrency !== 'custom'" class="selected-currency-info">
+                        Including values for: <strong>{{ selectedCurrency }}</strong>
+                      </div>
+                      <div v-else-if="selectedCurrency === 'custom' && customCurrency" class="selected-currency-info">
+                        Including values for custom currency: <strong>{{ customCurrency.toUpperCase() }}</strong>
+                      </div>
+                      <div v-else class="selected-currency-info">
+                        Including values for all detected currencies
+                      </div>
+                    </div>
+                    
+                    <div class="multi-table-summary">
+                      <strong>{{ multiTableDetectionResults.length }} table(s) selected</strong>
+                      <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">All detected fields from selected tables will be combined into a single instrument for calculations.</p>
+                    </div>
+                    
+                    <div class="multi-instruments-list">
+                      <div v-for="(instrument, index) in multiTableDetectionResults" :key="index" class="multi-instrument-item">
+                        <div class="multi-instrument-header">
+                          <strong>Table {{ index + 1 }}: {{ instrument.tableName }}</strong>
+                        </div>
+                        <div class="multi-instrument-fields">
+                          <div v-for="(value, field) in instrument.fields" :key="field" class="multi-detected-field-item">
+                            <span class="multi-detected-field-label">{{ field }}:</span>
+                            <span class="multi-detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                          </div>
+                        </div>
+                        <div v-if="instrument.missingFields.length > 0" class="multi-missing-fields">
+                          <span class="missing-label">Missing:</span>
+                          {{ instrument.missingFields.join(', ') }}
+                        </div>
+                      </div>
+                    </div>
+                  </v-card-text>
+                  <v-card-actions>
+                    <button class="btn-secondary" @click="showMultiTableDetectionSuccess = false">Close</button>
+                    <button class="btn-primary" @click="useMultiTableDetectedFields">Use Combined Fields</button>
+                  </v-card-actions>
+                </v-card>
+              </v-dialog>
+
+              <!-- Auto Detection Success Popup -->
+              <v-dialog v-model="showDetectionSuccess" max-width="500px">
+                <v-card>
+                  <v-card-title class="detection-success-title">
+                    Auto Detection Successful ✓
+                    <v-spacer></v-spacer>
+                    <button class="btn-close-dialog" @click="showDetectionSuccess = false">×</button>
+                  </v-card-title>
+                  <v-card-text class="detection-success-body">
+                    <!-- Show instrument type from detection time (stored) -->
+                    <div class="instrument-type-display">
+                      <strong>Instrument:</strong> {{ detectedInstrumentType === 'money-market' ? 'Money Market' : detectedInstrumentType === 'treasury-bills' ? 'Treasury Bills' : 'Bonds' }}
+                      ({{ detectedInstrumentType }})
+                    </div>
+                    
+                    <!-- Currency Selection for Auto-Detection -->
+                    <div class="currency-selection-section">
+                      <label class="currency-label">Select Currency to Include in Auto-Detected Values:</label>
+                      <v-select
+                        v-model="selectedCurrency"
+                        @change="handleCurrencyChange"
+                        :items="currencyOptions"
+                        label="Currency"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        class="currency-select-vuetify"
+                      ></v-select>
+                      <div v-if="selectedCurrency === 'custom'" class="custom-currency-input-wrapper">
+                        <v-text-field
+                          v-model="customCurrency"
+                          label="Custom Currency Code"
+                          placeholder="e.g., ZWG"
+                          variant="outlined"
+                          density="compact"
+                          maxlength="3"
+                          hide-details
+                          @input="handleCustomCurrencyInput"
+                          class="custom-currency-field-vuetify"
+                        >
+                          <template v-slot:append>
+                            <span class="currency-code-badge">{{ customCurrency.length }}/3</span>
+                          </template>
+                        </v-text-field>
+                      </div>
+                      <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
+                        <strong>Detected Currencies in Section:</strong> {{ detectedCurrencies.join(', ') }}
+                      </div>
+                      <div v-if="selectedCurrency && selectedCurrency !== 'custom'" class="selected-currency-info">
+                        Including values for: <strong>{{ selectedCurrency }}</strong>
+                      </div>
+                      <div v-else-if="selectedCurrency === 'custom' && customCurrency" class="selected-currency-info">
+                        Including values for custom currency: <strong>{{ customCurrency.toUpperCase() }}</strong>
+                      </div>
+                      <div v-else class="selected-currency-info">
+                        Including values for all detected currencies
+                      </div>
+                    </div>
+                    
+                    <div class="detected-fields-list">
+                      <div v-for="(value, field) in autoDetectedFields" :key="field" class="detected-field-item">
+                        <span class="detected-field-label">{{ field }}:</span>
+                        <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                      </div>
+                      <div v-if="detectedCurrencies.length > 1 && selectedCurrency" class="currency-filter-info">
+                        <em>Note: Showing fields for {{ selectedCurrency }} only. Select "All Currencies" to see all detected fields.</em>
+                      </div>
+                    </div>
+                    
+                    <!-- Show missing fields if any -->
+                    <div v-if="Object.keys(autoDetectedFields).length < requiredColumns.length" class="missing-fields-warning">
+                      <p><strong>Missing Required Fields:</strong></p>
+                      <ul>
+                        <li v-for="col in requiredColumns.filter(c => !autoDetectedFields[c])" :key="col">{{ col }}</li>
+                      </ul>
+                    </div>
+                  </v-card-text>
+                  <v-card-actions>
+                    <button class="btn-secondary" @click="showDetectionSuccess = false">Close</button>
+                    <button class="btn-primary" @click="useDetectedFields">Work on This Worksheet</button>
+                  </v-card-actions>
+                </v-card>
+              </v-dialog>
+
+              <!-- Workbook Viewer Dialog -->
+              <v-dialog v-model="showWorkbookViewer" max-width="95%" fullscreen hide-overlay>
+                <v-card>
+                  <v-card-title class="excel-dialog-title-no-logo">
+                    <span>Excel Workbook – {{ currentSheetName || 'Select a sheet' }}</span>
+                    <v-spacer></v-spacer>
+                    <button class="btn-auto-detect" @click="autoDetectSingleInstrument" v-if="currentSheetName && workbookSheets.length">
+                      Auto Detect
+                    </button>
+                    <button class="btn-work-on-sheet" @click="workOnSelectedSheet" v-if="currentSheetName && workbookSheets.length">
+                      Work on This Sheet
+                    </button>
+                    <button class="btn-close-dialog" @click="showWorkbookViewer = false">×</button>
+                  </v-card-title>
+                  <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
+                    <ExcelWorkbookViewer
+                      :workbook-data="{ sheets: workbookSheets, fileBuffer: originalFileBuffer }"
+                      :file-name="uploadedFile?.name || 'Workbook'"
+                      :instrument-type="instrumentType"
+                      :worksheet-statuses="worksheetStatuses"
+                      @close="showWorkbookViewer = false"
+                      @sheet-selected="handleSheetSelectedFromViewer"
+                      @single-instrument-extracted="handleSingleInstrumentExtracted"
+                      @table-isolated="handleTableIsolated"
+                      @multi-table-detect="handleMultiTableDetect"
+                      @workbook-loaded="handleWorkbookLoaded"
+                    />
+                  </v-card-text>
+                  <div class="popup-footer">
+                    <span v-if="activeValuationDate" class="valuation-date-footer">Valuation Date: {{ activeValuationDate }}</span>
+                    <v-spacer></v-spacer>
+                    <button class="btn-secondary" @click="showWorkbookViewer = false">Close</button>
+                  </div>
+                </v-card>
+              </v-dialog>
+
+              <!-- ===== Required Columns / Extracted Values ===== -->
+              <div class="required-columns">
+                <h4 v-if="sheetType === 'multi'">Required Columns</h4>
+                <h4 v-else>Required Values (Single Instrument)</h4>
+                
+                <!-- Multi-sheet: Column badges -->
+                <div v-if="sheetType === 'multi'" class="columns-list">
+                  <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
+                    <span class="badge-icon">{{ hasRequiredColumn(col) ? '✓' : '○' }}</span>
+                    {{ col }}
+                  </span>
+                </div>
+                
+                <!-- Single-sheet: Extracted values table (like mapping preview) -->
+                <div v-else class="extracted-values-table">
+                  <div class="table-header">
+                    <span class="header-field">Field</span>
+                    <span class="header-value">Extracted Value</span>
+                    <span class="header-status">Status</span>
+                  </div>
+                  <div v-for="(value, key) in extractedValues" :key="key" class="table-row" :class="{ 'row-missing': !value || value === 'N/A' }">
+                    <span class="row-field">{{ key }}</span>
+                    <div class="row-value">
+                      <input
+                        v-if="value && value !== 'N/A'"
+                        type="text"
+                        class="value-input"
+                        :value="value"
+                        @input="updateExtractedValue(key, $event.target.value)"
+                        @blur="updateExtractedValue(key, $event.target.value)"
+                      />
+                      <input
+                        v-else
+                        type="text"
+                        class="value-input placeholder"
+                        placeholder="Enter value..."
+                        @input="updateExtractedValue(key, $event.target.value)"
+                        @blur="updateExtractedValue(key, $event.target.value)"
+                      />
+                      <button class="btn-clear-value" @click="clearExtractedValue(key)" title="Clear value">×</button>
+                    </div>
+                    <span class="row-status" :class="{ 'status-missing': !value || value === 'N/A' }">
+                      {{ value && value !== 'N/A' ? '✓ Detected' : '! Missing' }}
+                    </span>
+                  </div>
+                </div>
+                
+                <!-- Status messages -->
+                <div v-if="rawData.length && sheetType === 'multi' && missingColumns.length" class="warning-message">
+                  <span class="warning-icon">⚠</span>
+                  <span>Missing required columns. Use the dropdowns on the column headers or click "Map Columns" to assign them.</span>
+                </div>
+                <div v-if="rawData.length && sheetType === 'multi' && missingColumns.length === 0 && mappingApplied" class="success-message">
+                  <span class="success-icon">✓</span>
+                  <span>All columns mapped. Ready to continue.</span>
+                </div>
+                <div v-if="sheetType === 'single' && Object.keys(extractedValues).length > 0" class="values-summary">
+                  <span class="summary-text">
+                    {{ Object.values(extractedValues).filter(v => v && v !== 'N/A').length }} of {{ Object.keys(extractedValues).length }} required values detected
+                  </span>
+                </div>
+              </div>
+
+              <div class="navigation-buttons">
+                <button class="btn-primary" @click="continueAfterUpload" :disabled="!uploadedFile || !rawData.length">Continue</button>
+                <button class="btn-secondary" @click="goToDashboard">Cancel</button>
+              </div>
+            </v-card-text>
+          </v-card>
+        </div>
+
+        <!-- ===== CLEANING ===== -->
+        <div v-if="activeTab === 'cleaning'" class="content-card">
+          <v-card>
+            <v-card-title>Clean {{ instrumentLabel }} Data</v-card-title>
+            <v-card-text>
+              <div v-if="!hasData" class="empty-state">
+                <p>No data uploaded yet.</p>
+                <button class="btn-primary" @click="switchTab('upload')">Go to Upload</button>
+              </div>
+              <div v-else>
+                <div class="cleaning-options-panel">
+                  <h3>Cleaning Filters</h3>
+                  <div class="filter-scroll-container">
+                    <div class="options-list">
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeDuplicates"> Remove duplicate rows</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillMissingText"> Fill missing text with "N/A"</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.dropRowsWithMissing"> Drop rows with ANY missing value</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.trimWhitespace"> Trim whitespace</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.convertToNumbers"> Convert text numbers to numeric</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeOutliers"> Remove outliers (3σ)</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeDates"> Standardize dates to selected format:
+                        <select v-model="selectedDateFormat" class="date-format-select-inline" :disabled="!cleaningOptions.standardizeDates">
+                          <option v-for="format in dateFormatOptions" :key="format.value" :value="format.value">{{ format.label }}</option>
+                        </select>
+                      </label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeSpecialChars"> Remove special characters</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.changeCase"> Change text case:
+                        <select v-model="cleaningOptions.caseType"><option value="none">None</option><option value="upper">UPPER</option><option value="lower">lower</option><option value="title">Title</option></select>
+                      </label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillWithCustom"> Fill missing with custom value:
+                        <input type="text" v-model="cleaningOptions.customFillValue" placeholder="Value" style="width:100px">
+                      </label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeColumnsAllMissing"> Remove columns where ALL values are missing</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.capOutliers"> Cap outliers at 3σ</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeRowsSpecificColumnEmpty"> Remove rows where a specific column is empty:
+                        <select v-model="cleaningOptions.specificColumn"><option value="">-- Select --</option><option v-for="col in Object.keys(rawData[0]||{})" :key="col" :value="col">{{ col }}</option></select>
+                      </label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.standardizeNumericRange"> Standardize numeric columns to [0,1]</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.removeEmptyRows"> Remove completely empty rows</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillForward"> Forward fill missing values</label>
+                      <label class="option-checkbox"><input type="checkbox" v-model="cleaningOptions.fillBackward"> Backward fill missing values</label>
+                    </div>
+                  </div>
+                  <div class="cleaning-buttons">
+                    <button class="btn-primary" @click="applyCleaning">Clean Data</button>
+                  </div>
+                </div>
+
+                <!-- ===== NEW: Detected Values for Single Instrument ===== -->
+                <div v-if="sheetType === 'single' && Object.keys(autoDetectedFields).length > 0" class="detected-values-section">
+                  <h3>Detected Values (Single Instrument)</h3>
+                  <p class="section-hint">Review the values detected by Auto Detection. Exclude values you don't want to use for calculations.</p>
+                  
+                  <div class="detected-values-table">
+                    <div class="table-header">
+                      <span class="header-field">Field</span>
+                      <span class="header-value">Extracted Value</span>
+                      <span class="header-status">Status</span>
+                      <span class="header-action">Action</span>
+                    </div>
+                    <div v-for="(value, key) in autoDetectedFields" :key="key" class="table-row" :class="{ 'row-excluded': excludedDetectedFields.has(key) }">
+                      <span class="row-field">{{ key }}</span>
+                      <div class="row-value">
+                        <span class="value-display">{{ formatDetectedValue(key, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                      </div>
+                      <span class="row-status" :class="{ 'status-excluded': excludedDetectedFields.has(key), 'status-included': !excludedDetectedFields.has(key) }">
+                        {{ excludedDetectedFields.has(key) ? 'Excluded' : 'Included' }}
+                      </span>
+                      <div class="row-action">
+                        <button 
+                          class="btn-toggle-exclude" 
+                          @click="toggleExcludeField(key)"
+                          :class="{ 'btn-exclude': !excludedDetectedFields.has(key), 'btn-include': excludedDetectedFields.has(key) }"
+                        >
+                          {{ excludedDetectedFields.has(key) ? 'Include' : 'Exclude' }}
+                        </button>
+                      </div>
+                    </div>
+                    <!-- Display currency separately if it was selected but not in autoDetectedFields -->
+                    <div v-if="selectedCurrency && !autoDetectedFields['Currency']" class="table-row">
+                      <span class="row-field">Currency</span>
+                      <div class="row-value">
+                        <span class="value-display">{{ selectedCurrency === 'custom' ? customCurrency?.toUpperCase() : selectedCurrency }}</span>
+                      </div>
+                      <span class="row-status status-included">Included</span>
+                      <div class="row-action">
+                        <button class="btn-toggle-exclude btn-exclude" @click="toggleExcludeField('Currency')">Exclude</button>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="detected-values-summary">
+                    <span class="summary-text">
+                      {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) - excludedDetectedFields.size }} of {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) }} values included for calculations
+                    </span>
+                  </div>
+                </div>
+                <div v-if="cleanedData.length" class="preview-section">
+                  <h4>Cleaned Data ({{ cleanedData.length }} rows)</h4>
+                  <div class="excel-scroll-wrapper">
+                    <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
+                  </div>
+                </div>
+
+                <!-- ===== FIXED: Redesigned Cleaning Summary with KPI Cards ===== -->
+                <div v-if="cleanedData.length" class="cleaning-summary-cards">
+                  <v-row>
+                    <v-col cols="12" sm="6" md="3" v-for="stat in cleaningResultStats" :key="stat.title">
+                      <v-card class="kpi-card result-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <v-card-text>
+                          <div class="kpi-content">
+                            <div class="kpi-icon" :style="{ background: stat.gradient }">
+                              <v-icon size="28" color="white">{{ stat.icon }}</v-icon>
+                            </div>
+                            <div class="kpi-info">
+                              <div class="kpi-value">{{ stat.value }}</div>
+                              <div class="kpi-title">{{ stat.title }}</div>
+                            </div>
+                          </div>
+                        </v-card-text>
+                      </v-card>
+                    </v-col>
+                  </v-row>
+                  
+                  <!-- ===== NEW: Cleaning Operations Performed ===== -->
+                  <div v-if="cleaningOperationsSummary.length" class="cleaning-operations-summary">
+                    <h4 class="operations-title">Operations Performed:</h4>
+                    <ul class="operations-list">
+                      <li v-for="(operation, index) in cleaningOperationsSummary" :key="index" class="operation-item">
+                        <v-icon size="16" color="#4CAF50">mdi-check-circle</v-icon>
+                        {{ operation }}
+                      </li>
+                    </ul>
+                  </div>
+                  
+                  <p class="success-text text-center">✓ Data is now clean and ready for calculations</p>
+                </div>
+
+                <div class="navigation-buttons">
+                  <button class="btn-secondary" @click="switchTab('upload')">Previous</button>
+                  <button class="btn-primary" @click="continueAfterCleaning" :disabled="!cleanedData.length">Continue</button>
+                  <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+        </div>
+
+        <!-- ===== CALCULATIONS ===== -->
+        <div v-if="activeTab === 'calculations'" class="content-card">
+          <v-card>
+            <v-card-title class="calc-header">
+              {{ instrumentLabel }} Calculations
+              <span v-if="currentlyViewingInstrument" class="viewing-badge">
+                Currently Viewing: <strong>{{ currentlyViewingInstrument }}</strong>
+              </span>
+              <v-spacer></v-spacer>
+              <button
+                v-if="instrumentSummary.rows.length >= 2 && sheetType === 'multi'"
+                class="btn-calculated-instruments"
+                @click="openAllCalculationsPopup"
+              >
+                Calculated Instruments
+              </button>
+            </v-card-title>
+            <v-card-text>
+              <div v-if="!hasCleanedData" class="empty-state">
+                <p>No cleaned data. Please clean first.</p>
+                <button class="btn-primary" @click="switchTab('cleaning')">Go to Cleaning</button>
+              </div>
+              <div v-else>
+                <div class="summary-cards">
+                  <div class="summary-card total" @click="showFormula('Total Portfolio Value')">
+                    <div class="card-label">Total Portfolio Value</div>
+                    <div class="card-value">{{ formatNumber(allCalculations.totalValue || 0) }}</div>
+                  </div>
+                  <div class="summary-card rate" @click="showFormula('Average Rate')">
+                    <div class="card-label">{{ rateLabel }}</div>
+                    <div class="card-value">{{ formatNumber(allCalculations.avgRate || 0) }}%</div>
+                  </div>
+                  <div class="summary-card count" @click="showFormula('Number of Instruments')">
+                    <div class="card-label">Number of Instruments</div>
+                    <div class="card-value">{{ allCalculations.instrumentCount || 0 }}</div>
+                  </div>
+                </div>
+
+                <div v-if="allCalculations.fred?.benchmark_rate" class="comparison-card fred-calc-card">
+                  <div class="comparison-item">
+                    <span class="comparison-label">FRED market benchmark ({{ allCalculations.fred.series_label }}):</span>
+                    <span class="comparison-value market">{{ formatNumber(allCalculations.fred.benchmark_rate) }}%</span>
+                  </div>
+                  <div class="comparison-item">
+                    <span class="comparison-label">Spread vs your portfolio:</span>
+                    <span class="comparison-value" :class="(allCalculations.fred.spread_vs_market || 0) >= 0 ? 'negative' : 'positive'">{{ formatNumber(allCalculations.fred.spread_vs_market) }}%</span>
+                  </div>
+                  <small class="fred-meta">{{ allCalculations.fred.country_name || allCalculations.fred.country }} · {{ allCalculations.fred.currency }} · {{ allCalculations.fred.maturity }} · FRED</small>
+                  <small v-if="allCalculations.fred.note" class="fred-meta">{{ allCalculations.fred.note }}</small>
+                </div>
+
+                <!-- Field Detection Results -->
+                <div v-if="fieldDetectionResults.summary && fieldDetectionResults.summary.total_fields_detected > 0" class="field-detection-card">
+                  <div class="field-detection-header">
+                    <v-icon small>mdi-magnify</v-icon>
+                    Field Detection Results
+                    <button class="btn-toggle-detection" @click="showFieldDetection = !showFieldDetection">
+                      {{ showFieldDetection ? 'Hide' : 'Show Details' }}
+                    </button>
+                  </div>
+                  <div class="detection-summary">
+                    <span class="detection-stat">
+                      <strong>{{ fieldDetectionResults.summary.total_fields_detected }}</strong> fields detected
+                    </span>
+                    <span class="detection-stat input">
+                      <strong>{{ fieldDetectionResults.summary.input_fields }}</strong> inputs
+                    </span>
+                    <span class="detection-stat existing">
+                      <strong>{{ fieldDetectionResults.summary.existing_fields }}</strong> existing values
+                    </span>
+                    <span class="detection-stat derived">
+                      <strong>{{ fieldDetectionResults.summary.derived_fields }}</strong> derived
+                    </span>
+                    <span class="detection-stat missing">
+                      <strong>{{ fieldDetectionResults.summary.missing_fields }}</strong> missing
+                    </span>
+                  </div>
+                  <div v-if="showFieldDetection" class="detection-details">
+                    <div v-for="(field, fieldName) in fieldDetectionResults.detected_fields" :key="fieldName" class="detection-field-item">
+                      <span class="field-name">{{ fieldName }}</span>
+                      <span class="field-value">{{ field.value !== null ? field.value : 'N/A' }}</span>
+                      <span class="field-type" :class="field.value_type">{{ field.value_type }}</span>
+                      <span class="field-source">{{ field.source }}</span>
+                      <span class="field-confidence">{{ Math.round(field.confidence * 100) }}%</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="calculations-section">
+                  <h3>{{ instrumentLabel }} Calculations</h3>
+                  <div class="calculations-grid">
+                    <div
+                      v-for="calc in calculationFields"
+                      :key="calc.key"
+                      class="calculation-card"
+                      @click="showFormula(calc.key)"
+                    >
+                      <div class="calc-name">{{ calc.label }}</div>
+                      <div class="calc-value">{{ formatCalcValue(calc.key, selectedCalculations[calc.key] ?? allCalculations[calc.key]) }}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <v-dialog v-model="showAllCalculationsPopup" max-width="95%" width="1400px" persistent>
+                  <v-card>
+                    <div class="popup-header-white">
+                      <div class="header-left">
+                        <div class="header-title">
+                          <h4>Calculated Instruments</h4>
+                          <p class="header-meta"><strong>{{ activeSession?.name || '' }}</strong></p>
+                        </div>
+                      </div>
+                      <button class="close-btn" @click="closeAllCalculationsPopup">×</button>
+                    </div>
+                    <v-card-text class="popup-body">
+                      <div v-if="instrumentSummary.rows.length === 0" class="empty-state">
+                        <p>No instruments detected. Please process a worksheet first.</p>
+                      </div>
+                      <div v-else class="excel-table-container">
+                        <div class="search-bar-container">
+                          <input 
+                            type="text" 
+                            v-model="instrumentSearchQuery" 
+                            placeholder="Search instruments..." 
+                            class="search-input"
+                          />
+                          <v-icon class="search-icon">mdi-magnify</v-icon>
+                        </div>
+                        <p class="popup-instruction">View all calculated instrument values below.</p>
+                        <table class="excel-table">
+                          <thead>
+                            <tr>
+                              <th v-for="col in instrumentSummaryColumnsForDisplay" :key="col">{{ col }}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr
+                              v-for="(row, idx) in sortedInstrumentSummaryRows"
+                              :key="idx"
+                            >
+                              <td v-for="col in instrumentSummaryColumnsForDisplay" :key="col">
+                                {{ formatTableCell(row[col], col) }}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </v-card-text>
+                    <v-card-actions class="popup-footer">
+                      <span v-if="currentlyViewingInstrument" class="viewing-indicator">
+                        <v-icon small>mdi-eye</v-icon> Currently viewing: <strong>{{ currentlyViewingInstrument }}</strong>
+                      </span>
+                      <v-spacer></v-spacer>
+                      <button class="btn-primary" @click="downloadCalculatedInstrumentsExcel" style="margin-right: 10px;">
+                        <v-icon small style="margin-right: 5px;">mdi-download</v-icon> Download Excel
+                      </button>
+                      <button class="btn-secondary" @click="closeAllCalculationsPopup">Close</button>
+                    </v-card-actions>
+                  </v-card>
+                </v-dialog>
+
+                <div class="navigation-buttons">
+                  <button class="btn-secondary" @click="switchTab('cleaning')">Previous</button>
+                  <button class="btn-primary" @click="continueToVisualizations">Continue</button>
+                  <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+        </div>
+
+        <!-- ===== VISUALIZATIONS ===== -->
+        <div v-if="activeTab === 'visualizations'" class="content-card">
+          <v-card>
+            <v-card-title><v-icon>mdi-chart-line</v-icon> {{ instrumentLabel }} – Yield Curve</v-card-title>
+            <v-card-text>
+              <div v-if="hasCleanedData && yieldCurveData.length" class="comparison-card">
+                <div class="comparison-item">
+                  <span class="comparison-label">Portfolio Average Rate:</span>
+                  <span class="comparison-value portfolio">{{ formatNumber(portfolioAvgRate) }}%</span>
+                </div>
+                <div class="comparison-item">
+                  <span class="comparison-label">Benchmark Yield ({{ selectedMaturityOptionLabel }}):</span>
+                  <span class="comparison-value market">{{ benchmarkYield !== null ? formatNumber(benchmarkYield) + '%' : '—' }}</span>
+                </div>
+                <div class="comparison-difference" :class="{ 'positive': benchmarkYield - portfolioAvgRate > 0, 'negative': benchmarkYield - portfolioAvgRate < 0 }">
+                  Difference: {{ benchmarkYield !== null ? formatNumber(benchmarkYield - portfolioAvgRate) : '—' }}%
+                </div>
+              </div>
+
+              <div class="filters-row">
+                <div class="filter-group">
+                  <label>Country / Region</label>
+                  <select v-model="selectedCountryOption" @change="onCountrySelectChange" class="filter-select">
+                    <option v-for="opt in displayCountryOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option value="__custom__">✏️ Custom...</option>
+                  </select>
+                  <input
+                    v-if="selectedCountryOption === '__custom__'"
+                    v-model="customCountryInput"
+                    @input="onCustomCountryInput"
+                    placeholder="Type country code (e.g. ZAF)"
+                    class="filter-custom-input"
+                  />
+                </div>
+                <div class="filter-group">
+                  <label>Currency</label>
+                  <select v-model="selectedCurrencyOption" @change="onCurrencySelectChange" class="filter-select">
+                    <option v-for="opt in displayCurrencyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option value="__custom__">✏️ Custom...</option>
+                  </select>
+                  <input
+                    v-if="selectedCurrencyOption === '__custom__'"
+                    v-model="customCurrencyInput"
+                    @input="onCustomCurrencyInput"
+                    placeholder="Type currency code (e.g. ZWL)"
+                    class="filter-custom-input"
+                  />
+                </div>
+                <div class="filter-group">
+                  <label>Maturity / Date Range</label>
+                  <div class="maturity-toggle">
+                    <button 
+                      class="toggle-btn" 
+                      :class="{ active: maturityMode === 'maturity' }"
+                      @click="maturityMode = 'maturity'"
+                    >Maturity</button>
+                    <button 
+                      class="toggle-btn" 
+                      :class="{ active: maturityMode === 'dateRange' }"
+                      @click="maturityMode = 'dateRange'"
+                    >Date Range</button>
+                  </div>
+                  <select v-if="maturityMode === 'maturity'" v-model="selectedMaturityOption" @change="onMaturitySelectChange" class="filter-select">
+                    <option v-for="opt in maturityOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    <option value="__custom__">✏️ Custom...</option>
+                  </select>
+                  <input
+                    v-if="maturityMode === 'maturity' && selectedMaturityOption === '__custom__'"
+                    v-model="customMaturityInput"
+                    @input="onCustomMaturityInput"
+                    placeholder="e.g. 3Y, 6M, 13W"
+                    class="filter-custom-input"
+                  />
+                  <div v-if="maturityMode === 'dateRange'" class="date-range-inputs">
+                    <input 
+                      type="date" 
+                      v-model="yieldCurveStartDate" 
+                      class="date-input-small"
+                      placeholder="Start Date"
+                    />
+                    <input 
+                      type="date" 
+                      v-model="yieldCurveEndDate" 
+                      class="date-input-small"
+                      placeholder="End Date"
+                    />
+                  </div>
+                </div>
+                <button class="btn-secondary refresh-btn" @click="fetchYieldCurve" :disabled="yieldCurveLoading">Refresh curve</button>
+              </div>
+
+              <div v-if="yieldCurveLoading" class="loading-container">
+                <v-icon size="48" class="spin">mdi-loading</v-icon>
+                <p>Fetching yield curve from FRED...</p>
+              </div>
+              <div v-else-if="yieldCurveError && !yieldCurveData.length" class="error-container">
+                <v-icon color="error" size="48">mdi-alert-circle-outline</v-icon>
+                <p>{{ yieldCurveError }}</p>
+                <button class="btn-primary" @click="fetchYieldCurve">Retry</button>
+              </div>
+              <div v-else-if="yieldCurveData.length" class="chart-container chart-container--fred">
+                <canvas ref="yieldCurveChart" width="800" height="400" style="background: white; border-radius: 8px;"></canvas>
+                <div class="chart-footer">
+                  <small>Source: FRED – {{ chartSeriesLabel }} ({{ getCountryLabel(effectiveCountry) }} / {{ getCurrencyLabel(effectiveCurrency) }})</small>
+                </div>
+              </div>
+              <div v-else class="visualization-placeholder">
+                <v-icon size="64" color="#0B2044">mdi-chart-line</v-icon>
+                <h3>No Yield Curve Loaded</h3>
+                <p>Click the <strong>Refresh curve</strong> button above to fetch the latest yield curve.</p>
+                <button class="btn-primary" @click="fetchYieldCurve" style="margin-top: 16px;">Load Yield Curve</button>
+              </div>
+
+              <div class="navigation-buttons">
+                <button class="btn-secondary" @click="switchTab('calculations')">Previous</button>
+                <button class="btn-primary" @click="continueFromVisualizations">Continue</button>
+                <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
+              </div>
+            </v-card-text>
+          </v-card>
+        </div>
+
+        <!-- ===== SUMMARY ===== -->
+        <div v-if="activeTab === 'summary'" class="content-card">
+          <v-card class="summary-pro-card">
+            <v-card-title>
+              <v-icon>mdi-file-document-outline</v-icon> {{ instrumentLabel }} – Executive Summary
+            </v-card-title>
+            <v-card-text>
+              <div v-if="!instrumentSummary.rows.length && !completedInstrumentSummary.rows.length" class="empty-state">
+                <p>No summary data available. Please run calculations first.</p>
+              </div>
+              <div v-else>
+                <!-- Summary Tabs -->
+                <div class="summary-tabs">
+                  <button 
+                    class="summary-tab" 
+                    :class="{ active: activeSummaryTab === 'current' }"
+                    @click="activeSummaryTab = 'current'"
+                    :disabled="!instrumentSummary.rows.length"
+                  >
+                    <v-icon size="16">mdi-file</v-icon>
+                    Current Summary
+                    <span class="tab-count">{{ instrumentSummary.rows.length }}</span>
+                  </button>
+                  <button 
+                    class="summary-tab" 
+                    :class="{ active: activeSummaryTab === 'previous' }"
+                    @click="activeSummaryTab = 'previous'"
+                    :disabled="!currentWorkbookPreviousSummaries.length"
+                  >
+                    <v-icon size="16">mdi-history</v-icon>
+                    Previous Summaries
+                    <span class="tab-count">{{ currentWorkbookPreviousSummaries.length }}</span>
+                  </button>
+                  <button 
+                    class="summary-tab" 
+                    :class="{ active: activeSummaryTab === 'all' }"
+                    @click="activeSummaryTab = 'all'"
+                    :disabled="!instrumentSummary.rows.length && !currentWorkbookPreviousSummaries.length"
+                  >
+                    <v-icon size="16">mdi-view-list</v-icon>
+                    View All
+                    <span class="tab-count">{{ instrumentSummary.rows.length + currentWorkbookPreviousSummaries.length }}</span>
+                  </button>
+                </div>
+
+                <!-- Current Summary Section -->
+                <div v-if="activeSummaryTab === 'current' || activeSummaryTab === 'all'" class="summary-section">
+                  <div v-if="instrumentSummary.rows.length" class="section-header">
+                    <h3>
+                      <v-icon size="20" style="color: #4CAF50;">mdi-file</v-icon>
+                      Current Selection Summary
+                      <span class="worksheet-badge">{{ currentSheetName || 'Current' }}</span>
+                    </h3>
+                    <button class="btn-secondary btn-sm" @click="viewCurrentSummary">
+                      <v-icon size="14">mdi-table-large</v-icon> View Excel
+                    </button>
+                  </div>
+                  
+                  <div v-if="instrumentSummary.rows.length" class="analytics-section" style="margin-bottom: 24px;">
+                    <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
+                      <i class="fas fa-chart-line" style="color: #1a4d8f; margin-right: 8px;"></i> Descriptive Analytics
+                    </h3>
+                    <div class="analytics-cards">
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Number of Records'] || '0' }}</div>
+                          <div class="kpi-title">Number of Instruments</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Total Face Value'] || '0.00' }}</div>
+                          <div class="kpi-title">Total Face Value</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Yield'] || '0.00' }}%</div>
+                          <div class="kpi-title">Weighted Avg Yield</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Maturity'] || '0.00' }}</div>
+                          <div class="kpi-title">Weighted Avg Maturity</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Average Rate'] || '0.00' }}%</div>
+                          <div class="kpi-title">Average Rate</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="instrumentSummary.rows.length" class="quality-control-section" style="margin-bottom: 24px;">
+                    <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
+                      <i class="fas fa-check-circle" style="color: #1a4d8f; margin-right: 8px;"></i> Quality Control
+                    </h3>
+                    <div class="quality-cards">
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.completeness || 0 }}%</div>
+                          <div class="kpi-title">Data Completeness</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.columnsMapped || 0 }} / {{ requiredColumns.length }}</div>
+                          <div class="kpi-title">Columns Mapped</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.rowsProcessed || 0 }}</div>
+                          <div class="kpi-title">Rows Processed</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.duplicatesRemoved || 0 }}</div>
+                          <div class="kpi-title">Duplicates Removed</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ dataQualitySummary.missingValuesFixed || 0 }}</div>
+                          <div class="kpi-title">Missing Values Fixed</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Previous Summaries Section -->
+                <div v-if="activeSummaryTab === 'previous' || activeSummaryTab === 'all'" class="summary-section">
+                  <div v-if="currentWorkbookPreviousSummaries.length" class="section-header">
+                    <h3>
+                      <v-icon size="20" style="color: #2196F3;">mdi-history</v-icon>
+                      Previous Summaries (Current Workbook)
+                      <span class="worksheet-badge">{{ currentWorkbookPreviousSummaries.length }} records</span>
+                    </h3>
+                    <div style="display: flex; gap: 10px;">
+                      <button class="btn-secondary btn-sm" @click="viewPreviousSummariesExcel">
+                        <v-icon size="14">mdi-table-large</v-icon> View Excel
+                      </button>
+                      <button class="btn-secondary btn-sm" @click="exportSummary">
+                        <v-icon size="14">mdi-download</v-icon> Export All
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <!-- Excel-style table display for previous summaries -->
+                  <div v-if="currentWorkbookPreviousSummaries.length" class="excel-table-container" style="margin-top: 20px;">
+                    <table class="excel-table">
+                      <thead>
+                        <tr>
+                          <th>Instrument Name</th>
+                          <th>Worksheet</th>
+                          <th>Instrument Type</th>
+                          <th>Total Value</th>
+                          <th>Average Rate</th>
+                          <th>Workbook</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(row, idx) in currentWorkbookPreviousSummaries.slice(0, 20)" :key="idx">
+                          <td>{{ row['Instrument Name'] || row['instrument_name'] || `Record ${idx + 1}` }}</td>
+                          <td>{{ row['Worksheet'] || row['worksheet'] || 'Unknown' }}</td>
+                          <td>{{ row['Instrument Type'] || row['instrument_type'] || 'N/A' }}</td>
+                          <td>{{ formatNumber(row['Total Value'] || row['total_value'] || 0) }}</td>
+                          <td>{{ formatNumber(row['Average Rate'] || row['average_rate'] || 0) }}%</td>
+                          <td>{{ row['Workbook'] || 'Unknown' }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div v-if="currentWorkbookPreviousSummaries.length > 20" class="show-more-indicator" style="padding: 10px; text-align: center; color: #666;">
+                      ... and {{ currentWorkbookPreviousSummaries.length - 20 }} more records (click View Excel to see all)
+                    </div>
+                  </div>
+                  <div v-else class="empty-state">
+                    <p>No previous summaries for current workbook.</p>
+                  </div>
+                </div>
+
+                <div class="summary-report" v-if="activeSummaryTab === 'current'">
+                  <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
+                    <button class="btn-primary" @click="viewCurrentSummary" style="font-size: 18px; padding: 16px 40px;">
+                      📊 View Current Valuations
+                    </button>
+                  </div>
+                  <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <h4 style="margin-bottom: 15px; color: #0B2044;">Continue Working</h4>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                      <button class="btn-secondary" @click="continueWorkingOnCurrent" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-pencil</v-icon>
+                        Continue on Current Sheet
+                      </button>
+                      <button class="btn-primary" @click="chooseAnotherSheet" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-table-multiple</v-icon>
+                        Choose Another Sheet
+                      </button>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 13px; color: #666;">
+                      Current worksheet: <strong>{{ currentSheetName || 'Not selected' }}</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div class="summary-report" v-if="activeSummaryTab === 'previous'">
+                  <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
+                    <button class="btn-primary" @click="viewPreviousSummary" style="font-size: 18px; padding: 16px 40px;">
+                      📊 View Last Previous Valuation
+                    </button>
+                  </div>
+                  <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <h4 style="margin-bottom: 15px; color: #0B2044;">Continue Working</h4>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                      <button class="btn-secondary" @click="continueWorkingOnCurrent" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-pencil</v-icon>
+                        Continue on Current Sheet
+                      </button>
+                      <button class="btn-primary" @click="chooseAnotherSheet" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-table-multiple</v-icon>
+                        Choose Another Sheet
+                      </button>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 13px; color: #666;">
+                      Current worksheet: <strong>{{ currentSheetName || 'Not selected' }}</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div class="summary-report" v-if="activeSummaryTab === 'all'">
+                  <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
+                    <button class="btn-primary" @click="viewAllSummaries" style="font-size: 18px; padding: 16px 40px;">
+                      📊 View All Valuations
+                    </button>
+                  </div>
+                  <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <h4 style="margin-bottom: 15px; color: #0B2044;">Continue Working</h4>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                      <button class="btn-secondary" @click="continueWorkingOnCurrent" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-pencil</v-icon>
+                        Continue on Current Sheet
+                      </button>
+                      <button class="btn-primary" @click="chooseAnotherSheet" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-table-multiple</v-icon>
+                        Choose Another Sheet
+                      </button>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 13px; color: #666;">
+                      Current worksheet: <strong>{{ currentSheetName || 'Not selected' }}</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div class="summary-report" v-if="activeSummaryTab === 'all'">
+                  <div class="excel-viewer-button" style="text-align: center; margin-top: 20px;">
+                    <button class="btn-primary" @click="exportSummary" style="font-size: 18px; padding: 16px 40px;">
+                      📊 Export All Summaries (Current + Previous)
+                    </button>
+                  </div>
+                  <div class="workbook-actions" style="text-align: center; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <h4 style="margin-bottom: 15px; color: #0B2044;">Continue Working</h4>
+                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                      <button class="btn-secondary" @click="continueWorkingOnCurrent" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-pencil</v-icon>
+                        Continue on Current Sheet
+                      </button>
+                      <button class="btn-primary" @click="chooseAnotherSheet" style="padding: 12px 24px;">
+                        <v-icon size="16" style="margin-right: 8px;">mdi-table-multiple</v-icon>
+                        Choose Another Sheet
+                      </button>
+                    </div>
+                    <p style="margin-top: 12px; font-size: 13px; color: #666;">
+                      Current worksheet: <strong>{{ currentSheetName || 'Not selected' }}</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Teleport to="body">
+                <div v-if="showInstrumentExcelPopup" class="excel-popup-overlay" @click="closeInstrumentExcelPopup">
+                  <div class="excel-popup-content" @click.stop>
+                    <div class="popup-header-white">
+                      <div class="header-left">
+                        <div class="header-title">
+                          <h4>Instrument Summary – {{ selectedInstrumentType }}</h4>
+                          <p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p>
+                        </div>
+                      </div>
+                      <button class="close-btn" @click="closeInstrumentExcelPopup">×</button>
+                    </div>
+                    <div class="popup-body">
+                      <div class="search-bar-container">
+                        <input 
+                          type="text" 
+                          v-model="instrumentSearchQuery" 
+                          placeholder="Search instruments..." 
+                          class="search-input"
+                        />
+                        <v-icon class="search-icon">mdi-magnify</v-icon>
+                      </div>
+                      <p class="popup-instruction" v-if="excelPopupMode === 'current'">
+                        <strong>Current Valuations:</strong> Calculations from the current worksheet/section
+                      </p>
+                      <p class="popup-instruction" v-else-if="excelPopupMode === 'previous'">
+                        <strong>Last Previous Valuation:</strong> Most recent previous calculation from this workbook
+                      </p>
+                      <p class="popup-instruction" v-else-if="excelPopupMode === 'all'">
+                        <strong>All Valuations:</strong> Current and all previous calculations from this workbook
+                      </p>
+                      <div class="excel-table-wrapper">
+                        <table class="excel-table">
+                          <thead>
+                            <tr>
+                              <th v-for="col in instrumentSummaryColumnsForDisplay" :key="col" @click="sortByColumn(col)" class="sortable-header">
+                                <span>{{ col }}</span>
+                                <span class="sort-indicator" v-if="sortColumn === col">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="(row, idx) in paginatedInstrumentSummaryRows" :key="idx">
+                              <td v-for="col in instrumentSummaryColumnsForDisplay" :key="col">{{ formatCellValue(row[col], col) }}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div v-if="totalPages > 1" class="pagination-controls">
+                        <button @click="currentPage = 1" :disabled="currentPage === 1">First</button>
+                        <button @click="currentPage--" :disabled="currentPage === 1">Previous</button>
+                        <span>Page {{ currentPage }} of {{ totalPages }}</span>
+                        <button @click="currentPage++" :disabled="currentPage === totalPages">Next</button>
+                        <button @click="currentPage = totalPages" :disabled="currentPage === totalPages">Last</button>
+                      </div>
+                    </div>
+                    <div class="popup-footer">
+                      <span v-if="activeValuationDate" class="valuation-date-footer">Valuation Date: {{ activeValuationDate }}</span>
+                      <button class="btn-secondary" @click="closeInstrumentExcelPopup">Close</button>
+                    </div>
+                  </div>
+                </div>
+              </Teleport>
+
+              <div v-if="showWorkflowPopup" class="excel-popup-overlay" @click="closeWorkflowPopup">
+                <div class="excel-popup-content" @click.stop>
+                  <div class="popup-header-white">
+                    <h3>🔄 Workflow Options</h3>
+                    <button class="close-btn" @click="closeWorkflowPopup">×</button>
+                  </div>
+                  <div class="popup-body">
+                    <p><strong>Instrument:</strong> {{ selectedWorkflowInstrument?.['Instrument Name'] || `Instrument ${selectedWorkflowIndex + 1}` }}</p>
+                    <p><strong>Type:</strong> {{ selectedWorkflowInstrument?.['Instrument Type'] || selectedInstrumentType }}</p>
+                    <div class="workflow-options">
+                      <button class="workflow-option-btn" @click="navigateToUpload"><v-icon>mdi-upload</v-icon><span>Upload New Data</span></button>
+                      <button class="workflow-option-btn" @click="navigateToCleaning"><v-icon>mdi-broom</v-icon><span>Cleaning</span></button>
+                      <button class="workflow-option-btn" @click="navigateToCalculations"><v-icon>mdi-calculator</v-icon><span>Calculations</span></button>
+                      <button class="workflow-option-btn" @click="navigateToVisualizations"><v-icon>mdi-chart-line</v-icon><span>Visualizations</span></button>
+                    </div>
+                  </div>
+                  <div class="popup-footer">
+                    <button class="btn-secondary" @click="closeWorkflowPopup">Close</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="navigation-buttons">
+                <button class="btn-secondary" @click="switchTab('visualizations')">Previous</button>
+                <button class="btn-primary" @click="goToReportTab">Continue to Report →</button>
+                <button class="btn-primary" @click="goToPortfolioSummary" style="margin-left:10px;">Continue to Portfolio Summary →</button>
+                <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
+              </div>
+            </v-card-text>
+          </v-card>
+        </div>
+
+        <!-- ===== REPORTS ===== -->
+        <div v-if="activeTab === 'reports'" class="content-card">
+          <v-card>
+            <v-card-title><v-icon>mdi-file-pdf-box</v-icon> Generate Combined Report</v-card-title>
+            <v-card-text>
+              <div class="report-options">
+                <div class="instrument-selection">
+                  <h3>Select Instruments to Include</h3>
+                  <div class="selection-cards">
+                    <div class="selection-card" :class="{ active: selectedInstruments.moneyMarket }" @click="selectedInstruments.moneyMarket = !selectedInstruments.moneyMarket">
+                      <v-icon size="28" color="#1E88E5">mdi-chart-line</v-icon>
+                      <span>Money Market</span>
+                      <div class="check-indicator" v-if="selectedInstruments.moneyMarket"><v-icon size="16" color="#4CAF50">mdi-check-circle-outline</v-icon></div>
+                    </div>
+                    <div class="selection-card" :class="{ active: selectedInstruments.bonds }" @click="selectedInstruments.bonds = !selectedInstruments.bonds">
+                      <v-icon size="28" color="#4CAF50">mdi-chart-timeline</v-icon>
+                      <span>Bonds</span>
+                      <div class="check-indicator" v-if="selectedInstruments.bonds"><v-icon size="16" color="#4CAF50">mdi-check-circle-outline</v-icon></div>
+                    </div>
+                    <div class="selection-card" :class="{ active: selectedInstruments.tbills }" @click="selectedInstruments.tbills = !selectedInstruments.tbills">
+                      <v-icon size="28" color="#FF9800">mdi-finance</v-icon>
+                      <span>T-Bills</span>
+                      <div class="check-indicator" v-if="selectedInstruments.tbills"><v-icon size="16" color="#4CAF50">mdi-check-circle-outline</v-icon></div>
+                    </div>
+                  </div>
+                  <div class="selection-actions">
+                    <button class="btn-secondary" @click="selectAllInstruments">Select All</button>
+                    <button class="btn-secondary" @click="deselectAllInstruments">Deselect All</button>
+                  </div>
+                </div>
+                <div class="report-actions">
+                  <button class="btn-preview" @click="previewReport">Preview Report</button>
+                  <button class="btn-preview" @click="downloadCombinedReport('word')">Download</button>
+                </div>
+              </div>
+              <div class="navigation-buttons">
+                <button class="btn-secondary" @click="switchTab('summary')">Previous</button>
+                <button class="btn-primary" @click="goToDashboard">Finish & Dashboard</button>
+              </div>
+            </v-card-text>
+          </v-card>
+        </div>
+      </div>
+    </div>
+
+    <!-- Excel Review Dialog -->
+    <v-dialog v-model="showExcelDialog" max-width="90%" fullscreen hide-overlay>
+      <v-card>
+        <v-card-title class="excel-dialog-title-white">
+          <div class="header-left">
+            <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+            <div class="header-title"><h4>{{ excelDialogTitle }}</h4><p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p></div>
+          </div>
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="closeExcelDialog"><v-icon>mdi-close</v-icon></button>
+        </v-card-title>
+        <v-card-text class="excel-dialog-content pa-0">
+          <ExcelViewer :data="excelData" :headers="excelColumns" @data-update="onExcelDataUpdate" />
+        </v-card-text>
+        <div class="popup-footer">
+          <span v-if="activeValuationDate" class="valuation-date-footer">Valuation Date: {{ activeValuationDate }}</span>
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="closeExcelDialog">Close</button>
+        </div>
+      </v-card>
+    </v-dialog>
+
+    <!-- Formula Dialog -->
+    <v-dialog v-model="formulaDialog" max-width="600px">
+      <v-card>
+        <v-card-title class="formula-dialog-title">
+          <v-icon>mdi-ruler</v-icon> Formula Used
+          <v-spacer></v-spacer>
+          <button v-if="formulaCalculationDetails" class="btn-secondary small" @click="showCalculationDetails = !showCalculationDetails">
+            {{ showCalculationDetails ? 'Hide Details' : 'Show Calculation Details' }}
+          </button>
+        </v-card-title>
+        <v-card-text class="formula-text">{{ formulaText }}</v-card-text>
+        <v-card-text v-if="showCalculationDetails && formulaCalculationDetails" class="calculation-details">
+          <div class="calculation-steps">
+            <h4>Calculation Breakdown:</h4>
+            <div v-for="(step, idx) in formulaCalculationDetails" :key="idx" class="calculation-step">
+              <div class="step-label">{{ step.label }}:</div>
+              <div class="step-value">{{ step.value }}</div>
+              <div v-if="step.formula" class="step-formula">{{ step.formula }}</div>
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <button class="btn-secondary" @click="formulaDialog = false">Close</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Report Preview Dialog -->
+    <v-dialog v-model="reportPreviewDialog" max-width="90%" fullscreen hide-overlay>
+      <v-card>
+        <v-card-title class="excel-dialog-title-white">
+          <div class="header-left">
+            <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
+            <div class="header-title"><h4>Report Preview</h4><p class="header-meta"><strong>{{ activeSession?.name || 'N/A' }}</strong></p></div>
+          </div>
+          <v-spacer></v-spacer>
+          <button class="btn-close-dialog" @click="reportPreviewDialog = false"><v-icon>mdi-close</v-icon></button>
+        </v-card-title>
+        <v-card-text class="report-preview-content" style="padding:0;">
+          <iframe :srcdoc="reportPreviewHtml" frameborder="0" style="width:100%; height:80vh;"></iframe>
+        </v-card-text>
+        <div class="popup-footer">
+          <span v-if="activeValuationDate" class="valuation-date-footer">Valuation Date: {{ activeValuationDate }}</span>
+          <v-spacer></v-spacer>
+          <button class="btn-preview" @click="downloadFromPreview('word')">Download</button>
+        </div>
+      </v-card>
+    </v-dialog>
+
+    <!-- Modal Excel Viewer -->
+    <ExcelModalViewer
+      :visible="showModalViewer"
+      :fileData="viewerFileData"
+      @close="showModalViewer = false"
+      @update:visible="(val) => showModalViewer = val"
+      @process-sheet="handleProcessSheetFromModal"
+    />
+
+    <!-- Snackbar for notifications -->
+    <v-snackbar
+      v-model="snackbar.show"
+      :color="snackbar.color"
+      :timeout="snackbar.timeout"
+      location="bottom"
+    >
+      {{ snackbar.message }}
+    </v-snackbar>
+  </FixedLayout>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import FixedLayout from '@/components/FixedLayout.vue'
+import * as XLSX from 'xlsx'
+import api from '@/services/api.js'
+import sessionManager from '@/services/sessionManager.js'
+import mappingTemplateManager from '@/services/mappingTemplateManager.js'
+import { useFredMarket } from '@/composables/useFredMarket'
+import { useWorksheetWorkflow } from '@/composables/useWorksheetWorkflow.js'
+import ExcelViewer from '@/components/ExcelViewer.vue'
+import ExcelModalViewer from '@/components/ExcelModalViewer.vue'
+import ExcelWorkbookViewer from '@/components/ExcelWorkbookViewer.vue'
+import WorksheetSelector from '@/components/WorksheetSelector.vue'
+import { markStepCompleted, isStepPersistedCompleted } from '@/utils/workflowProgress.js'
+import { autoMatchColumns, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping'
+import { detectSheetType, extractSingleInstrumentValues, getRequiredFieldMappings } from '@/utils/sheetTypeDetector'
+import { autoDetectInstrumentFields } from '@/utils/autoDetectInstrument.js'
+import Chart from 'chart.js/auto'
+import 'chartjs-adapter-date-fns'
+import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
+
+function autoDetectTable(data) {
+  if (!data || data.length === 0) return { type: 'empty', data: [] }
+
+  const firstRow = data[0]
+  let hasHeaders = false
+  if (firstRow && typeof firstRow === 'object') {
+    const values = Object.values(firstRow)
+    hasHeaders = values.some(v => typeof v === 'string' && v.length > 0 && isNaN(v) && !v.match(/^[\d\.,\-]+$/))
+  }
+
+  if (!hasHeaders) {
+    const columnCount = Math.max(...data.map(row => Object.keys(row).length))
+    const headers = Array.from({ length: columnCount }, (_, i) => `Column ${i + 1}`)
+    const tableData = data.map(row => {
+      const obj = {}
+      const values = Object.values(row)
+      headers.forEach((h, idx) => {
+        obj[h] = values[idx] !== undefined ? values[idx] : ''
+      })
+      return obj
+    })
+    return { type: 'table', headers, data: tableData }
+  }
+
+  return { type: 'columns', data }
+}
+
+const router = useRouter()
+const route = useRoute()
+
+// Field mappings for converting backend field names to user-friendly column names
+const FIELD_MAPPINGS = {
+  'money-market': {
+    'discount_yield': 'Discount Yield',
+    'discountYield': 'Discount Yield',
+    'effective_yield': 'Effective Yield',
+    'effectiveYield': 'Effective Yield',
+    'interest_earned': 'Interest Earned',
+    'interestEarned': 'Interest Earned',
+    'interest_rate': 'Interest Rate',
+    'interestRate': 'Interest Rate',
+    'principal': 'Principal',
+    'term_days': 'Days to Maturity',
+    'termDays': 'Days to Maturity',
+    'total_value': 'Total Value',
+    'totalValue': 'Total Value',
+    'yield_curve_rate': 'Yield Curve Rate',
+    'yieldCurveRate': 'Yield Curve Rate',
+    'instrument_name': 'Instrument Name',
+    'instrument_type': 'Instrument Type',
+    'status': 'Status'
+  },
+  'bonds': {
+    'clean_price': 'Clean Price',
+    'dirty_price': 'Dirty Price',
+    'coupon_rate': 'Coupon Rate',
+    'couponRate': 'Coupon Rate',
+    'yield_to_maturity': 'Yield to Maturity',
+    'yieldToMaturity': 'Yield to Maturity',
+    'current_yield': 'Current Yield',
+    'currentYield': 'Current Yield',
+    'macaulay_duration': 'Macaulay Duration',
+    'macaulayDuration': 'Macaulay Duration',
+    'modified_duration': 'Modified Duration',
+    'modifiedDuration': 'Modified Duration',
+    'convexity': 'Convexity',
+    'accrued_interest': 'Accrued Interest',
+    'accruedInterest': 'Accrued Interest',
+    'face_value': 'Face Value',
+    'faceValue': 'Face Value',
+    'total_value': 'Total Value',
+    'totalValue': 'Total Value',
+    'instrument_name': 'Instrument Name',
+    'instrument_type': 'Instrument Type',
+    'status': 'Status'
+  },
+  'tbills': {
+    'discount_rate': 'Discount Rate',
+    'discountRate': 'Discount Rate',
+    'discount_yield': 'Discount Yield',
+    'discountYield': 'Discount Yield',
+    'investment_yield': 'Investment Yield',
+    'investmentYield': 'Investment Yield',
+    'bond_equivalent_yield': 'Bond Equivalent Yield',
+    'bondEquivalentYield': 'Bond Equivalent Yield',
+    'face_value': 'Face Value',
+    'faceValue': 'Face Value',
+    'purchase_price': 'Purchase Price',
+    'purchasePrice': 'Purchase Price',
+    'total_value': 'Total Value',
+    'totalValue': 'Total Value',
+    'days_to_maturity': 'Days to Maturity',
+    'daysToMaturity': 'Days to Maturity',
+    'instrument_name': 'Instrument Name',
+    'instrument_type': 'Instrument Type',
+    'status': 'Status'
+  }
+}
+
+// Input fields that should NOT be shown in summary (these are from cleaning page)
+// Use display names (after mapping) for filtering
+const INPUT_FIELDS = {
+  'money-market': [
+    'Principal', 'Interest Rate', 'Discount Rate', 'Purchase Price',
+    'Issue Date', 'Maturity Date', 'Settlement Date', 'Days to Maturity',
+    'Compounding Frequency', 'Day Count Convention',
+    'Status', 'Error', 'Instrument Name', 'Instrument Type'
+  ],
+  'bonds': [
+    'Face Value', 'Par Value', 'Coupon Rate', 'Coupon Frequency',
+    'Yield to Maturity', 'Issue Date', 'Maturity Date', 'Settlement Date',
+    'Years to Maturity', 'Frequency', 'Day Count Convention',
+    'Status', 'Error', 'Instrument Name', 'Instrument Type'
+  ],
+  'tbills': [
+    'Face Value', 'Discount Rate', 'Purchase Price',
+    'Issue Date', 'Maturity Date', 'Settlement Date', 'Days to Maturity',
+    'Day Count Convention',
+    'Status', 'Error', 'Instrument Name', 'Instrument Type'
+  ]
+}
+

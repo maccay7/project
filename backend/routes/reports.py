@@ -23,6 +23,30 @@ A4_HEIGHT_PX = 1123
 SCREENSHOT_SCALE = 2  # device pixel ratio for sharpness
 
 
+def _safe_session_id(session_id):
+    """Sanitise session_id for safe use in filesystem paths.
+    Strips anything that isn't alphanumeric, dash, underscore, or dot."""
+    if session_id is None:
+        return 'unknown'
+    s = str(session_id).strip()
+    s = re.sub(r'[^A-Za-z0-9_\-\.]', '_', s)
+    s = s.replace('..', '_')
+    return s or 'unknown'
+
+
+def _safe_filename(requested_name, fallback):
+    """Return a filesystem-safe filename, defaulting to `fallback`.
+    Preserves the .docx extension if present."""
+    if not requested_name:
+        return fallback
+    base = os.path.basename(str(requested_name).strip())
+    base = re.sub(r'[^A-Za-z0-9_\-\. ]', '_', base)
+    base = base.replace('..', '_')
+    if not base.lower().endswith('.docx'):
+        base = base + '.docx'
+    return base or fallback
+
+
 def create_reports_table():
     """Create the reports table if it doesn't exist."""
     conn = get_db()
@@ -109,7 +133,6 @@ def generate_report_excel(session_id, report_data, instrument_type):
 
     valuation_date = report_data.get('valuationDate', datetime.now().strftime('%Y-%m-%d'))
 
-    # Sheet 1: Cover Page
     ws_cover = wb.active
     ws_cover.title = 'Cover'
 
@@ -143,7 +166,6 @@ def generate_report_excel(session_id, report_data, instrument_type):
 
     ws_cover.column_dimensions['A'].width = 50
 
-    # Sheet 2: Summary
     ws_summary = wb.create_sheet('Summary')
     summary_data = report_data.get('summary', {})
 
@@ -183,7 +205,6 @@ def generate_report_excel(session_id, report_data, instrument_type):
     ws_summary.column_dimensions['A'].width = 30
     ws_summary.column_dimensions['B'].width = 20
 
-    # Sheet 3: Data
     ws_data = wb.create_sheet('Data')
     data = report_data.get('data', [])
     if data and len(data) > 0:
@@ -216,7 +237,6 @@ def generate_report_excel(session_id, report_data, instrument_type):
             adjusted_width = min(max_length + 2, 50)
             ws_data.column_dimensions[column].width = adjusted_width
 
-    # Sheet 4: Appendix
     ws_appendix = wb.create_sheet('Appendix')
     appendix = generate_appendix_data(data, instrument_type)
 
@@ -312,19 +332,14 @@ def _render_html_to_page_images(html: str, tmpdir: str):
     one image per A4 page. This is what guarantees the exported Word
     matches the Report Preview visually, page for page."""
 
-    # Replace relative image URLs with HTTP URLs to the backend's reports directory
     output_dir = 'reports'
-    
-    # Replace /DuraCapital%20logo.png with backend URL
+
     html = html.replace('/DuraCapital%20logo.png', 'http://localhost:5000/reports/DuraCapital logo.png')
     html = html.replace('/DuraCapital logo.png', 'http://localhost:5000/reports/DuraCapital logo.png')
-    
-    # Replace /reportbackground.png with backend URL
     html = html.replace('/reportbackground.png', 'http://localhost:5000/reports/reportbackground.png')
-    
+
     print(f"[reports] Replaced image URLs with backend HTTP URLs")
 
-    # Debug: Log image URLs in HTML
     img_urls = re.findall(r'<img[^>]*src=["\']([^"\']+)["\']', html, re.IGNORECASE)
     if img_urls:
         print(f"[reports] Found {len(img_urls)} img tags with URLs: {img_urls[:3]}")
@@ -341,8 +356,6 @@ def _render_html_to_page_images(html: str, tmpdir: str):
         )
         page = context.new_page()
 
-        # set_content uses about:blank as the document URL, so we must give
-        # the page a real URL for the <base href> to work reliably.
         try:
             page.goto(f"{frontend_base}/", wait_until="domcontentloaded", timeout=15000)
         except Exception as e:
@@ -350,10 +363,8 @@ def _render_html_to_page_images(html: str, tmpdir: str):
 
         page.set_content(html, wait_until="networkidle")
 
-        # Wait for the page to be fully loaded
         page.wait_for_load_state("networkidle", timeout=15000)
 
-        # Wait for all images to load and be fully rendered
         try:
             page.wait_for_function(
                 """() => {
@@ -367,10 +378,8 @@ def _render_html_to_page_images(html: str, tmpdir: str):
         except Exception as e:
             print(f"[reports] Warning: Image loading wait failed: {e}")
 
-        # Let chart libraries (Chart.js, D3, etc.) finish drawing on canvas
         page.wait_for_timeout(3000)
 
-        # Log all images and their status before screenshot
         try:
             image_status = page.evaluate(
                 """() => Array.from(document.images).map(img => ({
@@ -395,7 +404,6 @@ def _render_html_to_page_images(html: str, tmpdir: str):
         except Exception:
             pass
 
-        # Let images finish loading (key step for background / logo)
         try:
             page.wait_for_function(
                 """() => {
@@ -408,7 +416,6 @@ def _render_html_to_page_images(html: str, tmpdir: str):
         except Exception as e:
             print(f"[reports] Warning: Image loading check failed: {e}")
 
-        # Log loaded images for debugging
         try:
             loaded = page.evaluate(
                 """() => Array.from(document.images)
@@ -418,22 +425,18 @@ def _render_html_to_page_images(html: str, tmpdir: str):
         except Exception as e:
             print(f"[reports] Warning: Could not log loaded images: {e}")
 
-        # Let web fonts settle
         try:
             page.evaluate("() => document.fonts && document.fonts.ready")
         except Exception:
             pass
 
-        # Wait for all images to be fully loaded and rendered
         page.wait_for_timeout(3000)
 
-        # Force a repaint to ensure images are rendered
         try:
             page.evaluate("() => document.body.offsetHeight")
         except Exception:
             pass
 
-        # Log any images that still failed to load (helps debugging)
         try:
             failed = page.evaluate(
                 """() => Array.from(document.images)
@@ -445,20 +448,16 @@ def _render_html_to_page_images(html: str, tmpdir: str):
         except Exception:
             pass
 
-        # Get the actual content height
         content_height = page.evaluate("document.documentElement.scrollHeight")
-        
-        # Calculate number of pages based on actual content
-        # Only count a page if it has meaningful content (at least 20% of A4 height)
+
         raw_num_pages = (content_height + A4_HEIGHT_PX - 1) // A4_HEIGHT_PX
         last_page_height = content_height % A4_HEIGHT_PX if content_height % A4_HEIGHT_PX != 0 else A4_HEIGHT_PX
-        
-        # If the last page is less than 20% of A4 height, skip it
+
         if last_page_height < (A4_HEIGHT_PX * 0.2) and raw_num_pages > 1:
             num_pages = raw_num_pages - 1
         else:
             num_pages = raw_num_pages
-        
+
         print(f"[reports] Content height: {content_height}px, Calculated pages: {num_pages}")
 
         page_paths = []
@@ -476,14 +475,18 @@ def _render_html_to_page_images(html: str, tmpdir: str):
         return page_paths
 
 
-def generate_word_from_html(session_id: str, report_html: str) -> str:
-    """Build a .docx whose pages are exact images of the given HTML,
-    so the exported Word matches the Report Preview visually, page for page."""
+def generate_word_from_html(session_id: str, report_html: str, requested_name: str = None) -> tuple:
+    """Build a .docx whose pages are exact images of the given HTML, so the
+    exported Word matches the Report Preview visually, page for page.
+
+    Returns (internal_path, display_name) where internal_path is the actual
+    file on disk (with the timestamp prefix used for download lookup) and
+    display_name is the friendly name the browser should use."""
     output_dir = 'reports'
     os.makedirs(output_dir, exist_ok=True)
 
-    # Use a persistent directory instead of temp for debugging
-    tmpdir = os.path.join(output_dir, f'tmp_{session_id}_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+    safe_sid = _safe_session_id(session_id)
+    tmpdir = os.path.join(output_dir, f'tmp_{safe_sid}_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
     os.makedirs(tmpdir, exist_ok=True)
 
     try:
@@ -500,7 +503,6 @@ def generate_word_from_html(session_id: str, report_html: str) -> str:
         section.left_margin = Cm(0)
         section.right_margin = Cm(0)
 
-        # Zero the default spacing so the picture paragraph takes no extra room
         normal = doc.styles['Normal']
         normal.font.name = 'Arial'
         normal.font.size = Pt(1)
@@ -518,17 +520,16 @@ def generate_word_from_html(session_id: str, report_html: str) -> str:
             p.paragraph_format.line_spacing = 1.0
             run = p.add_run()
             run.font.size = Pt(1)
-            # Fill the entire A4 page with the rendered image
             run.add_picture(img_path, width=Cm(21.0), height=Cm(29.7))
 
-        file_name = f"report_{session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-        file_path = os.path.join(output_dir, file_name)
+        internal_name = f"report_{safe_sid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+        file_path = os.path.join(output_dir, internal_name)
         doc.save(file_path)
 
-        # Keep temp directory for debugging - don't delete
         print(f"[reports] Debug: Intermediate PNG files saved in {tmpdir}")
 
-        return file_path
+        display_name = _safe_filename(requested_name, internal_name)
+        return file_path, display_name
 
     except Exception as e:
         print(f"[reports] Error generating Word document: {e}")
@@ -540,12 +541,17 @@ def reports_routes(app):
 
     create_reports_table()
 
-    # Serve temporary images from reports directory
     @app.route('/reports/<path:filename>')
     def serve_report_image(filename):
-        """Serve temporary images for Playwright rendering."""
-        output_dir = 'reports'
-        return send_file(os.path.join(output_dir, filename))
+        """Serve static images from the reports directory.
+        Path is validated to prevent traversal outside reports/."""
+        output_dir = os.path.abspath('reports')
+        requested = os.path.abspath(os.path.join(output_dir, filename))
+        if not requested.startswith(output_dir + os.sep) and requested != output_dir:
+            return jsonify({'success': False, 'message': 'Invalid path'}), 400
+        if not os.path.isfile(requested):
+            return jsonify({'success': False, 'message': 'File not found'}), 404
+        return send_file(requested)
 
     @app.route('/api/report/generate', methods=['POST', 'OPTIONS'])
     def generate_report_endpoint():
@@ -630,6 +636,7 @@ def reports_routes(app):
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
         report_html = payload.get('report_html')
+        requested_name = payload.get('file_name')
 
         if not session_id:
             return jsonify({'success': False, 'message': 'Session ID is required'}), 400
@@ -637,14 +644,15 @@ def reports_routes(app):
             return jsonify({'success': False, 'message': 'report_html is required'}), 400
 
         try:
-            file_path = generate_word_from_html(session_id, report_html)
+            file_path, display_name = generate_word_from_html(session_id, report_html, requested_name)
 
             if file_path and os.path.exists(file_path):
                 return jsonify({
                     'success': True,
                     'data': {
                         'file_path': file_path,
-                        'file_name': os.path.basename(file_path)
+                        'file_name': display_name,
+                        'stored_file_name': os.path.basename(file_path)
                     }
                 })
             else:
@@ -665,8 +673,11 @@ def reports_routes(app):
             if not os.path.exists(output_dir):
                 return jsonify({'success': False, 'message': 'Reports directory not found'}), 404
 
+            safe_sid = _safe_session_id(session_id)
+            prefix = f'report_{safe_sid}_'
+
             word_files = [f for f in os.listdir(output_dir)
-                          if f.startswith(f'report_{session_id}_') and f.endswith('.docx')]
+                          if f.startswith(prefix) and f.endswith('.docx')]
 
             if not word_files:
                 return jsonify({'success': False, 'message': 'No Word report found for this session'}), 404
@@ -675,7 +686,11 @@ def reports_routes(app):
             latest_file = word_files[0]
             file_path = os.path.join(output_dir, latest_file)
 
-            return send_file(file_path, as_attachment=True, download_name=latest_file)
+            # Optional friendly name via query string (?name=...)
+            requested = request.args.get('name')
+            download_name = _safe_filename(requested, latest_file) if requested else latest_file
+
+            return send_file(file_path, as_attachment=True, download_name=download_name)
 
         except Exception as e:
             print(f"Error downloading Word report: {e}")

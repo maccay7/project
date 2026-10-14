@@ -337,6 +337,78 @@ function viewResults(sheetName) {
   color: white;
 }
 
+.btn-work-on-sheet {
+  background: #0B2044;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+}
+
+.btn-work-on-sheet:hover:not(:disabled) {
+  background: #1a3a6e;
+  transform: translateY(-1px);
+}
+
+.btn-work-on-sheet:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-auto-detect-sheet {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.btn-auto-detect-sheet:hover:not(:disabled) {
+  background: #45a049;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(76,175,80,0.3);
+}
+
+.btn-auto-detect-sheet:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-view-results {
+  background: #2196F3;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+}
+
+.btn-view-results:hover {
+  background: #1976D2;
+  transform: translateY(-1px);
+}
+
 .status-badge.not_started {
   background: #e0e0e0;
   color: #666;

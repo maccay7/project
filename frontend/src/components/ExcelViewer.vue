@@ -54,7 +54,7 @@
                 class="header-cell"
                 :class="{ 'resizing': resizingColumn === header }"
               >
-                <div v-if="showMappingControls && isRequiredColumn(header)" class="header-dropdown">
+                <div v-if="showMappingControls" class="header-dropdown">
                   <select
                     :value="getMappingForHeader(header)"
                     @change="onMappingChange(header, $event.target.value)"
@@ -229,7 +229,7 @@ export default {
       return displayData.value.slice(start, start + pageSize.value)
     })
 
-    const defaultColumnWidth = 120
+    const defaultColumnWidth = 140
     const defaultRowHeight = 32
 
     const selectedCellRef = computed(() => {
@@ -904,6 +904,10 @@ export default {
 .header-cell {
   position: relative;
   padding-right: 8px;
+  vertical-align: top;
+}
+.header-cell.mapped-column {
+  background: #e8f5e9;
 }
 .header-text {
   display: inline-block;
@@ -915,18 +919,37 @@ export default {
 .header-dropdown {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  width: 100%;
 }
 .mapping-dropdown {
   font-size: 11px;
-  padding: 2px 4px;
+  padding: 3px 4px;
   border-radius: 4px;
-  border: 1px solid #ccc;
+  border: 1px solid #90a4ae;
   background: white;
+  color: #0B2044;
+  width: 100%;
+  cursor: pointer;
+}
+.mapping-dropdown:focus {
+  outline: none;
+  border-color: #0B2044;
+  box-shadow: 0 0 0 2px rgba(11,32,68,0.15);
 }
 .header-label {
-  font-weight: normal;
+  font-weight: 600;
   font-size: 12px;
+  color: #0B2044;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mapped-badge {
+  font-size: 10px;
+  color: #2e7d32;
+  font-weight: 600;
+  margin-left: 4px;
 }
 .column-resizer {
   position: absolute;

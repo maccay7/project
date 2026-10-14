@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+import traceback
 from flask import request, jsonify, send_file
 from werkzeug.utils import secure_filename
 from utils.db import get_db
@@ -11,7 +12,6 @@ from utils.excel_parser import parse_full_workbook
 
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'xlsm', 'csv'}
-# No file size limit - accept any file Excel can open
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -55,6 +55,18 @@ def create_dataset_table():
         return False
 
 
+def _safe_json_dumps(obj):
+    if obj is None:
+        return None
+    try:
+        return json.dumps(obj, default=str)
+    except Exception:
+        try:
+            return json.dumps(str(obj))
+        except Exception:
+            return None
+
+
 def save_dataset_metadata(file_name, original_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, user_id=None, session_id=None, metadata=None):
     conn = get_db()
     if not conn:
@@ -65,7 +77,7 @@ def save_dataset_metadata(file_name, original_name, file_path, file_size, instru
             """INSERT INTO datasets 
                (file_name, original_file_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, user_id, session_id, metadata) 
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (file_name, original_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, user_id, session_id, json.dumps(metadata) if metadata else None)
+            (file_name, original_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, user_id, session_id, _safe_json_dumps(metadata))
         )
         conn.commit()
         dataset_id = cursor.lastrowid
@@ -74,6 +86,7 @@ def save_dataset_metadata(file_name, original_name, file_path, file_size, instru
         return dataset_id
     except Exception as e:
         print(f"Error saving dataset metadata: {e}")
+        traceback.print_exc()
         conn.close()
         return None
 
@@ -84,10 +97,7 @@ def intelligent_parse(file_path, instrument_type):
     metadata = parsed.get('metadata', {})
 
     extracted_data = []
-
     for sheet in parsed.get('sheets', []):
-        # excel_parser already returns sheet['data'] as a list of dicts
-        # (headers applied to each row). Just aggregate them.
         data = sheet.get('data', [])
         for row in data:
             if isinstance(row, dict):
@@ -99,6 +109,36 @@ def intelligent_parse(file_path, instrument_type):
         'metadata': metadata,
         'sheets': parsed.get('sheets', [])
     }
+
+
+def _parse_workbook_safely(file_path, instrument_type):
+    try:
+        parsed = parse_full_workbook(file_path, instrument_type, max_rows=None)
+        sheet_count = len(parsed.get('sheets', []))
+        total_rows = sum(s.get('total_rows', 0) for s in parsed.get('sheets', []))
+        total_columns = max((s.get('total_columns', 0) for s in parsed.get('sheets', [])), default=0)
+        sheet_names = [s.get('name') for s in parsed.get('sheets', []) if s.get('name')]
+        warnings = list(parsed.get('warnings', []) or [])
+        return {
+            'ok': True,
+            'sheet_count': sheet_count,
+            'total_rows': total_rows,
+            'total_columns': total_columns,
+            'sheet_names': sheet_names,
+            'warnings': warnings
+        }
+    except Exception as parse_err:
+        err_msg = f"{type(parse_err).__name__}: {parse_err}"
+        print(f"[dataset/upload] parse_full_workbook failed for {file_path}: {err_msg}")
+        traceback.print_exc()
+        return {
+            'ok': False,
+            'sheet_count': 0,
+            'total_rows': 0,
+            'total_columns': 0,
+            'sheet_names': [],
+            'warnings': [f"Parse failed: {err_msg}"]
+        }
 
 
 def dataset_routes(app):
@@ -130,51 +170,52 @@ def dataset_routes(app):
         try:
             file.save(file_path)
             file_size = os.path.getsize(file_path)
+        except Exception as save_err:
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': f'Failed to save file: {str(save_err)}'}), 500
 
-            parsed = parse_full_workbook(file_path, instrument_type, max_rows=None)
-            sheet_count = len(parsed.get('sheets', []))
-            total_rows = sum(s.get('total_rows', 0) for s in parsed.get('sheets', []))
-            total_columns = max((s.get('total_columns', 0) for s in parsed.get('sheets', [])), default=0)
+        parse_result = _parse_workbook_safely(file_path, instrument_type)
 
-            metadata = {
-                'sheet_count': sheet_count,
-                'sheet_names': [s['name'] for s in parsed.get('sheets', [])],
-                'total_rows': total_rows,
-                'total_columns': total_columns,
-                'parse_warnings': parsed.get('warnings', [])
-            }
+        metadata = {
+            'sheet_count': parse_result['sheet_count'],
+            'sheet_names': parse_result['sheet_names'],
+            'total_rows': parse_result['total_rows'],
+            'total_columns': parse_result['total_columns'],
+            'parse_warnings': parse_result['warnings']
+        }
 
+        try:
             dataset_id = save_dataset_metadata(
                 unique_filename,
                 file.filename,
                 file_path,
                 file_size,
                 instrument_type,
-                sheet_count,
-                total_rows,
-                total_columns,
+                parse_result['sheet_count'],
+                parse_result['total_rows'],
+                parse_result['total_columns'],
                 user_id,
                 session_id,
                 metadata
             )
+        except Exception as meta_err:
+            traceback.print_exc()
+            return jsonify({'success': False, 'message': f'Metadata save failed: {str(meta_err)}'}), 500
 
-            if dataset_id:
-                return jsonify({
-                    'success': True,
-                    'data': {
-                        'dataset_id': dataset_id,
-                        'file_name': file.filename,
-                        'file_size': file_size,
-                        'instrument_type': instrument_type,
-                        'metadata': metadata,
-                        'warnings': parsed.get('warnings', [])
-                    }
-                })
-            else:
-                return jsonify({'success': False, 'message': 'Failed to save dataset metadata'}), 500
+        if not dataset_id:
+            return jsonify({'success': False, 'message': 'Failed to save dataset metadata'}), 500
 
-        except Exception as e:
-            return jsonify({'success': False, 'message': f'Upload failed: {str(e)}'}), 500
+        return jsonify({
+            'success': True,
+            'data': {
+                'dataset_id': dataset_id,
+                'file_name': file.filename,
+                'file_size': file_size,
+                'instrument_type': instrument_type,
+                'metadata': metadata,
+                'warnings': parse_result['warnings']
+            }
+        })
 
     @app.route('/api/dataset/<int:dataset_id>/parse', methods=['GET', 'OPTIONS'])
     def parse_dataset(dataset_id):
@@ -209,7 +250,11 @@ def dataset_routes(app):
             })
 
         except Exception as e:
-            conn.close()
+            traceback.print_exc()
+            try:
+                conn.close()
+            except Exception:
+                pass
             return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/dataset/<int:dataset_id>/intelligent-parse', methods=['GET', 'OPTIONS'])
@@ -245,7 +290,11 @@ def dataset_routes(app):
             })
 
         except Exception as e:
-            conn.close()
+            traceback.print_exc()
+            try:
+                conn.close()
+            except Exception:
+                pass
             return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/dataset/<int:dataset_id>', methods=['DELETE', 'OPTIONS'])
@@ -275,12 +324,15 @@ def dataset_routes(app):
             return jsonify({'success': True, 'message': 'Dataset deleted'})
 
         except Exception as e:
-            conn.close()
+            traceback.print_exc()
+            try:
+                conn.close()
+            except Exception:
+                pass
             return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/save-dataset', methods=['POST', 'OPTIONS'])
     def save_dataset():
-        """Save dataset with data and headers (frontend compatibility)"""
         if request.method == 'OPTIONS':
             return '', 200
 
@@ -294,7 +346,6 @@ def dataset_routes(app):
             headers = data.get('headers')
             instrument_type = data.get('instrument_type') or None
 
-            # If upload_id is provided, update existing dataset
             if upload_id:
                 conn = get_db()
                 if not conn:
@@ -316,7 +367,7 @@ def dataset_routes(app):
 
                         cursor.execute(
                             """UPDATE datasets SET metadata = %s WHERE id = %s""",
-                            (json.dumps(metadata), upload_id)
+                            (_safe_json_dumps(metadata), upload_id)
                         )
                         conn.commit()
                         cursor.close()
@@ -330,10 +381,13 @@ def dataset_routes(app):
                         cursor.close()
                         conn.close()
                 except Exception as e:
-                    conn.close()
+                    traceback.print_exc()
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
                     return jsonify({'success': False, 'message': str(e)}), 500
 
-            # Create new dataset entry without file (data-only save)
             conn = get_db()
             if not conn:
                 return jsonify({'success': False, 'message': 'Database error'}), 500
@@ -352,9 +406,9 @@ def dataset_routes(app):
                     """INSERT INTO datasets 
                        (file_name, original_file_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, metadata) 
                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                    (name, name, '', 0, instrument_type, len(sheet_names) if sheet_names else 1, 
-                     len(payload_data) if payload_data else 0, len(headers) if headers else 0, 
-                     json.dumps(metadata))
+                    (name, name, '', 0, instrument_type, len(sheet_names) if sheet_names else 1,
+                     len(payload_data) if payload_data else 0, len(headers) if headers else 0,
+                     _safe_json_dumps(metadata))
                 )
                 conn.commit()
                 dataset_id = cursor.lastrowid
@@ -367,15 +421,19 @@ def dataset_routes(app):
                 })
 
             except Exception as e:
-                conn.close()
+                traceback.print_exc()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
                 return jsonify({'success': False, 'message': str(e)}), 500
 
         except Exception as e:
+            traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/get-datasets', methods=['GET', 'OPTIONS'])
     def get_datasets():
-        """Get all datasets (frontend compatibility)"""
         if request.method == 'OPTIONS':
             return '', 200
 
@@ -396,7 +454,7 @@ def dataset_routes(app):
                 if isinstance(metadata, str):
                     try:
                         metadata = json.loads(metadata)
-                    except:
+                    except Exception:
                         metadata = {}
 
                 result.append({
@@ -414,12 +472,15 @@ def dataset_routes(app):
             return jsonify({'success': True, 'data': result})
 
         except Exception as e:
-            conn.close()
+            traceback.print_exc()
+            try:
+                conn.close()
+            except Exception:
+                pass
             return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/load-dataset', methods=['POST', 'OPTIONS'])
     def load_dataset():
-        """Load dataset by ID (frontend compatibility)"""
         if request.method == 'OPTIONS':
             return '', 200
 
@@ -448,10 +509,9 @@ def dataset_routes(app):
                 if isinstance(metadata, str):
                     try:
                         metadata = json.loads(metadata)
-                    except:
+                    except Exception:
                         metadata = {}
 
-                # If dataset has stored data/headers in metadata, return those
                 if metadata.get('data') and metadata.get('headers'):
                     return jsonify({
                         'success': True,
@@ -464,7 +524,6 @@ def dataset_routes(app):
                         }
                     })
 
-                # Otherwise, parse the file if it exists
                 file_path = dataset['file_path']
                 if file_path and os.path.exists(file_path):
                     instrument_type = dataset['instrument_type']
@@ -484,15 +543,19 @@ def dataset_routes(app):
                 return jsonify({'success': False, 'message': 'No data available for this dataset'}), 404
 
             except Exception as e:
-                conn.close()
+                traceback.print_exc()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
                 return jsonify({'success': False, 'message': str(e)}), 500
 
         except Exception as e:
+            traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/delete-dataset', methods=['POST', 'OPTIONS'])
     def delete_dataset_post():
-        """Delete dataset by ID (frontend compatibility - POST method)"""
         if request.method == 'OPTIONS':
             return '', 200
 
@@ -525,8 +588,13 @@ def dataset_routes(app):
                 return jsonify({'success': True, 'message': 'Dataset deleted'})
 
             except Exception as e:
-                conn.close()
+                traceback.print_exc()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
                 return jsonify({'success': False, 'message': str(e)}), 500
 
         except Exception as e:
+            traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500

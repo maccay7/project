@@ -91,10 +91,10 @@
                 <span>{{ uploadedFile.name }}</span>
                 <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
-                <button class="btn-auto-detect-green" @click="autoDetectSingleInstrument" :disabled="isDetecting || !currentSheetName" v-if="currentSheetName">
+                <button class="btn-auto-detect-green" @click="() => autoDetectSingleInstrument()" :disabled="isDetecting || !currentSheetName" v-if="currentSheetName">
                   <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
                   <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
-                  {{ isDetecting ? 'Scanning...' : 'Auto Detect' }}
+                  {{ getDetectionButtonText() }}
                 </button>
                 <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
                 <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
@@ -110,9 +110,11 @@
                   :selected-worksheet="worksheetWorkflow.selectedWorksheet"
                   :loading="fileLoading"
                   :error="uploadError"
+                  :is-detecting="isDetecting"
                   @select-sheet="handleWorksheetSelect"
                   @work-on-sheet="handleWorkOnSheet"
                   @view-results="handleViewResults"
+                  @auto-detect-sheet="handleAutoDetectSheet"
                 />
               </div>
 
@@ -348,50 +350,6 @@
                       ({{ detectedInstrumentType }})
                     </div>
                     
-                    <!-- Currency Selection for Auto-Detection -->
-                    <div class="currency-selection-section">
-                      <label class="currency-label">Select Currency to Include in Auto-Detected Values:</label>
-                      <v-select
-                        v-model="selectedCurrency"
-                        @change="handleCurrencyChange"
-                        :items="currencyOptions"
-                        label="Currency"
-                        variant="outlined"
-                        density="compact"
-                        hide-details
-                        class="currency-select-vuetify"
-                      ></v-select>
-                      <div v-if="selectedCurrency === 'custom'" class="custom-currency-input-wrapper">
-                        <v-text-field
-                          v-model="customCurrency"
-                          label="Custom Currency Code"
-                          placeholder="e.g., ZWG"
-                          variant="outlined"
-                          density="compact"
-                          maxlength="3"
-                          hide-details
-                          @input="handleCustomCurrencyInput"
-                          class="custom-currency-field-vuetify"
-                        >
-                          <template v-slot:append>
-                            <span class="currency-code-badge">{{ customCurrency.length }}/3</span>
-                          </template>
-                        </v-text-field>
-                      </div>
-                      <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
-                        <strong>Detected Currencies in Section:</strong> {{ detectedCurrencies.join(', ') }}
-                      </div>
-                      <div v-if="selectedCurrency && selectedCurrency !== 'custom'" class="selected-currency-info">
-                        Including values for: <strong>{{ selectedCurrency }}</strong>
-                      </div>
-                      <div v-else-if="selectedCurrency === 'custom' && customCurrency" class="selected-currency-info">
-                        Including values for custom currency: <strong>{{ customCurrency.toUpperCase() }}</strong>
-                      </div>
-                      <div v-else class="selected-currency-info">
-                        Including values for all detected currencies
-                      </div>
-                    </div>
-                    
                     <div class="detected-fields-list">
                       <div v-if="Object.keys(autoDetectedFields).length > 0">
                         <h4>Detected Fields ({{ Object.keys(autoDetectedFields).length }})</h4>
@@ -399,16 +357,41 @@
                           <span class="detected-field-label">{{ field }}:</span>
                           <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
                           <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="detected-field-location">@ {{ autoDetectedFieldsWithMetadata[field].location }}</span>
+                          <!-- DEBUG: Show currency variants info -->
+                          <div v-if="typeof value === 'object' && value !== null" class="debug-info" style="font-size: 11px; color: #666; margin-top: 4px;">
+                            <span v-if="value.currencyVariants">Currency variants: {{ Object.keys(value.currencyVariants).join(', ') }}</span>
+                            <span v-else>No currency variants ({{ typeof value }})</span>
+                          </div>
+                          <!-- Currency selector for fields with multiple currency variants -->
+                          <div v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1" class="currency-variant-selector">
+                            <select v-model="value.selectedCurrency" @change="updateSelectedCurrency(field, value.selectedCurrency)" class="currency-select">
+                              <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
+                                {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
+                              </option>
+                            </select>
+                          </div>
                         </div>
                       </div>
-                      
-                      <div v-if="Object.keys(autoDetectedFields).length === 0" class="no-detection-message">
+
+                      <div v-if="Object.keys(autoDetectedAdditionalFields).length > 0">
+                        <h4>Additional Detected Fields ({{ Object.keys(autoDetectedAdditionalFields).length }})</h4>
+                        <div v-for="(value, field) in autoDetectedAdditionalFields" :key="'add-' + field" class="detected-field-item">
+                          <span class="detected-field-label">{{ field }}:</span>
+                          <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                          <!-- Currency selector for additional fields with multiple currency variants -->
+                          <div v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1" class="currency-variant-selector">
+                            <select v-model="value.selectedCurrency" @change="updateSelectedCurrency(field, value.selectedCurrency, true)" class="currency-select">
+                              <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
+                                {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
+                              </option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div v-if="Object.keys(autoDetectedFields).length === 0 && Object.keys(autoDetectedAdditionalFields).length === 0" class="no-detection-message">
                         <p>No required fields detected in this worksheet.</p>
                         <p>Try selecting a different section or check if the field names match the expected format.</p>
-                      </div>
-                      
-                      <div v-if="detectedCurrencies.length > 1 && selectedCurrency" class="currency-filter-info">
-                        <em>Note: Showing fields for {{ selectedCurrency }} only. Select "All Currencies" to see all detected fields.</em>
                       </div>
                     </div>
                     
@@ -426,8 +409,16 @@
                       <p class="section-hint">These fields were detected but are not required for calculations.</p>
                       <div v-for="(field, label) in autoDetectedAdditionalFields" :key="label" class="additional-field-item">
                         <span class="additional-field-label">{{ label }}:</span>
-                        <span class="additional-field-value">{{ typeof field === 'object' && field !== null ? field.value : field }}</span>
+                        <span class="additional-field-value">{{ formatDetectedValue(label, typeof field === 'object' && field !== null ? field.value : field) }}</span>
                         <span v-if="typeof field === 'object' && field?.location" class="additional-field-location">@ {{ field.location }}</span>
+                        <!-- Currency selector for additional fields with multiple currency variants -->
+                        <div v-if="typeof field === 'object' && field?.currencyVariants && Object.keys(field.currencyVariants).length > 1" class="currency-variant-selector">
+                          <select v-model="field.selectedCurrency" @change="updateSelectedCurrency(label, field.selectedCurrency, true)" class="currency-select">
+                            <option v-for="(variantValue, currency) in field.currencyVariants" :key="currency" :value="currency">
+                              {{ currency }}: {{ formatDetectedValue(label, variantValue) }}
+                            </option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                   </v-card-text>
@@ -439,24 +430,25 @@
               </v-dialog>
 
               <!-- Workbook Viewer Dialog -->
-              <v-dialog v-model="showWorkbookViewer" max-width="95%" fullscreen hide-overlay>
-                <v-card>
+              <v-dialog v-model="showWorkbookViewer" max-width="95%" persistent>
+                <v-card style="height: 90vh;">
                   <v-card-title class="excel-dialog-title-no-logo">
                     <span>Excel Workbook – {{ currentSheetName || 'Select a sheet' }}</span>
                     <v-spacer></v-spacer>
-                    <button class="btn-auto-detect" @click="autoDetectSingleInstrument" v-if="currentSheetName && workbookSheets.length" :disabled="isDetecting">
+                    <button class="btn-auto-detect-green" @click="() => autoDetectSingleInstrument()" v-if="currentSheetName && workbookSheets.length" :disabled="isDetecting">
                       <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
                       <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
-                      {{ isDetecting ? 'Scanning...' : 'Auto Detect' }}
+                      {{ getDetectionButtonText() }}
                     </button>
                     <button class="btn-work-on-sheet" @click="workOnSelectedSheet" v-if="currentSheetName && workbookSheets.length">
                       Work on This Sheet
                     </button>
                     <button class="btn-close-dialog" @click="showWorkbookViewer = false">×</button>
                   </v-card-title>
-                  <v-card-text class="pa-0" style="height: calc(100vh - 120px);">
+                  <v-card-text class="pa-0" style="height: calc(90vh - 120px);">
                     <ExcelWorkbookViewer
-                      :workbook-data="{ sheets: workbookSheets, fileBuffer: originalFileBuffer }"
+                      v-if="showWorkbookViewer"
+                      :workbook-data="{ sheets: [], fileBuffer: originalFileBuffer }"
                       :file-name="uploadedFile?.name || 'Workbook'"
                       :instrument-type="instrumentType"
                       :worksheet-statuses="worksheetStatuses"
@@ -598,11 +590,11 @@
                 </div>
 
                 <!-- ===== NEW: Detected Values for Single Instrument ===== -->
-                <div v-if="sheetType === 'single' && Object.keys(autoDetectedFields).length > 0" class="detected-values-section">
+                <div v-if="sheetType === 'single'" class="detected-values-section">
                   <h3>Detected Values (Single Instrument)</h3>
                   <p class="section-hint">Review the values detected by Auto Detection. Exclude values you don't want to use for calculations.</p>
-                  
-                  <div class="detected-values-table">
+
+                  <div v-if="Object.keys(autoDetectedFields).length > 0" class="detected-values-table">
                     <div class="table-header">
                       <span class="header-field">Field</span>
                       <span class="header-value">Extracted Value</span>
@@ -635,15 +627,40 @@
                       </div>
                       <span class="row-status status-included">Included</span>
                       <div class="row-action">
-                        <button class="btn-toggle-exclude btn-exclude" @click="toggleExcludeField('Currency')">Exclude</button>
+                        <button class="btn-toggle-exclude btn-include" disabled>Included</button>
+                      </div>
+                    </div>
+
+                    <div class="detected-values-summary">
+                      <span class="summary-text">
+                        {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) - excludedDetectedFields.size }} of {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) }} values included for calculations
+                      </span>
+                    </div>
+
+                    <!-- Add Field Section -->
+                    <div class="add-field-section">
+                      <h4>Add Field</h4>
+                      <p class="section-hint">Add a custom field that will be included in calculations.</p>
+                      <div class="add-field-form">
+                        <input
+                          v-model="newFieldName"
+                          type="text"
+                          placeholder="Field name (e.g., CustomRate)"
+                          class="add-field-input"
+                        />
+                        <input
+                          v-model="newFieldValue"
+                          type="text"
+                          placeholder="Value (e.g., 0.05)"
+                          class="add-field-input"
+                        />
+                        <button class="btn-add-field" @click="addCustomField">Add Field</button>
                       </div>
                     </div>
                   </div>
                   
-                  <div class="detected-values-summary">
-                    <span class="summary-text">
-                      {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) - excludedDetectedFields.size }} of {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) }} values included for calculations
-                    </span>
+                  <div v-else class="no-detection-message-cleaning">
+                    <p>No fields detected. Please run Auto Detection to detect values from your worksheet.</p>
                   </div>
                 </div>
                 <div v-if="cleanedData.length" class="preview-section">
@@ -690,7 +707,10 @@
 
                 <div class="navigation-buttons">
                   <button class="btn-secondary" @click="switchTab('upload')">Previous</button>
-                  <button class="btn-primary" @click="continueAfterCleaning" :disabled="!cleanedData.length">Continue</button>
+                  <button class="btn-primary" @click="continueAfterCleaning" :disabled="!cleanedData.length || isCalculating">
+                    <v-icon v-if="isCalculating" size="16" class="spin-animation">mdi-loading</v-icon>
+                    {{ isCalculating ? 'Calculating...' : 'Continue' }}
+                  </button>
                   <button class="btn-secondary" @click="goToDashboard">Dashboard</button>
                 </div>
               </div>
@@ -788,7 +808,14 @@
 
                 <div class="calculations-section">
                   <h3>{{ instrumentLabel }} Calculations</h3>
-                  <div class="calculations-grid">
+                  
+                  <!-- Calculating Animation -->
+                  <div v-if="isCalculating" class="calculating-animation">
+                    <v-icon size="16" class="spin-animation">mdi-loading</v-icon>
+                    <span>Calculating...</span>
+                  </div>
+                  
+                  <div v-else class="calculations-grid">
                     <div
                       v-for="calc in calculationFields"
                       :key="calc.key"
@@ -796,7 +823,7 @@
                       @click="showFormula(calc.key)"
                     >
                       <div class="calc-name">{{ calc.label }}</div>
-                      <div class="calc-value">{{ formatCalcValue(calc.key, selectedCalculations[calc.key] ?? allCalculations[calc.key]) }}</div>
+                      <div class="calc-value">{{ formatCalcValue(calc.key, calc.value) }}</div>
                     </div>
                   </div>
                 </div>
@@ -1389,10 +1416,10 @@
                 <div class="instrument-selection">
                   <h3>Select Instruments to Include</h3>
                   <div class="selection-cards">
-                    <div class="selection-card" :class="{ active: selectedInstruments.moneyMarket }" @click="selectedInstruments.moneyMarket = !selectedInstruments.moneyMarket">
+                    <div class="selection-card" :class="{ active: selectedInstruments['money-market'] }" @click="selectedInstruments['money-market'] = !selectedInstruments['money-market']">
                       <v-icon size="28" color="#1E88E5">mdi-chart-line</v-icon>
                       <span>Money Market</span>
-                      <div class="check-indicator" v-if="selectedInstruments.moneyMarket"><v-icon size="16" color="#4CAF50">mdi-check-circle-outline</v-icon></div>
+                      <div class="check-indicator" v-if="selectedInstruments['money-market']"><v-icon size="16" color="#4CAF50">mdi-check-circle-outline</v-icon></div>
                     </div>
                     <div class="selection-card" :class="{ active: selectedInstruments.bonds }" @click="selectedInstruments.bonds = !selectedInstruments.bonds">
                       <v-icon size="28" color="#4CAF50">mdi-chart-timeline</v-icon>
@@ -1448,23 +1475,48 @@
     </v-dialog>
 
     <!-- Formula Dialog -->
-    <v-dialog v-model="formulaDialog" max-width="600px">
+    <v-dialog v-model="formulaDialog" max-width="700px">
       <v-card>
         <v-card-title class="formula-dialog-title">
-          <v-icon>mdi-ruler</v-icon> Formula Used
+          <v-icon>mdi-ruler</v-icon> Calculation Breakdown
           <v-spacer></v-spacer>
-          <button v-if="formulaCalculationDetails" class="btn-secondary small" @click="showCalculationDetails = !showCalculationDetails">
-            {{ showCalculationDetails ? 'Hide Details' : 'Show Calculation Details' }}
-          </button>
+          <button class="btn-close-dialog" @click="formulaDialog = false"><v-icon>mdi-close</v-icon></button>
         </v-card-title>
-        <v-card-text class="formula-text">{{ formulaText }}</v-card-text>
-        <v-card-text v-if="showCalculationDetails && formulaCalculationDetails" class="calculation-details">
-          <div class="calculation-steps">
-            <h4>Calculation Breakdown:</h4>
-            <div v-for="(step, idx) in formulaCalculationDetails" :key="idx" class="calculation-step">
-              <div class="step-label">{{ step.label }}:</div>
-              <div class="step-value">{{ step.value }}</div>
-              <div v-if="step.formula" class="step-formula">{{ step.formula }}</div>
+        <v-card-text class="formula-content">
+          <div class="formula-section">
+            <h4>Formula Used:</h4>
+            <div class="formula-text">{{ formulaText }}</div>
+          </div>
+          <v-divider v-if="formulaCalculationDetails"></v-divider>
+          <div v-if="formulaCalculationDetails" class="calculation-details">
+            <h4>Workings with Exact Figures:</h4>
+            <div class="calculation-steps">
+              <div v-for="(step, idx) in formulaCalculationDetails" :key="idx" class="calculation-step">
+                <div class="step-header">
+                  <span class="step-label">{{ step.label }}</span>
+                  <span class="step-value">{{ step.value }}</span>
+                </div>
+                <div v-if="step.formula" class="step-formula">{{ step.formula }}</div>
+              </div>
+            </div>
+            <v-divider v-if="formulaCalculationDetails.breakdown"></v-divider>
+            <div v-if="formulaCalculationDetails.breakdown" class="breakdown-section">
+              <button class="btn-secondary small" @click="showIndividualBreakdown = !showIndividualBreakdown">
+                <v-icon small>{{ showIndividualBreakdown ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+                {{ showIndividualBreakdown ? 'Hide' : 'Show' }} Formula Component Breakdown
+              </button>
+              <div v-if="showIndividualBreakdown" class="breakdown-components">
+                <h5>{{ formulaCalculationDetails.breakdown.title }}</h5>
+                <div v-for="(component, cIdx) in formulaCalculationDetails.breakdown.components" :key="cIdx" class="component-breakdown">
+                  <div class="component-header">
+                    <span class="component-name">{{ component.componentName }}</span>
+                  </div>
+                  <div class="component-calculation">
+                    <span class="component-data">{{ component.calculation }}</span>
+                  </div>
+                  <div class="component-formula">{{ component.formula }}</div>
+                </div>
+              </div>
             </div>
           </div>
         </v-card-text>
@@ -1570,7 +1622,6 @@ function autoDetectTable(data) {
 const router = useRouter()
 const route = useRoute()
 
-// Field mappings for converting backend field names to user-friendly column names
 const FIELD_MAPPINGS = {
   'money-market': {
     'discount_yield': 'Discount Yield',
@@ -1639,8 +1690,6 @@ const FIELD_MAPPINGS = {
   }
 }
 
-// Input fields that should NOT be shown in summary (these are from cleaning page)
-// Use display names (after mapping) for filtering
 const INPUT_FIELDS = {
   'money-market': [
     'Principal', 'Interest Rate', 'Discount Rate', 'Purchase Price',
@@ -1662,7 +1711,6 @@ const INPUT_FIELDS = {
   ]
 }
 
-// Calculated fields that SHOULD be shown in summary (these are backend-calculated results)
 const CALCULATED_FIELDS = {
   'money-market': [
     'total_value', 'calculated_value', 'present_value', 'fair_value', 'market_value',
@@ -1699,13 +1747,11 @@ const CALCULATED_FIELDS = {
   ]
 }
 
-// Function to map backend field names to user-friendly column names
 function mapBackendFieldsToDisplayNames(row, instrumentType) {
   const mapping = FIELD_MAPPINGS[instrumentType] || {}
   const mappedRow = {}
   
   for (const [key, value] of Object.entries(row)) {
-    // Use mapped name if available, otherwise use original key
     const displayKey = mapping[key] || key
     mappedRow[displayKey] = value
   }
@@ -1713,25 +1759,20 @@ function mapBackendFieldsToDisplayNames(row, instrumentType) {
   return mappedRow
 }
 
-// Function to filter row to exclude only input fields (show everything else including calculated results)
 function filterToCalculatedFields(row, instrumentType) {
   const inputFields = INPUT_FIELDS[instrumentType] || []
   const filteredRow = {}
   
-  // Always include Instrument Name, Instrument Type, Worksheet, Workbook
   const alwaysInclude = ['Instrument Name', 'Instrument Type', 'Worksheet', 'Workbook']
   
   for (const [key, value] of Object.entries(row)) {
-    // Check if this is an always-include field
     if (alwaysInclude.includes(key)) {
       filteredRow[key] = value
       continue
     }
     
-    // Check if this is an input field (by display name)
     const isInput = inputFields.includes(key)
     
-    // Include if it's NOT an input field (show calculated fields and any other backend fields)
     if (!isInput) {
       filteredRow[key] = value
     }
@@ -1740,45 +1781,34 @@ function filterToCalculatedFields(row, instrumentType) {
   return filteredRow
 }
 
-// ============================================================
-// DETECTION NORMALIZATION — pure re-labelling + plausibility
-// gating. No mock values, no invented defaults. Every value
-// returned here was actually present in the detector output.
-// Recognised frequency tokens (rejects numeric garbage)
 const VALID_FREQUENCIES = /^(annual(ly)?|semi[- ]?annual(ly)?|quarter(ly)?|month(ly)?|weekly|daily|at maturity|zero|bullet|1|2|4|12|52|365)$/i
 
-// Reject garbage values that the detector incorrectly attached to a field
 function isPlausibleValue(canonicalKey, value) {
   if (value === null || value === undefined || value === '') return false
 
   const lc = String(canonicalKey).toLowerCase()
 
-  // Frequency field validation
   if (lc.includes('frequency') || lc.includes('interest') && lc.includes('payment') && lc.includes('frequency') || lc.includes('payment') && lc.includes('frequency')) {
     return VALID_FREQUENCIES.test(String(value).trim())
   }
 
-  // Rate/yield/coupon validation: must be 0-100
   if (lc.includes('rate') || lc.includes('yield') || lc.includes('coupon') || lc.includes('discount')) {
     const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[%,$\s]/g, ''))
     if (isNaN(n)) return false
     return n >= 0 && n <= 100
   }
 
-  // Face/principal/value/price validation: must be non-negative
   if (lc.includes('value') || lc.includes('amount') || lc.includes('price') || lc.includes('principal') || lc.includes('face') || lc.includes('notional') || lc.includes('nominal') || lc.includes('par')) {
     const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[$,\s]/g, ''))
     if (isNaN(n)) return false
     return n >= 0
   }
 
-  // Date validation
   if (lc.includes('date') || lc.includes('maturity') || lc.includes('auction') || lc.includes('settlement') || lc.includes('issue') || lc.includes('coupon') && lc.includes('date')) {
     const d = new Date(value)
     return !isNaN(d.getTime())
   }
 
-  // Days/term validation: must be non-negative integer
   if (lc.includes('days') || lc.includes('term') || lc.includes('tenor') || lc.includes('maturity') && !lc.includes('date')) {
     const n = typeof value === 'number' ? value : parseFloat(String(value))
     if (isNaN(n)) return false
@@ -1788,46 +1818,35 @@ function isPlausibleValue(canonicalKey, value) {
   return true
 }
 
-/**
- * Normalise the detector output into canonical required-column keys.
- * - Never invents values
- * - Re-labels only what was actually detected
- * - Drops implausible/garbage values
- * - Uses semantic compatibility for key resolution
- * - Outputs keys that are literally in requiredColumns.value
- */
 function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, requiredColsOverride = null) {
   const normalised = {}
   const normalisedMeta = {}
   const usedCanonical = new Set()
   
-  // Use override if provided, otherwise read from requiredColumns.value
   const targetColumns = requiredColsOverride || requiredColumns.value || []
   console.log('normalizeDetectedFields target columns:', targetColumns)
   console.log('normalizeDetectedFields input fields:', Object.keys(fields || {}))
 
-  // Semantic compatibility groups - expanded with more variations
-  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name']
-  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount']
-  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon']
-  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date']
-  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency']
-  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years']
-  const currencyFields = ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency']
+  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name', 'Instrument']
+  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount', 'Notional Amount', 'Purchase Price', 'Future Value']
+  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon', 'Investment Yield', 'Effective Annual Yield', 'Benchmark Rate', 'Reference Rate', 'Spread', 'Margin']
+  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date', 'Call Date', 'Put Date', 'Coupon Date']
+  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency', 'Compounding Frequency']
+  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years', 'Accrued Days', 'Days in Coupon Period', 'Term to Maturity']
+  const currencyFields = ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency', 'Exchange Rate', 'FX Rate']
   const statusFields = ['Status', 'State', 'Type', 'Category', 'Classification']
+  const priceFields = ['Price', 'Purchase Price', 'Clean Price', 'Dirty Price', 'Market Price', 'Current Price', 'Price per 100', 'Call Price', 'Put Price']
+  const interestFields = ['Accrued Interest', 'Interest Accrued', 'Coupon', 'Coupon Amount', 'Coupon Payment', 'Annual Coupon', 'Interest Earned', 'Interest Income', 'Discount Amount']
+  const durationFields = ['Macaulay Duration', 'Modified Duration', 'Convexity', 'DV01']
+  const returnFields = ['Capital Gain Loss', 'Total Return', 'Profit Return', 'Market Value', 'Present Value', 'Carrying Value', 'Book Value', 'Fair Value', 'Maturity Value', 'Current Value', 'Purchase Cost']
 
-  // Helper function to check if two strings are semantically similar
   function isSemanticMatch(detectedKey, targetField, semanticType) {
     const detectedLower = String(detectedKey).toLowerCase().replace(/[\s_\-()]+/g, '')
     const targetLower = String(targetField).toLowerCase().replace(/[\s_\-()]+/g, '')
     
-    // Exact match
     if (detectedLower === targetLower) return true
-    
-    // Substring match (detected contains target or vice versa)
     if (detectedLower.includes(targetLower) || targetLower.includes(detectedLower)) return true
     
-    // Check against semantic field list
     const semanticFields = {
       'name': nameStyleFields,
       'faceValue': faceValueFields,
@@ -1836,7 +1855,11 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
       'frequency': frequencyFields,
       'term': termFields,
       'currency': currencyFields,
-      'status': statusFields
+      'status': statusFields,
+      'price': priceFields,
+      'interest': interestFields,
+      'duration': durationFields,
+      'return': returnFields
     }
     
     const fields = semanticFields[semanticType] || []
@@ -1846,12 +1869,10 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
     return detectedInList && targetInList
   }
 
-  // Build semantic map for detected keys
   const detectedSemantics = {}
   for (const [rawKey, rawValue] of Object.entries(fields || {})) {
     const keyLower = String(rawKey).toLowerCase().replace(/[\s_\-()]+/g, '')
     
-    // Classify detected key by semantic type (substring match instead of exact)
     if (nameStyleFields.some(f => {
       const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
       return keyLower.includes(fLower) || fLower.includes(keyLower)
@@ -1892,15 +1913,33 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
       return keyLower.includes(fLower) || fLower.includes(keyLower)
     })) {
       detectedSemantics[rawKey] = 'status'
+    } else if (priceFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'price'
+    } else if (interestFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'interest'
+    } else if (durationFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'duration'
+    } else if (returnFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return keyLower.includes(fLower) || fLower.includes(keyLower)
+    })) {
+      detectedSemantics[rawKey] = 'return'
     } else {
-      // If no semantic match, allow it anyway if it matches a target column exactly
       detectedSemantics[rawKey] = 'generic'
     }
   }
 
   console.log('Detected semantics:', detectedSemantics)
 
-  // Stable iteration order: longest raw keys first (more specific first)
   const rawEntries = Object.entries(fields || {}).sort(
     (a, b) => String(b[0]).length - String(a[0]).length
   )
@@ -1908,27 +1947,23 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
   for (const [rawKey, rawValue] of rawEntries) {
     const semantic = detectedSemantics[rawKey]
     
-    // Find matching target column by semantic type or exact match
     let matchedCanonical = null
     for (const targetCol of targetColumns) {
       const targetLower = String(targetCol).toLowerCase().replace(/[\s_\-()]+/g, '')
       const rawKeyLower = String(rawKey).toLowerCase().replace(/[\s_\-()]+/g, '')
       
-      // Exact match
       if (rawKeyLower === targetLower) {
         matchedCanonical = targetCol
         console.log(`Exact match "${rawKey}" to "${targetCol}"`)
         break
       }
       
-      // Semantic match
       if (semantic && isSemanticMatch(rawKey, targetCol, semantic)) {
         matchedCanonical = targetCol
         console.log(`Matched "${rawKey}" to "${targetCol}" (${semantic})`)
         break
       }
       
-      // Generic: if target column name is contained in detected key or vice versa
       if (rawKeyLower.includes(targetLower) || targetLower.includes(rawKeyLower)) {
         matchedCanonical = targetCol
         console.log(`Generic match "${rawKey}" to "${targetCol}"`)
@@ -1938,7 +1973,6 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
     
     if (!matchedCanonical) {
       console.log(`No match found for "${rawKey}" - will keep as-is`)
-      // Keep the field as-is even if it doesn't match a required column
       matchedCanonical = rawKey
     }
     
@@ -1952,7 +1986,6 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
         ? rawValue.value
         : rawValue
 
-    // Skip implausible value check for generic fields - allow them through
     if (semantic !== 'generic' && !isPlausibleValue(matchedCanonical, actualValue)) {
       console.log(`Rejected "${matchedCanonical}": "${actualValue}" (implausible value)`)
       continue
@@ -1969,20 +2002,6 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
   return { fields: normalised, fieldsWithMetadata: normalisedMeta }
 }
 
-/**
- * Secondary raw-sheet scan for required fields the primary detector missed.
- * Reads the actual workbook buffer directly and searches every cell in the
- * sheet for a label matching an alias of a missing required field.
- *
- * This is NOT a mock/fallback: every value returned here was physically
- * present in the uploaded workbook at the exact cell coordinates it was
- * found. It only compensates for the primary detector's limited internal
- * label dictionary (e.g. it doesn't know "Principal" or "Issue Date").
- *
- * Uses semantic compatibility for label matching.
- * Only returns values that pass isPlausibleValue().
- * No row limit - scans entire sheet.
- */
 function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOverride = null) {
   if (!originalFileBuffer.value || !currentSheetName.value) return {}
   if (!missingFields || missingFields.length === 0) return {}
@@ -1991,28 +2010,26 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
   console.log('Secondary scan for missing fields:', missingFields)
   console.log('Target columns:', targetColumns)
 
-  // Semantic compatibility groups - expanded with more variations
-  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name']
-  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount']
-  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon']
-  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date']
-  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency']
-  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years']
-  const currencyFields = ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency']
+  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name', 'Instrument']
+  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount', 'Notional Amount', 'Purchase Price', 'Future Value']
+  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon', 'Investment Yield', 'Effective Annual Yield', 'Benchmark Rate', 'Reference Rate', 'Spread', 'Margin']
+  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date', 'Call Date', 'Put Date', 'Coupon Date']
+  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency', 'Compounding Frequency']
+  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years', 'Accrued Days', 'Days in Coupon Period', 'Term to Maturity']
+  const currencyFields = ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency', 'Exchange Rate', 'FX Rate']
   const statusFields = ['Status', 'State', 'Type', 'Category', 'Classification']
+  const priceFields = ['Price', 'Purchase Price', 'Clean Price', 'Dirty Price', 'Market Price', 'Current Price', 'Price per 100', 'Call Price', 'Put Price']
+  const interestFields = ['Accrued Interest', 'Interest Accrued', 'Coupon', 'Coupon Amount', 'Coupon Payment', 'Annual Coupon', 'Interest Earned', 'Interest Income', 'Discount Amount']
+  const durationFields = ['Macaulay Duration', 'Modified Duration', 'Convexity', 'DV01']
+  const returnFields = ['Capital Gain Loss', 'Total Return', 'Profit Return', 'Market Value', 'Present Value', 'Carrying Value', 'Book Value', 'Fair Value', 'Maturity Value', 'Current Value', 'Purchase Cost']
 
-  // Helper function to check if two strings are semantically similar
   function isSemanticMatch(detectedKey, targetField, semanticType) {
     const detectedLower = String(detectedKey).toLowerCase().replace(/[\s_\-()]+/g, '')
     const targetLower = String(targetField).toLowerCase().replace(/[\s_\-()]+/g, '')
     
-    // Exact match
     if (detectedLower === targetLower) return true
-    
-    // Substring match (detected contains target or vice versa)
     if (detectedLower.includes(targetLower) || targetLower.includes(detectedLower)) return true
     
-    // Check against semantic field list
     const semanticFields = {
       'name': nameStyleFields,
       'faceValue': faceValueFields,
@@ -2021,7 +2038,11 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
       'frequency': frequencyFields,
       'term': termFields,
       'currency': currencyFields,
-      'status': statusFields
+      'status': statusFields,
+      'price': priceFields,
+      'interest': interestFields,
+      'duration': durationFields,
+      'return': returnFields
     }
     
     const fields = semanticFields[semanticType] || []
@@ -2031,7 +2052,6 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
     return detectedInList && targetInList
   }
 
-  // Build semantic map for target columns
   const targetSemantics = {}
   for (const targetCol of targetColumns) {
     const targetLower = targetCol.toLowerCase().replace(/[\s_\-()]+/g, '')
@@ -2076,6 +2096,26 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
       return targetLower.includes(fLower) || fLower.includes(targetLower)
     })) {
       targetSemantics[targetCol] = 'status'
+    } else if (priceFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'price'
+    } else if (interestFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'interest'
+    } else if (durationFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'duration'
+    } else if (returnFields.some(f => {
+      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+      return targetLower.includes(fLower) || fLower.includes(targetLower)
+    })) {
+      targetSemantics[targetCol] = 'return'
     }
   }
 
@@ -2102,7 +2142,15 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
 
     console.log(`Secondary scan scanning all ${aoa.length} rows`)
 
-    for (let r = 0; r < aoa.length; r++) {
+    const foundFields = new Set()
+    const maxRows = Math.min(aoa.length, 10000)
+
+    for (let r = 0; r < maxRows; r++) {
+      if (foundFields.size === missingFields.length) {
+        console.log(`Secondary scan found all ${missingFields.length} fields, stopping at row ${r}`)
+        break
+      }
+      
       const row = aoa[r]
       if (!row) continue
       for (let c = 0; c < row.length; c++) {
@@ -2111,7 +2159,6 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
 
         const cellLower = String(cell).toLowerCase().replace(/[\s_\-()]+/g, '')
 
-        // Classify cell by semantic type (substring match)
         let cellSemantic = null
         
         if (nameStyleFields.some(f => {
@@ -2154,20 +2201,37 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
           return cellLower.includes(fLower) || fLower.includes(cellLower)
         })) {
           cellSemantic = 'status'
+        } else if (priceFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'price'
+        } else if (interestFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'interest'
+        } else if (durationFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'duration'
+        } else if (returnFields.some(f => {
+          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
+          return cellLower.includes(fLower) || fLower.includes(cellLower)
+        })) {
+          cellSemantic = 'return'
         }
 
         if (!cellSemantic) continue
 
-        // Find matching missing field by semantic type
         for (const missingField of missingFields) {
           if (found[missingField] !== undefined) continue
           if (!targetSemantics[missingField]) continue
           if (targetSemantics[missingField] !== cellSemantic) continue
 
-          // Check semantic match
           if (!isSemanticMatch(cell, missingField, cellSemantic)) continue
 
-          // Look to the right (up to 6 cells) for the value
           let value = null
           for (let cc = c + 1; cc < Math.min(c + 7, row.length); cc++) {
             const next = row[cc]
@@ -2176,7 +2240,6 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
               break
             }
           }
-          // Fall back to directly below
           if (value === null && r + 1 < aoa.length) {
             const below = aoa[r + 1] ? aoa[r + 1][c] : ''
             if (below !== null && below !== undefined && below !== '') {
@@ -2186,6 +2249,7 @@ function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOv
 
           if (value !== null && isPlausibleValue(missingField, value)) {
             found[missingField] = value
+            foundFields.add(missingField)
             console.log(`[secondary scan] recovered "${missingField}": "${value}" at row ${r}, col ${c}`)
           }
         }
@@ -2217,13 +2281,25 @@ const instrumentConfigs = ref({
     weightedRateKey: 'weightedAvgRate',
     fredDefault: '1Y',
     calculationFields: [
-      { key: 'weightedAvgRate', label: 'Weighted Average Rate', suffix: '%' },
-      { key: 'totalInterest', label: 'Total Interest (Annualized)' },
+      { key: 'totalValue', label: 'Total Value (Maturity)' },
+      { key: 'totalPrincipal', label: 'Total Principal' },
       { key: 'interestEarned', label: 'Interest Earned' },
-      { key: 'annualYield', label: 'Annual Yield', suffix: '%' },
+      { key: 'totalInterest', label: 'Total Interest' },
+      { key: 'interestRate', label: 'Interest Rate', suffix: '%' },
+      { key: 'avgRate', label: 'Average Rate', suffix: '%' },
+      { key: 'weightedAvgRate', label: 'Weighted Average Rate', suffix: '%' },
+      { key: 'effectiveYield', label: 'Effective Yield', suffix: '%' },
       { key: 'effectiveAnnualRate', label: 'Effective Annual Rate', suffix: '%' },
+      { key: 'bondEquivalentYield', label: 'Bond Equivalent Yield', suffix: '%' },
+      { key: 'discountYield', label: 'Discount Yield', suffix: '%' },
       { key: 'avgDaysToMaturity', label: 'Average Days to Maturity', suffix: ' days' },
-      { key: 'totalPrincipal', label: 'Total Principal' }
+      { key: 'termDays', label: 'Term Days' },
+      { key: 'daysToMaturity', label: 'Days to Maturity' },
+      { key: 'maturityValue', label: 'Maturity Value' },
+      { key: 'presentValue', label: 'Present Value' },
+      { key: 'fairValue', label: 'Fair Value' },
+      { key: 'yieldCurveRate', label: 'Benchmark Rate', suffix: '%' },
+      { key: 'annualYield', label: 'Annual Yield', suffix: '%' }
     ],
     summaryMetrics: [
       { key: 'totalValue', label: 'Total Portfolio Value' },
@@ -2247,10 +2323,29 @@ const instrumentConfigs = ref({
     weightedRateKey: 'weightedAvgCoupon',
     fredDefault: '10Y',
     calculationFields: [
+      { key: 'totalValue', label: 'Total Market Value' },
+      { key: 'totalFaceValue', label: 'Total Face Value' },
+      { key: 'totalMarketValue', label: 'Total Market Value' },
+      { key: 'currentPrice', label: 'Current Price' },
+      { key: 'pricePer100', label: 'Price per 100' },
+      { key: 'couponRate', label: 'Coupon Rate', suffix: '%' },
+      { key: 'avgCouponRate', label: 'Average Coupon Rate', suffix: '%' },
       { key: 'weightedAvgCoupon', label: 'Weighted Average Coupon', suffix: '%' },
-      { key: 'totalAnnualIncome', label: 'Total Annual Income' },
-      { key: 'avgYTM', label: 'Average Yield to Maturity', suffix: '%' },
-      { key: 'duration', label: 'Duration (years)' }
+      { key: 'totalAnnualIncome', label: 'Total Annual Coupon Income' },
+      { key: 'annualCoupon', label: 'Annual Coupon' },
+      { key: 'couponPerPeriod', label: 'Coupon per Period' },
+      { key: 'yieldToMaturity', label: 'Yield to Maturity', suffix: '%' },
+      { key: 'avgYTM', label: 'Average YTM', suffix: '%' },
+      { key: 'currentYield', label: 'Current Yield', suffix: '%' },
+      { key: 'duration', label: 'Macaulay Duration (years)' },
+      { key: 'modifiedDuration', label: 'Modified Duration (years)' },
+      { key: 'accruedInterest', label: 'Accrued Interest' },
+      { key: 'presentValue', label: 'Present Value' },
+      { key: 'fairValue', label: 'Fair Value' },
+      { key: 'yearsToMaturity', label: 'Years to Maturity' },
+      { key: 'frequency', label: 'Coupon Frequency' },
+      { key: 'daysAccrued', label: 'Days Accrued' },
+      { key: 'yieldCurveRate', label: 'Benchmark Rate', suffix: '%' }
     ],
     summaryMetrics: [
       { key: 'totalValue', label: 'Total Portfolio Value' },
@@ -2276,14 +2371,26 @@ const instrumentConfigs = ref({
     weightedRateKey: 'weightedAvgDiscount',
     fredDefault: '13W',
     calculationFields: [
-      { key: 'weightedAvgDiscount', label: 'Weighted Average Discount', suffix: '%' },
-      { key: 'totalDiscount', label: 'Total Discount' },
-      { key: 'effectiveYield', label: 'Effective Yield', suffix: '%' },
-      { key: 'bondEquivalentYield', label: 'Bond Equivalent Yield', suffix: '%' },
-      { key: 'pricePer100', label: 'Price per 100' },
+      { key: 'totalValue', label: 'Total Value (Face Value)' },
+      { key: 'totalFaceValue', label: 'Total Face Value' },
       { key: 'totalPurchasePrice', label: 'Total Purchase Price' },
-      { key: 'avgInvestment', label: 'Average Investment' },
+      { key: 'totalDiscount', label: 'Total Discount Amount' },
+      { key: 'discountRate', label: 'Discount Rate', suffix: '%' },
+      { key: 'avgDiscountRate', label: 'Average Discount Rate', suffix: '%' },
+      { key: 'weightedAvgDiscount', label: 'Weighted Average Discount', suffix: '%' },
+      { key: 'discountYield', label: 'Discount Yield', suffix: '%' },
+      { key: 'moneyMarketYield', label: 'Money Market Yield', suffix: '%' },
+      { key: 'bondEquivalentYield', label: 'Bond Equivalent Yield', suffix: '%' },
       { key: 'holdingPeriodYield', label: 'Holding Period Yield', suffix: '%' },
+      { key: 'effectiveAnnualYield', label: 'Effective Annual Yield', suffix: '%' },
+      { key: 'avgDaysToMaturity', label: 'Average Days to Maturity', suffix: ' days' },
+      { key: 'termDays', label: 'Term Days' },
+      { key: 'daysToMaturity', label: 'Days to Maturity' },
+      { key: 'maturityValue', label: 'Maturity Value' },
+      { key: 'presentValue', label: 'Present Value' },
+      { key: 'fairValue', label: 'Fair Value' },
+      { key: 'yieldCurveRate', label: 'Benchmark Rate', suffix: '%' },
+      { key: 'avgInvestment', label: 'Average Investment' },
       { key: 'annualizedYield', label: 'Annualized Yield', suffix: '%' }
     ],
     summaryMetrics: [
@@ -2454,7 +2561,7 @@ const worksheetStatus = ref({})
 const uploadHistory = ref([])
 const currentWorkbookName = ref('')
 
-const selectedInstruments = ref({ moneyMarket: true, bonds: true, tbills: true })
+const selectedInstruments = ref({ 'money-market': true, bonds: true, tbills: true })
 const reportPreviewDialog = ref(false)
 const reportPreviewHtml = ref('')
 
@@ -2477,7 +2584,24 @@ const detectedCurrencies = ref([])
 const detectedInstrumentType = ref('')
 const selectedCurrency = ref('')
 const isDetecting = ref(false)
+const detectionStatus = ref('idle')
+const isCalculating = ref(false)
+
+const getDetectionButtonText = () => {
+  switch (detectionStatus.value) {
+    case 'idle': return 'Auto Detect'
+    case 'scanning': return 'Scanning...'
+    case 'analyzing': return 'Analysing worksheet...'
+    case 'detecting': return 'Detecting fields...'
+    case 'validating': return 'Validating results...'
+    case 'complete': return 'Detection complete'
+    default: return 'Auto Detect'
+  }
+}
+const isUsingDetectedFields = ref(false)
 const excludedDetectedFields = ref(new Set())
+const newFieldName = ref('')
+const newFieldValue = ref('')
 
 const showModalViewer = ref(false)
 const viewerFileData = ref(null)
@@ -2486,6 +2610,7 @@ const formulaDialog = ref(false)
 const formulaText = ref('')
 const formulaCalculationDetails = ref(null)
 const showCalculationDetails = ref(false)
+const showIndividualBreakdown = ref(false)
 const formulas = ref({})
 const manualInputs = ref({})
 
@@ -2719,13 +2844,11 @@ function getDisplayColumns() {
     'days_to_maturity', 'face_value', 'principal'
   ]
   
-  // Get columns from both current and completed summaries
   let allColumns = [...(instrumentSummary.value.columns || [])]
   if (completedInstrumentSummary.value.columns) {
     allColumns = [...allColumns, ...completedInstrumentSummary.value.columns]
   }
   
-  // Add Valuation Type column
   allColumns = [...allColumns, 'Valuation Type', 'Workbook', 'Worksheet']
   
   const cols = allColumns.filter(c => !exclude.includes(c))
@@ -2755,16 +2878,13 @@ const sortedInstrumentSummaryRows = computed(() => {
   let rows = []
   
   if (excelPopupMode.value === 'current') {
-    // Current tab: Show ONLY current valuations
     rows = instrumentSummary.value.rows.map(row => ({
       ...row,
       'Valuation Type': 'Current'
     }))
   } else if (excelPopupMode.value === 'previous') {
-    // Previous tab: Show ONLY the last previous summary
     const allPrevious = completedInstrumentSummary.value.rows || []
     if (allPrevious.length > 0) {
-      // Get the last summary (most recent previous)
       const lastSummary = allPrevious[allPrevious.length - 1]
       rows = [lastSummary].map(row => ({
         ...row,
@@ -2772,7 +2892,6 @@ const sortedInstrumentSummaryRows = computed(() => {
       }))
     }
   } else if (excelPopupMode.value === 'all') {
-    // View All: Show all summaries
     const currentRows = instrumentSummary.value.rows.map(row => ({
       ...row,
       'Valuation Type': 'Current'
@@ -2828,11 +2947,67 @@ const currentWorkbookPreviousSummaries = computed(() => {
 
 const calculationFields = computed(() => {
   const fields = config.value.calculationFields || []
-  return fields.map(field => ({
-    ...field,
-    value: selectedCalculations.value[field.key] !== undefined ? selectedCalculations.value[field.key] : allCalculations.value[field.key] !== undefined ? allCalculations.value[field.key] : null
-  }))
+  const allCalc = allCalculations.value || {}
+  const selectedCalc = selectedCalculations.value || {}
+  
+  return fields.map(field => {
+    let value = selectedCalc[field.key] !== undefined ? selectedCalc[field.key] :
+                allCalc[field.key] !== undefined ? allCalc[field.key] :
+                selectedCalc[toSnakeCase(field.key)] !== undefined ? selectedCalc[toSnakeCase(field.key)] :
+                allCalc[toSnakeCase(field.key)] !== undefined ? allCalc[toSnakeCase(field.key)] : null
+    
+    if (value === null || value === undefined) {
+      const agg = allCalc.agg || selectedCalc.agg || {}
+      value = agg[field.key] !== undefined ? agg[field.key] :
+              agg[toSnakeCase(field.key)] !== undefined ? agg[toSnakeCase(field.key)] : null
+    }
+    
+    return {
+      ...field,
+      value
+    }
+  })
 })
+
+function toSnakeCase(str) {
+  if (!str || typeof str !== 'string') return str
+  try {
+    return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)
+  } catch (e) {
+    return str
+  }
+}
+
+function normalizeFieldName(fieldName) {
+  if (!fieldName) return fieldName
+  if (typeof fieldName !== 'string') return fieldName
+  const fieldMap = {
+    'CouponRate': 'coupon_rate',
+    'CouponFrequency': 'coupon_frequency',
+    'MaturityDate': 'maturity_date',
+    'BondName': 'instrument_name',
+    'settlement_date': 'issue_date',
+    'next_coupon_date': 'next_coupon_date',
+    'valuation_date': 'valuation_date',
+    'present_value': 'present_value',
+    'accrued_interest': 'accrued_interest',
+    'carrying_value': 'carrying_value',
+    'discount_rate': 'discount_rate',
+    'price': 'price',
+    'interest_rate': 'interest_rate',
+    'yield_to_maturity': 'yield_to_maturity',
+    'spread': 'spread',
+    'principal': 'face_value',
+    'fair_value': 'fair_value',
+    'tenor': 'tenor',
+    'country_risk_premium': 'country_risk_premium'
+  }
+  try {
+    return fieldMap[fieldName] || toSnakeCase(fieldName)
+  } catch (e) {
+    return fieldName
+  }
+}
 
 function formatCalcValue(key, value) {
   if (value === null || value === undefined) return '—'
@@ -2880,17 +3055,11 @@ function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToCalculations() { activeTab.value = 'calculations'; forceUpdate.value++ }
 function goToPortfolioSummary() { 
   saveSessionData(); 
-  // Try multiple sources for session ID
   const sessionId = activeSession.value?.id || sessionManager.getActiveSessionId() || localStorage.getItem('dura_active_session_id')
   console.log('goToPortfolioSummary - sessionId:', sessionId)
-  console.log('goToPortfolioSummary - activeSession.value:', activeSession.value)
-  console.log('goToPortfolioSummary - sessionManager.getActiveSessionId():', sessionManager.getActiveSessionId())
-  console.log('goToPortfolioSummary - localStorage dura_active_session_id:', localStorage.getItem('dura_active_session_id'))
   if (sessionId) {
-    // Ensure session is set as active in sessionManager before navigation
     sessionManager.setActiveSession({ id: sessionId })
     localStorage.setItem('dura_active_session_id', sessionId)
-    console.log('Session set as active:', sessionId)
     router.push({ path: '/summary', query: { session: sessionId } })
   } else {
     console.error('No session ID available for navigation')
@@ -3285,7 +3454,6 @@ async function loadHistoryFile(item) {
   }
   
   if (confirm(`Load ${item.name}? Current unsaved data will be lost.`)) {
-    // Convert base64 back to ArrayBuffer
     const base64String = item.fileData.split(',')[1]
     const binaryString = atob(base64String)
     const bytes = new Uint8Array(binaryString.length)
@@ -3294,11 +3462,9 @@ async function loadHistoryFile(item) {
     }
     const arrayBuffer = bytes.buffer
 
-    // Restore file buffer
     originalFileBuffer.value = arrayBuffer
     uploadedFile.value = { name: item.name, size: arrayBuffer.byteLength }
 
-    // Re-parse workbook to get sheets
     try {
       const result = await worksheetWorkflow.handleFileUpload(new File([arrayBuffer], item.name))
       if (result.success) {
@@ -3307,10 +3473,8 @@ async function loadHistoryFile(item) {
         originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
         showSnackbar(`Loaded ${item.name} from history`, 'success')
         
-        // Clear active cache but preserve workbook data
         clearActiveCache(true)
         
-        // Open workbook viewer so user can select a sheet
         showWorkbookViewer.value = true
         activeTab.value = 'upload'
         forceUpdate.value++
@@ -3380,15 +3544,11 @@ async function readFileData(file) {
     const result = await worksheetWorkflow.handleFileUpload(file)
 
     if (result.success) {
-      // Load the new workbook data FIRST
       workbookSheets.value = worksheetWorkflow.workbookSheets.value
       worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
       originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
       worksheetStatuses.value = {}
       
-      // Then clear all state for new active session (new workbook upload)
-      // Pass false to clear completed summaries (previous valuations) since this is a new workbook
-      // This will clear worksheet-specific data but preserve the newly loaded workbook data
       clearActiveCache(false)
       
       worksheetSelected.value = false
@@ -3448,7 +3608,6 @@ function handleWorksheetSelect(sheetName) {
     currentSheetName.value = sheetName
     worksheetSelected.value = true
     
-    // Clear active cache but preserve previous valuations for comparison
     clearActiveCache(true)
     
     const sheet = workbookSheets.value.find(s => s.name === sheetName)
@@ -3463,7 +3622,6 @@ function handleWorksheetSelect(sheetName) {
       }
       sheetType.value = 'multi'
       
-      // Auto-detect sheet type and apply initial mapping
       if (rawData.value.length > 0) {
         const detection = detectSheetType(rawData.value, instrumentType.value)
         sheetType.value = detection.type
@@ -3483,30 +3641,9 @@ function handleWorksheetSelect(sheetName) {
   }
 }
 
-/**
- * Clear Active Session Cache
- * 
- * Active Session Boundary:
- * - The currently uploaded workbook is the active session
- * - All worksheet, section, detection, calculation, and summary data must belong only to the active workbook
- * - Changing worksheets/sections resets only the active calculation context/cache
- * - Uploading a new workbook starts a new active session and must clear all unsaved data, cached calculations, and temporary state from the previous workbook
- * - Do not carry values, calculations, or selections from a previous workbook into the new session
- * - Previously saved historical summaries may remain available separately and must not be deleted
- * 
- * IMPORTANT: When changing worksheets/sections within the same workbook:
- * - Save current summaries as completed summaries (previous valuations) for comparison
- * - Clear only the current active calculation state
- * - Current summaries will be repopulated with new worksheet/section data
- * - Completed summaries will show previous valuations for comparison
- * - Preserve workbook data (workbookSheets, originalFileBuffer) so viewer can display the workbook
- * 
- * Active session = current workbook + current worksheet/section + current instrument selection + current valuation parameters
- */
 function clearActiveCache(preservePreviousValuations = true) {
   console.log('🔄 Clearing active cache for worksheet/section change, preservePreviousValuations:', preservePreviousValuations)
   
-  // Save current summaries as completed summaries before clearing (for comparison)
   if (preservePreviousValuations) {
     if (instrumentSummary.value.rows.length > 0) {
       completedInstrumentSummary.value = JSON.parse(JSON.stringify(instrumentSummary.value))
@@ -3518,37 +3655,37 @@ function clearActiveCache(preservePreviousValuations = true) {
     }
   }
   
-  // Clear all temporary calculation and detection state for active session
-  cleanedData.value = []
-  calculations.value = {}
-  allCalculations.value = {}
-  selectedCalculations.value = {}
-  columnMapping.value = {}
+  if (!isUsingDetectedFields.value) {
+    cleanedData.value = []
+    calculations.value = {}
+    allCalculations.value = {}
+    selectedCalculations.value = {}
+    columnMapping.value = {}
+    autoDetectedFields.value = {}
+    autoDetectedFieldsWithMetadata.value = {}
+    autoDetectedAdditionalFields.value = {}
+    extractedValues.value = {}
+    rawData.value = []
+    originalRawData.value = []
+  } else {
+    calculations.value = {}
+    allCalculations.value = {}
+    selectedCalculations.value = {}
+    columnMapping.value = {}
+  }
   
-  // Clear current summaries (will be repopulated with new data)
   instrumentSummary.value = { columns: [], rows: [] }
   portfolioSummary.value = { columns: [], rows: [] }
   
-  // Clear completed summaries only if it's a new workbook upload
   if (!preservePreviousValuations) {
     completedInstrumentSummary.value = { columns: [], rows: [] }
     completedPortfolioSummary.value = { columns: [], rows: [] }
   }
   
   fieldDetectionResults.value = { detected_fields: {}, summary: {} }
-  
-  autoDetectedFields.value = {}
-  autoDetectedFieldsWithMetadata.value = {}
-  detectedCurrencies.value = []
-  detectedInstrumentType.value = ''
-  selectedCurrency.value = ''
-  customCurrency.value = ''
-  excludedDetectedFields.value.clear()
-  showDetectionSuccess.value = false
   showMultiTableDetectionSuccess.value = false
   multiTableDetectionResults.value = []
   
-  // Clear worksheet-specific data but preserve workbook data
   rawData.value = []
   originalRawData.value = []
   previewData.value = []
@@ -3557,8 +3694,6 @@ function clearActiveCache(preservePreviousValuations = true) {
   extractedValues.value = {}
   singleInstrumentExtractedValues.value = {}
   isolatedTableData.value = null
-  
-  // IMPORTANT: Do NOT clear workbookSheets or originalFileBuffer - these are needed for the workbook viewer
   
   mappingApplied.value = false
   showMappingDialog.value = false
@@ -3580,17 +3715,9 @@ function clearActiveCache(preservePreviousValuations = true) {
 
 function handleSheetSelectedFromViewer(sheetName) {
   console.log(`🔄 handleSheetSelectedFromViewer: Switching to worksheet "${sheetName}"`)
-  
+  console.log('🔄 Current activeTab:', activeTab.value)
+  console.log('🔄 isUsingDetectedFields:', isUsingDetectedFields.value)
   currentSheetName.value = sheetName
-  worksheetSelected.value = true
-  
-  // Clear active cache but preserve previous valuations for comparison
-  clearActiveCache(true)
-  
-  // Keep workbook viewer open with the selected sheet
-  showWorkbookViewer.value = true
-  activeTab.value = 'upload'
-  forceUpdate.value++
 }
 
 function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
@@ -3603,7 +3730,6 @@ function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }
   
   currentSheetName.value = sheetName
   
-  // Clear active cache but preserve previous valuations for comparison
   clearActiveCache(true)
   
   isolatedTableData.value = {
@@ -3619,6 +3745,7 @@ function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }
   originalRawData.value = JSON.parse(JSON.stringify(data))
   fileColumns.value = headers
   originalFileColumns.value = [...headers]
+  currentMappingTemplateId.value = null
   showMappingDialog.value = true
   mappingApplied.value = false
   columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
@@ -3627,13 +3754,21 @@ function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }
   showPreview.value = true
 }
 
+async function handleAutoDetectSheet(sheetName) {
+  if (!originalFileBuffer.value) {
+    alert('File buffer not available')
+    return
+  }
+  currentSheetName.value = sheetName
+  await autoDetectSingleInstrument()
+}
+
 async function handleWorkOnSheet(sheetName) {
   fileLoading.value = true
   uploadError.value = ''
   
   console.log(`🔄 handleWorkOnSheet: Switching to worksheet "${sheetName}"`)
   
-  // Clear active cache but preserve previous valuations for comparison
   clearActiveCache(true)
 
   try {
@@ -3672,20 +3807,13 @@ async function handleWorkOnSheet(sheetName) {
       worksheetSelected.value = true
 
       if (result.type === 'multi') {
+        currentMappingTemplateId.value = null
         const headers = Object.keys(sheetData[0] || {})
         if (headers.length) {
           columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
-          const mappingKey = `mapping_${instrumentType.value}_${uploadedFile.value?.name || 'default'}`
-          const savedMapping = localStorage.getItem(mappingKey)
-          if (savedMapping) {
-            try {
-              const parsed = JSON.parse(savedMapping)
-              columnMapping.value = { ...columnMapping.value, ...parsed }
-            } catch (e) {}
-          }
         }
         applyCurrentMapping()
-        if (result.type === 'multi' && !mappingShownForSheet.value[sheetName]) {
+        if (!mappingShownForSheet.value[sheetName]) {
           mappingShownForSheet.value[sheetName] = true
           showMappingDialog.value = true
         }
@@ -3734,23 +3862,32 @@ function applyCurrentMapping() {
     mappingApplied.value = true
     return
   }
-  const hasAnyMapping = requiredColumns.value.some(col => columnMapping.value[col])
+
+  const required = requiredColumns.value || []
+  const hasAnyMapping = required.some(
+    col => columnMapping.value[col] && columnMapping.value[col] !== '__na__'
+  )
+
   if (!hasAnyMapping) {
     rawData.value = originalRawData.value
     mappingApplied.value = false
+    showPreview.value = true
     return
   }
-  const mappedData = originalRawData.value.map(row => {
-    const newRow = {}
-    requiredColumns.value.forEach(col => {
-      const srcCol = columnMapping.value[col]
-      newRow[col] = srcCol ? getCellValue(row[srcCol]) : ''
-    })
-    return newRow
+
+  const transformed = originalRawData.value.map(row => {
+    const out = {}
+    for (const reqCol of required) {
+      const srcCol = columnMapping.value[reqCol]
+      out[reqCol] = (srcCol && srcCol !== '__na__' && row[srcCol] !== undefined)
+        ? row[srcCol]
+        : ''
+    }
+    return out
   })
-  rawData.value = mappedData
-  const allMapped = requiredColumns.value.every(col => columnMapping.value[col])
-  mappingApplied.value = allMapped
+
+  rawData.value = transformed
+  mappingApplied.value = true
   showPreview.value = true
 }
 
@@ -3761,13 +3898,9 @@ function updateColumnMapping(newMapping) {
 }
 
 async function saveFinalMapping() {
-  const mappingKey = `mapping_${instrumentType.value}_${uploadedFile.value?.name || 'default'}`
-  localStorage.setItem(mappingKey, JSON.stringify(columnMapping.value))
-  console.log('Mapping saved to localStorage:', mappingKey)
-
   if (currentMappingTemplateId.value) {
     try {
-      console.log('Updating existing template:', currentMappingTemplateId.value)
+      console.log('Updating existing template from preview:', currentMappingTemplateId.value)
       const result = await mappingTemplateManager.updateTemplate(currentMappingTemplateId.value, {
         columnMapping: columnMapping.value,
         fileColumns: fileColumns.value
@@ -3784,9 +3917,9 @@ async function saveFinalMapping() {
       showSnackbar('Failed to update mapping: ' + (e.message || e), 'error')
     }
   } else {
-    const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'}`
+    const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'} - ${new Date().toLocaleDateString()}`
     try {
-      console.log('Creating new template:', templateName)
+      console.log('Creating new template from preview:', templateName)
       const result = await mappingTemplateManager.saveTemplate(
         templateName,
         instrumentType.value,
@@ -3820,8 +3953,12 @@ function refreshFileColumns() {
     fileColumns.value = []
   }
   if (sheetType.value === 'multi') {
-    const newMapping = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-    columnMapping.value = { ...columnMapping.value, ...newMapping }
+    const autoMapping = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+    const merged = { ...columnMapping.value }
+    for (const [key, val] of Object.entries(autoMapping)) {
+      if (!merged[key]) merged[key] = val
+    }
+    columnMapping.value = merged
   }
   applyCurrentMapping()
   forceUpdate.value++
@@ -3874,18 +4011,6 @@ function openMappingDialog() {
     }
   }
 
-  if (uploadedFile.value) {
-    const mappingKey = `mapping_${uploadedFile.value.name}_${uploadedFile.value.size}`
-    const savedMapping = localStorage.getItem(mappingKey)
-    if (savedMapping) {
-      try {
-        columnMapping.value = JSON.parse(savedMapping)
-      } catch (e) {
-        console.warn('Failed to load saved mapping:', e)
-      }
-    }
-  }
-
   showMappingDialog.value = true
 }
 
@@ -3893,19 +4018,23 @@ function closeMappingDialog() {
   showMappingDialog.value = false
 }
 
-function applyColumnMappingAndClose() {
+async function applyColumnMappingAndClose() {
   applyCurrentMapping()
 
-  if (uploadedFile.value && columnMapping.value) {
-    const mappingKey = `mapping_${uploadedFile.value.name}_${uploadedFile.value.size}`
-    localStorage.setItem(mappingKey, JSON.stringify(columnMapping.value))
-    console.log('Mapping saved for file:', uploadedFile.value.name)
+  if (currentMappingTemplateId.value) {
+    try {
+      await mappingTemplateManager.updateTemplate(currentMappingTemplateId.value, {
+        columnMapping: columnMapping.value,
+        fileColumns: fileColumns.value
+      })
+    } catch (e) {
+      console.error('Error updating template on apply:', e)
+    }
   }
 
   showMappingDialog.value = false
   showPreview.value = true
   forceUpdate.value++
-  refreshFileColumns()
 }
 
 function resetMapping() {
@@ -3915,33 +4044,54 @@ function resetMapping() {
   applyCurrentMapping()
 }
 
-function openWorkbookViewer() {
-  if (!uploadedFile.value) {
-    alert('Please upload a file first')
-    return
-  }
-  if (!workbookSheets.value.length) {
-    alert('No workbook sheets available')
-    return
-  }
+async function openWorkbookViewer() {
+  console.log('=== openWorkbookViewer called ===')
+  console.log('uploadedFile.value:', uploadedFile.value)
+  console.log('originalFileBuffer.value:', originalFileBuffer.value)
+  console.log('workbookSheets.value:', workbookSheets.value)
+  console.log('workbookSheets.value.length:', workbookSheets.value?.length)
+  console.log('worksheetWorkflow.workbookSheets.value:', worksheetWorkflow.workbookSheets.value)
+  console.log('worksheetWorkflow.workbookSheets.value.length:', worksheetWorkflow.workbookSheets.value?.length)
+  console.log('currentSheetName.value:', currentSheetName.value)
+
   if (!originalFileBuffer.value) {
-    alert('File buffer not available. Please try re-uploading the file.')
+    alert('File buffer not available. Please upload a file first.')
     return
   }
   if (originalFileBuffer.value.byteLength === 0) {
-    alert('File buffer is empty. Please try re-uploading the file.')
+    alert('File buffer is empty. Please re-upload the file.')
     return
   }
-  if (!currentSheetName.value && workbookSheets.value.length) {
-    currentSheetName.value = workbookSheets.value[0].name
+
+  if (worksheetWorkflow.workbookSheets.value?.length > 0) {
+    workbookSheets.value = [...worksheetWorkflow.workbookSheets.value]
+    console.log('Using pre-parsed sheets from workflow:', workbookSheets.value.length)
+  } else {
+    workbookSheets.value = []
+    console.log('No pre-parsed sheets available, will parse from buffer')
   }
-  
+
   if (activeSession.value?.id) {
     loadWorksheetStatuses()
   }
-  
-  showWorkbookViewer.value = true
+
+  console.log('Setting showWorkbookViewer.value = true')
+
+  try {
+    showWorkbookViewer.value = true
+    console.log('showWorkbookViewer.value after set:', showWorkbookViewer.value)
+
+    await nextTick()
+    console.log('After nextTick, showWorkbookViewer.value:', showWorkbookViewer.value)
+  } catch (error) {
+    console.error('Error opening workbook viewer:', error)
+    alert('Failed to open workbook viewer: ' + error.message)
+  }
 }
+
+watch(showWorkbookViewer, (newVal, oldVal) => {
+  console.log('showWorkbookViewer changed from', oldVal, 'to', newVal)
+})
 
 function workOnSelectedSheet() {
   if (!currentSheetName.value) {
@@ -3968,20 +4118,27 @@ async function autoDetectSingleInstrument() {
     return
   }
   isDetecting.value = true
+  detectionStatus.value = 'scanning'
 
   autoDetectedFields.value = {}
   autoDetectedFieldsWithMetadata.value = {}
   autoDetectedAdditionalFields.value = {}
   detectedCurrencies.value = []
   detectedInstrumentType.value = ''
-  // Don't reset selectedCurrency - preserve user's choice
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
 
   console.log(`🔍 Starting auto-detection on sheet: "${currentSheetName.value}"`)
 
   try {
-    // Determine currency to use for filtering
+    if (!requiredColumns.value || requiredColumns.value.length === 0) {
+      console.log('⚠️ Required columns not loaded, loading config...')
+      await loadConfig()
+      console.log('✅ Config loaded, required columns:', requiredColumns.value)
+    }
+
+    detectionStatus.value = 'analyzing'
+    
     let currencyFilter = null
     if (selectedCurrency.value) {
       if (selectedCurrency.value === 'custom') {
@@ -3991,49 +4148,84 @@ async function autoDetectSingleInstrument() {
       }
     }
 
-    const detectionResult = await autoDetectInstrumentFields(
+    console.log(`🔍 Starting auto-detection on sheet: "${currentSheetName.value}"`)
+    console.log('Currency filter:', currencyFilter)
+    console.log('Required columns:', requiredColumns.value)
+    console.log('Instrument type:', instrumentType.value)
+
+    detectionStatus.value = 'detecting'
+
+    const detectionPromise = autoDetectInstrumentFields(
       originalFileBuffer.value,
       currentSheetName.value,
       requiredColumns.value,
       instrumentType.value,
       null,
       null,
-      currencyFilter
+      currencyFilter,
+      (status) => {
+        detectionStatus.value = status
+      }
     )
+    
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Detection timeout - scan took too long')), 30000)
+    )
+    
+    const detectionResult = await Promise.race([detectionPromise, timeoutPromise])
 
-    // 1) Normalise detector output into canonical keys with runtime key resolution
+    console.log('=== Detection Result ===')
+    console.log('Raw detected fields:', detectionResult?.fields)
+    console.log('Detected currencies:', detectionResult?.currencies)
+    console.log('Missing fields:', detectionResult?.missingFields)
+    console.log('Additional fields:', Object.keys(detectionResult?.additionalFields || {}))
+
+    detectionStatus.value = 'validating'
+    
+    console.log('=== Normalizing Detected Fields ===')
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
       detectionResult?.fieldsWithMetadata,
       instrumentType.value,
       requiredColumns.value
     )
+    console.log('Normalized fields:', normalized.fields)
+    console.log('Normalized fields with metadata:', normalized.fieldsWithMetadata)
 
-    // 2) Secondary scan for any required field the detector missed
-    const missing = requiredColumns.value.filter(c => !(c in normalized.fields))
-    if (missing.length > 0) {
-      const scanResult = scanSheetForMissingFields(missing, instrumentType.value, requiredColumns.value)
-      for (const [k, v] of Object.entries(scanResult)) {
-        if (!(k in normalized.fields)) {
-          normalized.fields[k] = v
-          console.log(`[secondary scan] recovered "${k}":`, v)
-        }
+    detectionStatus.value = 'complete'
+
+    const mergedFields = { ...normalized.fields }
+    const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
+    for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
+      if (!(key in mergedFields)) {
+        mergedFields[key] = value
+        mergedFieldsWithMetadata[key] = value
       }
     }
 
-    // ALWAYS show popup, even if zero fields detected
-    autoDetectedFields.value = normalized.fields
-    autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
+    console.log('=== Merged Detection Results ===')
+    console.log('Primary fields:', Object.keys(normalized.fields).length)
+    console.log('Additional fields:', Object.keys(detectionResult?.additionalFields || {}).length)
+    console.log('Total merged fields:', Object.keys(mergedFields).length)
+
+    autoDetectedFields.value = mergedFields
+    autoDetectedFieldsWithMetadata.value = mergedFieldsWithMetadata
     autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
     detectedCurrencies.value = detectionResult?.currencies || []
     detectedInstrumentType.value = instrumentType.value
+
+    await nextTick()
+
+    console.log('=== Setting State for Popup ===')
+    console.log('autoDetectedFields:', autoDetectedFields.value)
+    console.log('autoDetectedFieldsWithMetadata:', autoDetectedFieldsWithMetadata.value)
+    console.log('autoDetectedAdditionalFields:', autoDetectedAdditionalFields.value)
+    console.log('detectedCurrencies:', detectedCurrencies.value)
     
-    // Only auto-select currency if user hasn't already selected one
     if (!selectedCurrency.value) {
       if (detectedCurrencies.value.length === 1) {
         selectedCurrency.value = detectedCurrencies.value[0]
       } else if (detectedCurrencies.value.length > 1) {
-        // Keep empty so user can choose
         selectedCurrency.value = ''
       }
     }
@@ -4041,7 +4233,12 @@ async function autoDetectSingleInstrument() {
     showDetectionSuccess.value = true
   } catch (error) {
     console.error('Auto Detect error:', error)
-    alert('Auto Detect failed: ' + error.message)
+    if (Object.keys(autoDetectedFields.value).length > 0) {
+      console.log('Showing partial detection results despite error')
+      showDetectionSuccess.value = true
+    } else {
+      alert('Auto Detect failed: ' + error.message)
+    }
   } finally {
     isDetecting.value = false
   }
@@ -4065,7 +4262,6 @@ async function handleMultiTableDetect(event) {
   try {
     const detectedInstruments = []
     
-    // Determine currency to use for filtering
     let currencyFilter = null
     if (selectedCurrency.value) {
       if (selectedCurrency.value === 'custom') {
@@ -4091,12 +4287,14 @@ async function handleMultiTableDetect(event) {
           event.instrumentType,
           table.range,
           tableData,
-          currencyFilter
+          currencyFilter,
+          (status) => {
+            detectionStatus.value = status
+          }
         )
 
         console.log(`Detection result for ${table.tableName}:`, detectionResult)
 
-        // 1) Normalise per-table detector output with runtime key resolution
         const normalized = normalizeDetectedFields(
           detectionResult?.fields,
           detectionResult?.fieldsWithMetadata,
@@ -4104,26 +4302,25 @@ async function handleMultiTableDetect(event) {
           requiredColumns.value
         )
 
-        // 2) Secondary scan for missing fields
-        const missing = requiredColumns.value.filter(c => !(c in normalized.fields))
-        if (missing.length > 0) {
-          const scanResult = scanSheetForMissingFields(missing, event.instrumentType, requiredColumns.value)
-          for (const [k, v] of Object.entries(scanResult)) {
-            if (!(k in normalized.fields)) {
-              normalized.fields[k] = v
-              console.log(`[secondary scan] recovered "${k}":`, v)
-            }
+        const mergedFields = { ...normalized.fields }
+        const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
+        for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
+          if (!(key in mergedFields)) {
+            mergedFields[key] = value
+            mergedFieldsWithMetadata[key] = value
           }
         }
 
-        if (Object.keys(normalized.fields).length > 0) {
+        console.log(`Merged fields for ${table.tableName}:`, Object.keys(mergedFields).length)
+
+        if (Object.keys(mergedFields).length > 0) {
           detectedInstruments.push({
             tableName: table.tableName,
-            instrumentName: normalized.fields.InstrumentName || table.tableName,
-            fields: normalized.fields,
-            fieldsWithMetadata: normalized.fieldsWithMetadata,
+            instrumentName: mergedFields.InstrumentName || table.tableName,
+            fields: mergedFields,
+            fieldsWithMetadata: mergedFieldsWithMetadata,
             currencies: detectionResult.currencies || [],
-            missingFields: requiredColumns.value.filter(c => !normalized.fields[c]),
+            missingFields: requiredColumns.value.filter(c => !mergedFields[c]),
             range: table.range
           })
         }
@@ -4137,7 +4334,6 @@ async function handleMultiTableDetect(event) {
       showMultiTableDetectionSuccess.value = true
       showWorkbookViewer.value = false
     } else {
-      // Always show popup even if zero fields detected
       showMultiTableDetectionSuccess.value = true
       showWorkbookViewer.value = false
     }
@@ -4164,6 +4360,10 @@ function useMultiTableDetectedFields() {
     combinedFields.InstrumentName = multiTableDetectionResults.value[0].instrumentName || ''
   }
 
+  console.log('=== Use Multi-Table Detected Fields ===')
+  console.log('Combined fields:', combinedFields)
+  console.log('Keys:', Object.keys(combinedFields))
+
   const tabularData = [combinedFields]
 
   rawData.value = tabularData
@@ -4183,6 +4383,8 @@ function useMultiTableDetectedFields() {
   autoDetectedFields.value = combinedFields
   
   activeTab.value = 'cleaning'
+  
+  console.log('Multi-table data flow complete - values set for preview, cleaning, and calculations')
 }
 
 function formatDetectedValue(field, value) {
@@ -4190,12 +4392,10 @@ function formatDetectedValue(field, value) {
 
   const lc = String(field).toLowerCase()
 
-  // Frequency must render as text, never as %
   if (lc.includes('frequency') || lc.includes('coupon') && lc.includes('frequency')) {
     return String(value)
   }
-  
-  // Also check for frequency-related keys
+
   if (lc.includes('interest') && lc.includes('payment') && lc.includes('frequency')) {
     return String(value)
   }
@@ -4225,6 +4425,18 @@ function formatDetectedValue(field, value) {
   return String(value)
 }
 
+function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
+  const targetFields = isAdditional ? autoDetectedAdditionalFields : autoDetectedFields
+  const fieldData = targetFields[fieldName]
+
+  if (fieldData && fieldData.currencyVariants && fieldData.currencyVariants[currency]) {
+    fieldData.selectedCurrency = currency
+    fieldData.value = fieldData.currencyVariants[currency]
+    fieldData.currency = currency
+    console.log(`Updated ${fieldName} to use ${currency}: ${fieldData.value}`)
+  }
+}
+
 async function handleCustomCurrencyInput() {
   if (customCurrency.value) {
     customCurrency.value = customCurrency.value.toUpperCase()
@@ -4239,28 +4451,18 @@ async function handleCustomCurrencyInput() {
         instrumentType.value,
         null,
         null,
-        customCurrency.value // Already uppercased
+        customCurrency.value,
+        (status) => {
+          detectionStatus.value = status
+        }
       )
 
-      // 1) Normalise with runtime key resolution
       const normalized = normalizeDetectedFields(
         detectionResult?.fields,
         detectionResult?.fieldsWithMetadata,
         instrumentType.value,
         requiredColumns.value
       )
-
-      // 2) Secondary scan for missing fields
-      const missing = requiredColumns.value.filter(c => !(c in normalized.fields))
-      if (missing.length > 0) {
-        const scanResult = scanSheetForMissingFields(missing, instrumentType.value, requiredColumns.value)
-        for (const [k, v] of Object.entries(scanResult)) {
-          if (!(k in normalized.fields)) {
-            normalized.fields[k] = v
-            console.log(`[secondary scan] recovered "${k}":`, v)
-          }
-        }
-      }
 
       if (Object.keys(normalized.fields).length > 0) {
         autoDetectedFields.value = normalized.fields
@@ -4288,7 +4490,6 @@ async function handleCurrencyChange() {
   isDetecting.value = true
 
   try {
-    // Determine currency to use for filtering
     let currencyFilter = null
     if (selectedCurrency.value) {
       if (selectedCurrency.value === 'custom') {
@@ -4307,12 +4508,14 @@ async function handleCurrencyChange() {
       instrumentType.value,
       null,
       null,
-      currencyFilter
+      currencyFilter,
+      (status) => {
+        detectionStatus.value = status
+      }
     )
 
     console.log('Detection result after currency change:', detectionResult)
 
-    // 1) Normalise with runtime key resolution
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
       detectionResult?.fieldsWithMetadata,
@@ -4320,30 +4523,27 @@ async function handleCurrencyChange() {
       requiredColumns.value
     )
 
-    // 2) Secondary scan for missing fields
-    const missing = requiredColumns.value.filter(c => !(c in normalized.fields))
-    if (missing.length > 0) {
-      const scanResult = scanSheetForMissingFields(missing, instrumentType.value, requiredColumns.value)
-      for (const [k, v] of Object.entries(scanResult)) {
-        if (!(k in normalized.fields)) {
-          normalized.fields[k] = v
-          console.log(`[secondary scan] recovered "${k}":`, v)
-        }
+    const mergedFields = { ...normalized.fields }
+    const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
+    for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
+      if (!(key in mergedFields)) {
+        mergedFields[key] = value
+        mergedFieldsWithMetadata[key] = value
       }
     }
 
-    if (Object.keys(normalized.fields).length > 0) {
-      autoDetectedFields.value = normalized.fields
-      autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
+    if (Object.keys(mergedFields).length > 0) {
+      autoDetectedFields.value = mergedFields
+      autoDetectedFieldsWithMetadata.value = mergedFieldsWithMetadata
       autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
       detectedCurrencies.value = detectionResult?.currencies || []
       detectedInstrumentType.value = instrumentType.value
       console.log('Updated detected fields:', autoDetectedFields.value)
+      console.log('Total fields after merge:', Object.keys(mergedFields).length)
     } else {
       console.log('No fields detected with currency filter')
     }
     
-    // ALWAYS show popup, even if zero fields detected
     showDetectionSuccess.value = true
   } catch (error) {
     console.error('Error re-running detection with currency change:', error)
@@ -4352,20 +4552,84 @@ async function handleCurrencyChange() {
   }
 }
 
-function useDetectedFields() {
+async function useDetectedFields() {
+  console.log('=== useDetectedFields Called ===')
+  console.log('Input autoDetectedFields.value:', autoDetectedFields.value)
+  console.log('Input autoDetectedFieldsWithMetadata.value:', autoDetectedFieldsWithMetadata.value)
+  console.log('Input autoDetectedAdditionalFields.value:', autoDetectedAdditionalFields.value)
+
+  const preservedDetectedFields = JSON.parse(JSON.stringify(autoDetectedFields.value))
+  const preservedDetectedFieldsWithMetadata = JSON.parse(JSON.stringify(autoDetectedFieldsWithMetadata.value))
+  const preservedDetectedAdditionalFields = JSON.parse(JSON.stringify(autoDetectedAdditionalFields.value))
+  const preservedDetectedCurrencies = JSON.parse(JSON.stringify(detectedCurrencies.value))
+
+  const mergedDetectedFields = { ...preservedDetectedFields }
+  for (const [key, value] of Object.entries(preservedDetectedAdditionalFields)) {
+    if (!(key in mergedDetectedFields)) {
+      mergedDetectedFields[key] = value
+    }
+  }
+
+  console.log('Merged fields for Cleaning:', Object.keys(mergedDetectedFields).length)
+
+  autoDetectedFields.value = mergedDetectedFields
+  autoDetectedFieldsWithMetadata.value = preservedDetectedFieldsWithMetadata
+  autoDetectedAdditionalFields.value = preservedDetectedAdditionalFields
+  detectedCurrencies.value = preservedDetectedCurrencies
+
+  console.log('=== Detection fields restored BEFORE tab switch ===')
+  console.log('autoDetectedFields:', Object.keys(autoDetectedFields.value).length)
+
+  isUsingDetectedFields.value = true
+
   showDetectionSuccess.value = false
   showWorkbookViewer.value = false
-  
+
   const values = {}
+
   for (const [key, value] of Object.entries(autoDetectedFields.value)) {
-    values[key] = typeof value === 'object' && value !== null ? value.value : value
+    if (typeof value === 'object' && value !== null) {
+      if (value.currencyVariants && value.selectedCurrency && value.currencyVariants[value.selectedCurrency]) {
+        values[key] = value.currencyVariants[value.selectedCurrency]
+        console.log(`Primary field ${key}: using ${value.selectedCurrency} variant = ${values[key]}`)
+      } else {
+        values[key] = value.value
+      }
+    } else {
+      values[key] = value
+    }
   }
-  
+
+  console.log('Adding additional detected fields...')
+  console.log('Additional fields count:', Object.keys(autoDetectedAdditionalFields.value).length)
+  for (const [key, value] of Object.entries(autoDetectedAdditionalFields.value)) {
+    if (!(key in values)) {
+      if (typeof value === 'object' && value !== null) {
+        if (value.currencyVariants && value.selectedCurrency && value.currencyVariants[value.selectedCurrency]) {
+          values[key] = value.currencyVariants[value.selectedCurrency]
+          console.log(`Additional field ${key}: using ${value.selectedCurrency} variant = ${values[key]}`)
+        } else {
+          values[key] = value.value
+        }
+      } else {
+        values[key] = value
+      }
+      console.log(`Added additional field: ${key} = ${values[key]}`)
+    }
+  }
+
   if (selectedCurrency.value && selectedCurrency.value !== 'custom') {
     values['Currency'] = selectedCurrency.value
   } else if (selectedCurrency.value === 'custom' && customCurrency.value) {
     values['Currency'] = customCurrency.value.toUpperCase()
   }
+
+  console.log('=== Use Detected Fields ===')
+  console.log('Values to be used:', values)
+  console.log('Keys:', Object.keys(values))
+  console.log('Number of values:', Object.keys(values).length)
+  console.log('Primary fields:', Object.keys(autoDetectedFields.value).length)
+  console.log('Additional fields:', Object.keys(autoDetectedAdditionalFields.value).length)
   
   extractedValues.value = values
   
@@ -4375,20 +4639,46 @@ function useDetectedFields() {
   fileColumns.value = Object.keys(values)
   originalFileColumns.value = [...fileColumns.value]
   
+  console.log('Data state after setting:')
+  console.log('rawData.value:', JSON.stringify(rawData.value))
+  console.log('cleanedData.value:', JSON.stringify(cleanedData.value))
+  console.log('fileColumns.value:', JSON.stringify(fileColumns.value))
+  console.log('extractedValues.value:', JSON.stringify(extractedValues.value))
+  console.log('autoDetectedFields.value (should remain unchanged):', JSON.stringify(autoDetectedFields.value))
+  
+  console.log('DEBUG - extractedValues keys:', Object.keys(extractedValues.value))
+  console.log('DEBUG - cleanedData[0]:', JSON.stringify(cleanedData.value[0]))
+  console.log('DEBUG - fileColumns:', JSON.stringify(fileColumns.value))
+  
   worksheetSelected.value = true
   showPreview.value = true
   sheetType.value = 'single'
   mappingApplied.value = true
   
+  console.log('Before setting activeTab to cleaning, current value:', activeTab.value)
+  
+  showWorkbookViewer.value = false
+  
+  await nextTick()
   activeTab.value = 'cleaning'
+  await nextTick()
+  
+  console.log('After setting activeTab to cleaning, current value:', activeTab.value)
+
+  console.log('=== Tab Switched to Cleaning ===')
+  console.log('Cleaning tab will show cleanedData:', cleanedData.value)
+  console.log('Cleaning tab will show autoDetectedFields:', autoDetectedFields.value)
+  console.log('Cleaning tab will show extractedValues:', extractedValues.value)
+  console.log('Active tab set to:', activeTab.value)
+  console.log('Data flow complete - values set for preview, cleaning, and calculations')
 }
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
   console.log(`🔄 handleProcessSheetFromViewer: Processing worksheet "${sheetName}"`)
+  console.log('🔄 This function sets activeTab to upload - this may be overwriting the cleaning tab')
   
   currentSheetName.value = sheetName
   
-  // Clear active cache but preserve previous valuations for comparison
   clearActiveCache(true)
   
   originalRawData.value = sheetData || []
@@ -4408,6 +4698,7 @@ function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
   const detection = detectSheetType(sheetData, instrumentType.value)
   sheetType.value = detection.type
   if (detection.type === 'multi') {
+    currentMappingTemplateId.value = null
     columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
     showMappingDialog.value = true
   } else {
@@ -4512,6 +4803,48 @@ function toggleExcludeField(fieldKey) {
     excludedDetectedFields.value.add(fieldKey)
   }
   excludedDetectedFields.value = new Set(excludedDetectedFields.value)
+}
+
+function addCustomField() {
+  if (!newFieldName.value.trim() || !newFieldValue.value.trim()) {
+    alert('Please enter both field name and value')
+    return
+  }
+
+  const fieldName = newFieldName.value.trim()
+  const fieldValue = newFieldValue.value.trim()
+
+  autoDetectedFields.value[fieldName] = {
+    value: fieldValue,
+    currencyVariants: {},
+    selectedCurrency: 'CUSTOM',
+    currency: null,
+    location: 'custom',
+    confidence: 1.0,
+    detectedFrom: 'custom',
+    semanticMatch: fieldName
+  }
+
+  extractedValues.value[fieldName] = fieldValue
+
+  if (cleanedData.value.length > 0) {
+    cleanedData.value[0][fieldName] = fieldValue
+  }
+
+  if (rawData.value.length > 0) {
+    rawData.value[0][fieldName] = fieldValue
+  }
+
+  if (!fileColumns.value.includes(fieldName)) {
+    fileColumns.value.push(fieldName)
+  }
+
+  console.log(`Added custom field: ${fieldName} = ${fieldValue}`)
+
+  newFieldName.value = ''
+  newFieldValue.value = ''
+
+  debouncedSave()
 }
 
 async function loadWorksheetStatuses() {
@@ -4779,8 +5112,20 @@ function viewPreviousSummariesExcel() {
 }
 
 function handleWorkbookLoaded(fileName) {
-  console.log('Workbook loaded:', fileName)
+  console.log('=== handleWorkbookLoaded called ===')
+  console.log('fileName:', fileName)
+  console.log('showWorkbookViewer.value:', showWorkbookViewer.value)
+  console.log('workbookSheets.value.length:', workbookSheets.value?.length)
   currentWorkbookName.value = fileName || 'Unknown'
+
+  nextTick(() => {
+    const dialog = document.querySelector('.v-dialog')
+    console.log('Dialog element in DOM:', !!dialog)
+    if (dialog) {
+      console.log('Dialog display:', window.getComputedStyle(dialog).display)
+      console.log('Dialog visibility:', window.getComputedStyle(dialog).visibility)
+    }
+  })
 }
 
 function closeInstrumentExcelPopup() {
@@ -4791,10 +5136,8 @@ function continueWorkingOnCurrent() {
   console.log('Continue on Current Sheet - returning to workbook view:', currentSheetName.value)
   console.log('Current workbook:', currentWorkbookName.value)
   
-  // Clear only calculation/detection state, preserve workbook data
   clearActiveCache(true)
   
-  // Keep workbook viewer open with the current sheet
   showWorkbookViewer.value = true
   activeTab.value = 'upload'
   forceUpdate.value++
@@ -4804,14 +5147,11 @@ function chooseAnotherSheet() {
   console.log('Choose Another Sheet - returning to workbook view')
   console.log('Current workbook:', currentWorkbookName.value)
   
-  // Clear only calculation/detection state, preserve workbook data
   clearActiveCache(true)
   
-  // Reset current sheet name so user can select a new one
   currentSheetName.value = ''
   worksheetSelected.value = false
   
-  // Keep workbook viewer open so user can select another sheet
   showWorkbookViewer.value = true
   activeTab.value = 'upload'
   forceUpdate.value++
@@ -5092,7 +5432,6 @@ function downloadCalculatedInstrumentsExcel() {
 
   const workbook = XLSX.utils.book_new()
   
-  // Get all unique columns from the backend calculation response
   const allColumns = new Set()
   summaryRows.forEach(row => {
     Object.keys(row).forEach(key => allColumns.add(key))
@@ -5104,7 +5443,6 @@ function downloadCalculatedInstrumentsExcel() {
   summaryRows.forEach(row => {
     const dataRow = columns.map(col => {
       const value = row[col]
-      // Return raw values, don't format them
       return value !== undefined && value !== null ? value : ''
     })
     data.push(dataRow)
@@ -5384,7 +5722,24 @@ function applyCleaning() {
       for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') { data[i][k] = data[i+1][k]; filled++ } })
       if (filled > 0) operations.push(`Filled ${filled} missing values backward`)
     }
-  
+
+    if (excludedDetectedFields.value.size > 0) {
+      const excludedCount = excludedDetectedFields.value.size
+      data = data.map(row => {
+        const newRow = {}
+        Object.keys(row).forEach(key => {
+          if (!excludedDetectedFields.value.has(key)) {
+            newRow[key] = row[key]
+          }
+        })
+        return newRow
+      })
+      operations.push(`Removed ${excludedCount} excluded fields from data`)
+      console.log('=== Applied excluded fields in cleaning ===')
+      console.log('Excluded fields:', Array.from(excludedDetectedFields.value))
+      console.log('Remaining fields:', Object.keys(data[0] || {}))
+    }
+
     cleanedData.value = data
     cleaningStats.value = { 
       totalRows: originalLength, 
@@ -5426,7 +5781,6 @@ async function continueAfterCleaning() {
     })
     
     cleanedData.value = filteredData
-    console.log('Filtered cleaned data:', filteredData)
   }
   
   activeTab.value = 'calculations'
@@ -5440,7 +5794,7 @@ async function continueAfterCleaning() {
   }
   
   calculateMetrics().catch(err => {
-    console.error('Error calculating metrics:', err)
+    showSnackbar('Error calculating metrics: ' + err.message, 'error')
   })
 }
 
@@ -5450,11 +5804,15 @@ async function calculateMetrics() {
     return
   }
 
+  if (isCalculating.value) {
+    return
+  }
+
+  isCalculating.value = true
+
   const requiredFields = requiredColumns.value[instrumentType.value] || []
   const missingFields = []
   
-  // For single instruments, check fields directly in cleaned data
-  // For multi-instrument, check through column mapping
   if (sheetType.value === 'single') {
     for (const field of requiredFields) {
       const hasColumn = cleanedData.value.some(row => row.hasOwnProperty(field))
@@ -5478,17 +5836,71 @@ async function calculateMetrics() {
   }
   
   if (missingFields.length > 0) {
-    console.error('Missing required fields:', missingFields)
     showSnackbar(`Missing required fields: ${missingFields.join(', ')}. Please complete the mapping before calculating.`, 'error')
+    isCalculating.value = false
     return
   }
 
+  let dataForCalculation = JSON.parse(JSON.stringify(cleanedData.value))
+  
   try {
-    console.log('Calling calculations API with instrument type:', instrumentType.value)
-    console.log('Cleaned data length:', cleanedData.value.length)
+    dataForCalculation = dataForCalculation.map(row => {
+      const normalizedRow = {}
+      for (const [key, value] of Object.entries(row)) {
+        try {
+          const normalizedKey = normalizeFieldName(key)
+          let normalizedValue = value
+          if (normalizedKey === 'coupon_frequency') {
+            if (typeof value === 'string') {
+              const freqLower = value.toLowerCase()
+              if (freqLower.includes('semi') || freqLower.includes('half')) {
+                normalizedValue = 2
+              } else if (freqLower.includes('quarter')) {
+                normalizedValue = 4
+              } else if (freqLower.includes('month') || freqLower.includes('monthly')) {
+                normalizedValue = 12
+              } else if (freqLower.includes('annual') || freqLower.includes('year')) {
+                normalizedValue = 1
+              } else {
+                normalizedValue = parseFloat(value) || 2
+              }
+            }
+          }
+          if (typeof value === 'string' && (normalizedKey.includes('principal') || normalizedKey.includes('face_value') || normalizedKey.includes('price') || normalizedKey.includes('amount') || normalizedKey.includes('value'))) {
+            normalizedValue = parseFloat(value.replace(/[$,]/g, '')) || value
+          }
+          if (typeof value === 'string' && (normalizedKey.includes('rate') || normalizedKey.includes('yield') || normalizedKey.includes('coupon') || normalizedKey.includes('spread') || normalizedKey.includes('discount'))) {
+            normalizedValue = parseFloat(value.replace(/[%]/g, '')) || value
+          }
+          normalizedRow[normalizedKey] = normalizedValue
+        } catch (e) {
+          normalizedRow[key] = value
+        }
+      }
+      return normalizedRow
+    })
+  } catch (e) {
+    console.error('Error normalizing data:', e)
+    dataForCalculation = JSON.parse(JSON.stringify(cleanedData.value))
+  }
+  
+  if (excludedDetectedFields.value.size > 0) {
+    dataForCalculation = dataForCalculation.map(row => {
+      const newRow = {}
+      Object.keys(row).forEach(key => {
+        if (!excludedDetectedFields.value.has(key)) {
+          newRow[key] = row[key]
+        }
+      })
+      return newRow
+    })
+  }
+
+  try {
+    console.log('Starting calculation for', instrumentType.value, 'with', dataForCalculation.length, 'rows')
     const response = await api.calculationsAPI.executeByType(
       instrumentType.value,
-      cleanedData.value,
+      dataForCalculation,
       {
         country: effectiveCountry.value,
         currency: effectiveCurrency.value,
@@ -5501,42 +5913,18 @@ async function calculateMetrics() {
       null,
       activeSession.value?.id
     )
-    
-    console.log('=== FULL BACKEND RESPONSE ===')
-    console.log('Calculations API response:', response)
-    console.log('Response keys:', Object.keys(response || {}))
-    console.log('Response success:', response?.success)
-    console.log('Response is_multi_instrument:', response?.is_multi_instrument)
-    console.log('Response aggregate:', response?.aggregate)
-    console.log('Response data.aggregates:', response?.data?.aggregates)
-    console.log('Response results:', response?.results)
-    console.log('Response data:', JSON.stringify(response?.data, null, 2))
-    console.log('Response data.calculations:', response?.data?.calculations)
-    console.log('Response data.aggregates keys:', response?.data?.aggregates ? Object.keys(response.data.aggregates) : 'N/A')
-    
-    if (response?.data?.aggregates) {
-      console.log('=== AGGREGATES CONTENT ===')
-      for (const [key, value] of Object.entries(response.data.aggregates)) {
-        console.log(`${key}:`, value)
-      }
-    }
+    console.log('Calculation response received:', response?.success)
     
     if (response?.success) {
-      console.log('=== RESPONSE SUCCESS - CHECKING BRANCHES ===')
-      console.log('is_multi_instrument:', response?.is_multi_instrument)
-      console.log('Has aggregate:', !!response?.aggregate)
-      console.log('Has data:', !!response?.data)
-      
+      console.log('Calculation successful, processing response...')
       if (response?.is_multi_instrument) {
-        console.log('=== MULTI-INSTRUMENT MODE ===')
+        console.log('Processing multi-instrument response')
         if (response?.instrument_summary) {
-          // Map backend field names to display names and filter to calculated fields only
           const mappedRows = response.instrument_summary.rows?.map(row => {
             const mapped = mapBackendFieldsToDisplayNames(row, instrumentType.value)
             return filterToCalculatedFields(mapped, instrumentType.value)
           }) || []
           
-          // Add workbook and worksheet info to current rows
           const currentRowsWithWorkbook = mappedRows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
@@ -5547,29 +5935,23 @@ async function calculateMetrics() {
             columns: response.instrument_summary.columns, 
             rows: currentRowsWithWorkbook 
           }
-          console.log('Instrument summary rows:', currentRowsWithWorkbook.length)
-          console.log('📊 Current summary updated with new worksheet data')
+          console.log('Instrument summary updated with', currentRowsWithWorkbook.length, 'rows')
         }
         
         if (response?.portfolio_summary) {
           portfolioSummary.value = response.portfolio_summary
-          console.log('Portfolio summary rows:', response.portfolio_summary.rows?.length)
-          console.log('📊 Current portfolio summary updated with new worksheet data')
         }
         
         const results = response?.results || {}
         const firstInstType = Object.keys(results)[0]
-        console.log('Results keys:', Object.keys(results))
-        console.log('First instrument type:', firstInstType)
+        console.log('Results for instrument type:', firstInstType)
         if (firstInstType && results[firstInstType]) {
           calculations.value = results[firstInstType].data
-          console.log('Calculations set from results[firstInstType].data')
           
           if (response?.aggregate) {
-            // Include all backend-calculated fields from aggregate
+            console.log('Setting allCalculations from aggregate')
             const agg = {
               ...response.aggregate,
-              // Ensure all instrument-specific fields are included
               accruedInterest: response.aggregate.accrued_interest ?? null,
               annualCoupon: response.aggregate.annual_coupon ?? null,
               bondEquivalentYield: response.aggregate.bond_equivalent_yield ?? null,
@@ -5597,13 +5979,12 @@ async function calculateMetrics() {
             }
             allCalculations.value = agg
             selectedCalculations.value = agg
-            console.log('allCalculations set from response.aggregate:', response.aggregate)
+            console.log('allCalculations set with', Object.keys(agg).length, 'fields')
           } else if (response?.data?.aggregates) {
-            // Include all backend-calculated fields from data.aggregates
+            console.log('Setting allCalculations from data.aggregates')
             const aggregates = response.data.aggregates
             const agg = {
               ...aggregates,
-              // Ensure all instrument-specific fields are included
               accruedInterest: aggregates.accrued_interest ?? null,
               annualCoupon: aggregates.annual_coupon ?? null,
               bondEquivalentYield: aggregates.bond_equivalent_yield ?? null,
@@ -5631,21 +6012,20 @@ async function calculateMetrics() {
             }
             allCalculations.value = agg
             selectedCalculations.value = agg
-            console.log('allCalculations set from response.data.aggregates:', response.data.aggregates)
+            console.log('allCalculations set with', Object.keys(agg).length, 'fields')
           } else {
+            console.log('No aggregate found, using calculations data directly')
             allCalculations.value = results[firstInstType].data
             selectedCalculations.value = results[firstInstType].data
-            console.log('allCalculations set from results[firstInstType].data (no aggregate)')
           }
         } else {
-          console.warn('No results found for multi-instrument response')
+          console.warn('No results found in response')
         }
+
+        isUsingDetectedFields.value = false
       } else if (response?.data) {
-        console.log('=== ENTERED DATA MODE BRANCH ===')
-        console.log('=== SINGLE INSTRUMENT / DATA MODE ===')
+        console.log('Processing single-instrument/data response')
         calculations.value = response.data
-        console.log('Response.data keys:', Object.keys(response.data || {}))
-        console.log('Response.data calculations:', response.data?.calculations)
         console.log('Response.data aggregates:', response.data?.aggregates)
         console.log('Sheet type:', sheetType.value)
 
@@ -5654,19 +6034,14 @@ async function calculateMetrics() {
         }
 
         const backendInstrumentNames = response?.instrument_names || []
-
         const calcArray = response.data.calculations || []
-        console.log('CalcArray length:', calcArray.length)
+        console.log('Calc array length:', calcArray.length)
         
-        // Handle single instrument case - use the single calculation directly
         if (sheetType.value === 'single' && calcArray.length === 1) {
-          console.log('=== SINGLE INSTRUMENT DETECTED ===')
+          console.log('Processing single instrument calculation')
           const singleCalc = calcArray[0]
-          console.log('Single calc:', singleCalc)
           calculations.value = singleCalc
           
-          // For single instruments, allCalculations should contain the calculation fields directly from backend
-          // NO fallbacks - use only backend-calculated values
           const agg = {
             totalValue: singleCalc.total_value ?? singleCalc.calculated_value ?? null,
             instrumentCount: 1,
@@ -5679,7 +6054,6 @@ async function calculateMetrics() {
             avgDaysToMaturity: singleCalc.days_to_maturity ?? singleCalc.term_days ?? null,
             totalPrincipal: singleCalc.principal ?? singleCalc.face_value ?? null,
             fred: response.data.fred || null,
-            // Include all backend-calculated fields directly from bonds calculation
             accruedInterest: singleCalc.accrued_interest ?? null,
             annualCoupon: singleCalc.annual_coupon ?? null,
             bondEquivalentYield: singleCalc.bond_equivalent_yield ?? null,
@@ -5693,43 +6067,69 @@ async function calculateMetrics() {
             yearsToMaturity: singleCalc.years_to_maturity ?? null,
             yieldToMaturity: singleCalc.yield_to_maturity ?? null,
             yieldCurveRate: singleCalc.yield_curve_rate ?? null,
-            // Legacy field mappings
             discountYield: singleCalc.discount_yield ?? null,
             effectiveYield: singleCalc.effective_yield ?? null,
             termDays: singleCalc.term_days ?? null,
             status: singleCalc.status ?? null
           }
           
-          // Check if calculation failed due to error
           if (singleCalc.status === 'cannot_calculate' || singleCalc.error) {
             const errorMsg = singleCalc.error || 'Calculation failed'
-            console.error('Backend calculation error:', errorMsg)
-            showSnackbar(`Calculation failed: ${errorMsg}`, 'error')
+            const missingFields = singleCalc.missing_fields || []
+            const invalidFields = singleCalc.invalid_fields || []
+            
+            console.error('Calculation failed:', errorMsg, missingFields, invalidFields)
+            
+            let fullErrorMsg = errorMsg
+            if (missingFields.length > 0) {
+              fullErrorMsg += ` Missing: ${missingFields.join(', ')}`
+            }
+            if (invalidFields.length > 0) {
+              const invalidMsg = invalidFields.map(f => `${f.field} (${f.reason})`).join(', ')
+              fullErrorMsg += ` Invalid: ${invalidMsg}`
+            }
+            
+            showSnackbar(`Calculation failed: ${fullErrorMsg}`, 'error')
             allCalculations.value = {
               status: 'error',
-              message: errorMsg,
+              message: fullErrorMsg,
               error: singleCalc.error,
               missing_field: singleCalc.missing_field,
-              // Include partial results that were calculated
+              missing_fields: missingFields,
+              invalid_fields: invalidFields,
               ...agg
             }
             selectedCalculations.value = allCalculations.value
             return
           }
           
-          // If status is partial, show warning with error message if available
           if (singleCalc.status === 'partial' && singleCalc.error) {
-            console.warn('Partial calculation with error:', singleCalc.error)
-            showSnackbar(`Partial calculation: ${singleCalc.error}`, 'warning')
+            const missingFields = singleCalc.missing_fields || []
+            const invalidFields = singleCalc.invalid_fields || []
+            
+            console.warn('Partial calculation:', singleCalc.error)
+            
+            let warningMsg = singleCalc.error
+            if (missingFields.length > 0) {
+              warningMsg += ` Missing: ${missingFields.join(', ')}`
+            }
+            if (invalidFields.length > 0) {
+              const invalidMsg = invalidFields.map(f => `${f.field} (${f.reason})`).join(', ')
+              warningMsg += ` Invalid: ${invalidMsg}`
+            }
+            
+            showSnackbar(`Partial calculation: ${warningMsg}`, 'warning')
             agg.status = 'partial'
             agg.error = singleCalc.error
             agg.missing_field = singleCalc.missing_field
+            agg.missing_fields = missingFields
+            agg.invalid_fields = invalidFields
           }
           
-          console.log('Final single instrument agg object:', agg)
+          console.log('Setting allCalculations for single instrument')
           allCalculations.value = agg
           selectedCalculations.value = agg
-          console.log('allCalculations set to single instrument backend values')
+          console.log('allCalculations keys:', Object.keys(allCalculations.value))
           
           const row = {
             'Instrument Name': backendInstrumentNames[0] || singleCalc.instrument_name || 'Instrument',
@@ -5742,7 +6142,6 @@ async function calculateMetrics() {
           const mappedRow = mapBackendFieldsToDisplayNames(row, instrumentType.value)
           const filteredRow = filterToCalculatedFields(mappedRow, instrumentType.value)
           
-          // Add workbook and worksheet info
           const filteredRowWithWorkbook = {
             ...filteredRow,
             'Workbook': currentWorkbookName.value || 'Unknown',
@@ -5751,16 +6150,11 @@ async function calculateMetrics() {
           
           Object.keys(filteredRowWithWorkbook).forEach(k => currentCols.add(k))
           instrumentSummary.value = { columns: Array.from(currentCols), rows: [filteredRowWithWorkbook] }
-          console.log('📊 Current summary updated with new worksheet data (single instrument)')
+          console.log('Instrument summary set with', filteredRowWithWorkbook.length, 'rows')
         } else if (calcArray.length > 1) {
-          // Handle case where backend returns multiple calculations but flags as single-instrument mode
-          console.log('=== MULTIPLE CALCULATIONS IN SINGLE MODE ===')
-          console.log('Using aggregates from response.data')
-          
+          console.log('Processing multiple calculations in single mode')
           const aggregates = response.data.aggregates || {}
-          console.log('Aggregates:', aggregates)
           
-          // Build allCalculations from aggregates - include all backend-calculated fields
           const agg = {
             totalValue: aggregates.totalValue ?? aggregates.total_value ?? null,
             instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? calcArray.length,
@@ -5773,7 +6167,6 @@ async function calculateMetrics() {
             avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? null,
             totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? null,
             fred: response.data.fred || null,
-            // Include all bonds-specific fields
             accruedInterest: aggregates.accrued_interest ?? null,
             annualCoupon: aggregates.annual_coupon ?? null,
             bondEquivalentYield: aggregates.bond_equivalent_yield ?? null,
@@ -5787,7 +6180,6 @@ async function calculateMetrics() {
             yearsToMaturity: aggregates.years_to_maturity ?? null,
             yieldToMaturity: aggregates.yield_to_maturity ?? null,
             yieldCurveRate: aggregates.yield_curve_rate ?? null,
-            // Include Treasury Bill-specific fields
             purchasePrice: aggregates.purchase_price ?? null,
             termDays: aggregates.term_days ?? null,
             discountAmount: aggregates.discount_amount ?? null,
@@ -5795,7 +6187,6 @@ async function calculateMetrics() {
             moneyMarketYield: aggregates.money_market_yield ?? null,
             holdingPeriodYield: aggregates.holding_period_yield ?? null,
             effectiveAnnualYield: aggregates.effective_annual_yield ?? null,
-            // Include Money Market-specific fields
             principal: aggregates.principal ?? null,
             interestRate: aggregates.interest_rate ?? null,
             interestEarned: aggregates.interest_earned ?? null,
@@ -5803,12 +6194,9 @@ async function calculateMetrics() {
             effectiveYield: aggregates.effective_yield ?? null
           }
           
-          console.log('Final agg object:', agg)
           allCalculations.value = agg
           selectedCalculations.value = agg
-          console.log('allCalculations set to agg from multi-calc single-mode')
           
-          // Build instrument summary from calculations with field mapping and filtering
           const rows = calcArray.map((calc, idx) => {
             const mappedCalc = mapBackendFieldsToDisplayNames(calc, instrumentType.value)
             const filteredCalc = filterToCalculatedFields(mappedCalc, instrumentType.value)
@@ -5823,7 +6211,6 @@ async function calculateMetrics() {
           const currentCols = new Set()
           rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
           
-          // Add workbook and worksheet info to current rows
           const rowsWithWorkbook = rows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
@@ -5831,9 +6218,7 @@ async function calculateMetrics() {
           }))
           
           instrumentSummary.value = { columns: Array.from(currentCols), rows: rowsWithWorkbook }
-          console.log('📊 Current summary updated with new worksheet data (single mode multi-calc)')
           
-          // Build portfolio summary from aggregates
           if (response.data.portfolio_summary) {
             portfolioSummary.value = response.data.portfolio_summary
           } else {
@@ -5865,7 +6250,6 @@ async function calculateMetrics() {
             completedPortfolioSummary.value = { columns: Array.from(allPortfolioCols), rows: mergedPortfolioRows }
           }
         } else if (calcArray.length) {
-          // Multi-instrument case with field mapping and filtering
           const rows = calcArray.map((calc, idx) => {
             const mappedCalc = mapBackendFieldsToDisplayNames(calc, instrumentType.value)
             const filteredCalc = filterToCalculatedFields(mappedCalc, instrumentType.value)
@@ -5880,7 +6264,6 @@ async function calculateMetrics() {
           const currentCols = new Set()
           rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
           
-          // Add workbook and worksheet info to current rows
           const rowsWithWorkbook = rows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
@@ -5888,7 +6271,6 @@ async function calculateMetrics() {
           }))
           
           instrumentSummary.value = { columns: Array.from(currentCols), rows: rowsWithWorkbook }
-          console.log('📊 Current summary updated with new worksheet data (single mode)')
 
           const aggregates = response.data.aggregates || response.data || {}
           const agg = {
@@ -5930,18 +6312,33 @@ async function calculateMetrics() {
           const currentPortfolioCols = new Set()
           Object.keys(portfolioRow).forEach(k => currentPortfolioCols.add(k))
           portfolioSummary.value = { columns: Array.from(currentPortfolioCols), rows: [portfolioRow] }
-          console.log('📊 Current portfolio summary updated with new worksheet data')
         } else {
-          // No calculations returned - show error
-          console.warn('No calculations returned from backend')
+          const backendErrors = response.data?.errors || []
+          const missingFields = response.data?.missing_fields || []
+          const invalidFields = response.data?.invalid_fields || []
+          
+          let errorMsg = 'Not calculable — required input not detected.'
+          if (backendErrors.length > 0) {
+            errorMsg = backendErrors.map(e => e.message || e).join('; ')
+          }
+          if (missingFields.length > 0) {
+            errorMsg += ` Missing: ${missingFields.join(', ')}`
+          }
+          if (invalidFields.length > 0) {
+            const invalidMsg = invalidFields.map(f => `${f.field} (${f.reason})`).join(', ')
+            errorMsg += ` Invalid: ${invalidMsg}`
+          }
+          
+          showSnackbar(`Calculation failed: ${errorMsg}`, 'error')
           allCalculations.value = {
             status: 'error',
-            message: 'Not calculable — required input not detected.'
+            message: errorMsg,
+            errors: backendErrors,
+            missing_fields: missingFields,
+            invalid_fields: invalidFields
           }
           selectedCalculations.value = allCalculations.value
         }
-        
-        // Save the portfolio summary data to session immediately after calculations complete
         if (activeSession.value?.id) {
           await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
             rawData: rawData.value,
@@ -5962,24 +6359,38 @@ async function calculateMetrics() {
             cleaningStats: cleaningStats.value,
             sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
             manualInputs: manualInputs.value,
-            formulas: formulas.value
+            formulas: formulas.value,
+            autoDetectedFields: autoDetectedFields.value,
+            autoDetectedFieldsWithMetadata: autoDetectedFieldsWithMetadata.value,
+            autoDetectedAdditionalFields: autoDetectedAdditionalFields.value,
+            detectedCurrencies: detectedCurrencies.value,
+            excludedDetectedFields: Array.from(excludedDetectedFields.value)
           })
         }
 
         saveSessionData()
       } else {
         const errorMsg = response?.message || response?.error || 'Unknown error'
-        console.error('Backend calculation failed:', errorMsg)
         showSnackbar('Calculation failed: ' + errorMsg, 'error')
       }
+
+      isUsingDetectedFields.value = false
+      console.log('Calculation processing complete')
     }
   } catch (err) {
-    console.error('Error calling backend calculation:', err)
+    console.error('Error in calculation:', err)
     showSnackbar('Error calculating metrics: ' + (err.message || 'Unknown error'), 'error')
+    isUsingDetectedFields.value = false
+  } finally {
+    isCalculating.value = false
+    console.log('Calculation animation stopped')
   }
+  console.log('Starting FRED enrichment')
   await enrichCalculationsWithFred()
+  console.log('FRED enrichment complete')
   debouncedSave()
   forceUpdate.value++
+  console.log('Calculation function complete')
 }
 
 async function continueToVisualizations() {
@@ -6011,7 +6422,6 @@ async function continueFromVisualizations() {
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
     await markStepCompleted(String(sid), 'visualizations')
-    // Ensure portfolio summary is saved before navigating
     await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, {
       rawData: rawData.value,
       cleanedData: cleanedData.value,
@@ -6132,7 +6542,7 @@ async function fetchYieldCurve() {
           maturity: parseFloat(m),
           maturityLabel: curveData.labels?.[idx] || m,
           rate: curveData.rates?.[idx] || 0,
-          date: curveData.dates?.[idx] || null // Include date for date range mode
+          date: curveData.dates?.[idx] || null
         }))
         yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() })
         yieldCurveData.value = points
@@ -6182,7 +6592,6 @@ function updateFredBenchmark() {
 }
 
 async function renderYieldCurveChart() {
-  // Destroy existing chart instance before creating a new one
   if (chartInstanceRef.current) {
     chartInstanceRef.current.destroy()
     chartInstanceRef.current = null
@@ -6202,29 +6611,25 @@ async function renderYieldCurveChart() {
     chartInstanceRef.current = null
   }
 
-  // Handle date range mode vs maturity mode
   let transformed = []
   let xAxisType = 'linear'
   let xAxisTitle = 'Maturity'
   let xScaleOptions = {}
 
   if (maturityMode.value === 'dateRange') {
-    // Date range mode: show dates on x-axis
     xAxisType = 'time'
     xAxisTitle = 'Date'
 
-    // Filter and sort by date
     const dateFilteredData = yieldCurveData.value
       .filter(d => d.date !== null && d.date !== undefined)
       .sort((a, b) => new Date(a.date) - new Date(b.date))
 
-    // Use actual dates as x values (time scale)
     transformed = dateFilteredData.map(d => {
       const dateObj = new Date(d.date)
       return {
-        x: dateObj.getTime(),  // Use timestamp for time scale
+        x: dateObj.getTime(),
         y: d.rate,
-        label: d.date,  // Keep original date string
+        label: d.date,
         originalDate: d.date
       }
     })
@@ -6249,7 +6654,6 @@ async function renderYieldCurveChart() {
       }
     }
   } else {
-    // Maturity mode: show maturity labels on x-axis
     const period = effectiveMaturity.value
     let unitLabel = 'Years'
     let stepSize = 1
@@ -6460,28 +6864,32 @@ async function saveTemplates() {
 }
 
 async function saveCurrentMappingAsTemplate() {
-  console.log('saveCurrentMappingAsTemplate called')
-  console.log('newTemplateName:', newTemplateName.value)
-  console.log('columnMapping:', columnMapping.value)
-  console.log('requiredColumns:', requiredColumns.value)
-  
   if (!newTemplateName.value || !newTemplateName.value.trim()) {
     showSnackbar('Please enter a template name')
     return
   }
 
   try {
-    console.log('Calling mappingTemplateManager.saveTemplate')
-    const result = await mappingTemplateManager.saveTemplate(
-      newTemplateName.value.trim(),
-      instrumentType.value,
-      columnMapping.value,
-      requiredColumns.value,
-      fileColumns.value
-    )
-    console.log('Save result:', result)
+    let result
+    if (currentMappingTemplateId.value) {
+      result = await mappingTemplateManager.updateTemplate(currentMappingTemplateId.value, {
+        columnMapping: columnMapping.value,
+        fileColumns: fileColumns.value
+      })
+    } else {
+      result = await mappingTemplateManager.saveTemplate(
+        newTemplateName.value.trim(),
+        instrumentType.value,
+        columnMapping.value,
+        requiredColumns.value,
+        fileColumns.value
+      )
+    }
+
     if (result) {
-      currentMappingTemplateId.value = result.id
+      if (!currentMappingTemplateId.value) {
+        currentMappingTemplateId.value = result.id
+      }
       await loadSavedTemplates()
       newTemplateName.value = ''
       showSnackbar('Mapping saved successfully', 'success')
@@ -6503,6 +6911,9 @@ async function applyTemplate(templateId) {
       return
     }
     columnMapping.value = { ...template.column_mapping }
+    if (template.file_columns) {
+      fileColumns.value = [...template.file_columns]
+    }
     currentMappingTemplateId.value = template.id
     applyCurrentMapping()
     debouncedSave()
@@ -6928,10 +7339,15 @@ function saveSessionData(explicitSave = false) {
     cleaningStats: cleaningStats.value,
     sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
     manualInputs: manualInputs.value,
-    formulas: formulas.value
+    formulas: formulas.value,
+    isCalculating: isCalculating.value,
+    autoDetectedFields: autoDetectedFields.value,
+    autoDetectedFieldsWithMetadata: autoDetectedFieldsWithMetadata.value,
+    autoDetectedAdditionalFields: autoDetectedAdditionalFields.value,
+    detectedCurrencies: detectedCurrencies.value,
+    excludedDetectedFields: Array.from(excludedDetectedFields.value)
   }
   
-  // Ensure session is set as active
   sessionManager.setActiveSession(activeSession.value)
   
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
@@ -6966,6 +7382,7 @@ async function loadSavedData() {
       yieldCurveData.value = wf.yieldCurveData || []
       manualInputs.value = wf.manualInputs || {}
       formulas.value = wf.formulas || {}
+      isCalculating.value = wf.isCalculating || false
       if (wf.fredFilters) {
         selectedCountryOption.value = wf.fredFilters.country || ''
         selectedCurrencyOption.value = wf.fredFilters.currency || ''
@@ -6976,6 +7393,25 @@ async function loadSavedData() {
       }
       if (wf.cleaningStats) cleaningStats.value = wf.cleaningStats
       if (wf.sessionSavedAt) sessionSavedAt.value = wf.sessionSavedAt
+
+      if (wf.autoDetectedFields) {
+        autoDetectedFields.value = wf.autoDetectedFields
+        console.log('Restored autoDetectedFields from session:', Object.keys(autoDetectedFields.value).length)
+      }
+      if (wf.autoDetectedFieldsWithMetadata) {
+        autoDetectedFieldsWithMetadata.value = wf.autoDetectedFieldsWithMetadata
+      }
+      if (wf.autoDetectedAdditionalFields) {
+        autoDetectedAdditionalFields.value = wf.autoDetectedAdditionalFields
+      }
+      if (wf.detectedCurrencies) {
+        detectedCurrencies.value = wf.detectedCurrencies
+      }
+      if (wf.excludedDetectedFields && Array.isArray(wf.excludedDetectedFields)) {
+        excludedDetectedFields.value = new Set(wf.excludedDetectedFields)
+        console.log('Restored excludedDetectedFields from session:', Array.from(excludedDetectedFields.value))
+      }
+
       loaded = true
     }
   } catch (err) {
@@ -7008,51 +7444,440 @@ function showFormula(metricKey) {
     'weightedAvgCoupon': 'Σ (Coupon Rate × Face Value) / Σ Face Value',
     'totalAnnualIncome': 'Σ (Coupon Rate × Face Value)',
     'avgYTM': 'Σ Yield to Maturity / Number of Instruments',
-    'duration': 'Macaulay Duration = Σ (t × PV(C_t)) / Price'
+    'duration': 'Macaulay Duration = Σ (t × PV(C_t)) / Price',
+    'totalValue': 'Σ of all calculated values',
+    'interestRate': 'Interest rate as percentage',
+    'discountYield': '(Discount Amount / Face Value) × (360 / Days) × 100',
+    'moneyMarketYield': '(Discount Amount / Purchase Price) × (360 / Days) × 100',
+    'effectiveAnnualYield': '((Face Value / Purchase Price)^(365/Days) - 1) × 100',
+    'currentPrice': 'Market price of the bond',
+    'couponRate': 'Annual coupon rate as percentage',
+    'yieldToMaturity': 'Internal rate of return',
+    'currentYield': '(Annual Coupon / Price) × 100',
+    'modifiedDuration': 'Macaulay Duration / (1 + YTM/Frequency)',
+    'accruedInterest': 'Coupon per Period × (Days Accrued / Days in Period)',
+    'presentValue': 'Σ (Cash Flow / (1 + YTM/Frequency)^t)',
+    'fairValue': 'Present Value - Purchase Price',
+    'termDays': 'Days from valuation to maturity',
+    'yieldCurveRate': 'Benchmark rate from FRED API'
   }
   formulaText.value = formulaMap[metricKey] || 'No formula available for this metric.'
   
-  // Build calculation details from backend aggregates
   const agg = allCalculations.value || {}
+  const calc = calculations.value || {}
   const details = []
   
-  if (metricKey === 'Total Portfolio Value' || metricKey === 'totalValue') {
-    details.push({ label: 'Total Value', value: agg.totalValue || agg.total_value || 0, formula: 'Sum of all instrument values' })
-    if (agg.totalPrincipal || agg.total_principal) {
-      details.push({ label: 'Total Principal', value: agg.totalPrincipal || agg.total_principal, formula: 'Sum of principal amounts' })
+  const getValue = (key) => {
+    return calc[key] || calc[toSnakeCase(key)] || calc[toCamelCase(key)] ||
+           agg[key] || agg[toSnakeCase(key)] || agg[toCamelCase(key)] || 0
+  }
+  
+  const formatValue = (val) => {
+    if (val === null || val === undefined || val === 0) return 'N/A'
+    if (typeof val === 'number') {
+      if (val > 10000) return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      return val.toFixed(4)
     }
-    if (agg.totalFaceValue || agg.total_face_value) {
-      details.push({ label: 'Total Face Value', value: agg.totalFaceValue || agg.total_face_value, formula: 'Sum of face values' })
+    return val
+  }
+  
+  const toSnakeCase = (str) => str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)
+  
+  const toCamelCase = (str) => str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
+  
+  if (metricKey === 'interestEarned' || metricKey === 'totalInterest') {
+    const principal = getValue('principal') || getValue('totalPrincipal') || getValue('total_principal')
+    const rate = getValue('interestRate') || getValue('interest_rate') || getValue('avgRate') || getValue('avg_rate')
+    const days = getValue('termDays') || getValue('term_days') || getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity')
+    const dayCount = getValue('dayCount') || getValue('day_count_convention') || 'ACT/360'
+    const divisor = dayCount.includes('360') ? 360 : 365
+    const interest = principal * (rate / 100) * (days / divisor)
+    
+    details.push({ label: 'Principal', value: formatValue(principal), formula: 'Principal amount invested' })
+    details.push({ label: 'Interest Rate', value: formatValue(rate) + '%', formula: 'Annual interest rate' })
+    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
+    details.push({ label: 'Answer (Interest Earned)', value: formatValue(interest), formula: 'Final calculated interest' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Principal Component', calculation: formatValue(principal), formula: 'Principal amount' },
+        { componentName: 'Rate Component', calculation: formatValue(rate) + '% (as decimal: ' + formatValue(rate/100) + ')', formula: 'Interest rate' },
+        { componentName: 'Time Component (Days/Divisor)', calculation: formatValue(days) + '/' + divisor + ' = ' + formatValue(days/divisor), formula: 'Time fraction' },
+        { componentName: 'Full Calculation (Principal × Rate × Days/Divisor)', calculation: `${formatValue(principal)} × ${formatValue(rate/100)} × ${formatValue(days/divisor)} = ${formatValue(interest)}`, formula: 'Principal × Rate × (Days/Divisor)' }
+      ]
     }
-  } else if (metricKey === 'Average Rate' || metricKey === 'avgRate' || metricKey === 'weightedAvgRate') {
-    details.push({ label: 'Weighted Average Rate', value: agg.weightedAvgRate || agg.avgRate || agg.avg_rate || 0, formula: 'Σ (Rate × Principal) / Σ Principal' })
-    details.push({ label: 'Instrument Count', value: agg.instrumentCount || agg.instrument_count || 0, formula: 'Number of unique instruments' })
-  } else if (metricKey === 'Number of Instruments' || metricKey === 'instrumentCount') {
-    details.push({ label: 'Unique Instruments', value: agg.instrumentCount || agg.instrument_count || 0, formula: 'Count of unique instrument names' })
-    details.push({ label: 'Successful Rows', value: agg.successful_rows || 0, formula: 'Rows with successful calculations' })
-  } else if (metricKey === 'totalInterest' || metricKey === 'interestEarned') {
-    details.push({ label: 'Total Interest', value: agg.totalInterest || agg.total_interest || 0, formula: 'Σ (Principal × Rate × Days/360)' })
-  } else if (metricKey === 'avgDaysToMaturity') {
-    details.push({ label: 'Average Days to Maturity', value: agg.avgDaysToMaturity || agg.avg_days_to_maturity || 0, formula: 'Σ Days / Instrument Count' })
-  } else if (metricKey === 'weightedAvgCoupon' || metricKey === 'totalAnnualIncome') {
-    details.push({ label: 'Weighted Average Coupon', value: agg.weightedAvgCoupon || 0, formula: 'Σ (Coupon Rate × Face Value) / Σ Face Value' })
-    details.push({ label: 'Total Annual Income', value: agg.totalAnnualIncome || agg.total_coupon_income || 0, formula: 'Σ (Coupon Rate × Face Value)' })
-  } else if (metricKey === 'avgYTM') {
-    details.push({ label: 'Average YTM', value: agg.avgYTM || agg.avg_ytm || 0, formula: 'Σ Yield to Maturity / Instrument Count' })
-  } else if (metricKey === 'duration') {
-    details.push({ label: 'Average Duration', value: agg.duration || agg.avg_duration || 0, formula: 'Macaulay Duration = Σ (t × PV(C_t)) / Price' })
-  } else if (metricKey === 'weightedAvgDiscount' || metricKey === 'totalDiscount') {
-    details.push({ label: 'Weighted Average Discount', value: agg.weightedAvgDiscount || agg.avg_discount_rate || 0, formula: 'Σ (Discount Rate × Face Value) / Σ Face Value' })
-    details.push({ label: 'Total Discount', value: agg.totalDiscount || agg.total_discount || 0, formula: 'Σ ((Face Value - Purchase Price) / Face Value × Face Value)' })
+  }
+  
+  else if (metricKey === 'discountYield') {
+    const face = getValue('faceValue') || getValue('face_value') || getValue('totalFaceValue') || getValue('total_face_value')
+    const purchase = getValue('purchasePrice') || getValue('purchase_price') || getValue('totalPurchasePrice') || getValue('total_purchase_price')
+    const days = getValue('termDays') || getValue('term_days') || getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity')
+    const discount = face - purchase
+    const dayCount = getValue('dayCount') || getValue('day_count_convention') || 'ACT/360'
+    const divisor = dayCount.includes('360') ? 360 : 365
+    const discountYield = (discount / face) * (divisor / days) * 100
+    
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Maturity value' })
+    details.push({ label: 'Purchase Price', value: formatValue(purchase), formula: 'Price paid' })
+    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
+    details.push({ label: 'Answer (Discount Yield)', value: formatValue(discountYield) + '%', formula: 'Final discount yield' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Face Value Component', calculation: formatValue(face), formula: 'Maturity value' },
+        { componentName: 'Purchase Price Component', calculation: formatValue(purchase), formula: 'Price paid' },
+        { componentName: 'Discount Amount Component (Face Value - Purchase Price)', calculation: `${formatValue(face)} - ${formatValue(purchase)} = ${formatValue(discount)}`, formula: 'Face Value - Purchase Price' },
+        { componentName: 'Discount Yield Calculation ((Discount / Face) × (Divisor / Days) × 100)', calculation: `(${formatValue(discount)} / ${formatValue(face)}) × (${divisor} / ${formatValue(days)}) × 100 = ${formatValue(discountYield)}%`, formula: '(Discount / Face) × (Divisor / Days) × 100' }
+      ]
+    }
+  }
+  
+  else if (metricKey === 'bondEquivalentYield') {
+    const face = getValue('faceValue') || getValue('face_value') || getValue('totalFaceValue') || getValue('total_face_value')
+    const purchase = getValue('purchasePrice') || getValue('purchase_price') || getValue('totalPurchasePrice') || getValue('total_purchase_price')
+    const days = getValue('termDays') || getValue('term_days') || getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity')
+    const discount = face - purchase
+    const bey = (discount / purchase) * (365 / days) * 100
+    
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Maturity value' })
+    details.push({ label: 'Purchase Price', value: formatValue(purchase), formula: 'Price paid' })
+    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
+    details.push({ label: 'Answer (Bond Equivalent Yield)', value: formatValue(bey) + '%', formula: 'Final BEY' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Face Value Component', calculation: formatValue(face), formula: 'Maturity value' },
+        { componentName: 'Purchase Price Component', calculation: formatValue(purchase), formula: 'Price paid' },
+        { componentName: 'Discount Amount Component (Face Value - Purchase Price)', calculation: `${formatValue(face)} - ${formatValue(purchase)} = ${formatValue(discount)}`, formula: 'Face Value - Purchase Price' },
+        { componentName: 'BEY Calculation ((Discount / Purchase) × (365 / Days) × 100)', calculation: `(${formatValue(discount)} / ${formatValue(purchase)}) × (365 / ${formatValue(days)}) × 100 = ${formatValue(bey)}%`, formula: '(Discount / Purchase) × (365 / Days) × 100' }
+      ]
+    }
+  }
+  
+  else if (metricKey === 'currentYield') {
+    const price = getValue('currentPrice') || getValue('current_price') || getValue('price')
+    const couponRate = getValue('couponRate') || getValue('coupon_rate')
+    const face = getValue('faceValue') || getValue('face_value') || 100000
+    const annualCoupon = face * (couponRate / 100)
+    const currentYield = (annualCoupon / price) * 100
+    
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
+    details.push({ label: 'Coupon Rate', value: formatValue(couponRate) + '%', formula: 'Annual coupon rate' })
+    details.push({ label: 'Current Price', value: formatValue(price), formula: 'Market price' })
+    details.push({ label: 'Answer (Current Yield)', value: formatValue(currentYield) + '%', formula: 'Final current yield' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Face Value Component', calculation: formatValue(face), formula: 'Par value' },
+        { componentName: 'Coupon Rate Component', calculation: formatValue(couponRate) + '% (as decimal: ' + formatValue(couponRate/100) + ')', formula: 'Annual coupon rate' },
+        { componentName: 'Annual Coupon Component (Face Value × Coupon Rate)', calculation: `${formatValue(face)} × ${formatValue(couponRate/100)} = ${formatValue(annualCoupon)}`, formula: 'Face Value × Coupon Rate' },
+        { componentName: 'Current Yield Calculation ((Annual Coupon / Price) × 100)', calculation: `(${formatValue(annualCoupon)} / ${formatValue(price)}) × 100 = ${formatValue(currentYield)}%`, formula: '(Annual Coupon / Price) × 100' }
+      ]
+    }
+  }
+  
+  else if (metricKey === 'accruedInterest') {
+    const couponRate = getValue('couponRate') || getValue('coupon_rate')
+    const frequency = getValue('frequency') || getValue('coupon_frequency') || 2
+    const face = getValue('faceValue') || getValue('face_value') || 100000
+    const dayCount = getValue('dayCount') || getValue('day_count_convention') || 'ACT/365'
+    const daysAccrued = getValue('daysAccrued') || getValue('days_accrued') || 45
+    const divisor = dayCount.includes('360') ? 360 : 365
+    const couponPerPeriod = face * (couponRate / 100) / frequency
+    const daysInPeriod = divisor / frequency
+    const accrued = couponPerPeriod * (daysAccrued / daysInPeriod)
+    
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
+    details.push({ label: 'Coupon Rate', value: formatValue(couponRate) + '%', formula: 'Annual coupon rate' })
+    details.push({ label: 'Coupon Frequency', value: frequency, formula: 'Payments per year' })
+    details.push({ label: 'Answer (Accrued Interest)', value: formatValue(accrued), formula: 'Final accrued interest' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Face Value Component', calculation: formatValue(face), formula: 'Par value' },
+        { componentName: 'Coupon Rate Component', calculation: formatValue(couponRate) + '% (as decimal: ' + formatValue(couponRate/100) + ')', formula: 'Annual coupon rate' },
+        { componentName: 'Coupon per Period Component (Annual Coupon / Frequency)', calculation: `${formatValue(face * (couponRate/100))} / ${frequency} = ${formatValue(couponPerPeriod)}`, formula: 'Annual Coupon / Frequency' },
+        { componentName: 'Days Accrued Component', calculation: formatValue(daysAccrued), formula: 'Days since last coupon' },
+        { componentName: 'Days in Period Component (Divisor / Frequency)', calculation: `${divisor} / ${frequency} = ${formatValue(daysInPeriod)}`, formula: `${divisor} / ${frequency}` },
+        { componentName: 'Accrued Interest Calculation (Coupon per Period × (Days Accrued / Days in Period))', calculation: `${formatValue(couponPerPeriod)} × (${formatValue(daysAccrued)} / ${formatValue(daysInPeriod)}) = ${formatValue(accrued)}`, formula: 'Coupon per Period × (Days Accrued / Days in Period)' }
+      ]
+    }
+  }
+  
+  else if (metricKey === 'Total Portfolio Value' || metricKey === 'totalValue') {
+    const rows = instrumentSummary.value.rows || []
+    const valueField = 'Total Value' in rows[0] ? 'Total Value' : 'total_value' in rows[0] ? 'total_value' : 'Calculated Value'
+    const principalField = 'Principal' in rows[0] ? 'Principal' : 'principal' in rows[0] ? 'principal' : 'Face Value'
+    
+    let totalValue = 0
+    let totalPrincipal = 0
+    const valueBreakdown = []
+    const principalBreakdown = []
+    
+    rows.forEach((row, idx) => {
+      const val = parseFloat(row[valueField] || row[valueField.toLowerCase()] || 0)
+      const princ = parseFloat(row[principalField] || row[principalField.toLowerCase()] || 0)
+      if (!isNaN(val)) {
+        totalValue += val
+        valueBreakdown.push(val)
+      }
+      if (!isNaN(princ)) {
+        totalPrincipal += princ
+        principalBreakdown.push(princ)
+      }
+    })
+    
+    details.push({ label: 'Total Value', value: formatValue(totalValue), formula: 'Sum of all instrument values' })
+    if (principalBreakdown.length > 0) {
+      details.push({ label: 'Total Principal', value: formatValue(totalPrincipal), formula: 'Sum of principal amounts' })
+    }
+    details.push({ label: 'Answer (Total Portfolio Value)', value: formatValue(totalValue), formula: 'Final portfolio value' })
+    
+    if (valueBreakdown.length > 0) {
+      details.breakdown = {
+        title: 'Formula Component Breakdown',
+        components: [
+          { componentName: 'Value Component', calculation: valueBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalValue), formula: 'Individual instrument values' }
+        ]
+      }
+      if (principalBreakdown.length > 0) {
+        details.breakdown.components.push({
+          componentName: 'Principal Component',
+          calculation: principalBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalPrincipal),
+          formula: 'Individual principal amounts'
+        })
+      }
+    }
+  }
+  
+  else if (metricKey === 'Average Rate' || metricKey === 'avgRate' || metricKey === 'weightedAvgRate') {
+    const rows = instrumentSummary.value.rows || []
+    const rateField = 'Avg Rate' in rows[0] ? 'Avg Rate' : 'avg_rate' in rows[0] ? 'avg_rate' : 'Interest Rate'
+    const principalField = 'Principal' in rows[0] ? 'Principal' : 'principal' in rows[0] ? 'principal' : 'Face Value'
+    
+    let totalWeightedRate = 0
+    let totalPrincipal = 0
+    const rateBreakdown = []
+    const principalBreakdown = []
+    const weightedBreakdown = []
+    
+    rows.forEach((row, idx) => {
+      const rate = parseFloat(row[rateField] || row[rateField.toLowerCase()] || 0)
+      const princ = parseFloat(row[principalField] || row[principalField.toLowerCase()] || 0)
+      if (!isNaN(rate) && !isNaN(princ)) {
+        const weighted = rate * princ
+        totalWeightedRate += weighted
+        totalPrincipal += princ
+        rateBreakdown.push(rate)
+        principalBreakdown.push(princ)
+        weightedBreakdown.push(weighted)
+      }
+    })
+    
+    const avgRate = totalPrincipal > 0 ? totalWeightedRate / totalPrincipal : 0
+    
+    details.push({ label: 'Total Weighted Rate', value: formatValue(totalWeightedRate), formula: 'Σ (Rate × Principal)' })
+    details.push({ label: 'Total Principal', value: formatValue(totalPrincipal), formula: 'Σ Principal' })
+    details.push({ label: 'Calculation', value: `${formatValue(totalWeightedRate)} / ${formatValue(totalPrincipal)} = ${formatValue(avgRate)}%`, formula: 'Σ (Rate × Principal) / Σ Principal' })
+    details.push({ label: 'Answer (Average Rate)', value: formatValue(avgRate) + '%', formula: 'Final weighted average rate' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Rate Component', calculation: rateBreakdown.map(v => formatValue(v) + '%').join(' + '), formula: 'Individual interest rates' },
+        { componentName: 'Principal Component', calculation: principalBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalPrincipal), formula: 'Individual principal amounts' },
+        { componentName: 'Weighted Rate Component (Rate × Principal)', calculation: weightedBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalWeightedRate), formula: 'Rate × Principal for each instrument' }
+      ]
+    }
+  }
+  
+  else if (metricKey === 'Number of Instruments' || metricKey === 'instrumentCount') {
+    const count = getValue('instrumentCount') || getValue('instrument_count') || (instrumentSummary.value.rows?.length || 0)
+    const successful = getValue('successful_rows')
+    const rows = instrumentSummary.value.rows || []
+    
+    details.push({ label: 'Total Count', value: formatValue(count), formula: 'Number of rows' })
+    if (successful) {
+      details.push({ label: 'Successful Calculations', value: formatValue(successful), formula: 'Rows with successful calculations' })
+    }
+    details.push({ label: 'Answer (Number of Instruments)', value: formatValue(count), formula: 'Final instrument count' })
+    
+    const instrumentNames = rows.map((row, idx) => {
+      const name = row['Instrument Name'] || row['instrument_name'] || row['Issuer'] || row['Name'] || row['instrument'] || `Instrument ${idx + 1}`
+      return name
+    })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Individual Instruments', calculation: instrumentNames.join(', '), formula: 'List of all instruments in the portfolio' }
+      ]
+    }
+  }
+  
+  else if (metricKey === 'weightedAvgCoupon' || metricKey === 'totalAnnualIncome') {
+    const rows = instrumentSummary.value.rows || []
+    const couponField = 'Coupon Rate' in rows[0] ? 'Coupon Rate' : 'coupon_rate' in rows[0] ? 'coupon_rate' : 'Interest Rate'
+    const faceField = 'Face Value' in rows[0] ? 'Face Value' : 'face_value' in rows[0] ? 'face_value' : 'Principal'
+    
+    let totalCouponIncome = 0
+    let totalFaceValue = 0
+    const couponBreakdown = []
+    const faceBreakdown = []
+    const incomeBreakdown = []
+    
+    rows.forEach((row, idx) => {
+      const coupon = parseFloat(row[couponField] || row[couponField.toLowerCase()] || 0)
+      const face = parseFloat(row[faceField] || row[faceField.toLowerCase()] || 0)
+      if (!isNaN(coupon) && !isNaN(face)) {
+        const income = face * (coupon / 100)
+        totalCouponIncome += income
+        totalFaceValue += face
+        couponBreakdown.push(coupon)
+        faceBreakdown.push(face)
+        incomeBreakdown.push(income)
+      }
+    })
+    
+    const avgCoupon = totalFaceValue > 0 ? (totalCouponIncome / totalFaceValue) * 100 : 0
+    
+    details.push({ label: 'Total Annual Income', value: formatValue(totalCouponIncome), formula: 'Σ (Face Value × Coupon Rate)' })
+    details.push({ label: 'Total Face Value', value: formatValue(totalFaceValue), formula: 'Σ Face Value' })
+    details.push({ label: 'Answer (Total Annual Income)', value: formatValue(totalCouponIncome), formula: 'Final annual coupon income' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Coupon Rate Component', calculation: couponBreakdown.map(v => formatValue(v) + '%').join(' + '), formula: 'Individual coupon rates' },
+        { componentName: 'Face Value Component', calculation: faceBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalFaceValue), formula: 'Individual face values' },
+        { componentName: 'Annual Income Component (Face Value × Coupon Rate)', calculation: incomeBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalCouponIncome), formula: 'Face Value × Coupon Rate for each instrument' }
+      ]
+    }
+  }
+  
+  else if (metricKey === 'avgYTM') {
+    const rows = instrumentSummary.value.rows || []
+    const ytmField = 'YTM' in rows[0] ? 'YTM' : 'ytm' in rows[0] ? 'ytm' : 'Yield to Maturity'
+    
+    let totalYTM = 0
+    let count = 0
+    const ytmBreakdown = []
+    
+    rows.forEach((row, idx) => {
+      const ytm = parseFloat(row[ytmField] || row[ytmField.toLowerCase()] || 0)
+      if (!isNaN(ytm)) {
+        totalYTM += ytm
+        count++
+        ytmBreakdown.push(ytm)
+      }
+    })
+    
+    const avgYTM = count > 0 ? totalYTM / count : 0
+    
+    details.push({ label: 'Sum of YTMs', value: formatValue(totalYTM) + '%', formula: 'Σ YTM' })
+    details.push({ label: 'Number of Instruments', value: formatValue(count), formula: 'Count' })
+    details.push({ label: 'Calculation', value: `${formatValue(totalYTM)}% / ${count} = ${formatValue(avgYTM)}%`, formula: 'Σ YTM / Count' })
+    details.push({ label: 'Answer (Average YTM)', value: formatValue(avgYTM) + '%', formula: 'Final average YTM' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'YTM Component', calculation: ytmBreakdown.map(v => formatValue(v) + '%').join(' + ') + ' = ' + formatValue(totalYTM) + '%', formula: 'Individual YTM values' }
+      ]
+    }
+  }
+  
+  else if (metricKey === 'duration') {
+    const rows = instrumentSummary.value.rows || []
+    const durationField = 'Duration' in rows[0] ? 'Duration' : 'duration' in rows[0] ? 'duration' : 'Macaulay Duration'
+    
+    let totalDuration = 0
+    let count = 0
+    const durationBreakdown = []
+    
+    rows.forEach((row, idx) => {
+      const dur = parseFloat(row[durationField] || row[durationField.toLowerCase()] || 0)
+      if (!isNaN(dur)) {
+        totalDuration += dur
+        count++
+        durationBreakdown.push(dur)
+      }
+    })
+    
+    const avgDuration = count > 0 ? totalDuration / count : 0
+    
+    details.push({ label: 'Sum of Durations', value: formatValue(totalDuration) + ' years', formula: 'Σ Duration' })
+    details.push({ label: 'Number of Instruments', value: formatValue(count), formula: 'Count' })
+    details.push({ label: 'Calculation', value: `${formatValue(totalDuration)} / ${count} = ${formatValue(avgDuration)} years`, formula: 'Σ Duration / Count' })
+    details.push({ label: 'Answer (Duration)', value: formatValue(avgDuration) + ' years', formula: 'Final duration' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Duration Component', calculation: durationBreakdown.map(v => formatValue(v) + ' years').join(' + ') + ' = ' + formatValue(totalDuration) + ' years', formula: 'Individual duration values' }
+      ]
+    }
+  }
+  
+  else if (metricKey === 'weightedAvgDiscount' || metricKey === 'totalDiscount') {
+    const rows = instrumentSummary.value.rows || []
+    const discountField = 'Discount Rate' in rows[0] ? 'Discount Rate' : 'discount_rate' in rows[0] ? 'discount_rate' : 'Discount'
+    const faceField = 'Face Value' in rows[0] ? 'Face Value' : 'face_value' in rows[0] ? 'face_value' : 'Principal'
+    
+    let totalDiscount = 0
+    let totalFaceValue = 0
+    const discountBreakdown = []
+    const faceBreakdown = []
+    const discountAmountBreakdown = []
+    
+    rows.forEach((row, idx) => {
+      const discount = parseFloat(row[discountField] || row[discountField.toLowerCase()] || 0)
+      const face = parseFloat(row[faceField] || row[faceField.toLowerCase()] || 0)
+      if (!isNaN(discount) && !isNaN(face)) {
+        const discountAmount = face * (discount / 100)
+        totalDiscount += discountAmount
+        totalFaceValue += face
+        discountBreakdown.push(discount)
+        faceBreakdown.push(face)
+        discountAmountBreakdown.push(discountAmount)
+      }
+    })
+    
+    const avgDiscount = totalFaceValue > 0 ? (totalDiscount / totalFaceValue) * 100 : 0
+    
+    details.push({ label: 'Total Discount Amount', value: formatValue(totalDiscount), formula: 'Σ (Face Value × Discount Rate)' })
+    details.push({ label: 'Total Face Value', value: formatValue(totalFaceValue), formula: 'Σ Face Value' })
+    details.push({ label: 'Answer (Total Discount)', value: formatValue(totalDiscount), formula: 'Final total discount' })
+    
+    details.breakdown = {
+      title: 'Formula Component Breakdown',
+      components: [
+        { componentName: 'Discount Rate Component', calculation: discountBreakdown.map(v => formatValue(v) + '%').join(' + '), formula: 'Individual discount rates' },
+        { componentName: 'Face Value Component', calculation: faceBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalFaceValue), formula: 'Individual face values' },
+        { componentName: 'Discount Amount Component (Face Value × Discount Rate)', calculation: discountAmountBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalDiscount), formula: 'Face Value × Discount Rate for each instrument' }
+      ]
+    }
+  }
+  
+  else {
+    const value = getValue(metricKey)
+    details.push({ label: metricKey, value: formatValue(value), formula: formulaMap[metricKey] || 'See formula above' })
+    details.push({ label: 'Answer', value: formatValue(value), formula: 'Final calculated value' })
   }
   
   formulaCalculationDetails.value = details.length > 0 ? details : null
-  showCalculationDetails.value = false
+  showCalculationDetails.value = true
+  showIndividualBreakdown.value = false
   formulaDialog.value = true
 }
 
-function selectAllInstruments() { selectedInstruments.value = { moneyMarket: true, bonds: true, tbills: true } }
-function deselectAllInstruments() { selectedInstruments.value = { moneyMarket: false, bonds: false, tbills: false } }
+function selectAllInstruments() { selectedInstruments.value = { 'money-market': true, bonds: true, tbills: true } }
+function deselectAllInstruments() { selectedInstruments.value = { 'money-market': false, bonds: false, tbills: false } }
 
 function getInstrumentData(instrumentId) {
   if (!activeSession.value) return null
@@ -7090,69 +7915,21 @@ const reportPreviewData = computed(() => {
     { key: 'bonds', label: 'Bonds' },
     { key: 'tbills', label: 'T-Bills' }
   ]
-  
-  let allSummaryRows = [...(instrumentSummary.value.rows || [])]
-  
-  if (activeSession.value?.id) {
-    sessionManager.getAllWorksheets(activeSession.value.id).then(worksheets => {
-      for (const [worksheetName, worksheetData] of Object.entries(worksheets)) {
-        if (worksheetData.instrumentSummary && worksheetData.instrumentSummary.rows) {
-          const worksheetRows = worksheetData.instrumentSummary.rows.map(row => ({
-            ...row,
-            Worksheet: worksheetName
-          }))
-          allSummaryRows = [...allSummaryRows, ...worksheetRows]
-        }
-      }
-    }).catch(err => {
-      console.error('Failed to aggregate worksheets for report:', err)
-    })
-  }
-  
+
   for (const type of instrumentTypes) {
     const key = type.key
     const selected = selectedInstruments.value[key]
-    if (selected) {
-      const data = getInstrumentData(key)
-      if (data && data.totalValue > 0) {
-        instrumentsData.push({ name: type.label, calculations: data, id: key })
-      }
+    if (!selected) continue
+
+    const data = getInstrumentData(key)
+    if (data && (data.totalValue > 0 || data.instrumentCount > 0)) {
+      instrumentsData.push({ name: type.label, calculations: data, id: key })
     }
   }
-  
-  if (instrumentsData.length === 0 && allSummaryRows.length > 0) {
-    const summaryRows = allSummaryRows
-    const grouped = {}
-    summaryRows.forEach(row => {
-      const type = row['Instrument Type'] || 'unknown'
-      if (!grouped[type]) grouped[type] = []
-      grouped[type].push(row)
-    })
-    for (const [type, rows] of Object.entries(grouped)) {
-      let totalValue = 0, instrumentCount = rows.length, totalAvgRate = 0
-      rows.forEach(row => {
-        const value = parseFloat(row['Total Value'] || row['total_value'] || row['Calculated Value'] || row['calculated_value'] || 0)
-        const rate = parseFloat(row['Avg Rate'] || row['avg_rate'] || row['Coupon Rate'] || row['coupon_rate'] || row['Discount Rate'] || row['discount_rate'] || 0)
-        if (!isNaN(value)) totalValue += value
-        if (!isNaN(rate)) totalAvgRate += rate
-      })
-      const avgRate = instrumentCount > 0 ? totalAvgRate / instrumentCount : null
-      const nameMap = { 'money-market': 'Money Market', 'bonds': 'Bonds', 'tbills': 'T-Bills' }
-      instrumentsData.push({
-        name: nameMap[type] || type,
-        calculations: {
-          totalValue,
-          instrumentCount,
-          avgRate,
-          avgCouponRate: type === 'bonds' ? avgRate : null,
-          avgDiscountRate: type === 'tbills' ? avgRate : null
-        }
-      })
-    }
-  }
-  return { 
-    session: activeSession.value?.name || 'No session', 
-    date: new Date().toLocaleString(), 
+
+  return {
+    session: activeSession.value?.name || 'No session',
+    date: new Date().toLocaleString(),
     instruments: instrumentsData,
     chartImage: chartImageData.value,
     fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
@@ -7651,7 +8428,6 @@ async function downloadCombinedReport(format) {
   } else if (format === 'html') downloadBlob(html, `${filename}.html`, 'text/html')
   else if (format === 'pdf') { const win = window.open(); win.document.write(html); win.print() }
   else if (format === 'word') {
-    // Use backend API to generate Word with proper image rendering
     try {
       const session = sessionManager.getActiveSession()
       const sessionId = session?.id || sessionManager.getActiveSessionId() || localStorage.getItem('dura_active_session_id')
@@ -7716,6 +8492,9 @@ const autoSaveEnabled = ref(false)
 let isSavingVersion = false
 
 watch([rawData, cleanedData], () => {
+  console.log('=== rawData or cleanedData changed ===')
+  console.log('rawData length:', rawData.value.length)
+  console.log('cleanedData length:', cleanedData.value.length)
   if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion) {
     console.log('Skipping auto-save - disabled or save in progress')
     return
@@ -7723,7 +8502,20 @@ watch([rawData, cleanedData], () => {
   debouncedSave()
 }, { deep: true })
 
+watch(allCalculations, (newVal) => {
+  console.log('=== allCalculations changed ===')
+  console.log('allCalculations.value:', newVal)
+  console.log('Keys:', Object.keys(newVal || {}))
+}, { deep: true })
+
 watch(() => activeTab.value, async (newTab) => {
+  console.log('=== Active Tab Changed ===')
+  console.log('New tab:', newTab)
+  console.log('autoDetectedFields.value:', autoDetectedFields.value)
+  console.log('cleanedData.value:', cleanedData.value)
+  console.log('extractedValues.value:', extractedValues.value)
+  console.log('allCalculations.value:', allCalculations.value)
+  
   if (newTab === 'calculations' && hasCleanedData.value) {
     await calculateMetrics()
   }
@@ -7830,7 +8622,6 @@ onMounted(async () => {
         console.log('Session set as active from cache:', current.id)
       }
     } else {
-      // If no active session, try to load the most recent session from sessionManager
       const allSessions = await sessionManager.getAllSessions()
       console.log('All sessions from sessionManager:', allSessions)
       if (allSessions.length > 0) {
@@ -7967,7 +8758,6 @@ onBeforeUnmount(() => {
 .mapping-row { display: flex; align-items: center; gap: 12px; }
 .required-label { width: 140px; font-weight: 600; color: #0B2044; font-size: 14px; }
 .dropdown-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; }
-
 .custom-currency-section { margin-top: 12px; padding: 12px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #9C27B0; }
 .custom-currency-label { font-size: 13px; font-weight: 600; color: #0B2044; margin-bottom: 8px; display: block; }
 .custom-currency-input-wrapper { position: relative; margin-top: 8px; }
@@ -7976,10 +8766,11 @@ onBeforeUnmount(() => {
 .custom-currency-field::placeholder { text-transform: none; letter-spacing: normal; font-weight: 400; }
 .currency-code-badge { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #999; font-weight: 500; background: #f5f5f5; padding: 2px 6px; border-radius: 4px; }
 .custom-currency-hint { font-size: 11px; color: #666; margin-top: 6px; }
-
 .detected-values-section { margin-top: 24px; padding: 20px; background: #f8f9ff; border-radius: 12px; border-left: 4px solid #4CAF50; }
 .detected-values-section h3 { font-size: 16px; font-weight: 600; color: #0B2044; margin: 0 0 8px 0; }
 .detected-values-section .section-hint { font-size: 13px; color: #666; margin: 0 0 16px 0; }
+.no-detection-message-cleaning { padding: 20px; background: #fff3cd; border-radius: 8px; border: 1px solid #ffc107; text-align: center; }
+.no-detection-message-cleaning p { margin: 0; color: #856404; font-size: 14px; }
 .detected-values-table { background: white; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; }
 .detected-values-table .table-header { display: flex; background: #0B2044; color: white; font-weight: 600; font-size: 13px; }
 .detected-values-table .table-header span { padding: 12px 16px; }
@@ -8054,24 +8845,26 @@ onBeforeUnmount(() => {
 .detected-currencies-info { margin-top: 12px; padding: 8px 12px; background: #e8f5e9; border-radius: 6px; font-size: 13px; color: #2E7D32; }
 .selected-currency-info { margin-top: 8px; padding: 8px 12px; background: #e3f2fd; border-radius: 6px; font-size: 13px; color: #1976D2; }
 .detected-fields-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
-.detected-field-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #4CAF50; }
-.detected-field-label { font-weight: 600; color: #0B2044; font-size: 14px; }
-.detected-field-value { font-weight: 700; color: #2E7D32; font-size: 15px; }
+.detected-field-item { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 12px 16px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #4CAF50; }
+.detected-field-label { font-weight: 600; color: #0B2044; font-size: 14px; margin-right: 8px; }
+.detected-field-value { font-weight: 700; color: #2E7D32; font-size: 15px; margin-right: 8px; }
 .detected-field-location { font-size: 11px; color: #999; font-style: italic; margin-left: 8px; }
+.currency-variant-selector { margin-top: 8px; margin-left: auto; }
+.currency-select { padding: 6px 12px; border: 1px solid #2196F3; border-radius: 6px; background: white; font-size: 13px; color: #0B2044; cursor: pointer; min-width: 150px; }
+.currency-select:hover { border-color: #1976D2; background: #f0f8ff; }
 .no-detection-message { padding: 16px; background: #FFF3E0; border-radius: 8px; border-left: 4px solid #FF9800; text-align: center; }
 .no-detection-message p { margin: 4px 0; color: #E65100; }
 .missing-fields-warning { padding: 12px 16px; background: #FFF3E0; border-radius: 8px; border-left: 4px solid #FF9800; }
 .additional-fields-section { margin-top: 20px; padding: 16px; background: #f0f8ff; border-radius: 8px; border-left: 4px solid #2196F3; }
 .additional-fields-section h4 { margin: 0 0 8px 0; font-size: 14px; color: #1976D2; }
 .additional-fields-section .section-hint { margin: 0 0 12px 0; font-size: 12px; color: #666; }
-.additional-field-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-radius: 6px; border-left: 3px solid #2196F3; margin-bottom: 6px; }
-.additional-field-label { font-weight: 600; color: #0B2044; font-size: 13px; }
-.additional-field-value { font-weight: 600; color: #1976D2; font-size: 13px; }
+.additional-field-item { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-radius: 6px; border-left: 3px solid #2196F3; margin-bottom: 6px; }
+.additional-field-label { font-weight: 600; color: #0B2044; font-size: 13px; margin-right: 8px; }
+.additional-field-value { font-weight: 600; color: #1976D2; font-size: 13px; margin-right: 8px; }
 .additional-field-location { font-size: 10px; color: #999; font-style: italic; margin-left: 8px; }
 .missing-fields-warning p { margin: 0 0 8px 0; font-weight: 600; color: #E65100; font-size: 14px; }
 .missing-fields-warning ul { margin: 0; padding-left: 20px; }
 .missing-fields-warning li { color: #E65100; font-size: 13px; margin-bottom: 4px; }
-
 .multi-table-summary { padding: 12px 16px; background: #e8f5e9; border-radius: 8px; border-left: 4px solid #4CAF50; margin-bottom: 16px; font-size: 14px; color: #2E7D32; }
 .multi-instruments-list { display: flex; flex-direction: column; gap: 16px; max-height: 400px; overflow-y: auto; }
 .multi-instrument-item { padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
@@ -8085,7 +8878,6 @@ onBeforeUnmount(() => {
 .multi-detected-field-location { font-size: 10px; color: #999; font-style: italic; margin-left: 8px; }
 .multi-missing-fields { padding: 8px 12px; background: #FFF3E0; border-radius: 6px; border-left: 3px solid #FF9800; font-size: 12px; }
 .multi-missing-fields .missing-label { font-weight: 600; color: #E65100; margin-right: 6px; }
-
 .saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }
 .saved-mappings-popup-body { padding: 20px 24px; }
 .saved-mappings-list { display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto; }
@@ -8106,70 +8898,31 @@ onBeforeUnmount(() => {
 .btn-close-dialog:hover { background: #f0f0f0; color: #0B2044; }
 .excel-dialog-content { padding: 0; height: calc(100vh - 140px); }
 .required-columns { margin: 20px 0; }
-
-.value-input {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  font-size: 13px;
-  font-family: inherit;
-  background: white;
-  transition: border-color 0.2s;
-}
-
-.value-input:focus {
-  outline: none;
-  border-color: #0B2044;
-  box-shadow: 0 0 0 2px rgba(11, 32, 68, 0.1);
-}
-
-.value-input.placeholder {
-  color: #999;
-  font-style: italic;
-}
-
-.btn-clear-value {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: #f44336;
-  color: white;
-  border: none;
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  font-size: 14px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  opacity: 0.7;
-  transition: opacity 0.2s;
-}
-
-.btn-clear-value:hover {
-  opacity: 1;
-}
-
-.row-value {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: 1;
-}
+.value-input { width: 100%; padding: 6px 10px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 13px; font-family: inherit; background: white; transition: border-color 0.2s; }
+.value-input:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11, 32, 68, 0.1); }
+.add-field-section { margin-top: 20px; padding: 16px; background: #f0f8ff; border-radius: 8px; border-left: 4px solid #2196F3; }
+.add-field-section h4 { margin: 0 0 8px 0; font-size: 14px; color: #1976D2; }
+.add-field-section .section-hint { margin: 0 0 12px 0; font-size: 12px; color: #666; }
+.add-field-form { display: flex; gap: 8px; align-items: center; }
+.add-field-input { flex: 1; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 13px; font-family: inherit; }
+.add-field-input:focus { outline: none; border-color: #2196F3; box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1); }
+.btn-add-field { padding: 8px 16px; background: #2196F3; color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+.btn-add-field:hover { background: #1976D2; }
+.calculating-animation { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 20px; color: #666; font-size: 14px; }
+.spin-animation { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.value-input.placeholder { color: #999; font-style: italic; }
+.btn-clear-value { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: #f44336; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; opacity: 0.7; transition: opacity 0.2s; }
+.btn-clear-value:hover { opacity: 1; }
+.row-value { position: relative; display: flex; align-items: center; flex: 1; }
 .required-columns h4 { color: #0B2044; font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .required-columns h4::before { content: '📋'; font-size: 18px; }
-
 .columns-list { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .column-badge { background: linear-gradient(135deg, #e8ecf1, #f5f7fa); padding: 8px 16px; border-radius: 24px; font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #e0e0e0; transition: all 0.2s; }
 .column-badge:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
 .column-badge .badge-icon { font-weight: 700; font-size: 14px; }
 .column-badge.missing-column { background: linear-gradient(135deg, #FFEBEE, #FFCDD2); color: #c62828; border-color: #ef9a9a; }
 .column-badge.mapped-column { background: linear-gradient(135deg, #E8F5E9, #C8E6C9); color: #2E7D32; border-color: #a5d6a7; }
-
 .extracted-values-table { background: white; border-radius: 12px; border: 1px solid #e0e0e0; overflow: hidden; margin-top: 16px; }
 .table-header { display: grid; grid-template-columns: 1fr 1fr 120px; gap: 0; background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; padding: 12px 16px; font-weight: 600; font-size: 13px; }
 .header-field, .header-value, .header-status { padding: 4px 8px; }
@@ -8178,7 +8931,6 @@ onBeforeUnmount(() => {
 .table-row:last-child { border-bottom: none; }
 .table-row.row-missing { background: #FFF3E0; }
 .table-row.row-missing:hover { background: #FFE0B2; }
-
 .row-field { font-weight: 600; color: #0B2044; font-size: 13px; padding: 4px 8px; }
 .row-value { padding: 4px 8px; }
 .value-text { color: #333; font-size: 14px; font-weight: 500; }
@@ -8186,10 +8938,8 @@ onBeforeUnmount(() => {
 .row-status { font-size: 12px; font-weight: 600; padding: 4px 8px; text-align: center; }
 .row-status:not(.status-missing) { color: #2E7D32; background: #E8F5E9; padding: 4px 8px; border-radius: 12px; }
 .row-status.status-missing { color: #c62828; background: #FFEBEE; padding: 4px 8px; border-radius: 12px; }
-
 .values-summary { margin-top: 16px; padding: 12px 16px; background: linear-gradient(135deg, #f8f9ff, #eef2ff); border-radius: 12px; border-left: 4px solid #0B2044; }
 .summary-text { font-size: 13px; font-weight: 500; color: #0B2044; }
-
 .success-message { margin-top: 10px; padding: 10px 16px; background: linear-gradient(135deg, #E8F5E9, #C8E6C9); border-radius: 10px; display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 500; color: #2E7D32; border: 1px solid #a5d6a7; }
 .success-icon { font-size: 16px; }
 .warning-message { margin-top: 10px; padding: 10px 16px; background: linear-gradient(135deg, #FFF3E0, #FFE0B2); border-radius: 10px; display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 500; color: #E65100; border: 1px solid #FFB74D; }
@@ -8336,7 +9086,28 @@ onBeforeUnmount(() => {
 .btn-delete-history { background: none; border: none; cursor: pointer; color: #f44336; font-size: 16px; }
 .excel-viewer-button { margin-bottom: 20px; text-align: right; }
 .formula-dialog-title { background: #0B2044; color: white; }
-.formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; }
+.formula-content { padding: 20px; }
+.formula-section { margin-bottom: 20px; }
+.formula-section h4 { color: #0B2044; margin-bottom: 8px; font-size: 14px; }
+.formula-text { font-size: 16px; padding: 16px; background: #f8f9ff; border-radius: 8px; margin-top: 8px; font-family: 'Courier New', monospace; }
+.calculation-details { margin-top: 20px; }
+.calculation-details h4 { color: #0B2044; margin-bottom: 12px; font-size: 14px; }
+.calculation-steps { display: flex; flex-direction: column; gap: 12px; }
+.calculation-step { background: #f8f9ff; padding: 12px; border-radius: 8px; border-left: 4px solid #0B2044; }
+.step-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.step-label { font-weight: 600; color: #0B2044; font-size: 13px; }
+.step-value { font-weight: 700; color: #1E88E5; font-size: 14px; font-family: 'Courier New', monospace; }
+.step-formula { font-size: 12px; color: #666; font-style: italic; margin-top: 4px; }
+.breakdown-section { margin-top: 16px; }
+.breakdown-section button { width: 100%; margin-top: 8px; }
+.breakdown-components { margin-top: 12px; }
+.breakdown-components h5 { color: #0B2044; margin-bottom: 12px; font-size: 13px; }
+.component-breakdown { background: #e8ecf1; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #1E88E5; }
+.component-header { margin-bottom: 8px; }
+.component-name { font-weight: 700; color: #0B2044; font-size: 14px; }
+.component-calculation { margin-bottom: 4px; }
+.component-data { font-weight: 700; color: #1E88E5; font-size: 13px; font-family: 'Courier New', monospace; }
+.component-formula { font-size: 11px; color: #666; font-style: italic; margin-top: 4px; }
 .preview-info { font-size: 12px; color: #666; margin-bottom: 8px; }
 .excel-preview-section { margin-top: 20px; padding: 16px; background: #fafafa; border-radius: 12px; }
 .preview-section { margin-top: 20px; padding: 16px; background: #fafafa; border-radius: 12px; }
@@ -8356,7 +9127,6 @@ onBeforeUnmount(() => {
 .summary-worksheet-selector { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
 .summary-worksheet-selector label { font-weight: 600; color: #0B2044; }
 .summary-worksheet-selector select { padding: 8px 12px; border-radius: 6px; border: 1px solid #ccc; background: white; font-size: 14px; min-width: 200px; }
-
 .field-detection-card { margin-top: 20px; padding: 16px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; }
 .field-detection-header { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #0B2044; margin-bottom: 12px; }
 .btn-toggle-detection { margin-left: auto; background: #0B2044; color: white; border: none; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
@@ -8379,7 +9149,6 @@ onBeforeUnmount(() => {
 .field-type.missing { background: #ffebee; color: #f44336; }
 .field-source { color: #666; font-size: 11px; }
 .field-confidence { font-weight: 600; color: #0B2044; text-align: right; }
-
 .summary-tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 2px solid #e8ecf1; padding-bottom: 16px; }
 .summary-tab { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border: none; background: #f5f5f5; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #666; }
 .summary-tab:hover:not(:disabled) { background: #e8ecf1; color: #0B2044; }
@@ -8387,13 +9156,11 @@ onBeforeUnmount(() => {
 .summary-tab:disabled { opacity: 0.4; cursor: not-allowed; }
 .tab-count { background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 12px; }
 .summary-tab.active .tab-count { background: rgba(255,255,255,0.3); }
-
 .summary-section { margin-bottom: 32px; padding: 20px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; }
 .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #e8ecf1; }
 .section-header h3 { display: flex; align-items: center; gap: 10px; margin: 0; color: #0B2044; font-size: 18px; font-weight: 600; }
 .worksheet-badge { background: #4CAF50; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-left: 12px; }
 .btn-sm { padding: 6px 12px; font-size: 13px; }
-
 .previous-summaries-list { display: flex; flex-direction: column; gap: 12px; }
 .summary-item-card { background: white; padding: 16px; border-radius: 8px; border: 1px solid #e8ecf1; transition: all 0.2s; }
 .summary-item-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #0B2044; }
@@ -8405,16 +9172,13 @@ onBeforeUnmount(() => {
 .detail-label { font-size: 13px; color: #666; font-weight: 500; }
 .detail-value { font-size: 14px; color: #0B2044; font-weight: 600; }
 .show-more-indicator { text-align: center; padding: 12px; color: #666; font-style: italic; font-size: 13px; }
-
 .analytics-pills { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; margin: 12px 0; }
 .analytics-pill { flex: 1; min-width: 160px; background: #f8faff; padding: 14px 20px; border-radius: 12px; border: 1px solid #edf0f6; text-align: center; transition: transform 0.2s, box-shadow 0.2s; }
 .analytics-pill:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06); }
 .analytics-pill .pill-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #7a879b; margin-bottom: 4px; }
 .analytics-pill .pill-value { display: block; font-size: 22px; font-weight: 700; color: #0b1e3c; }
-
 .analytics-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
 .quality-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
-
 @media (max-width: 768px) {
   .analytics-cards { grid-template-columns: repeat(2, 1fr); }
   .quality-cards { grid-template-columns: repeat(2, 1fr); }

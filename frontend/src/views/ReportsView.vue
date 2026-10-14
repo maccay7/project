@@ -98,7 +98,6 @@
     </div>
   </div>
 
-  <!-- Snackbar for notifications -->
   <v-snackbar
     v-model="snackbar.show"
     :color="snackbar.color"
@@ -135,7 +134,6 @@ const sessionName = ref('')
 const reportHtml = ref('')
 const showFullscreenReport = ref(false)
 
-// ---- Snackbar notification system ----
 const snackbar = ref({
   show: false,
   message: '',
@@ -144,22 +142,16 @@ const snackbar = ref({
 })
 
 function showSnackbar(message, color = 'error', timeout = 4000) {
-  snackbar.value = {
-    show: true,
-    message,
-    color,
-    timeout
-  }
+  snackbar.value = { show: true, message, color, timeout }
 }
 
-// ===== Helper Functions =====
+const ALL_INSTRUMENTS = ['money-market', 'bonds', 'tbills']
+const PORTFOLIO_SNAPSHOT_KEY = '__portfolio_summary__'
+
 async function fetchImageAsBase64(url) {
   try {
     const response = await fetch(url)
-    if (!response.ok) {
-      console.warn(`Failed to fetch image ${url}: ${response.status}`)
-      return null
-    }
+    if (!response.ok) return null
     const blob = await response.blob()
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
@@ -168,24 +160,36 @@ async function fetchImageAsBase64(url) {
       reader.readAsDataURL(blob)
     })
   } catch (e) {
-    console.warn(`Error fetching image ${url}:`, e)
     return null
   }
 }
 
 async function resolveSession() {
+  const querySid = route.query.session ? String(route.query.session) : null
+  if (querySid) {
+    const fresh = await sessionManager.getSession(querySid, true)
+    if (fresh) {
+      sessionManager.setActiveSession(fresh)
+      return fresh
+    }
+  }
   let session = sessionManager.getActiveSession()
   if (!session) {
     const sid = sessionManager.getActiveSessionId()
     if (sid) {
-      await sessionManager.getSession(sid)
-      session = sessionManager.getActiveSession()
+      session = await sessionManager.getSession(sid, true)
+      if (session) sessionManager.setActiveSession(session)
+    }
+  } else {
+    const refreshed = await sessionManager.getSession(session.id, true)
+    if (refreshed) {
+      session = refreshed
+      sessionManager.setActiveSession(refreshed)
     }
   }
   return session
 }
 
-// Helper: resolve valuation date from session context (no forced today)
 function resolveValuationDate(session) {
   if (session) {
     if (session.valuationDate) return session.valuationDate
@@ -204,7 +208,6 @@ function resolveValuationDate(session) {
   }
 }
 
-// Helper: resolve currency from session context (no assumed USD)
 function resolveCurrency(session) {
   if (session) {
     if (session.currency) return session.currency
@@ -221,7 +224,6 @@ function resolveCurrency(session) {
   }
 }
 
-// Helper: resolve country from session context (no assumed US)
 function resolveCountry(session) {
   if (session) {
     if (session.country) return session.country
@@ -237,68 +239,72 @@ function resolveCountry(session) {
   }
 }
 
+function getRequestedInstruments() {
+  const many = route.query.instruments
+  if (many) {
+    const list = String(many)
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+    if (list.length) return list
+  }
+  const one = route.query.instrument
+  if (one) return [String(one).trim()]
+  return [...ALL_INSTRUMENTS]
+}
+
 async function loadSummaryData(sessionId, instrumentType) {
+  try {
+    const snapshot = await sessionManager.getWorksheetData(sessionId, PORTFOLIO_SNAPSHOT_KEY)
+    if (snapshot && Array.isArray(snapshot.instrumentsWithDetails)) {
+      const match = snapshot.instrumentsWithDetails.find(i => i.id === instrumentType)
+      if (match && Array.isArray(match.details) && match.details.length) {
+        return { rows: match.details, columns: match.detailHeaders || [] }
+      }
+    }
+  } catch (e) {
+    console.warn('Portfolio snapshot read failed, falling back to workflow:', e)
+  }
+
   const wf = await sessionManager.getInstrumentWorkflow(sessionId, instrumentType)
   if (!wf) return null
 
-  // Prioritize completedInstrumentSummary (backend-calculated values)
-  if (wf.completedInstrumentSummary && wf.completedInstrumentSummary.rows && wf.completedInstrumentSummary.rows.length) {
-    return wf.completedInstrumentSummary
-  }
-  
-  // Fall back to instrumentSummary (backend-calculated values)
   if (wf.instrumentSummary && wf.instrumentSummary.rows && wf.instrumentSummary.rows.length) {
     return wf.instrumentSummary
   }
-  
-  // Fall back to completedPortfolioSummary (aggregated backend values)
-  if (wf.completedPortfolioSummary && wf.completedPortfolioSummary.rows && wf.completedPortfolioSummary.rows.length) {
-    return wf.completedPortfolioSummary
+
+  if (wf.completedInstrumentSummary && wf.completedInstrumentSummary.rows && wf.completedInstrumentSummary.rows.length) {
+    return wf.completedInstrumentSummary
   }
-  
-  // Fall back to portfolioSummary (aggregated backend values)
+
   if (wf.portfolioSummary && wf.portfolioSummary.rows && wf.portfolioSummary.rows.length) {
     return wf.portfolioSummary
   }
-  
-  // Last resort: try backend API
+
+  if (wf.completedPortfolioSummary && wf.completedPortfolioSummary.rows && wf.completedPortfolioSummary.rows.length) {
+    return wf.completedPortfolioSummary
+  }
+
   try {
     const response = await api.calculationsAPI.getInstrumentSummary(sessionId, instrumentType)
-    if (response?.success && response?.data) return response.data
+    if (response?.success && response?.data?.rows?.length) return response.data
   } catch (err) {
     console.error('Failed to load instrument summary from backend:', err)
   }
-  
+
   return null
 }
 
-// ===== LOAD FRED DATA FROM SESSION =====
 async function loadFredDataFromSession(sessionId, instrumentType) {
   try {
-    console.log('Loading FRED data from session:', { sessionId, instrumentType })
     const wf = await sessionManager.getInstrumentWorkflow(sessionId, instrumentType)
-    console.log('Workflow data:', wf)
-    if (wf) {
-      console.log('FRED filters from workflow:', wf.fredFilters)
-      console.log('Yield curve data from workflow:', wf.yieldCurveData)
-      console.log('Yield curve data length:', wf.yieldCurveData?.length || 0)
-      // Return immediately if data exists in workflow
-      if (wf.fredFilters && wf.yieldCurveData && wf.yieldCurveData.length > 0) {
-        console.log('Returning cached FRED data from workflow')
-        return {
-          fredFilters: wf.fredFilters,
-          yieldCurveData: wf.yieldCurveData
-        }
-      }
-    } else {
-      console.warn('No workflow data found for instrument type:', instrumentType)
+    if (wf && wf.fredFilters && wf.yieldCurveData && wf.yieldCurveData.length > 0) {
+      return { fredFilters: wf.fredFilters, yieldCurveData: wf.yieldCurveData }
     }
   } catch (e) {
     console.warn('Could not load Fred data from session:', e)
   }
-  
-  // If no data in session, fetch from FRED API using whatever filter context is available
-  console.log('No yield curve data in session, fetching from FRED API')
+
   try {
     const session = await resolveSession()
     const country = resolveCountry(session)
@@ -320,7 +326,6 @@ async function loadFredDataFromSession(sessionId, instrumentType) {
         maturity: data.maturities?.[idx] || idx,
         rate: rate
       }))
-      console.log('Fetched yield curve from FRED API:', points.length, 'points')
       return {
         fredFilters: { country: country, currency: currency, maturity: null },
         yieldCurveData: points
@@ -329,34 +334,31 @@ async function loadFredDataFromSession(sessionId, instrumentType) {
   } catch (e) {
     console.warn('Failed to fetch yield curve from FRED API:', e)
   }
-  
-  console.log('Returning empty FRED data')
+
   return { fredFilters: { country: null, currency: null, maturity: null }, yieldCurveData: [] }
 }
 
-// ===== Load Dataset Preview =====
 async function loadDatasetPreview() {
   showDatasetPreview.value = true
   try {
     const session = await resolveSession()
-    if (!session) {
-      return
-    }
-    const instrument = route.query.instrument
-    if (!instrument) return
-    const summary = await loadSummaryData(session.id, instrument)
+    if (!session) return
+    const requested = getRequestedInstruments()
+    const primary = requested[0] || null
+    if (!primary) return
+    const summary = await loadSummaryData(session.id, primary)
     let data = []
     if (summary && summary.rows && summary.rows.length) {
       data = summary.rows
     }
     if (data.length) {
       dataset.value = {
-        name: `${instrument} dataset (summary)`,
-        instrument_type: instrument,
+        name: `${primary} dataset (summary)`,
+        instrument_type: primary,
         data: data
       }
-      generatePreview()
     }
+    await generatePreview()
   } catch (err) {
     console.error('Load dataset preview error', err)
     showSnackbar('Error loading dataset: ' + err.message, 'error')
@@ -365,7 +367,7 @@ async function loadDatasetPreview() {
 
 function handleDatasetUpdate(updatedData) {
   if (dataset.value) {
-    dataset.value.data = updatedData
+    dataset.value = { ...dataset.value, data: updatedData }
   }
 }
 
@@ -374,44 +376,49 @@ function selectReportType(type) {
   generatePreview()
 }
 
-// ===== Generate Preview =====
 async function generatePreview() {
   const session = await resolveSession()
   if (!session) {
     reportError.value = 'No active session found.'
-    previewData.value = null
+    previewData.value = {
+      type: 'Empty',
+      session: 'N/A',
+      allWorkedData: {},
+      yieldCurveData: [],
+      fredFilters: { country: null, currency: null, maturity: null }
+    }
+    reportHtml.value = '<p>No active session found. Open a session from the Dashboard first.</p>'
     return
   }
   sessionName.value = session.name || 'Current Session'
-  const instrument = route.query.instrument
-  if (!instrument) {
-    reportError.value = 'No instrument selected in the URL.'
-    previewData.value = null
-    return
-  }
+
+  const requested = getRequestedInstruments()
+  const primary = requested[0] || null
+
   const allWorkedData = {}
-  const instruments = ['money-market', 'bonds', 'tbills']
-  for (const inst of instruments) {
+  const missingInstruments = []
+
+  for (const inst of requested) {
     const summary = await loadSummaryData(session.id, inst)
     if (summary && summary.rows && summary.rows.length) {
       allWorkedData[inst] = summary.rows
+    } else {
+      missingInstruments.push(inst)
     }
   }
-  let currentData = []
-  const currentSummary = await loadSummaryData(session.id, instrument)
-  if (currentSummary && currentSummary.rows && currentSummary.rows.length) {
-    currentData = currentSummary.rows
-  }
 
-  // 🔥 Load FRED data from session
-  const fredData = await loadFredDataFromSession(session.id, instrument)
+  const currentData = primary && allWorkedData[primary] ? allWorkedData[primary] : []
+
+  const fredData = await loadFredDataFromSession(session.id, primary)
   const valuationDate = resolveValuationDate(session)
 
   const preview = {
     type: selectedType.value === 'current' ? 'Current Instrument Report' : 'Full Session Report',
     date: new Date().toLocaleString(),
     session: session.name || 'Current Session',
-    instrument: instrument,
+    instrument: primary,
+    requestedInstruments: requested,
+    missingInstruments: missingInstruments,
     rows: currentData.length,
     columns: currentData.length ? Object.keys(currentData[0]).length : 0,
     sample: currentData.slice(0, 3),
@@ -421,9 +428,10 @@ async function generatePreview() {
     fredFilters: fredData.fredFilters,
     yieldCurveData: fredData.yieldCurveData
   }
+
   if (selectedType.value === 'session') {
     const allData = {}
-    for (const inst of instruments) {
+    for (const inst of requested) {
       const rows = allWorkedData[inst] || []
       if (rows.length) allData[inst] = rows
     }
@@ -431,90 +439,97 @@ async function generatePreview() {
     preview.totalRows = Object.values(allData).reduce((sum, arr) => sum + arr.length, 0)
     preview.totalValue = Object.values(allData).reduce((sum, arr) => sum + arr.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['Calculated Value'] || 0)), 0), 0)
   }
+
   previewData.value = preview
-  reportError.value = ''
 
-  // Generate HTML
-  if (previewData.value) {
-    const data = previewData.value
-    const instrumentName = data.instrument || 'unknown'
-    const sessionName = data.session || 'Current Session'
-    const date = data.date || new Date().toLocaleString()
-    const valuationDate = data.valuationDate
-    let fullData = []
-    if (selectedType.value === 'session' && data.instruments) {
-      for (const [inst, rows] of Object.entries(data.instruments)) {
-        if (rows && rows.length) fullData = fullData.concat(rows)
-      }
-    } else {
-      if (data.allWorkedData && data.allWorkedData[instrument]) {
-        fullData = data.allWorkedData[instrument]
-      } else if (data.sample) {
-        fullData = data.sample
-      }
+  if (missingInstruments.length > 0 && missingInstruments.length < requested.length) {
+    reportError.value = `No calculation results found for: ${missingInstruments.join(', ')}. Those instruments were excluded from the report.`
+  } else if (missingInstruments.length === requested.length) {
+    reportError.value = 'No calculation results available yet. Run calculations on the instruments you want to include first.'
+  } else {
+    reportError.value = ''
+  }
+
+  const data = previewData.value
+  const reportTitleName = selectedType.value === 'session'
+    ? (data.session || 'Full Session')
+    : (data.instrument || 'unknown')
+
+  const date = data.date || new Date().toLocaleString()
+  const valuationDateFinal = data.valuationDate
+
+  let fullData = []
+  if (selectedType.value === 'session' && data.instruments) {
+    for (const [, rows] of Object.entries(data.instruments)) {
+      if (rows && rows.length) fullData = fullData.concat(rows)
     }
-    if (fullData.length) {
-      let chartImage = data.chartImage || ''
-      if (!chartImage) {
-        try {
-          console.log('Attempting to capture chart from DOM...')
-          const canvas = document.querySelector('.chart-container--fred canvas')
-          if (canvas && canvas.toDataURL) {
-            chartImage = canvas.toDataURL('image/png', 1.0)
-            console.log('Chart captured from DOM:', chartImage ? 'success' : 'failed')
-          } else {
-            console.warn('No canvas found in DOM for chart capture')
-          }
-        } catch (e) {
-          console.warn('Could not capture chart:', e)
-        }
-      }
-      console.log('Using chart image for report:', chartImage ? 'yes' : 'no')
-
-      reportHtml.value = generateReportHtml(
-        fullData,
-        instrumentName,
-        sessionName,
-        date,
-        valuationDate,
-        chartImage,
-        data.fredFilters || null,
-        data.yieldCurveData || [],
-        data.allWorkedData || {},
-        {}  // No base64 options - using HTTP URLs instead
-      )
-    } else {
-      reportHtml.value = '<p>No data available for report. Please run calculations first.</p>'
+  } else {
+    if (data.allWorkedData && data.instrument && data.allWorkedData[data.instrument]) {
+      fullData = data.allWorkedData[data.instrument]
+    } else if (data.sample) {
+      fullData = data.sample
     }
   }
+
+  if (!fullData.length) {
+    const msg = missingInstruments.length > 0
+      ? `No calculation results were available for: ${missingInstruments.join(', ')}. Please run calculations on those instruments first.`
+      : 'No data available for report. Please run calculations first.'
+    reportHtml.value = `<div style="padding:32px;font-family:Arial,sans-serif;color:#333;">
+      <h2 style="color:#0B2044;">No Report Data</h2>
+      <p>${msg}</p>
+      <p style="color:#666;font-size:13px;">Session: <strong>${session.name || 'N/A'}</strong></p>
+      <p style="color:#666;font-size:13px;">Requested instruments: ${requested.join(', ')}</p>
+    </div>`
+    return
+  }
+
+  let chartImage = data.chartImage || ''
+  if (!chartImage) {
+    try {
+      const canvas = document.querySelector('.chart-container--fred canvas')
+      if (canvas && canvas.toDataURL) {
+        chartImage = canvas.toDataURL('image/png', 1.0)
+      }
+    } catch (e) {
+      console.warn('Could not capture chart:', e)
+    }
+  }
+
+  reportHtml.value = generateReportHtml(
+    fullData,
+    reportTitleName,
+    session.name || 'Current Session',
+    date,
+    valuationDateFinal,
+    chartImage,
+    data.fredFilters || null,
+    data.yieldCurveData || [],
+    data.allWorkedData || {},
+    {}
+  )
 }
 
-// ===== Other helper functions =====
 function formatForExcel(value, type = 'number', key = '') {
   if (value === null || value === undefined || value === '') return ''
   const num = parseFloat(value)
   if (isNaN(num)) return value
-  
-  // Round time fields to whole numbers
+
   const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
-  if (isTimeField) {
-    return Math.round(num)
-  }
-  
-  if (type === 'percentage') {
-    return Math.round(num * 10) / 10
-  } else if (type === 'money') {
-    return Math.round(num * 100) / 100
-  }
+  if (isTimeField) return Math.round(num)
+
+  if (type === 'percentage') return Math.round(num * 10) / 10
+  if (type === 'money') return Math.round(num * 100) / 100
   return num
 }
 
 function formatRowForExcel(row) {
   const formatted = {}
   for (const [key, value] of Object.entries(row)) {
-    if (key.toLowerCase().includes('rate') || key.toLowerCase().includes('yield') || key.toLowerCase().includes('coupon') || key.toLowerCase().includes('discount')) {
+    const lc = key.toLowerCase()
+    if (lc.includes('rate') || lc.includes('yield') || lc.includes('coupon') || lc.includes('discount')) {
       formatted[key] = formatForExcel(value, 'percentage', key)
-    } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('price') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('principal') || key.toLowerCase().includes('interest')) {
+    } else if (lc.includes('value') || lc.includes('price') || lc.includes('amount') || lc.includes('principal') || lc.includes('interest')) {
       formatted[key] = formatForExcel(value, 'money', key)
     } else {
       formatted[key] = formatForExcel(value, 'number', key)
@@ -524,19 +539,12 @@ function formatRowForExcel(row) {
 }
 
 async function downloadReport() {
-  console.log('=== DOWNLOAD REPORT CLICKED ===')
-  console.log('previewData.value:', previewData.value)
-  console.log('reportHtml.value:', reportHtml.value ? 'exists' : 'null')
-  
-  // The preview HTML is the single source of truth.
   if (!previewData.value || !reportHtml.value) {
-    console.log('ERROR: No report preview available')
     showSnackbar('No report preview available to export.', 'warning')
     return
   }
 
   const data = previewData.value
-  console.log('Starting download process...')
 
   try {
     const session = await resolveSession()
@@ -544,9 +552,12 @@ async function downloadReport() {
 
     const filenameSuffix = data.valuationDate ? `-${data.valuationDate}` : ''
 
-    // Send the EXACT rendered preview HTML — no re-rendering, no raw data,
-    // no separate chart/logo/background capture. The backend only converts.
     const endpoint = 'http://localhost:5000/api/report/generate-word'
+
+    const requested = Array.isArray(data.requestedInstruments) ? data.requestedInstruments : []
+    const instrumentTypeParam = requested.length > 1
+      ? requested.join(',')
+      : (requested[0] || null)
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -554,7 +565,7 @@ async function downloadReport() {
       body: JSON.stringify({
         session_id: session.id,
         report_html: reportHtml.value,
-        instrument_type: route.query.instrument || null,
+        instrument_type: instrumentTypeParam,
         file_name: `Dura-Capital-Valuation-Report${filenameSuffix}.docx`
       })
     })
@@ -563,8 +574,7 @@ async function downloadReport() {
 
     if (!result.success) {
       showSnackbar(
-        `Failed to generate Word report: ` +
-          (result.message || 'Unknown error'),
+        `Failed to generate Word report: ` + (result.message || 'Unknown error'),
         'error'
       )
       return
@@ -610,10 +620,8 @@ function formatCurrency(value) {
 async function markDone() {
   try {
     const session = await resolveSession()
-    if (!session) {
-      return
-    }
-    await markStepCompleted(session.id, 'reports')
+    if (!session) return
+    await markStepCompleted(String(session.id), 'reports')
     router.push('/dashboard')
   } catch (err) {
     console.error(err)
@@ -622,7 +630,7 @@ async function markDone() {
 }
 
 onMounted(async () => {
-  if (route.query.session && route.query.instrument) {
+  if (route.query.session) {
     await loadDatasetPreview()
   } else {
     await generatePreview()

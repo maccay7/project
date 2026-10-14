@@ -1,7 +1,6 @@
 <template>
   <FixedLayout>
     <div class="summary-page">
-      <!-- Page header -->
       <div class="page-header hero-header">
         <div>
           <h1>Portfolio Summary</h1>
@@ -18,7 +17,6 @@
         </div>
       </div>
 
-      <!-- KPI Strip -->
       <div class="kpi-strip">
         <div v-for="stat in extendedKpis" :key="stat.label" class="kpi-card">
           <div class="kpi-top-bar"></div>
@@ -32,7 +30,6 @@
         </div>
       </div>
 
-      <!-- Descriptive Analytics -->
       <div class="analytics-section" style="margin-bottom: 24px;">
         <h3 style="margin-bottom: 16px; color: #0B2044; font-size: 18px; font-weight: 600;">
           <i class="fas fa-chart-line" style="color: #1a4d8f; margin-right: 8px;"></i> Descriptive Analytics
@@ -76,7 +73,6 @@
         </div>
       </div>
 
-      <!-- Instrument breakdown -->
       <div class="section-header">
         <v-icon color="#0B2044" size="22">mdi-chart-areaspline</v-icon>
         <h2>Instrument breakdown</h2>
@@ -113,7 +109,6 @@
         </div>
       </div>
 
-      <!-- Distribution bars -->
       <div class="distribution-section">
         <h3>Portfolio Allocation</h3>
         <div class="distribution-bars">
@@ -127,7 +122,6 @@
         </div>
       </div>
 
-      <!-- Detailed sections -->
       <div v-for="inst in instrumentsWithDetails" :key="inst.id" class="detail-section">
         <div class="detail-header">
           <h3>{{ inst.name }} – Detailed Instruments ({{ inst.details.length }} rows)</h3>
@@ -139,7 +133,6 @@
         </div>
       </div>
 
-      <!-- Export buttons -->
       <div class="export-all-section">
         <button class="btn-view-portfolio" @click="openCombinedModal">
           <v-icon>mdi-eye</v-icon> View Portfolio as Excel
@@ -154,9 +147,6 @@
         <button class="btn-primary" @click="goToReport">Continue to Report →</button>
       </div>
 
-      <!-- ===== MODALS ===== -->
-
-      <!-- Detail Modal -->
       <v-dialog v-model="detailModalVisible" max-width="90%" fullscreen hide-overlay>
         <v-card>
           <v-card-title class="excel-dialog-title-white">
@@ -196,7 +186,6 @@
         </v-card>
       </v-dialog>
 
-      <!-- Combined Modal -->
       <v-dialog v-model="combinedModalVisible" max-width="90%" fullscreen hide-overlay>
         <v-card>
           <v-card-title class="excel-dialog-title-white">
@@ -213,7 +202,6 @@
             </button>
           </v-card-title>
           <v-card-text class="combined-excel-body">
-            <!-- Summary Table -->
             <div class="combined-section">
               <h4 class="combined-section-title">Summary</h4>
               <div class="excel-table-wrapper">
@@ -267,7 +255,6 @@
               </div>
             </div>
 
-            <!-- Details for each instrument -->
             <div v-for="inst in filteredDetails" :key="inst.id" class="combined-section">
               <h4 class="combined-section-title">
                 {{ inst.name }} – Details ({{ inst.details.length }} rows)
@@ -298,7 +285,6 @@
         </v-card>
       </v-dialog>
 
-      <!-- Export Dialog -->
       <v-dialog v-model="showExportDialog" max-width="500px">
         <v-card>
           <v-card-title>Select instruments to export</v-card-title>
@@ -349,9 +335,8 @@ const sortOrder = ref('asc')
 const loading = ref(false)
 const error = ref('')
 
-// ================================================================
-// Helper: getUniqueHeaders
-// ================================================================
+const PORTFOLIO_SNAPSHOT_KEY = '__portfolio_summary__'
+
 function getUniqueHeaders(headers) {
   const exclude = ['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet']
   const filtered = headers.filter(h => !exclude.includes(h))
@@ -365,9 +350,6 @@ function getUniqueHeaders(headers) {
   })
 }
 
-// ================================================================
-// Valuation date — from session/selected value, NOT forced to today
-// ================================================================
 const activeValuationDate = computed(() => {
   const s = activeSession.value
   if (s) {
@@ -385,9 +367,6 @@ const activeValuationDate = computed(() => {
   return null
 })
 
-// ================================================================
-// Descriptive Analytics
-// ================================================================
 const analyticsData = computed(() => {
   const allDetails = instrumentsWithDetails.value.flatMap(inst => inst.details || [])
   if (!allDetails.length) return {}
@@ -429,7 +408,6 @@ const analyticsData = computed(() => {
   return stats
 })
 
-// ---- Computed totals ----
 const totalFaceValue = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.faceValue || 0), 0))
 const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + inst.value, 0))
 const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
@@ -506,7 +484,6 @@ function openCombinedModal() {
   combinedModalVisible.value = true
 }
 
-// ---- Excel helpers ----
 function isPercentageField(col) {
   const lowerCol = col.toLowerCase()
   return lowerCol.includes('rate') || lowerCol.includes('yield') || lowerCol.includes('discount') || lowerCol.includes('coupon')
@@ -530,7 +507,6 @@ function formatForExcel(value, type = 'number', key = '') {
   return num
 }
 
-// ---- Export functions ----
 function exportCombinedExcel() {
   const workbook = XLSX.utils.book_new()
   const valuationDate = activeValuationDate.value || ''
@@ -688,9 +664,43 @@ function exportToExcel() {
   showExportDialog.value = false
 }
 
-// ================================================================
-// loadSummary – main data loader
-// ================================================================
+async function publishPortfolioSnapshot(sid) {
+  try {
+    const snapshot = {
+      sessionId: String(sid),
+      sessionName: activeSession.value?.name || '',
+      valuationDate: activeValuationDate.value,
+      generatedAt: new Date().toISOString(),
+      instruments: instruments.value.map(inst => ({
+        id: inst.id,
+        name: inst.name,
+        value: inst.value,
+        faceValue: inst.faceValue,
+        difference: inst.difference,
+        count: inst.count,
+        avgRate: inst.avgRate,
+        fredBench: inst.fredBench,
+        completed: inst.completed,
+        statusText: inst.statusText
+      })),
+      instrumentsWithDetails: instrumentsWithDetails.value.map(inst => ({
+        id: inst.id,
+        name: inst.name,
+        details: inst.details,
+        detailHeaders: inst.detailHeaders
+      }))
+    }
+    await sessionManager.saveWorksheetData(sid, PORTFOLIO_SNAPSHOT_KEY, snapshot)
+    console.log('Portfolio summary snapshot published for report linkage:', {
+      sessionId: sid,
+      instruments: snapshot.instruments.length,
+      classes: snapshot.instruments.map(i => i.id)
+    })
+  } catch (e) {
+    console.warn('Failed to publish portfolio summary snapshot:', e)
+  }
+}
+
 async function loadSummary() {
   loading.value = true
   error.value = ''
@@ -704,24 +714,20 @@ async function loadSummary() {
         session = sessionManager.getActiveSession()
       }
     }
-    
-    // If still no session, try to get from URL query parameter
+
     if (!session) {
       const route = router.currentRoute.value
       const sessionId = route.query.session || route.query.session_id
       if (sessionId) {
-        console.log('Fetching session from backend with ID:', sessionId)
         await sessionManager.getSession(sessionId, true)
         session = sessionManager.getActiveSession()
-     }
+      }
     }
-    
-    // If still no session, try localStorage/sessionStorage
+
     if (!session) {
       try {
         const localSid = localStorage.getItem('dura_active_session_id') || sessionStorage.getItem('dura_active_session_id')
         if (localSid) {
-          console.log('Fetching session from storage with ID:', localSid)
           await sessionManager.getSession(localSid, true)
           session = sessionManager.getActiveSession()
         }
@@ -729,12 +735,10 @@ async function loadSummary() {
         console.warn('Failed to get session from storage:', e)
       }
     }
-    
+
     activeSession.value = session
 
     if (!activeSession.value) {
-      console.warn('No active session found')
-      console.warn('Session manager state:', sessionManager.getActiveSessionId())
       instruments.value = []
       instrumentsWithDetails.value = []
       loading.value = false
@@ -743,45 +747,24 @@ async function loadSummary() {
 
     const sid = activeSession.value.id
 
-    console.log('Loading summary for session:', sid)
-
     const wf = await sessionManager.getInstrumentWorkflow(sid, 'money-market')
-    console.log('=== MONEY MARKET WORKFLOW ===')
-    console.log('Money market workflow:', wf)
-    console.log('Money market workflow keys:', wf ? Object.keys(wf) : 'null')
-    console.log('Money market workflow allCalculations:', JSON.stringify(wf?.allCalculations, null, 2))
-    console.log('Money market workflow portfolioSummary:', wf?.portfolioSummary)
-    console.log('Money market workflow completedPortfolioSummary:', wf?.completedPortfolioSummary)
     const summary = wf?.instrumentSummary || { rows: [], columns: [] }
     const portfolioSummary = wf?.portfolioSummary || { rows: [], columns: [] }
     const completedPortfolioSummary = wf?.completedPortfolioSummary || { rows: [], columns: [] }
-    const allCalculations = wf?.allCalculations || {}
 
-    console.log('Money market allCalculations:', JSON.stringify(allCalculations, null, 2))
-    console.log('Money market portfolioSummary rows:', portfolioSummary.rows)
-    console.log('Money market completedPortfolioSummary rows:', completedPortfolioSummary.rows)
-
-    // First, try to use completed portfolio summary rows (these are the aggregated portfolio rows)
     let allSummaryRows = [...(completedPortfolioSummary.rows || [])]
-    
-    // If no completed portfolio summary, fall back to portfolio summary
+
     if (allSummaryRows.length === 0) {
       allSummaryRows = [...(portfolioSummary.rows || [])]
     }
-    
-    // If still no data, fall back to instrument summary
+
     if (allSummaryRows.length === 0) {
       allSummaryRows = [...summary.rows]
     }
-    
-    // Also check other instrument types for their portfolio summaries
+
     for (const type of ['bonds', 'tbills']) {
       const wfType = await sessionManager.getInstrumentWorkflow(sid, type)
-      console.log(`${type} workflow:`, wfType)
-      console.log(`${type} allCalculations:`, wfType?.allCalculations)
-      console.log(`${type} portfolioSummary rows:`, wfType?.portfolioSummary?.rows)
-      console.log(`${type} completedPortfolioSummary rows:`, wfType?.completedPortfolioSummary?.rows)
-      
+
       if (wfType?.completedPortfolioSummary?.rows && wfType.completedPortfolioSummary.rows.length > 0) {
         const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
         if (hasData) {
@@ -811,8 +794,6 @@ async function loadSummary() {
         }
       }
     }
-
-    console.log('Final allSummaryRows:', allSummaryRows)
 
     if (allSummaryRows.length === 0) {
       try {
@@ -846,20 +827,17 @@ async function loadSummary() {
     }
 
     for (const template of templates) {
-      // Filter rows by instrument type - handle both portfolio summary and instrument summary rows
       const rows = allSummaryRows.filter(r => {
         const instType = r['Instrument Type'] || r['instrument_type'] || r['instrumentType']
         return instType === template.id
       })
-      
+
       let totalValue = 0, totalFaceValue = 0, totalAvgRate = 0, totalFredBench = 0, fredBenchCount = 0
       let instrumentCount = 0
 
-      // Use backend aggregates as the source of truth
       const wfType = await sessionManager.getInstrumentWorkflow(sid, template.id)
       const aggregates = wfType?.allCalculations || wfType?.calculations || {}
-      
-      // Use backend aggregates if available - these are the authoritative values
+
       if (Object.keys(aggregates).length > 0) {
         totalValue = aggregates.totalValue ?? aggregates.total_value ?? 0
         totalFaceValue = aggregates.totalPrincipal ?? aggregates.total_principal ?? aggregates.totalFaceValue ?? aggregates.total_face_value ?? 0
@@ -870,15 +848,13 @@ async function loadSummary() {
           fredBenchCount = 1
         }
       } else if (rows.length > 0) {
-        // Only fall back to rows if no aggregates exist (should not happen normally)
-        console.warn(`No aggregates found for ${template.id}, falling back to row-level data`)
         rows.forEach(row => {
           const value = getVal(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
           const faceValue = getVal(row, 'Face Value', 'face_value', 'Amount', 'amount', 'Principal', 'principal', 'Total Principal', 'total_principal')
           const rate = getVal(row, 'Average Rate', 'average_rate', 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate')
           const count = getVal(row, 'Number of Instruments', 'number_of_instruments', 'Instrument Count', 'instrument_count')
           const fred = getVal(row, 'FRED Benchmark', 'fred_benchmark', 'FRED_Benchmark')
-          
+
           totalValue += value
           totalFaceValue += faceValue
           totalAvgRate += rate
@@ -944,6 +920,8 @@ async function loadSummary() {
     })
     selectedExportInstruments.value = initSelections
 
+    await publishPortfolioSnapshot(sid)
+
   } catch (err) {
     console.error('Error loading summary:', err)
     error.value = err.message || 'Failed to load summary data'
@@ -953,10 +931,6 @@ async function loadSummary() {
     loading.value = false
   }
 }
-
-// ================================================================
-// LIFECYCLE HOOKS
-// ================================================================
 
 const handleSessionUpdate = async (event) => {
   const { sessionId } = event.detail || {}
@@ -978,7 +952,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* Your existing styles remain unchanged */
 .summary-page { padding: 28px; max-width: 1200px; margin: 0 auto; }
 .hero-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; }
 .hero-header h1 { color: #0B2044; font-size: 32px; margin: 0 0 8px; }

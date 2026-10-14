@@ -1,5 +1,5 @@
 /**
- * Generate IFRS‑style report HTML with yield curve appendix from session filters.
+ * Generate IFRS-style report HTML with yield curve appendix from session filters.
  * @param {Array} data - The instrument data rows (can be single instrument or all instruments).
  * @param {string} instrument - Instrument type (e.g., 'money-market') or 'portfolio' for all instruments.
  * @param {string} session - Session name.
@@ -26,18 +26,54 @@ export function generateReportHtml(
 ) {
   const valDate = valuationDate || ''
   const currencySymbol = options.currencySymbol || ''
-  // Use base64 data URLs if provided, otherwise use relative URLs
   const logoUrl = options.logoBase64 || '/DuraCapital%20logo.png'
   const backgroundCoverUrl = options.backgroundBase64 || '/reportbackground.png'
 
-  // Normalized FRED filters (no hardcoded defaults)
   const filters = fredFilters || {}
   const filterCountry = filters.country || '—'
   const filterCurrency = filters.currency || '—'
   const filterMaturity = filters.maturity || '—'
-  
+
+  // ---- Robust field picker: handles camelCase, snake_case, and "Title Case" with spaces.
+  function pick(row, keys) {
+    if (!row) return undefined
+    for (const key of keys) {
+      if (row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key]
+    }
+    // Case-insensitive fallback
+    const lower = Object.keys(row).reduce((acc, k) => { acc[k.toLowerCase()] = row[k]; return acc }, {})
+    for (const key of keys) {
+      const v = lower[key.toLowerCase()]
+      if (v !== undefined && v !== null && v !== '') return v
+    }
+    return undefined
+  }
+
+  // ---- Safe numeric coercion: handles "1,234.56", "$1,234", "5.25%", plain numbers, null.
+  function toNumber(val) {
+    if (val === undefined || val === null || val === '') return 0
+    if (typeof val === 'number') return isNaN(val) ? 0 : val
+    const cleaned = String(val).replace(/[$€£¥,%\s]/g, '')
+    const n = parseFloat(cleaned)
+    return isNaN(n) ? 0 : n
+  }
+
+  // ---- Read a numeric value from a row using multiple key candidates, coerced to number.
+  function numFrom(row, keys) {
+    const raw = pick(row, keys)
+    return toNumber(raw)
+  }
+
+  // ---- Human-readable label for the report (e.g., "money-market" -> "Money Market")
+  function labelFor(value) {
+    if (!value) return ''
+    return String(value)
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase())
+  }
+
   // Handle portfolio report with all instruments
-  let reportData = data
+  let reportData = Array.isArray(data) ? data : []
   let reportInstrument = instrument
   if (instrument === 'portfolio' && allInstrumentsData && Object.keys(allInstrumentsData).length > 0) {
     reportData = []
@@ -48,18 +84,45 @@ export function generateReportHtml(
     })
     reportInstrument = 'Portfolio'
   }
-  
-  // Use calculated values from backend
-  const totalValue = reportData.reduce((s, r) => s + (parseFloat(r['Total Value'] || r['total_value'] || r['Calculated Value'] || r['calculated_value'] || r.FaceValue || r.Amount || r.Principal || 0)), 0)
-  const totalInterest = reportData.reduce((s, r) => s + (parseFloat(r['Total Interest'] || r['total_interest'] || r['Interest Earned'] || r['interest_earned'] || r.Interest || 0)), 0)
-  const rates = reportData.map(r => parseFloat(r['Avg Rate'] || r['avg_rate'] || r.Rate || r.InterestRate || r.CouponRate || r.DiscountRate || 0)).filter(r => !isNaN(r) && r > 0)
+
+  // Total value across rows
+  const totalValue = reportData.reduce((s, r) => s + numFrom(r, [
+    'Total Value', 'total_value',
+    'Calculated Value', 'calculated_value',
+    'Market Value', 'market_value',
+    'Face Value', 'face_value',
+    'Principal', 'principal',
+    'Amount', 'amount',
+    'Value', 'value'
+  ]), 0)
+
+  const totalInterest = reportData.reduce((s, r) => s + numFrom(r, [
+    'Total Interest', 'total_interest',
+    'Interest Earned', 'interest_earned',
+    'Interest', 'interest'
+  ]), 0)
+
+  const rates = reportData
+    .map(r => numFrom(r, [
+      'Average Rate', 'average_rate',
+      'Avg Rate', 'avg_rate',
+      'Weighted Average Rate', 'weighted_avg_rate',
+      'Interest Rate', 'interest_rate',
+      'Coupon Rate', 'coupon_rate',
+      'Discount Rate', 'discount_rate',
+      'Yield to Maturity', 'yield_to_maturity',
+      'Rate', 'rate',
+      'Yield', 'yield'
+    ]))
+    .filter(r => r > 0)
+
   const avgRate = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0
 
-  const instType = reportInstrument.toLowerCase()
+  const instType = String(reportInstrument || '').toLowerCase()
   let methodology = '',
     formulas = '',
     assumptions = ''
-  if (instType.includes('money') || instType === 'money-market') {
+  if (instType.includes('money')) {
     methodology = 'Money Market Instruments: Short-term debt instruments valued using discounted cash flow methodology.'
     formulas = 'Fair value = F / (1 + r·t/365) where F = Face value, r = annualized interest rate, t = days to maturity.'
     assumptions = 'Simple interest convention (365 days/year). Weighted average rate = Σ (Rate × Amount) / Σ Amount.'
@@ -71,7 +134,7 @@ export function generateReportHtml(
     methodology = 'Treasury Bills: Short-term government securities valued using discount yield methodology.'
     formulas = 'Discount amount = Face value × (Discount rate/100) × (Days to maturity/360). Effective yield = (Face value / Price − 1) × (365 / Days to maturity) × 100.'
     assumptions = 'Bank discount basis (360 days/year) for discount rate; bond equivalent yield uses 365 days.'
-  } else if (instType === 'portfolio') {
+  } else if (instType === 'portfolio' || instType.includes('portfolio')) {
     methodology = 'Portfolio Valuation: Combined valuation of multiple fixed income instrument types including money market instruments, corporate bonds, and treasury bills.'
     formulas = 'Portfolio Value = Σ Individual Instrument Values. Each instrument is valued using its appropriate methodology.'
     assumptions = 'Market-consistent valuation using appropriate yield curves for each instrument type.'
@@ -81,17 +144,71 @@ export function generateReportHtml(
     assumptions = 'Standard market conventions applied.'
   }
 
+  // ---- Appendix rows
   let instrumentRows = ''
   reportData.forEach((item, idx) => {
-    const name = item.Instrument || item.BondName || item.TBillName || `Instrument ${idx + 1}`
-    const faceValue = parseFloat(item.FaceValue || item.Amount || item.Principal || 0)
-    const rate = parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0)
-    const term = parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0)
-    const ticker = item.BBTicker || item.Ticker || item.Security || 'N/A'
+    const name = pick(item, [
+      'Instrument Name', 'instrument_name',
+      'Bond Name', 'bond_name',
+      'T-Bill Name', 'tbill_name',
+      'TBillName', 'BondName',
+      'Instrument', 'instrument',
+      'Name', 'name'
+    ]) || `Instrument ${idx + 1}`
+
+    const ticker = pick(item, [
+      'BB Ticker', 'bb_ticker', 'BBTicker',
+      'Ticker', 'ticker',
+      'Security', 'security',
+      'ISIN', 'isin'
+    ]) || 'N/A'
+
+    const faceValue = numFrom(item, [
+      'Face Value', 'face_value',
+      'Principal', 'principal',
+      'Amount', 'amount',
+      'Notional', 'notional',
+      'Total Value', 'total_value',
+      'Calculated Value', 'calculated_value'
+    ])
+
+    const rate = numFrom(item, [
+      'Interest Rate', 'interest_rate',
+      'Coupon Rate', 'coupon_rate',
+      'Discount Rate', 'discount_rate',
+      'Yield to Maturity', 'yield_to_maturity',
+      'Average Rate', 'average_rate',
+      'Avg Rate', 'avg_rate',
+      'Rate', 'rate',
+      'Yield', 'yield'
+    ])
+
+    let term = numFrom(item, [
+      'Term', 'term',
+      'Years to Maturity', 'years_to_maturity',
+      'Days to Maturity', 'days_to_maturity'
+    ])
+    if (!term) {
+      const maturityRaw = pick(item, ['Maturity Date', 'maturity_date', 'Maturity', 'maturity'])
+      const issueRaw = pick(item, ['Issue Date', 'issue_date', 'Issue', 'issue'])
+      if (maturityRaw) {
+        const maturityDate = new Date(maturityRaw)
+        const issueDate = issueRaw ? new Date(issueRaw) : new Date()
+        if (!isNaN(maturityDate.getTime()) && !isNaN(issueDate.getTime())) {
+          term = (maturityDate - issueDate) / (365 * 24 * 60 * 60 * 1000)
+          if (term < 0) term = 0
+        }
+      }
+    }
+
     instrumentRows += `<tr><td>${name}</td><td>${ticker}</td><td>${faceValue.toFixed(2)}</td><td>${rate.toFixed(4)}%</td><td>${term.toFixed(2)}</td><td>${valDate}</td></tr>`
   })
 
-  // Build appendix rows from yieldCurveData
+  if (!instrumentRows) {
+    instrumentRows = `<tr><td colspan="6" style="text-align:center; color:#999;">No instrument rows available for this selection.</td></tr>`
+  }
+
+  // ---- Yield curve appendix
   let appendixRows = ''
   if (yieldCurveData && yieldCurveData.length) {
     appendixRows = yieldCurveData.map(point => `
@@ -104,8 +221,10 @@ export function generateReportHtml(
   }
 
   const chartHtml = chartImageData ?
-    `<div class="chart-container"><img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" /><p class="chart-caption">FRED Yield Curve – ${instrument} (${filterCountry} / ${filterCurrency})</p></div>` :
+    `<div class="chart-container"><img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" /><p class="chart-caption">FRED Yield Curve – ${labelFor(instrument)} (${filterCountry} / ${filterCurrency})</p></div>` :
     '<p>Yield curve chart not available.</p>'
+
+  const instrumentLabel = labelFor(instrument)
 
   return `<!DOCTYPE html>
 <html>
@@ -159,7 +278,7 @@ export function generateReportHtml(
   <div class="cover-content">
     <div class="cover-session-name">${session}</div>
     <h1 class="cover-title">Valuation Assessment Report</h1>
-    <p class="cover-subtitle">${instrument.charAt(0).toUpperCase() + instrument.slice(1)}</p>
+    <p class="cover-subtitle">${instrumentLabel}</p>
   </div>
 </div>
 <div class="page toc-page">
@@ -174,11 +293,11 @@ export function generateReportHtml(
   <div class="toc-item"><span>Appendix</span><span>8</span></div>
   <div class="toc-item"><span>Reference</span><span>9</span></div>
 </div>
-<div class="page"><h1 class="section-title">Introduction</h1><p>Dura Capital (Private) Limited was contracted to provide a fair valuation assessment report of the following ${instrument} instruments as at ${valDate}.</p><ul style="margin:20px 0 20px 30px;"><li>${instrument} instruments</li><li>Valuation as at ${valDate}</li><li>${data.length} individual instruments assessed</li></ul></div>
-<div class="page"><h1 class="section-title">Executive Summary</h1><div class="executive-summary"><p><strong>Key Findings:</strong></p><ul style="margin-left:20px;"><li>Total Portfolio Value: <span class="highlight">${currencySymbol}${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li><li>Number of Instruments: <span class="highlight">${data.length}</span></li><li>Average Rate: <span class="highlight">${avgRate.toFixed(2)}%</span></li><li>Valuation Date: <span class="highlight">${valDate}</span></li></ul><p><strong>Valuation Approach:</strong> ${methodology}</p></div></div>
+<div class="page"><h1 class="section-title">Introduction</h1><p>Dura Capital (Private) Limited was contracted to provide a fair valuation assessment report of the following ${instrumentLabel} instruments as at ${valDate}.</p><ul style="margin:20px 0 20px 30px;"><li>${instrumentLabel} instruments</li><li>Valuation as at ${valDate}</li><li>${reportData.length} individual instruments assessed</li></ul></div>
+<div class="page"><h1 class="section-title">Executive Summary</h1><div class="executive-summary"><p><strong>Key Findings:</strong></p><ul style="margin-left:20px;"><li>Total Portfolio Value: <span class="highlight">${currencySymbol}${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></li><li>Number of Instruments: <span class="highlight">${reportData.length}</span></li><li>Average Rate: <span class="highlight">${avgRate.toFixed(2)}%</span></li><li>Valuation Date: <span class="highlight">${valDate}</span></li></ul><p><strong>Valuation Approach:</strong> ${methodology}</p></div></div>
 <div class="page"><h1 class="section-title">Methodology</h1><div class="methodology-box"><p>${methodology}</p><div class="formula">${formulas}</div><p><strong>Assumptions:</strong> ${assumptions}</p></div></div>
 <div class="page"><h1 class="section-title">Market Inputs</h1><p>Rates sourced from FRED for ${valDate}. Filters used: Country = ${filterCountry}, Currency = ${filterCurrency}, Maturity = ${filterMaturity}.</p></div>
-<div class="page"><h1 class="section-title">Results</h1><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Total Portfolio Value</td><td>${currencySymbol}${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Number of Instruments</td><td>${data.length}</td></tr><tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr><tr><td>Total Interest Earned</td><td>${currencySymbol}${totalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Valuation Date</td><td>${valDate}</td></tr></tbody></table></div>
+<div class="page"><h1 class="section-title">Results</h1><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Total Portfolio Value</td><td>${currencySymbol}${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Number of Instruments</td><td>${reportData.length}</td></tr><tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr><tr><td>Total Interest Earned</td><td>${currencySymbol}${totalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Valuation Date</td><td>${valDate}</td></tr></tbody></table></div>
 <div class="page"><h1 class="section-title">Yield Curve</h1><p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>${chartHtml}</div>
 <div class="page"><h1 class="section-title">Conclusion</h1><p>The valuation assessment is in accordance with IFRS 13 fair value measurement principles as at ${valDate}.</p></div>
 <div class="page"><h1 class="section-title">Appendix: Detailed Instrument Data</h1><table class="appendix-table"><thead><tr><th>Instrument Name</th><th>BB Ticker</th><th>Face Value</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead><tbody>${instrumentRows}</tbody></table>

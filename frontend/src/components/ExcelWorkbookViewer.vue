@@ -1,14 +1,11 @@
 <template>
   <div class="excel-workbook-viewer" :style="{ height: viewerHeight + 'px' }">
-    <!-- Resize handle -->
     <div class="resize-handle" @mousedown="startResize"></div>
-    <!-- Header with logo and formula bar -->
     <div class="viewer-header">
       <div class="header-left">
         <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
         <span class="excel-filename">{{ fileName || 'Excel Workbook' }}</span>
       </div>
-      <!-- Formula bar -->
       <div class="formula-bar">
         <div class="formula-bar-label">fx</div>
         <input 
@@ -20,10 +17,8 @@
       </div>
     </div>
 
-    <!-- Custom Excel grid -->
     <div class="excel-grid-wrapper">
       <div class="excel-grid-container">
-        <!-- Column headers (A, B, C...) -->
         <div class="excel-column-headers">
           <div class="excel-header-cell excel-corner-cell"></div>
           <div
@@ -37,7 +32,6 @@
           </div>
         </div>
 
-        <!-- Rows -->
         <div class="excel-rows-container" ref="rowsContainer">
           <div
             v-for="(row, rowIndex) in visibleRows"
@@ -49,12 +43,10 @@
             }"
             @click="handleRowClick(rowIndex)"
           >
-            <!-- Row header (number) -->
             <div class="excel-header-cell excel-row-header" :style="{ height: getRowHeight(rowIndex) }">
               {{ rowIndex + 1 }}
               <div class="row-resize-handle" @mousedown.stop="startRowResize(rowIndex, $event)"></div>
             </div>
-            <!-- Cells -->
             <div class="excel-cells-container">
               <div
                 v-for="(cell, colIndex) in row"
@@ -75,7 +67,6 @@
       </div>
     </div>
 
-    <!-- Sheet tabs (bottom) -->
     <div class="excel-sheet-tabs">
       <div
         v-for="(sheet, index) in sheets"
@@ -93,7 +84,6 @@
       </div>
     </div>
 
-    <!-- Table detection panel -->
     <div v-if="detectedTables.length > 0 && !isTableIsolationMode" class="table-detection-panel">
       <div class="table-detection-header">
         <v-icon size="16" class="table-icon">mdi-table-large</v-icon>
@@ -149,7 +139,6 @@
       </div>
     </div>
 
-    <!-- Table isolation mode header -->
     <div v-if="isTableIsolationMode && selectedTable" class="table-isolation-header">
       <div class="isolation-info">
         <v-icon size="16" class="table-icon">mdi-table-large</v-icon>
@@ -161,7 +150,6 @@
       </button>
     </div>
 
-    <!-- Single instrument extracted values preview -->
     <div v-if="isSingleInstrumentSheet && Object.keys(extractedPreviewValues).length > 0" class="single-instrument-preview">
       <div class="preview-header">
         <v-icon size="16" class="preview-icon">mdi-check-circle</v-icon>
@@ -182,8 +170,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import * as XLSX from 'xlsx'
+
+let lastParseSig = ''
+
 import {
   detectSheetType,
   extractSingleInstrumentValues,
@@ -191,6 +182,8 @@ import {
   detectInstrumentNameColumn,
   extractInstrumentNames
 } from '@/utils/sheetTypeDetector'
+
+const DISPLAY_ROW_LIMIT = 2000
 
 function extractValuesIntelligently(data, instrumentType) {
   const requiredFields = getRequiredFieldMappings(instrumentType)
@@ -207,6 +200,139 @@ function extractValuesIntelligently(data, instrumentType) {
   }
 
   return extracted
+}
+
+function findDensestCluster(sortedPositions, gapThreshold) {
+  if (!sortedPositions || sortedPositions.length === 0) {
+    return { min: -1, max: -1, count: 0 }
+  }
+  if (sortedPositions.length === 1) {
+    return { min: sortedPositions[0], max: sortedPositions[0], count: 1 }
+  }
+
+  let bestStart = 0
+  let bestEnd = 0
+  let bestCount = 1
+  let curStart = 0
+
+  for (let i = 1; i < sortedPositions.length; i++) {
+    if (sortedPositions[i] - sortedPositions[i - 1] > gapThreshold) {
+      const count = i - curStart
+      if (count > bestCount) {
+        bestCount = count
+        bestStart = curStart
+        bestEnd = i - 1
+      }
+      curStart = i
+    }
+  }
+
+  const finalCount = sortedPositions.length - curStart
+  if (finalCount > bestCount) {
+    bestCount = finalCount
+    bestStart = curStart
+    bestEnd = sortedPositions.length - 1
+  }
+
+  return {
+    min: sortedPositions[bestStart],
+    max: sortedPositions[bestEnd],
+    count: bestCount
+  }
+}
+
+function getTrueRange(worksheet) {
+  if (!worksheet) return null
+
+  const declaredRef = worksheet['!ref']
+  const declared = declaredRef ? XLSX.utils.decode_range(declaredRef) : null
+
+  const rowPositions = []
+  const colPositions = []
+  let cellCount = 0
+  let minRow = Infinity, maxRow = -1
+  let minCol = Infinity, maxCol = -1
+
+  for (const addr in worksheet) {
+    if (addr[0] === '!') continue
+    let decoded
+    try { decoded = XLSX.utils.decode_cell(addr) } catch (e) { continue }
+    const cell = worksheet[addr]
+    if (!cell) continue
+    const hasValue = cell.v !== undefined && cell.v !== null && cell.v !== ''
+    const hasFormula = cell.f !== undefined && cell.f !== null && cell.f !== ''
+    if (!hasValue && !hasFormula) continue
+
+    cellCount++
+    rowPositions.push(decoded.r)
+    colPositions.push(decoded.c)
+    if (decoded.r < minRow) minRow = decoded.r
+    if (decoded.r > maxRow) maxRow = decoded.r
+    if (decoded.c < minCol) minCol = decoded.c
+    if (decoded.c > maxCol) maxCol = decoded.c
+  }
+
+  if (maxRow === -1 || maxCol === -1) return declared
+
+  const height = maxRow - minRow + 1
+  const width  = maxCol - minCol + 1
+  const area   = height * width
+
+  if (area > 1_000_000 && cellCount / area < 0.001) {
+    const uniqueRows = [...new Set(rowPositions)].sort((a, b) => a - b)
+    const uniqueCols = [...new Set(colPositions)].sort((a, b) => a - b)
+
+    const ROW_GAP = 50
+    const COL_GAP = 10
+
+    const rowCluster = findDensestCluster(uniqueRows, ROW_GAP)
+    const colCluster = findDensestCluster(uniqueCols, COL_GAP)
+
+    const rowCoverage = uniqueRows.length ? rowCluster.count / uniqueRows.length : 0
+    const colCoverage = uniqueCols.length ? colCluster.count / uniqueCols.length : 0
+
+    if (
+      rowCoverage >= 0.5 &&
+      colCoverage >= 0.5 &&
+      rowCluster.min !== -1 &&
+      colCluster.min !== -1
+    ) {
+      const newMinRow = Math.max(minRow, rowCluster.min)
+      const newMaxRow = Math.min(maxRow, rowCluster.max)
+      const newMinCol = Math.max(minCol, colCluster.min)
+      const newMaxCol = Math.min(maxCol, colCluster.max)
+
+      console.warn(
+        `ExcelWorkbookViewer: phantom range detected on sheet ` +
+        `(declared ${declaredRef || 'n/a'}) — ${area.toLocaleString()} cells claimed, ` +
+        `${cellCount.toLocaleString()} real. Trimming to ` +
+        `${newMaxRow - newMinRow + 1} rows × ${newMaxCol - newMinCol + 1} columns.`
+      )
+
+      return {
+        s: { r: newMinRow, c: newMinCol },
+        e: { r: newMaxRow, c: newMaxCol }
+      }
+    }
+
+    const MAX_CLIPPED_ROWS = 10000
+    const MAX_CLIPPED_COLS = 200
+    const cappedMaxRow = Math.min(maxRow, minRow + MAX_CLIPPED_ROWS - 1)
+    const cappedMaxCol = Math.min(maxCol, minCol + MAX_CLIPPED_COLS - 1)
+
+    console.warn(
+      `ExcelWorkbookViewer: phantom range on sheet (declared ${declaredRef || 'n/a'}) — ` +
+      `${area.toLocaleString()} cells claimed, only ${cellCount.toLocaleString()} real. ` +
+      `Clipping to ${cappedMaxRow - minRow + 1} rows × ${cappedMaxCol - minCol + 1} columns.`
+    )
+
+    return {
+      s: { r: minRow, c: minCol },
+      e: { r: cappedMaxRow, c: cappedMaxCol }
+    }
+  }
+
+  return { s: { r: minRow, c: minCol }, e: { r: maxRow, c: maxCol } }
 }
 
 const props = defineProps({
@@ -230,7 +356,6 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'workbook-loaded', 'detect-start', 'detect-end'])
 
-// ===== STATE =====
 const sheets = ref([])
 const activeSheetIndex = ref(0)
 const visibleRows = ref([])
@@ -250,28 +375,23 @@ const selectedTables = ref(new Set())
 const isDetecting = ref(false)
 const isMultiTableMode = ref(false)
 
-// Viewer resize
 const viewerHeight = ref(600)
 const isResizing = ref(false)
 const resizeStartY = ref(0)
 const resizeStartHeight = ref(0)
 
-// Column/row resize
 const resizingColumn = ref(-1)
 const resizingRow = ref(-1)
 const resizeStartX = ref(0)
 const columnWidths = ref({})
 const rowHeights = ref({})
 
-// Custom row selection for manual table creation
 const isSelectingRows = ref(false)
 const selectedRowRange = ref({ start: -1, end: -1 })
 const isRowSelectionMode = ref(false)
 
-// ===== COMPUTED =====
 const activeSheet = computed(() => sheets.value[activeSheetIndex.value] || null)
 
-// ===== METHODS =====
 function getColumnHeaders(count) {
   const headers = []
   for (let i = 0; i < count; i++) {
@@ -445,11 +565,6 @@ function isMergedCell(row, col) {
   return false
 }
 
-// FIX #8: Highlight ONLY the actual detected header cells.
-// - Never highlight entire rows/columns.
-// - Never highlight empty cells outside the header.
-// - Never extend highlighting outside the actual table/section bounds.
-// - Supports BOTH horizontal and vertical header structures.
 function getCellStyle(row, col) {
   const styles = {
     width: getColumnWidth(col),
@@ -471,28 +586,23 @@ function getCellStyle(row, col) {
     fontSize: '13px'
   }
 
-  // Determine if this cell is an actual header cell of a detected structure.
-  let headerDepth = -1         // 0 = first horizontal header row, 1 = second header row
+  let headerDepth = -1
   let isVerticalHeaderCell = false
 
   const headerKeywords = ['name', 'date', 'rate', 'value', 'amount', 'price', 'yield', 'coupon', 'maturity', 'issue', 'principal', 'face', 'discount', 'interest', 'term', 'tenor', 'frequency', 'currency', 'country', 'instrument', 'bond', 'bill', 'security', 'type', 'status', 'code', 'id', 'number', 'total', 'balance', 'payment', 'period', 'year', 'month', 'day', 'description', 'category', 'account', 'reference', 'transaction', 'debit', 'credit', 'asset', 'liability', 'equity', 'revenue', 'expense', 'income', 'cost', 'profit', 'loss', 'margin', 'ratio', 'percentage', 'quantity', 'unit', 'measure', 'location', 'address', 'contact', 'phone', 'email', 'customer', 'client', 'vendor', 'supplier', 'product', 'service', 'item', 'sku', 'barcode', 'serial', 'batch', 'lot', 'expiry', 'valid', 'active', 'inactive', 'pending', 'complete', 'open', 'closed', 'approved', 'rejected', 'submitted', 'draft', 'final', 'original', 'current', 'previous', 'next', 'first', 'last', 'beginning', 'ending', 'start', 'end', 'min', 'max', 'avg', 'sum', 'count']
 
   for (const table of detectedTables.value) {
-    // Hard boundary: this cell must sit inside the table's bounding box.
     if (row < table.startRow || row > table.endRow) continue
     if (col < table.startCol || col > table.endCol) continue
 
-    // A header cell must actually contain a value — never highlight empty cells.
     const rawValue = activeSheet.value?.fullData?.[row]?.[col]
     const hasValue = rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== ''
     if (!hasValue) continue
 
-    // Additional check: cell value must contain a header keyword to be highlighted
     const cellText = String(rawValue).trim().toLowerCase()
     const hasHeaderKeyword = headerKeywords.some(keyword => cellText.includes(keyword))
     if (!hasHeaderKeyword) continue
 
-    // ---- Horizontal header check ----
     const headerRows = Array.isArray(table.headerRows) && table.headerRows.length
       ? table.headerRows
       : (table.headerRow !== undefined ? [table.headerRow] : [])
@@ -503,9 +613,6 @@ function getCellStyle(row, col) {
       break
     }
 
-    // ---- Vertical header check ----
-    // For a vertical table, only the label column (table.startCol) is the header column,
-    // and only cells that actually contain a value are part of the header.
     if (table.type === 'vertical_table' && col === table.startCol) {
       isVerticalHeaderCell = true
       break
@@ -513,27 +620,22 @@ function getCellStyle(row, col) {
   }
 
   if (headerDepth === 0) {
-    // First horizontal header row: strong highlight
     styles.backgroundColor = 'rgba(227, 242, 253, 0.5)'
     styles.fontWeight = '700'
     styles.color = '#0d47a1'
     styles.borderBottom = '2px solid #0d47a1'
   } else if (headerDepth > 0) {
-    // Second (or later) horizontal header row: lighter highlight
     styles.backgroundColor = 'rgba(227, 242, 253, 0.35)'
     styles.fontWeight = '600'
     styles.color = '#1565c0'
     styles.borderBottom = '1px solid #0d47a1'
   } else if (isVerticalHeaderCell) {
-    // Vertical header cell: highlight only that cell, with a right border
     styles.backgroundColor = 'rgba(227, 242, 253, 0.5)'
     styles.fontWeight = '700'
     styles.color = '#0d47a1'
     styles.borderRight = '2px solid #0d47a1'
   }
-  // No other highlighting - only actual detected header cells are highlighted
 
-  // Merged cell handling (unchanged)
   let isInMergedRange = false
   for (const range of mergedRanges.value) {
     if (row >= range.min_row && row <= range.max_row &&
@@ -623,14 +725,20 @@ function loadSheetData() {
       columnHeaders.value = getColumnHeaders(colCount)
       mergedRanges.value = []
     } else {
-      visibleRows.value = sheet.fullData
+      const totalRows = sheet.fullData.length
+      const paintCount = Math.min(totalRows, DISPLAY_ROW_LIMIT)
+      const painted = new Array(paintCount)
+      for (let r = 0; r < paintCount; r++) {
+        painted[r] = sheet.fullData[r]
+      }
+      visibleRows.value = painted
+
       const colCount = sheet.total_columns || sheet.fullData[0]?.length || 10
       columnHeaders.value = getColumnHeaders(colCount)
       mergedRanges.value = sheet.merged_ranges || []
     }
     
     extractFormulas(sheet)
-    
     detectTables()
     
     if (sheet.data && sheet.data.length > 0) {
@@ -714,7 +822,7 @@ function stopResize() {
 
 function detectTables() {
   detectedTables.value = []
-  const data = visibleRows.value
+  const data = activeSheet.value?.fullData || visibleRows.value
   if (!data || data.length === 0) return
 
   const structures = analyzeWorksheetStructure(data)
@@ -792,7 +900,6 @@ function classifyCellContent(cell, row, col) {
 function detectLabelValuePairs(data, cellAnalysis) {
   const pairs = []
 
-  // ---- Horizontal label/value pairs (label above value) ----
   for (let row = 0; row < data.length - 1; row++) {
     for (let col = 0; col < (data[row]?.length || 0); col++) {
       const currentCell = cellAnalysis[row]?.[col]
@@ -813,8 +920,6 @@ function detectLabelValuePairs(data, cellAnalysis) {
     }
   }
 
-  // ---- FIX #3 / FIX #8: Vertical tables ----
-  // (label in one column, corresponding value in the next column, repeated down rows)
   const pairMap = new Map()
   for (let row = 0; row < data.length; row++) {
     const rowLen = data[row]?.length || 0
@@ -837,14 +942,12 @@ function detectLabelValuePairs(data, cellAnalysis) {
       const groupRows = [row]
       consumed.add(key)
 
-      // Expand downward
       let nextRow = row + 1
       while (pairMap.has(`${nextRow},${col}`) && !consumed.has(`${nextRow},${col}`)) {
         consumed.add(`${nextRow},${col}`)
         groupRows.push(nextRow)
         nextRow++
       }
-      // Expand upward
       let prevRow = row - 1
       while (pairMap.has(`${prevRow},${col}`) && !consumed.has(`${prevRow},${col}`)) {
         consumed.add(`${prevRow},${col}`)
@@ -891,7 +994,6 @@ function detectLabelValuePairs(data, cellAnalysis) {
 }
 
 function detectContentBasedTables(data, cellAnalysis) {
-  // FIX #3 / FIX #8: Rewritten to support both single-row and two-row (multi-level) headers.
   const tables = []
 
   const rowMeta = []
@@ -1166,7 +1268,6 @@ function selectTable(table) {
     const isolatedData = []
     const headers = []
     
-    // FIX #3 / FIX #8: Support 1-row and 2-row headers. Combined header labels for multi-row.
     const headerRows = Array.isArray(table.headerRows) && table.headerRows.length
       ? table.headerRows
       : [table.headerRow !== undefined ? table.headerRow : table.startRow]
@@ -1240,7 +1341,6 @@ function autoDetectSelectedTables() {
   isDetecting.value = true
   emit('detect-start')
 
-  // FIX #2 / #4 / #5 / #8: Emit EVERY selected table with full source metadata.
   const selectedTableData = []
   for (const index of selectedTables.value) {
     const table = detectedTables.value[index]
@@ -1250,8 +1350,6 @@ function autoDetectSelectedTables() {
         : [table.headerRow !== undefined ? table.headerRow : table.startRow]
       const headerRowEnd = headerRows[headerRows.length - 1]
 
-      // Combined header labels for each column (handles 2-row headers).
-      // Only include cells that actually contain a value — never fabricate labels.
       const headerLabels = []
       for (let col = table.startCol; col <= table.endCol; col++) {
         const parts = []
@@ -1283,7 +1381,6 @@ function autoDetectSelectedTables() {
         data: []
       }
 
-      // Include the full table block preserving original cell order
       for (let row = table.startRow; row <= table.endRow; row++) {
         if (activeSheet.value.fullData[row]) {
           tableData.data.push(
@@ -1302,8 +1399,6 @@ function autoDetectSelectedTables() {
     selectedCount: selectedTableData.length,
     instrumentType: props.instrumentType
   })
-  
-  // Note: isDetecting is reset by the parent component when detection completes
 }
 
 function formatFieldName(key) {
@@ -1341,82 +1436,109 @@ function closeViewer() {
 }
 
 watch(() => props.workbookData, (newData) => {
-  if (newData && newData.sheets) {
+  if (!newData || !newData.sheets) return
+
+  const sig = (props.fileName || '') + '|' +
+              (newData.fileBuffer ? newData.fileBuffer.byteLength : 0) + '|' +
+              (newData.sheets?.length || 0)
+
+  if (sig === lastParseSig && sheets.value.length > 0) return
+  lastParseSig = sig
+
+  selectedTables.value.clear()
+  selectedTable.value = null
+  isTableIsolationMode.value = false
+
+  const hasFullData = newData.sheets.some(s => s.fullData && s.fullData.length > 0)
+
+  if (hasFullData) {
     sheets.value = newData.sheets
-    selectedTables.value.clear()
-    selectedTable.value = null
-    isTableIsolationMode.value = false
-    emit('workbook-loaded', props.fileName)
-    
-    if (newData.fileBuffer && (!newData.sheets[0]?.fullData || newData.sheets[0]?.fullData?.length === 0)) {
-      loadWorkbookFromFileBuffer(newData.fileBuffer)
-    } else {
-      loadSheetData()
-    }
+    loadSheetData()
+    nextTick(() => emit('workbook-loaded', props.fileName))
+  } else if (newData.fileBuffer) {
+    sheets.value = []
+    nextTick(() => loadWorkbookFromFileBuffer(newData.fileBuffer))
+  } else {
+    sheets.value = newData.sheets
+    loadSheetData()
+    nextTick(() => emit('workbook-loaded', props.fileName))
   }
-}, { immediate: true, deep: true })
+}, { immediate: true })
 
 onMounted(() => {
-  if (props.workbookData && props.workbookData.sheets) {
-    sheets.value = props.workbookData.sheets
-    
-    if (props.workbookData.fileBuffer && (!props.workbookData.sheets[0]?.fullData || props.workbookData.sheets[0]?.fullData?.length === 0)) {
-      loadWorkbookFromFileBuffer(props.workbookData.fileBuffer)
-    } else {
-      loadSheetData()
-    }
-  }
+})
+
+onUnmounted(() => {
+  lastParseSig = ''
 })
 
 function loadWorkbookFromFileBuffer(fileBuffer) {
   if (!fileBuffer) {
     return
   }
-  
+
+  const t0 = performance.now()
+  console.log(`ExcelWorkbookViewer: parse START — ${fileBuffer.byteLength} bytes`)
+
+  const watchdog = setTimeout(() => {
+    console.error('ExcelWorkbookViewer: XLSX.read exceeded 20s — workbook likely has a malformed range')
+  }, 20000)
+
   try {
     const workbook = XLSX.read(fileBuffer, {
       type: 'array',
       cellDates: true,
-      cellStyles: true,
-      cellNF: true,
-      cellFormula: true
+      cellStyles: false,
+      cellNF: false,
+      cellFormula: true,
+      bookVBA: false,
+      bookProps: false
     })
+
+    console.log(`ExcelWorkbookViewer: XLSX.read finished in ${(performance.now() - t0).toFixed(0)}ms, ${workbook.SheetNames.length} sheet(s)`)
     
     const loadedSheets = []
     for (const sheetName of workbook.SheetNames) {
       const worksheet = workbook.Sheets[sheetName]
-      
-      const ref = worksheet['!ref']
+
+      const trueRange = getTrueRange(worksheet)
       let fullData = []
       let totalRows = 0
       let totalColumns = 0
-      let maxRows = 500
-      let maxCols = 100
       
-      if (ref) {
-        const range = XLSX.utils.decode_range(ref)
-        totalRows = range.e.r - range.s.r + 1
-        totalColumns = range.e.c - range.s.c + 1
-        
-        if (totalRows > 50000 || totalColumns > 500) {
-          continue
-        }
-        
-        maxRows = Math.min(500, totalRows)
-        maxCols = Math.min(100, totalColumns)
-        
-        for (let R = range.s.r; R < range.s.r + maxRows; R++) {
-          const row = []
-          for (let C = range.s.c; C < range.s.c + maxCols; C++) {
-            const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
-            const cell = worksheet[cellAddress]
-            if (cell) {
-              row.push(cell.w ?? cell.v ?? '')
-            } else {
-              row.push('')
-            }
+      if (trueRange) {
+        totalRows = trueRange.e.r - trueRange.s.r + 1
+        totalColumns = trueRange.e.c - trueRange.s.c + 1
+
+        const cellMap = new Map()
+        for (const addr in worksheet) {
+          if (addr[0] === '!') continue
+          let decoded
+          try { decoded = XLSX.utils.decode_cell(addr) } catch (e) { continue }
+          if (decoded.r < trueRange.s.r || decoded.r > trueRange.e.r) continue
+          if (decoded.c < trueRange.s.c || decoded.c > trueRange.e.c) continue
+          const cell = worksheet[addr]
+          if (!cell) continue
+          const rowKey = decoded.r - trueRange.s.r
+          const colKey = decoded.c - trueRange.s.c
+          if (!cellMap.has(rowKey)) {
+            cellMap.set(rowKey, new Map())
           }
-          fullData.push(row)
+          cellMap.get(rowKey).set(colKey, cell.w ?? cell.v ?? '')
+        }
+
+        fullData = []
+        for (let r = 0; r < totalRows; r++) {
+          if (cellMap.has(r)) {
+            const row = new Array(totalColumns).fill('')
+            const rowData = cellMap.get(r)
+            for (const [c, val] of rowData) {
+              row[c] = val
+            }
+            fullData.push(row)
+          } else {
+            fullData.push(new Array(totalColumns).fill(''))
+          }
         }
       }
       
@@ -1432,10 +1554,21 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         }
       }
       
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-        defval: '', 
-        raw: false
-      })
+      const ANALYSIS_SAMPLE_ROWS = 500
+      const jsonData = []
+      if (fullData.length > 0) {
+        const headerRow = fullData[0].map((h, i) =>
+          h === '' || h === undefined || h === null ? `Column${i + 1}` : String(h)
+        )
+        const sampleRows = Math.min(ANALYSIS_SAMPLE_ROWS, fullData.length)
+        for (let r = 1; r < sampleRows; r++) {
+          const obj = {}
+          for (let c = 0; c < headerRow.length; c++) {
+            obj[headerRow[c]] = fullData[r][c] ?? ''
+          }
+          jsonData.push(obj)
+        }
+      }
       
       loadedSheets.push({
         name: sheetName,
@@ -1446,15 +1579,17 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         merged_ranges: mergedRanges
       })
       
-      console.log(`ExcelWorkbookViewer: Sheet "${sheetName}" loaded with ${fullData.length} rows`)
+      console.log(`ExcelWorkbookViewer: Sheet "${sheetName}" loaded with ${fullData.length} rows × ${totalColumns} columns`)
     }
     
     sheets.value = loadedSheets
-    console.log(`ExcelWorkbookViewer: Total ${loadedSheets.length} sheets loaded from file buffer`)
+    console.log(`ExcelWorkbookViewer: parse DONE in ${(performance.now() - t0).toFixed(0)}ms — ${loadedSheets.length} sheet(s)`)
+    emit('workbook-loaded', props.fileName)
     loadSheetData()
   } catch (err) {
-    console.error('ExcelWorkbookViewer: Failed to load workbook from file buffer:', err)
-    console.error('ExcelWorkbookViewer: Error stack:', err.stack)
+    console.error('ExcelWorkbookViewer: parse FAILED after', (performance.now() - t0).toFixed(0), 'ms:', err)
+  } finally {
+    clearTimeout(watchdog)
   }
 }
 </script>

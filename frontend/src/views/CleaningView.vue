@@ -60,7 +60,7 @@
           </v-card-text>
         </v-card>
 
-        <!-- Required Values (Single Instrument) — FIX #7 -->
+        <!-- Required Values (Single Instrument) -->
         <v-card v-if="hasDetectedValues" class="stats-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-format-list-checks</v-icon>
@@ -107,8 +107,6 @@
           <v-card-text>
             <div v-if="showDatasetPreview">
               <ExcelViewer
-                :file-base64="dataset?.file_base64"
-                :file-name="dataset?.name || ''"
                 :data="dataset?.data"
                 :headers="dataset?.data ? Object.keys(dataset.data[0] || {}) : []"
                 @data-update="handleDataUpdate"
@@ -134,8 +132,7 @@
                       <div><strong>{{ opt.label }}</strong><div class="desc">{{ opt.desc }}</div></div>
                     </template>
                   </v-checkbox>
-                  
-                  <!-- Date Format Dropdown -->
+
                   <div v-if="cleaningOptions.find(o => o.key === 'formatDates')?.value" class="date-format-section">
                     <label class="date-format-label">Select Date Format:</label>
                     <v-select
@@ -169,7 +166,6 @@
                 <v-chip color="green" size="small">Changes Applied</v-chip>
               </v-card-title>
               <v-card-text>
-                <!-- ===== CLEANING RESULTS KPI CARDS ===== -->
                 <v-row>
                   <v-col cols="12" sm="6" md="3" v-for="stat in resultStats" :key="stat.title">
                     <v-card class="kpi-card result-kpi">
@@ -259,7 +255,7 @@ const showDatasetPreview = ref(false)
 const sheetNames = ref([])
 const selectedSheet = ref('')
 
-// Detected values (Required Values — Single Instrument, FIX #7)
+// Detected values (Required Values — Single Instrument)
 const detectedValues = ref({})
 const excludedFields = ref(new Set())
 
@@ -337,7 +333,8 @@ function toggleFieldInclusion(key) {
   } catch (e) { /* ignore */ }
 }
 
-function loadDetectedValues() {
+async function loadDetectedValues() {
+  // 1) Fast path: sessionStorage
   try {
     const stored =
       sessionStorage.getItem('detectedValues') ||
@@ -352,6 +349,31 @@ function loadDetectedValues() {
     }
   } catch (e) {
     detectedValues.value = {}
+  }
+
+  if (Object.keys(detectedValues.value).length) return
+
+  // 2) Slow path: read from the active session workflow
+  try {
+    const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
+    if (!sid) return
+    for (const key of ['money-market', 'bonds', 'tbills']) {
+      const wf = await sessionManager.getInstrumentWorkflow(sid, key)
+      if (!wf) continue
+      const fields =
+        (wf.autoDetectedFields && Object.keys(wf.autoDetectedFields).length && wf.autoDetectedFields) ||
+        (wf.extractedValues && Object.keys(wf.extractedValues).length && wf.extractedValues) ||
+        null
+      if (fields) {
+        detectedValues.value = { ...fields }
+        if (Array.isArray(wf.excludedDetectedFields)) {
+          excludedFields.value = new Set(wf.excludedDetectedFields)
+        }
+        return
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to read detected values from session workflow:', e)
   }
 }
 
@@ -399,7 +421,7 @@ async function loadData() {
     sheetNames.value = last.headers || ['Sheet1']
     selectedSheet.value = sheetNames.value[0]
     results.value = null
-    alert(`Loaded: ${last.name} (${dataset.value.data?.length || 0} rows)`)
+    console.log(`CleaningView: loaded "${last.name}" (${dataset.value.data?.length || 0} rows)`)
     return
   } catch (err) {
     console.error(err)
@@ -428,13 +450,21 @@ function clearResults() {
 // Delete dataset
 async function deleteData() {
   if (!uploadId.value) return alert('No dataset ID')
-  if (confirm('Delete permanently?')) {
-    await dataAPI.deleteDataset(uploadId.value)
+  if (!confirm('Delete permanently?')) return
+  try {
+    const res = await datasetAPI.delete(uploadId.value)
+    if (!res || res.success === false) {
+      alert('Failed to delete dataset: ' + (res?.message || 'Unknown error'))
+      return
+    }
     dataset.value = null
     originalDataset.value = null
     uploadId.value = null
     results.value = null
     alert('Dataset deleted')
+  } catch (err) {
+    console.error('Delete dataset error:', err)
+    alert('Error deleting dataset: ' + (err.message || err))
   }
 }
 
@@ -456,19 +486,18 @@ function handleDataUpdate(newData) {
 // Start cleaning
 async function startCleaning() {
   if (!dataset.value?.data) return alert('No data to clean')
-  
+
   isCleaning.value = true
   try {
     const options = {}
     cleaningOptions.value.forEach(opt => { if (opt.value) options[opt.key] = true })
-    
-    // Add date format if formatDates is enabled
+
     if (options.formatDates) {
       options.dateFormat = selectedDateFormat.value
     }
-    
+
     const response = await dataAPI.clean(dataset.value.data, options)
-    
+
     if (response.success) {
       results.value = {
         originalRows: dataset.value.data.length,
@@ -504,7 +533,14 @@ async function completeProcess() {
       headers: sheetNames.value || [],
       instrument_type: dataset.value.instrumentType || null
     }
-    const res = await datasetAPI.save(payload.name, payload.file_base64, payload.sheet_names, payload.upload_id, payload.data, payload.headers, payload.instrument_type)
+    const res = await datasetAPI.save(
+      payload.name,
+      payload.file_base64,
+      payload.sheet_names,
+      payload.upload_id,
+      payload.data,
+      payload.headers
+    )
     if (res && res.success) {
       alert('Process completed! Cleaned data saved to datasets')
     } else {
