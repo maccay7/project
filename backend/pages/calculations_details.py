@@ -1005,6 +1005,7 @@ def calculate_bond(item: Dict[str, Any], benchmark_yield: Optional[float] = None
 
             current_yield = (annual_coupon / price) * 100.0 if price > 0 else None
             accrued = None
+            days_accrued = None
             # Use last coupon date or issue date for accrued interest calculation
             last_coupon_d = parse_date(item.get("last_coupon_date")) or parse_date(item.get("issue_date"))
             val_d = parse_date(item.get("valuation_date")) or parse_date(item.get("settlement_date"))
@@ -1028,6 +1029,9 @@ def calculate_bond(item: Dict[str, Any], benchmark_yield: Optional[float] = None
             result["modified_duration"] = round(modified, 4) if modified is not None else None
             result["current_yield"] = round(current_yield, 4) if current_yield is not None else None
             result["accrued_interest"] = round_money(accrued)
+            result["coupon_per_period"] = round_money(coupon_per_period) if coupon_per_period is not None else None
+            result["days_accrued"] = round_time(days_accrued) if days_accrued is not None else None
+            result["price_per_100"] = round((price / face) * 100.0, 2) if price is not None and face is not None and face > 0 else None
             result["bond_equivalent_yield"] = round(ytm_pct, 4) if ytm_pct is not None else None
             result["yield_curve_rate"] = round(benchmark_yield * 100.0, 4) if benchmark_yield is not None else None
             result["status"] = "success"
@@ -1043,6 +1047,9 @@ def calculate_bond(item: Dict[str, Any], benchmark_yield: Optional[float] = None
     result["currentYield"] = result.get("current_yield")
     result["accruedInterest"] = result.get("accrued_interest")
     result["annualCoupon"] = result.get("annual_coupon")
+    result["couponPerPeriod"] = result.get("coupon_per_period")
+    result["daysAccrued"] = result.get("days_accrued")
+    result["pricePer100"] = result.get("price_per_100")
     result["bondEquivalentYield"] = result.get("bond_equivalent_yield")
     result["yieldCurveRate"] = result.get("yield_curve_rate")
     result["presentValue"] = result.get("present_value")
@@ -1127,8 +1134,11 @@ def calculate_money_market(item: Dict[str, Any], benchmark_yield: Optional[float
 
         result["interest_earned"] = round_money(interest)
         result["total_value"] = round_money(total_value)
+        result["maturity_value"] = round_money(total_value)  # Alias for total_value
+        result["total_interest"] = round_money(interest)  # Alias for interest_earned
         result["discount_yield"] = round(discount_yield, 4) if discount_yield is not None else None
         result["effective_yield"] = round(effective_yield, 4)
+        result["effective_annual_rate"] = round(effective_yield, 4)  # Alias for effective_yield
         result["bond_equivalent_yield"] = round(bond_equivalent_yield, 4)
         result["yield_curve_rate"] = round(benchmark_yield * 100.0, 4) if benchmark_yield is not None else None
         result["status"] = "success"
@@ -1139,8 +1149,11 @@ def calculate_money_market(item: Dict[str, Any], benchmark_yield: Optional[float
     result["termDays"] = result["term_days"]
     result["interestEarned"] = result.get("interest_earned")
     result["totalValue"] = result.get("total_value")
+    result["maturityValue"] = result.get("maturity_value")
+    result["totalInterest"] = result.get("total_interest")
     result["discountYield"] = result.get("discount_yield")
     result["effectiveYield"] = result.get("effective_yield")
+    result["effectiveAnnualRate"] = result.get("effective_annual_rate")
     result["bondEquivalentYield"] = result.get("bond_equivalent_yield")
     result["yieldCurveRate"] = result.get("yield_curve_rate")
     if "market_value" in result:
@@ -1330,6 +1343,9 @@ def calculate_data(data: List[Dict],
                     sum(p * r for p, r in zip(principals, rates)) / sum(principals), 4)
             m = _mean("term_days")
             aggregates["avg_days_to_maturity"] = round(m, 2) if m is not None else None
+            # Effective annual rate is the same as effective yield
+            m = _mean("effective_yield")
+            aggregates["effective_annual_rate"] = round(m, 4) if m is not None else None
 
         elif instrument_type == "tbills":
             aggregates["total_face_value"] = round_money(_sum("face_value"))
@@ -1340,17 +1356,27 @@ def calculate_data(data: List[Dict],
             aggregates["avg_discount_rate"] = round(m, 4) if m is not None else None
             m = _mean("term_days")
             aggregates["avg_days_to_maturity"] = round(m, 2) if m is not None else None
+            # Calculate weighted average discount rate (by face value)
+            face_values = [r["face_value"] for r in successful if r.get("face_value") is not None]
+            discount_rates = [r["money_market_yield"] for r in successful if r.get("money_market_yield") is not None]
+            if face_values and sum(face_values) > 0 and len(face_values) == len(discount_rates):
+                aggregates["weighted_avg_discount"] = round(
+                    sum(f * d for f, d in zip(face_values, discount_rates)) / sum(face_values), 4)
+            # Calculate average investment (purchase price)
+            m = _mean("purchase_price")
+            aggregates["avg_investment"] = round(m, 2) if m is not None else None
+            # Annualized yield is bond equivalent yield (365-day basis)
+            m = _mean("bond_equivalent_yield")
+            aggregates["annualized_yield"] = round(m, 4) if m is not None else None
 
         elif instrument_type == "bonds":
             aggregates["total_face_value"] = round_money(_sum("face_value"))
             aggregates["total_market_value"] = round_money(_sum("current_price"))
             # FIX: coupon income should come from annual_coupon, not accrued_interest.
             aggregates["total_coupon_income"] = round_money(_sum("annual_coupon"))
-            # If current_price is 0 or null, use face_value as fallback for total_value
-            total_price = _sum("current_price")
-            if total_price is None or total_price == 0:
-                total_price = _sum("face_value")
-            aggregates["total_value"] = round_money(total_price)
+            # total_value is current_price (market value) - NO silent fallback to face_value
+            # If current_price is missing, it will be None (not fabricated)
+            aggregates["total_value"] = round_money(_sum("current_price"))
             m = _mean("yield_to_maturity")
             aggregates["avg_ytm"] = round(m, 4) if m is not None else None
             m = _mean("duration")
@@ -1374,9 +1400,13 @@ def calculate_data(data: List[Dict],
         "totalAnnualIncome":  "total_coupon_income",   # frontend label for bonds
         "weightedAvgRate":    "weighted_avg_rate",
         "weightedAvgCoupon":  "weighted_avg_coupon",
+        "weightedAvgDiscount": "weighted_avg_discount",
         "avgYTM":             "avg_ytm",
         "avgDiscountRate":    "avg_discount_rate",
         "avgDaysToMaturity":  "avg_days_to_maturity",
+        "avgDuration":        "avg_duration",
+        "avgInvestment":      "avg_investment",
+        "annualizedYield":    "annualized_yield",
         "duration":           "avg_duration",
         "failedCount":        "failed_count",
     }
