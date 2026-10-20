@@ -1,13 +1,3 @@
-# backend/.../fred_config.py
-"""
-FRED API integration.
-
-Rules:
-- Never fabricate benchmark data. If FRED returns nothing, benchmark_rate is None.
-- Country and maturity default to US / 1Y when not supplied.
-- Date range queries are supported via from_date / to_date.
-"""
-
 import os
 import requests
 import logging
@@ -48,7 +38,6 @@ COUNTRY_ALIASES = {
     'ISR': 'IL', 'IL': 'IL',
 }
 
-# Currency per country — used to echo the right currency back to the client
 COUNTRY_CURRENCY = {
     'US': 'USD', 'GB': 'GBP', 'EUR': 'EUR', 'JP': 'JPY', 'CA': 'CAD',
     'AU': 'AUD', 'ZA': 'ZAR', 'CH': 'CHF', 'NZ': 'NZD', 'NO': 'NOK',
@@ -104,7 +93,6 @@ def currency_for_country(country):
 
 
 def series_for_country(country, maturity):
-    """Return (series_id, label, used_maturity, country_upper, currency, note)."""
     if not country or not str(country).strip():
         country = 'US'
     country_upper = normalize_country(country)
@@ -135,11 +123,6 @@ def series_for_country(country, maturity):
 
 
 def fetch_fred_observation(series_id, from_date=None, to_date=None):
-    """
-    Fetch the latest observation for a FRED series.
-    If from_date/to_date are given, uses them to filter; else returns the most recent value.
-    Returns (value, date) or (None, None).
-    """
     if not FRED_API_KEY:
         logger.error("FRED_API_KEY not set — cannot fetch real data")
         return None, None
@@ -181,14 +164,6 @@ def fetch_fred_observation(series_id, from_date=None, to_date=None):
 
 
 def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None):
-    """
-    Return a sorted list of {maturity, maturityLabel, rate, date, source}.
-    Optional `from_date`/`to_date` filter observations by date.
-
-    NO FALLBACKS - only returns real FRED API data.
-    When date range is provided, returns time series data across the date range.
-    When no date range, returns current yield curve across maturities.
-    """
     if not country:
         country = 'US'
     if maturities is None:
@@ -202,10 +177,8 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
 
     points = []
 
-    # If date range is provided, fetch time series data for a key maturity
     if from_date and to_date:
         logger.info(f"Date range mode: Fetching time series from {from_date} to {to_date}")
-        # For date range mode, fetch time series for a key maturity (10Y Treasury)
         key_maturity = '10Y'
         series_id, label, used_mat, _, _, note = series_for_country(country, key_maturity)
         if series_id:
@@ -217,7 +190,7 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                     'observation_start': from_date,
                     'observation_end': to_date,
                     'sort_order': 'asc',
-                    'limit': 1000  # Get up to 1000 data points
+                    'limit': 1000
                 }
                 logger.info(f"Fetching FRED time series for {series_id} from {from_date} to {to_date}")
                 resp = requests.get(f'{FRED_BASE_URL}/series/observations',
@@ -228,15 +201,15 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                         for obs in data['observations']:
                             if obs.get('value') and obs.get('value') != '.':
                                 try:
-                                    val = float(obs['value'))
+                                    val = float(obs['value'])
                                     points.append({
                                         'maturity': maturity_map.get(used_mat, 10.0),
                                         'maturityLabel': used_mat,
                                         'rate': round(val, 4),
                                         'date': obs.get('date'),
                                         'source': 'fred',
-                                        'x': obs.get('date'),  # Use date as x for time series
-                                        'y': round(val, 4)  # Use rate as y
+                                        'x': obs.get('date'),
+                                        'y': round(val, 4)
                                     })
                                 except (ValueError, TypeError):
                                     continue
@@ -247,7 +220,6 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                 logger.error(f"Error fetching time series for {series_id}: {e}")
     else:
         logger.info("Standard yield curve mode: Fetching current rates across maturities")
-        # Standard yield curve mode: get current rates across maturities
         for mat_label in maturities:
             series_id, label, used_mat, _, _, note = series_for_country(country, mat_label)
             if not series_id:
@@ -263,7 +235,6 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                     'source': 'fred',
                 })
 
-    # Sort by date for time series, by maturity for yield curve
     if from_date and to_date:
         points.sort(key=lambda x: x['date'] or '')
     else:
@@ -274,7 +245,6 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
 
 
 def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency='USD'):
-    """Return a benchmark record. benchmark_rate is None when FRED has no data."""
     if not country:
         country = 'US'
     if not maturity:
@@ -305,7 +275,6 @@ def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency=
 
 def attach_fred_to_calculation(result, instrument_type, maturity='1Y',
                                country='US', currency='USD'):
-    """Attach FRED benchmark data to a calculation result. Never fabricates values."""
     if not country:
         country = 'US'
     if not maturity:

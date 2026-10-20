@@ -1,10 +1,3 @@
-"""
-Instrument Detection Logic
-
-This module provides logic to detect whether a dataset contains a single instrument
-or multiple instruments, and determines the appropriate workflow for each case.
-"""
-
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -12,7 +5,6 @@ import re
 
 
 class InstrumentCount(Enum):
-    """Number of instruments in dataset."""
     SINGLE = "single"
     MULTIPLE = "multiple"
     UNKNOWN = "unknown"
@@ -20,7 +12,6 @@ class InstrumentCount(Enum):
 
 @dataclass
 class InstrumentDetectionResult:
-    """Result of instrument detection."""
     count_type: InstrumentCount
     instrument_count: int
     instrument_type: Optional[str]
@@ -30,14 +21,12 @@ class InstrumentDetectionResult:
 
 
 def _normalize(text: str) -> str:
-    """Lowercase and convert separators to spaces for word-boundary matching."""
     if text is None:
         return ""
     return re.sub(r'[_\-:]+', ' ', str(text).lower()).strip()
 
 
 def _word_in(pattern: str, text: str) -> bool:
-    """True if pattern appears in text as a whole word (not a substring)."""
     p = _normalize(pattern)
     t = _normalize(text)
     if not p or not t:
@@ -46,18 +35,8 @@ def _word_in(pattern: str, text: str) -> bool:
 
 
 class InstrumentDetector:
-    """
-    Detects whether a dataset contains single or multiple instruments.
-    
-    This detector:
-    - Analyzes data structure to determine instrument count
-    - Identifies instrument type based on available fields
-    - Provides confidence scores for detection
-    - Recommends appropriate workflow
-    """
-    
+
     def __init__(self):
-        # Field patterns that indicate specific instrument types
         self.instrument_field_patterns = {
             'money-market': [
                 'principal', 'interest_rate', 'investment_amount', 'days_to_maturity',
@@ -72,23 +51,13 @@ class InstrumentDetector:
                 'maturity_date', 'face_value', 'par_value', 'bond_name'
             ]
         }
-        
-        # Fields that typically indicate multiple instruments
+
         self.multi_instrument_indicators = [
             'instrument_name', 'security', 'ticker', 'symbol',
             'isin', 'cusip', 'bond_name', 'tbill_name', 'instrument_id'
         ]
-    
+
     def detect_from_data(self, data: List[Dict]) -> InstrumentDetectionResult:
-        """
-        Detect instrument count and type from data rows.
-        
-        Args:
-            data: List of data rows (dictionaries)
-            
-        Returns:
-            InstrumentDetectionResult with detection details
-        """
         if not data or not isinstance(data, list):
             return InstrumentDetectionResult(
                 count_type=InstrumentCount.UNKNOWN,
@@ -98,16 +67,11 @@ class InstrumentDetector:
                 reasoning="No data provided",
                 recommended_workflow="error"
             )
-        
+
         instrument_count = len(data)
-        
-        # Check for instrument identifier fields
         has_identifier = self._has_instrument_identifier(data)
-        
-        # Detect instrument type from field names
         detected_type = self._detect_instrument_type(data)
-        
-        # Determine if single or multiple
+
         if instrument_count == 1:
             count_type = InstrumentCount.SINGLE
             confidence = 0.95
@@ -119,7 +83,6 @@ class InstrumentDetector:
             reasoning = f"Multiple data rows ({instrument_count}) with instrument identifiers detected"
             recommended_workflow = "multiple_instruments"
         elif instrument_count > 1:
-            # Could be multiple instruments without explicit identifiers
             count_type = InstrumentCount.MULTIPLE
             confidence = 0.70
             reasoning = f"Multiple data rows ({instrument_count}) detected, treating as multiple instruments"
@@ -129,7 +92,7 @@ class InstrumentDetector:
             confidence = 0.0
             reasoning = "Unable to determine instrument count"
             recommended_workflow = "error"
-        
+
         return InstrumentDetectionResult(
             count_type=count_type,
             instrument_count=instrument_count,
@@ -138,17 +101,8 @@ class InstrumentDetector:
             reasoning=reasoning,
             recommended_workflow=recommended_workflow
         )
-    
+
     def detect_from_fields(self, fields: List[str]) -> InstrumentDetectionResult:
-        """
-        Detect instrument type from available field names.
-        
-        Args:
-            fields: List of field names
-            
-        Returns:
-            InstrumentDetectionResult with detection details
-        """
         if not fields:
             return InstrumentDetectionResult(
                 count_type=InstrumentCount.UNKNOWN,
@@ -158,20 +112,18 @@ class InstrumentDetector:
                 reasoning="No fields provided",
                 recommended_workflow="error"
             )
-        
-        # Detect instrument type
+
         detected_type = self._detect_instrument_type_from_fields(fields)
-        
-        # Check for identifier fields
+
         has_identifier = any(
             any(_word_in(indicator, field) for indicator in self.multi_instrument_indicators)
             for field in fields
         )
-        
+
         if has_identifier:
             return InstrumentDetectionResult(
                 count_type=InstrumentCount.MULTIPLE,
-                instrument_count=0,  # Unknown count from fields only
+                instrument_count=0,
                 instrument_type=detected_type,
                 confidence=0.75,
                 reasoning="Instrument identifier fields detected, likely multiple instruments",
@@ -186,65 +138,52 @@ class InstrumentDetector:
                 reasoning="No instrument identifiers detected, assuming single instrument",
                 recommended_workflow="single_instrument"
             )
-    
+
     def _has_instrument_identifier(self, data: List[Dict]) -> bool:
-        """Check if data has instrument identifier fields."""
         if not data:
             return False
-        
+
         first_row = data[0]
         fields = list(first_row.keys())
-        
+
         for field in fields:
             for indicator in self.multi_instrument_indicators:
                 if _word_in(indicator, field):
                     return True
-        
+
         return False
-    
+
     def _detect_instrument_type(self, data: List[Dict]) -> Optional[str]:
-        """Detect instrument type from data fields and values."""
         if not data:
             return None
-        
+
         first_row = data[0]
         fields = list(first_row.keys())
-        
+
         return self._detect_instrument_type_from_fields(fields)
-    
+
     def _detect_instrument_type_from_fields(self, fields: List[str]) -> Optional[str]:
-        """Detect instrument type from field names only (word-boundary aware)."""
         scores = {
             'money-market': 0,
             'tbills': 0,
             'bonds': 0
         }
-        
+
         for field in fields:
             for inst_type, patterns in self.instrument_field_patterns.items():
                 for pattern in patterns:
                     if _word_in(pattern, field):
                         scores[inst_type] += 1
-        
-        # Return type with highest score
+
         max_score = max(scores.values())
         if max_score > 0:
             for inst_type, score in scores.items():
                 if score == max_score:
                     return inst_type
-        
+
         return None
-    
+
     def get_workflow_requirements(self, detection_result: InstrumentDetectionResult) -> Dict:
-        """
-        Get workflow requirements based on detection result.
-        
-        Args:
-            detection_result: Result from instrument detection
-            
-        Returns:
-            Dictionary with workflow requirements
-        """
         if detection_result.recommended_workflow == "single_instrument":
             return {
                 'workflow': 'single_instrument',
@@ -266,7 +205,7 @@ class InstrumentDetector:
                 'show_portfolio_summary': True,
                 'display_mode': 'summary',
                 'require_confirmation': True,
-                'show_individual_details': False  # Show only on "Show Excel" click
+                'show_individual_details': False
             }
         else:
             return {
@@ -283,5 +222,4 @@ class InstrumentDetector:
 
 
 def create_instrument_detector() -> InstrumentDetector:
-    """Factory function to create an instrument detector."""
     return InstrumentDetector()

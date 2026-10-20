@@ -1,11 +1,3 @@
-"""
-Dynamic Field Detection and Semantic Mapping Engine
-
-This module provides intelligent field detection and semantic mapping
-for financial instrument data, supporting various naming conventions
-and field aliases across different datasets.
-"""
-
 from typing import Dict, List, Optional, Tuple, Set
 import re
 from dataclasses import dataclass
@@ -20,7 +12,6 @@ class InstrumentType(Enum):
 
 @dataclass
 class FieldMapping:
-    """Represents a mapping from a source field to a target field."""
     target_field: str
     source_field: str
     confidence: float
@@ -29,21 +20,9 @@ class FieldMapping:
 
 
 class FieldMappingEngine:
-    """
-    Dynamic field detection and semantic mapping engine.
-
-    This engine:
-    - Detects fields from uploaded datasets
-    - Performs semantic matching to identify equivalent fields
-    - Supports field aliases and naming variations
-    - Provides confidence scores for mappings
-    - Allows user confirmation/override of mappings
-    """
 
     def __init__(self):
-        # Comprehensive field alias database
         self.field_aliases = {
-            # Principal/Face Value concepts
             'principal': [
                 'principal', 'face value', 'face', 'face amount', 'par value', 'par',
                 'nominal', 'nominal value', 'investment amount', 'amount invested',
@@ -58,7 +37,6 @@ class FieldMappingEngine:
                 'issue price', 'investment amount', 'amount invested'
             ],
 
-            # Interest Rate concepts
             'interest_rate': [
                 'interest rate', 'rate', 'coupon rate', 'coupon', 'yield',
                 'annual rate', 'nominal rate', 'stated rate'
@@ -74,7 +52,6 @@ class FieldMappingEngine:
                 'money market yield', 'bond equivalent yield', 'bey'
             ],
 
-            # Date concepts
             'maturity_date': [
                 'maturity date', 'maturity', 'due date', 'expiration date',
                 'redemption date'
@@ -87,7 +64,6 @@ class FieldMappingEngine:
                 'issue date', 'issuance date', 'origination date', 'start date'
             ],
 
-            # Term/Duration concepts
             'days_to_maturity': [
                 'days to maturity', 'maturity days', 'term', 'tenor', 'days',
                 'remaining days', 'days remaining'
@@ -96,14 +72,11 @@ class FieldMappingEngine:
                 'term', 'tenor', 'duration', 'maturity', 'period'
             ],
 
-            # Frequency concepts
             'coupon_frequency': [
                 'coupon frequency', 'frequency', 'payment frequency',
                 'payments per year', 'compounding frequency'
             ],
 
-            # Other financial concepts — extended name aliases so any of these
-            # column labels map to the same field.
             'instrument_name': [
                 'parent company name', 'parent company',
                 'issuer', 'company', 'entity',
@@ -132,7 +105,6 @@ class FieldMappingEngine:
             ]
         }
 
-        # Instrument-specific required fields
         self.instrument_requirements = {
             InstrumentType.MONEY_MARKET: {
                 'required': ['principal', 'interest_rate'],
@@ -181,7 +153,6 @@ class FieldMappingEngine:
         }
 
     def normalize_field_name(self, field_name: str) -> str:
-        """Normalize a field name for comparison."""
         if not field_name:
             return ''
         normalized = field_name.lower().strip()
@@ -192,11 +163,6 @@ class FieldMappingEngine:
         return normalized
 
     def calculate_semantic_similarity(self, source_field: str, target_field: str) -> float:
-        """
-        Calculate semantic similarity between two field names.
-        Uses word-boundary matching to avoid false positives such as
-        'rate' matching inside 'corporate'.
-        """
         source_norm = self.normalize_field_name(source_field)
         target_norm = self.normalize_field_name(target_field)
 
@@ -228,7 +194,6 @@ class FieldMappingEngine:
         return 0.0
 
     def detect_fields(self, data: List[Dict]) -> List[str]:
-        """Detect all unique field names from dataset."""
         if not data:
             return []
         fields = set()
@@ -239,7 +204,6 @@ class FieldMappingEngine:
 
     def suggest_mapping(self, source_fields: List[str],
                         instrument_type: InstrumentType) -> Dict[str, FieldMapping]:
-        """Suggest field mappings for a given instrument type."""
         requirements = self.instrument_requirements.get(instrument_type, {})
         required_fields = requirements.get('required', [])
         optional_fields = requirements.get('optional', [])
@@ -276,7 +240,6 @@ class FieldMappingEngine:
         return mappings
 
     def _get_semantic_category(self, field_name: str) -> str:
-        """Get semantic category for a field."""
         categories = {
             'principal': 'amount',
             'face_value': 'amount',
@@ -300,7 +263,6 @@ class FieldMappingEngine:
 
     def validate_mapping(self, mapping: Dict[str, FieldMapping],
                          instrument_type: InstrumentType) -> Tuple[bool, List[str], List[str]]:
-        """Validate a mapping against instrument requirements."""
         requirements = self.instrument_requirements.get(instrument_type, {})
         required_fields = requirements.get('required', [])
 
@@ -320,11 +282,9 @@ class FieldMappingEngine:
 
     def apply_mapping(self, data: List[Dict],
                       mapping: Dict[str, FieldMapping]) -> List[Dict]:
-        """Apply field mappings to transform data."""
         if not data or not mapping:
             return data
 
-        # Precompute consumed source columns once
         consumed_sources = {fm.source_field for fm in mapping.values()}
 
         transformed = []
@@ -343,5 +303,4 @@ class FieldMappingEngine:
 
 
 def create_field_mapping_engine() -> FieldMappingEngine:
-    """Factory function to create a field mapping engine."""
     return FieldMappingEngine()

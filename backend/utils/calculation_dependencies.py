@@ -1,10 +1,3 @@
-"""
-Calculation Dependency Validation Engine
-
-Validates that required fields are present before attempting calculations.
-No mock or fallback data is used - missing dependencies are clearly reported.
-"""
-
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from enum import Enum
@@ -29,9 +22,6 @@ class DependencyValidation:
     optional_fields: List[str]
 
 
-# -----------------------------------------------------------------------------
-# Frequency labels → integer (payments per year)
-# -----------------------------------------------------------------------------
 TEXT_FREQUENCY_VALUES = {
     "annual": 1, "annually": 1, "yearly": 1, "1": 1,
     "semi-annual": 2, "semiannual": 2, "semi annual": 2,
@@ -51,7 +41,6 @@ NUMERIC_FIELDS = {
 
 
 def parse_frequency(value: Any) -> Optional[int]:
-    """Convert 'semi-annual' / 2 / '2' to an int. Returns None if unknown."""
     if value is None:
         return None
     if isinstance(value, bool):
@@ -75,7 +64,6 @@ def parse_frequency(value: Any) -> Optional[int]:
 
 
 class CalculationDependencyEngine:
-    """Defines and validates calculation dependencies for every instrument type."""
 
     def __init__(self):
         self.money_market_dependencies = {

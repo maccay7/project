@@ -1,19 +1,6 @@
-"""
-Calculations API — HTTP layer.
-
-This module has NO financial math. It:
-  1. Reads the JSON payload from the HTTP request.
-  2. Passes `data` to pages/calculations_details.py.
-  3. Returns the response as JSON.
-
-Multi-instrument sheets are NOT auto-split by classification labels here.
-The caller supplies the instrument_type (from the page the user is on);
-we trust it verbatim and never try to re-detect.
-"""
-
 import json
 import uuid
-from datetime import datetime
+from contextlib import contextmanager
 from flask import request, jsonify
 
 from pages.calculations_details import (
@@ -26,9 +13,33 @@ from utils.calculation_dependencies import create_calculation_dependency_engine
 from utils.instrument_detection import create_instrument_detector
 
 
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
+@contextmanager
+def _db():
+    conn = get_db()
+    cursor = None
+    if conn:
+        try:
+            cursor = conn.cursor()
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+    try:
+        yield conn, cursor
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 def normalize_instrument_type(instrument_type):
     if not instrument_type:
@@ -46,11 +57,6 @@ def normalize_instrument_type(instrument_type):
 
 
 def _instrument_identity(result_row):
-    """
-    Extract a stable identity key for an instrument result dict.
-    Prefer explicit IDs; fall back to instrument name; last resort: row index.
-    Returns a lower-cased string, or None if no identity can be determined.
-    """
     if not isinstance(result_row, dict):
         return None
     candidates = [
@@ -62,7 +68,6 @@ def _instrument_identity(result_row):
         result_row.get('instrumentName'),
         result_row.get('name'),
     ]
-    # Also look inside 'calculation' and 'inputs'
     for nested_key in ('calculation', 'inputs', 'sourceData'):
         nested = result_row.get(nested_key)
         if isinstance(nested, dict):
@@ -88,46 +93,25 @@ def _instrument_identity(result_row):
 
 
 def _unique_instrument_count(individual_results, backend_count=0):
-    """
-    Return the number of UNIQUE successfully-calculated instruments.
-
-    Preference order:
-      1. backend_count if it is a positive integer
-      2. count of unique identity keys from individual_results
-      3. count of successful rows (last resort)
-    """
     if isinstance(backend_count, int) and backend_count > 0:
         return backend_count
-
     if not individual_results:
         return 0
-
     success_rows = [r for r in (individual_results or [])
                     if isinstance(r, dict) and r.get('status') == 'success']
-
     if not success_rows:
         return 0
-
     seen = set()
     for r in success_rows:
         key = _instrument_identity(r)
         if key:
             seen.add(key)
-
     if seen:
         return len(seen)
-    # Fallback: no identity available, count successful rows
     return len(success_rows)
 
 
 def detect_instruments_from_data(data):
-    """
-    Detect whether a sheet has more than one instrument type.
-    ONLY the 'instrument' / 'instrument_type' / 'instrument type' columns
-    are treated as signals. Free-text columns like Classification,
-    Category, or Asset Class are ignored so descriptive labels do not
-    accidentally trigger an instrument split.
-    """
     if not data:
         return {'unique_instruments': [], 'instrument_counts': {},
                 'total_rows': 0, 'is_multi_instrument': False}
@@ -183,10 +167,6 @@ def split_data_by_instrument(data, instrument_column):
     return split
 
 
-# -----------------------------------------------------------------------------
-# PERSISTENCE (audit history only, doesn't affect the response)
-# -----------------------------------------------------------------------------
-
 def _ensure_calculations_table(cursor):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS calculations (
@@ -218,6 +198,7 @@ def save_calculation(instrument_type, input_data, result_data,
     conn = get_db()
     if not conn:
         return None
+    cursor = None
     try:
         import hashlib
         cursor = conn.cursor()
@@ -272,6 +253,16 @@ def save_calculation(instrument_type, input_data, result_data,
     except Exception as e:
         print(f"Save failed: {e}")
         return None
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _load_json(value):
@@ -283,13 +274,41 @@ def _load_json(value):
     return value if value is not None else {}
 
 
-# -----------------------------------------------------------------------------
-# ROUTES
-# -----------------------------------------------------------------------------
+def _fetch_benchmark(inst_type, maturity, country, currency):
+    try:
+        benchmark = get_market_benchmark(inst_type, maturity, country, currency)
+        if benchmark.get('benchmark_rate') is not None:
+            return benchmark['benchmark_rate']
+    except Exception as e:
+        print(f"FRED benchmark fetch failed: {e}")
+    return None
+
+
+def _attach_fred(result, inst_type, maturity, country, currency):
+    try:
+        attach_fred_to_calculation(result, inst_type, maturity, country, currency)
+    except Exception as e:
+        print(f"FRED failed: {e}")
+
+
+def _fix_instrument_count(result):
+    calc_list = result.get('calculations', [])
+    individual = [{
+        'instrumentId': c.get('instrument_name') or f'instrument-{i+1}',
+        'instrument_name': c.get('instrument_name'),
+        'status': c.get('status', 'cannot_calculate'),
+    } for i, c in enumerate(calc_list)]
+    unique_count = _unique_instrument_count(
+        individual, result.get('instrument_count', 0)
+    )
+    if isinstance(result.get('aggregates'), dict):
+        result['aggregates']['instrument_count'] = unique_count
+    result['instrument_count'] = unique_count
+    return unique_count
+
 
 def calculations_routes(app):
 
-    # ------------------------------------------------------------------ validate
     @app.route('/api/calculations/validate', methods=['POST', 'OPTIONS'])
     def calculations_validate():
         if request.method == 'OPTIONS':
@@ -329,7 +348,6 @@ def calculations_routes(app):
                         'invalid_rows': len(data) - valid_count,
                         'validations': validations})
 
-    # ------------------------------------------------------------------ single
     @app.route('/api/calculations/single', methods=['POST', 'OPTIONS'])
     def calculations_single():
         if request.method == 'OPTIONS':
@@ -351,17 +369,10 @@ def calculations_routes(app):
                             'errors': [{'field': 'instrument_type', 'code': 'missing',
                                         'message': 'instrument_type is required'}]}), 400
 
-        # Fetch FRED benchmark rate before calculation
-        benchmark_yield = None
-        try:
-            benchmark = get_market_benchmark(inst_type, maturity, country, currency)
-            if benchmark.get('benchmark_rate') is not None:
-                benchmark_yield = benchmark['benchmark_rate']
-        except Exception as e:
-            print(f"FRED benchmark fetch failed: {e}")
+        benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
         result = calc_single(row, inst_type, valuation_date=valuation_date,
-                           benchmark_yield=benchmark_yield)
+                             benchmark_yield=benchmark_yield)
         if result['status'] != 'success':
             return jsonify({
                 'status': 'error',
@@ -388,13 +399,9 @@ def calculations_routes(app):
             'sourceData': row,
             'warnings': [],
         }
-        try:
-            attach_fred_to_calculation(response, inst_type, maturity, country, currency)
-        except Exception as e:
-            print(f"FRED failed: {e}")
+        _attach_fred(response, inst_type, maturity, country, currency)
         return jsonify(response)
 
-    # ------------------------------------------------------------------ multiple
     @app.route('/api/calculations/multiple', methods=['POST', 'OPTIONS'])
     def calculations_multiple():
         if request.method == 'OPTIONS':
@@ -420,10 +427,6 @@ def calculations_routes(app):
                             'errors': [{'field': 'instrument_type', 'code': 'missing',
                                         'message': 'instrument_type is required'}]}), 400
 
-        # The caller supplies the instrument_type (based on the page the user
-        # is on). We do NOT try to re-detect from a Classification-like column,
-        # because free-text labels like "ZWG MM" would be misinterpreted as
-        # instrument types and break the calculation for every row.
         merged = []
         for row in data:
             r = {**row}
@@ -431,30 +434,16 @@ def calculations_routes(app):
                 r['valuation_date'] = valuation_date
             merged.append(r)
 
-        # Fetch FRED benchmark rate before calculation
-        benchmark_yield = None
-        try:
-            benchmark = get_market_benchmark(inst_type, maturity, country, currency)
-            if benchmark.get('benchmark_rate') is not None:
-                benchmark_yield = benchmark['benchmark_rate']
-        except Exception as e:
-            print(f"FRED benchmark fetch failed: {e}")
+        benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
         calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date,
                                      benchmark_yield=benchmark_yield)
-        try:
-            attach_fred_to_calculation(calc_result, inst_type, maturity, country, currency)
-        except Exception as e:
-            print(f"FRED failed: {e}")
+        _attach_fred(calc_result, inst_type, maturity, country, currency)
 
         individual = []
         for idx, calc in enumerate(calc_result.get('calculations', [])):
             src = data[idx] if idx < len(data) else {}
             v = validate_row(src, inst_type)
-
-            # Include the original input row so the frontend can dedupe
-            # consistently on instrument identity even when the backend
-            # calculation dict itself omits the name/id.
             merged_inputs = {**v['normalized_row']}
             for k, val in src.items():
                 if k not in merged_inputs and val not in (None, ''):
@@ -485,7 +474,6 @@ def calculations_routes(app):
         success_count = sum(1 for r in individual if r['status'] == 'success')
         failure_count = len(individual) - success_count
 
-        # ── FIX: use UNIQUE instrument count, not raw row count ───────────
         backend_count = calc_result.get('instrument_count', 0)
         unique_count = _unique_instrument_count(individual, backend_count)
 
@@ -508,7 +496,6 @@ def calculations_routes(app):
             'warnings': [],
         }
 
-        # Make sure the aggregate dict also reports the corrected count
         if isinstance(response['aggregates'], dict):
             response['aggregates']['instrument_count'] = unique_count
 
@@ -524,7 +511,6 @@ def calculations_routes(app):
             return jsonify(response), 400
         return jsonify(response)
 
-    # ------------------------------------------------------------------ portfolio
     @app.route('/api/calculations/portfolio', methods=['POST', 'OPTIONS'])
     def calculations_portfolio():
         if request.method == 'OPTIONS':
@@ -549,22 +535,23 @@ def calculations_routes(app):
                         'total_instrument_count': count, 'total_failed_count': failed,
                         'by_type': by_type, 'currency': currency})
 
-    # ------------------------------------------------------------------ get by id
     @app.route('/api/calculations/<calculation_id>', methods=['GET', 'OPTIONS'])
     def calculations_get_by_id(calculation_id):
         if request.method == 'OPTIONS':
             return '', 200
-        conn = get_db()
-        if not conn:
-            return jsonify({'status': 'error', 'errors': [
-                {'field': 'db', 'code': 'unavailable',
-                 'message': 'Database unavailable'}]}), 500
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM calculations WHERE calculation_id = %s LIMIT 1",
-                           (calculation_id,))
-            row = cursor.fetchone()
-            cursor.close(); conn.close()
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'status': 'error', 'errors': [
+                    {'field': 'db', 'code': 'unavailable',
+                     'message': 'Database unavailable'}]}), 500
+            try:
+                cursor.execute("SELECT * FROM calculations WHERE calculation_id = %s LIMIT 1",
+                               (calculation_id,))
+                row = cursor.fetchone()
+            except Exception as e:
+                return jsonify({'status': 'error', 'errors': [
+                    {'field': 'db', 'code': 'error', 'message': str(e)}]}), 500
+
             if not row:
                 return jsonify({'status': 'error', 'errors': [
                     {'field': 'calculationId', 'code': 'not_found',
@@ -577,11 +564,7 @@ def calculations_routes(app):
                 'inputData': _load_json(row.get('input_data')),
                 'resultData': _load_json(row.get('result_data')),
             })
-        except Exception as e:
-            return jsonify({'status': 'error', 'errors': [
-                {'field': 'db', 'code': 'error', 'message': str(e)}]}), 500
 
-    # ------------------------------------------------------------------ recalculate
     @app.route('/api/calculations/recalculate', methods=['POST', 'OPTIONS'])
     def calculations_recalculate():
         if request.method == 'OPTIONS':
@@ -604,31 +587,18 @@ def calculations_routes(app):
                 r['valuation_date'] = valuation_date
             merged.append(r)
 
-        # Fetch FRED benchmark rate before calculation
-        benchmark_yield = None
-        try:
-            benchmark = get_market_benchmark(inst_type, maturity, country, currency)
-            if benchmark.get('benchmark_rate') is not None:
-                benchmark_yield = benchmark['benchmark_rate']
-        except Exception as e:
-            print(f"FRED benchmark fetch failed: {e}")
+        benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
         calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date,
                                      benchmark_yield=benchmark_yield)
-        try:
-            attach_fred_to_calculation(calc_result, inst_type, maturity, country, currency)
-        except Exception:
-            pass
+        _attach_fred(calc_result, inst_type, maturity, country, currency)
 
-        # Build a result-shaped list to compute a unique instrument count
         calc_list = calc_result.get('calculations', [])
-        individual = []
-        for idx, calc in enumerate(calc_list):
-            individual.append({
-                'instrumentId': calc.get('instrument_name') or f'instrument-{idx+1}',
-                'instrument_name': calc.get('instrument_name'),
-                'status': calc.get('status', 'cannot_calculate'),
-            })
+        individual = [{
+            'instrumentId': c.get('instrument_name') or f'instrument-{i+1}',
+            'instrument_name': c.get('instrument_name'),
+            'status': c.get('status', 'cannot_calculate'),
+        } for i, c in enumerate(calc_list)]
         unique_count = _unique_instrument_count(
             individual, calc_result.get('instrument_count', 0)
         )
@@ -650,7 +620,6 @@ def calculations_routes(app):
             'warnings': [],
         })
 
-    # -------------------------------------------------------- legacy endpoints
     def _legacy_per_type(inst_type):
         endpoint_name = f'legacy_calculate_{inst_type.replace("-", "_")}'
 
@@ -670,35 +639,12 @@ def calculations_routes(app):
                 return jsonify({'success': False, 'status': 'error',
                                 'message': 'No data provided'}), 400
 
-            # Fetch FRED benchmark rate before calculation
-            benchmark_yield = None
-            try:
-                benchmark = get_market_benchmark(inst_type, maturity, country, currency)
-                if benchmark.get('benchmark_rate') is not None:
-                    benchmark_yield = benchmark['benchmark_rate']
-            except Exception as e:
-                print(f"FRED benchmark fetch failed: {e}")
+            benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
             result = calculate_data(data, inst_type, valuation_date=valuation_date,
-                                 benchmark_yield=benchmark_yield)
-            try:
-                attach_fred_to_calculation(result, inst_type, maturity, country, currency)
-            except Exception:
-                pass
-
-            # Fix the aggregate instrument_count on legacy responses too
-            calc_list = result.get('calculations', [])
-            individual = [{
-                'instrumentId': c.get('instrument_name') or f'instrument-{i+1}',
-                'instrument_name': c.get('instrument_name'),
-                'status': c.get('status', 'cannot_calculate'),
-            } for i, c in enumerate(calc_list)]
-            unique_count = _unique_instrument_count(
-                individual, result.get('instrument_count', 0)
-            )
-            if isinstance(result.get('aggregates'), dict):
-                result['aggregates']['instrument_count'] = unique_count
-            result['instrument_count'] = unique_count
+                                    benchmark_yield=benchmark_yield)
+            _attach_fred(result, inst_type, maturity, country, currency)
+            _fix_instrument_count(result)
 
             return jsonify({
                 'success': True,
@@ -731,34 +677,12 @@ def calculations_routes(app):
             return jsonify({'success': False, 'status': 'error',
                             'message': 'No uploaded data'}), 400
 
-        # Fetch FRED benchmark rate before calculation
-        benchmark_yield = None
-        try:
-            benchmark = get_market_benchmark(inst_type, maturity, country, currency)
-            if benchmark.get('benchmark_rate') is not None:
-                benchmark_yield = benchmark['benchmark_rate']
-        except Exception as e:
-            print(f"FRED benchmark fetch failed: {e}")
+        benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
         result = calculate_data(data, inst_type, valuation_date=valuation_date,
-                             benchmark_yield=benchmark_yield)
-        try:
-            attach_fred_to_calculation(result, inst_type, maturity, country, currency)
-        except Exception:
-            pass
-
-        calc_list = result.get('calculations', [])
-        individual = [{
-            'instrumentId': c.get('instrument_name') or f'instrument-{i+1}',
-            'instrument_name': c.get('instrument_name'),
-            'status': c.get('status', 'cannot_calculate'),
-        } for i, c in enumerate(calc_list)]
-        unique_count = _unique_instrument_count(
-            individual, result.get('instrument_count', 0)
-        )
-        if isinstance(result.get('aggregates'), dict):
-            result['aggregates']['instrument_count'] = unique_count
-        result['instrument_count'] = unique_count
+                                benchmark_yield=benchmark_yield)
+        _attach_fred(result, inst_type, maturity, country, currency)
+        _fix_instrument_count(result)
 
         return jsonify({'success': True, 'data': result})
 
@@ -775,6 +699,7 @@ def calculations_routes(app):
         if not data:
             return jsonify({'success': False, 'status': 'error',
                             'message': 'No uploaded data'}), 400
+
         detection = detect_instruments_from_data(data)
         if detection.get('is_multi_instrument'):
             split = split_data_by_instrument(data, detection.get('instrument_column'))
@@ -782,115 +707,71 @@ def calculations_routes(app):
             for itype, subset in split.items():
                 if not subset:
                     continue
-
-                # Fetch FRED benchmark rate before calculation
-                benchmark_yield = None
-                try:
-                    benchmark = get_market_benchmark(itype, maturity, country, currency)
-                    if benchmark.get('benchmark_rate') is not None:
-                        benchmark_yield = benchmark['benchmark_rate']
-                except Exception as e:
-                    print(f"FRED benchmark fetch failed: {e}")
-
+                benchmark_yield = _fetch_benchmark(itype, maturity, country, currency)
                 r = calculate_data(subset, itype, valuation_date=valuation_date,
-                                 benchmark_yield=benchmark_yield)
-
-                calc_list = r.get('calculations', [])
-                individual = [{
-                    'instrumentId': c.get('instrument_name') or f'instrument-{i+1}',
-                    'instrument_name': c.get('instrument_name'),
-                    'status': c.get('status', 'cannot_calculate'),
-                } for i, c in enumerate(calc_list)]
-                unique_count = _unique_instrument_count(
-                    individual, r.get('instrument_count', 0)
-                )
-                if isinstance(r.get('aggregates'), dict):
-                    r['aggregates']['instrument_count'] = unique_count
-                r['instrument_count'] = unique_count
-
+                                   benchmark_yield=benchmark_yield)
+                _fix_instrument_count(r)
                 all_results[itype] = {'data': r, 'row_count': len(subset)}
             return jsonify({'success': True, 'is_multi_instrument': True,
                             'instrument_detection': detection,
                             'results': all_results,
                             'calculation_count': len(all_results)})
+
         detector = create_instrument_detector()
         det = detector.detect_from_data(data)
         inst_type = det.instrument_type or 'money-market'
 
-        # Fetch FRED benchmark rate before calculation
-        benchmark_yield = None
-        try:
-            benchmark = get_market_benchmark(inst_type, payload.get('maturity'),
-                                             payload.get('country'), payload.get('currency'))
-            if benchmark.get('benchmark_rate') is not None:
-                benchmark_yield = benchmark['benchmark_rate']
-        except Exception as e:
-            print(f"FRED benchmark fetch failed: {e}")
+        benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
         result = calculate_data(data, inst_type, valuation_date=valuation_date,
-                             benchmark_yield=benchmark_yield)
-
-        calc_list = result.get('calculations', [])
-        individual = [{
-            'instrumentId': c.get('instrument_name') or f'instrument-{i+1}',
-            'instrument_name': c.get('instrument_name'),
-            'status': c.get('status', 'cannot_calculate'),
-        } for i, c in enumerate(calc_list)]
-        unique_count = _unique_instrument_count(
-            individual, result.get('instrument_count', 0)
-        )
-        if isinstance(result.get('aggregates'), dict):
-            result['aggregates']['instrument_count'] = unique_count
-        result['instrument_count'] = unique_count
+                                benchmark_yield=benchmark_yield)
+        _fix_instrument_count(result)
 
         return jsonify({'success': True, 'is_multi_instrument': False,
                         'instrument_type': inst_type, 'data': result})
 
-    # -------------------------------------------------------- summaries
     @app.route('/api/calculations/history', methods=['GET', 'OPTIONS'])
     def calculations_history():
         if request.method == 'OPTIONS':
             return '', 200
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': True, 'data': []})
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, instrument_type, dataset_id, session_id, "
-                           "calculation_status, created_at FROM calculations "
-                           "ORDER BY created_at DESC LIMIT 20")
-            rows = cursor.fetchall()
-            cursor.close(); conn.close()
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': True, 'data': []})
+            try:
+                cursor.execute("SELECT id, instrument_type, dataset_id, session_id, "
+                               "calculation_status, created_at FROM calculations "
+                               "ORDER BY created_at DESC LIMIT 20")
+                rows = cursor.fetchall()
+            except Exception:
+                return jsonify({'success': True, 'data': []})
             return jsonify({'success': True, 'data': [{
                 'id': r['id'], 'instrument_type': r['instrument_type'],
                 'dataset_id': r['dataset_id'], 'session_id': r['session_id'],
                 'status': r['calculation_status'],
                 'created_at': r['created_at'].isoformat() if r['created_at'] else None,
             } for r in rows]})
-        except Exception:
-            return jsonify({'success': True, 'data': []})
 
     @app.route('/api/calculations/latest', methods=['GET', 'OPTIONS'])
     def calculations_latest():
         if request.method == 'OPTIONS':
             return '', 200
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'DB unavailable'}), 500
-        try:
-            cursor = conn.cursor()
-            dataset_id = request.args.get('dataset_id')
-            session_id = request.args.get('session_id')
-            if dataset_id:
-                cursor.execute("SELECT * FROM calculations WHERE dataset_id = %s "
-                               "ORDER BY created_at DESC LIMIT 1", (dataset_id,))
-            elif session_id:
-                cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
-                               "ORDER BY created_at DESC LIMIT 1", (session_id,))
-            else:
-                cursor.execute("SELECT * FROM calculations ORDER BY created_at DESC LIMIT 1")
-            row = cursor.fetchone()
-            cursor.close(); conn.close()
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'DB unavailable'}), 500
+            try:
+                dataset_id = request.args.get('dataset_id')
+                session_id = request.args.get('session_id')
+                if dataset_id:
+                    cursor.execute("SELECT * FROM calculations WHERE dataset_id = %s "
+                                   "ORDER BY created_at DESC LIMIT 1", (dataset_id,))
+                elif session_id:
+                    cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
+                                   "ORDER BY created_at DESC LIMIT 1", (session_id,))
+                else:
+                    cursor.execute("SELECT * FROM calculations ORDER BY created_at DESC LIMIT 1")
+                row = cursor.fetchone()
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
             if not row:
                 return jsonify({'success': False, 'message': 'Not found'}), 404
             return jsonify({'success': True, 'data': {
@@ -900,8 +781,6 @@ def calculations_routes(app):
                 'status': row.get('calculation_status'),
                 'created_at': row.get('created_at').isoformat() if row.get('created_at') else None,
             }})
-        except Exception as e:
-            return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/calculations/instrument-summary', methods=['POST', 'OPTIONS'])
     def instrument_summary():
@@ -911,15 +790,15 @@ def calculations_routes(app):
         session_id = payload.get('session_id')
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id required'}), 400
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': True, 'data': {'columns': [], 'rows': []}})
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
-                           "ORDER BY created_at DESC", (session_id,))
-            rows = cursor.fetchall()
-            cursor.close(); conn.close()
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': True, 'data': {'columns': [], 'rows': []}})
+            try:
+                cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
+                               "ORDER BY created_at DESC", (session_id,))
+                rows = cursor.fetchall()
+            except Exception:
+                return jsonify({'success': True, 'data': {'columns': [], 'rows': []}})
             summary_rows = []
             for row in rows:
                 result_data = _load_json(row.get('result_data'))
@@ -938,8 +817,6 @@ def calculations_routes(app):
                 cols.update(r.keys())
             return jsonify({'success': True,
                             'data': {'columns': sorted(cols), 'rows': summary_rows}})
-        except Exception:
-            return jsonify({'success': True, 'data': {'columns': [], 'rows': []}})
 
     @app.route('/api/calculations/portfolio-summary', methods=['POST', 'OPTIONS'])
     def portfolio_summary():
@@ -949,16 +826,16 @@ def calculations_routes(app):
         session_id = payload.get('session_id')
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id required'}), 400
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': True, 'data': {
-                'columns': [], 'rows': [], 'portfolio_total': 0, 'instrument_counts': {}}})
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
-                           "ORDER BY created_at DESC", (session_id,))
-            rows = cursor.fetchall()
-            cursor.close(); conn.close()
+        empty = {'columns': [], 'rows': [], 'portfolio_total': 0, 'instrument_counts': {}}
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': True, 'data': empty})
+            try:
+                cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
+                               "ORDER BY created_at DESC", (session_id,))
+                rows = cursor.fetchall()
+            except Exception:
+                return jsonify({'success': True, 'data': empty})
             portfolio_rows = []
             portfolio_total = 0
             instrument_counts = {}
@@ -973,8 +850,6 @@ def calculations_routes(app):
                 tv = agg.get('total_value') or agg.get('total_market_value') or agg.get('total_face_value') or 0
                 portfolio_total += float(tv or 0)
 
-                # Fix: derive a unique count from stored results if the
-                # stored aggregate is wrong (old rows pre-fix).
                 stored_count = agg.get('instrument_count') or 0
                 stored_results = result_data.get('results') or result_data.get('calculations') or []
                 unique_count = _unique_instrument_count(stored_results, stored_count)
@@ -994,23 +869,20 @@ def calculations_routes(app):
                 'portfolio_total': portfolio_total,
                 'instrument_counts': instrument_counts,
             }})
-        except Exception:
-            return jsonify({'success': True, 'data': {
-                'columns': [], 'rows': [], 'portfolio_total': 0, 'instrument_counts': {}}})
 
     @app.route('/api/calculations/session/<session_id>', methods=['GET', 'OPTIONS'])
     def calculations_by_session(session_id):
         if request.method == 'OPTIONS':
             return '', 200
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': True, 'data': []})
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
-                           "ORDER BY created_at DESC", (session_id,))
-            rows = cursor.fetchall()
-            cursor.close(); conn.close()
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': True, 'data': []})
+            try:
+                cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
+                               "ORDER BY created_at DESC", (session_id,))
+                rows = cursor.fetchall()
+            except Exception:
+                return jsonify({'success': True, 'data': []})
             return jsonify({'success': True, 'data': [{
                 'id': r.get('id'),
                 'instrument_type': r.get('instrument_type'),
@@ -1018,22 +890,20 @@ def calculations_routes(app):
                 'status': r.get('calculation_status'),
                 'created_at': r.get('created_at').isoformat() if r.get('created_at') else None,
             } for r in rows]})
-        except Exception:
-            return jsonify({'success': True, 'data': []})
 
     @app.route('/api/calculations/session-workflows/<session_id>', methods=['GET', 'OPTIONS'])
     def session_workflows(session_id):
         if request.method == 'OPTIONS':
             return '', 200
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': True, 'data': {}})
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT instrument_workflows FROM ui_sessions WHERE session_id = %s",
-                           (session_id,))
-            row = cursor.fetchone()
-            cursor.close(); conn.close()
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': True, 'data': {}})
+            try:
+                cursor.execute("SELECT instrument_workflows FROM ui_sessions WHERE session_id = %s",
+                               (session_id,))
+                row = cursor.fetchone()
+            except Exception:
+                return jsonify({'success': True, 'data': {}})
             if row and row.get('instrument_workflows'):
                 try:
                     v = row['instrument_workflows']
@@ -1041,8 +911,6 @@ def calculations_routes(app):
                                     'data': json.loads(v) if isinstance(v, str) else v})
                 except Exception:
                     return jsonify({'success': True, 'data': {}})
-            return jsonify({'success': True, 'data': {}})
-        except Exception:
             return jsonify({'success': True, 'data': {}})
 
 

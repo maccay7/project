@@ -1,13 +1,3 @@
-# backend/.../fred_config.py
-"""
-FRED API integration.
-
-Rules:
-|- Never fabricate benchmark data. If FRED returns nothing, benchmark_rate is None.
-|- Country and maturity default to US / 1Y when not supplied.
-|- Date range queries are supported via from_date / to_date.
-"""
-
 import os
 import requests
 import logging
@@ -48,7 +38,6 @@ COUNTRY_ALIASES = {
     'ISR': 'IL', 'IL': 'IL',
 }
 
-# Currency per country — used to echo the right currency back to the client
 COUNTRY_CURRENCY = {
     'US': 'USD', 'GB': 'GBP', 'EUR': 'EUR', 'JP': 'JPY', 'CA': 'CAD',
     'AU': 'AUD', 'ZA': 'ZAR', 'CH': 'CHF', 'NZ': 'NZD', 'NO': 'NOK',
@@ -104,7 +93,6 @@ def currency_for_country(country):
 
 
 def series_for_country(country, maturity):
-    """Return (series_id, label, used_maturity, country_upper, currency, note)."""
     if not country or not str(country).strip():
         country = 'US'
     country_upper = normalize_country(country)
@@ -134,61 +122,63 @@ def series_for_country(country, maturity):
     return None, None, maturity, country_upper, currency_for_country(country_upper), 'No series found'
 
 
-def fetch_fred_observation(series_id, from_date=None, to_date=None):
-    """
-    Fetch the latest observation for a FRED series.
-    If from_date/to_date are given, uses them to filter; else returns the most recent value.
-    Returns (value, date) or (None, None).
-    """
+def fetch_fred_observation(series_id, from_date=None, to_date=None, max_retries=3):
     if not FRED_API_KEY:
         logger.error("FRED_API_KEY not set — cannot fetch real data")
         return None, None
-    try:
-        params = {
-            'series_id': series_id,
-            'api_key': FRED_API_KEY,
-            'file_type': 'json',
-        }
-        if from_date and to_date:
-            params['observation_start'] = from_date
-            params['observation_end'] = to_date
-            params['sort_order'] = 'desc'
-            params['limit'] = 1
-        else:
-            params['sort_order'] = 'desc'
-            params['limit'] = 1
 
-        resp = requests.get(f'{FRED_BASE_URL}/series/observations',
-                            params=params, timeout=10)
-        if resp.status_code != 200:
-            logger.error(f"FRED API status {resp.status_code} for series {series_id}")
-            return None, None
-        data = resp.json()
-        if 'error_code' in data:
-            logger.error(f"FRED error: {data.get('error_message')} for series {series_id}")
-            return None, None
-        for obs in data.get('observations', []):
-            if obs.get('value') and obs.get('value') != '.':
-                try:
-                    return float(obs['value']), obs.get('date')
-                except (ValueError, TypeError):
+    params = {
+        'series_id': series_id,
+        'api_key': FRED_API_KEY,
+        'file_type': 'json',
+    }
+    if from_date and to_date:
+        params['observation_start'] = from_date
+        params['observation_end'] = to_date
+        params['sort_order'] = 'desc'
+        params['limit'] = 1
+    else:
+        params['sort_order'] = 'desc'
+        params['limit'] = 1
+
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(f'{FRED_BASE_URL}/series/observations',
+                                params=params, timeout=30)
+            if resp.status_code != 200:
+                logger.error(f"FRED API status {resp.status_code} for series {series_id} (attempt {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
                     continue
-        logger.warning(f"No valid observation for series {series_id}")
-        return None, None
-    except Exception as e:
-        logger.error(f"Exception fetching FRED series {series_id}: {e}")
-        return None, None
+                return None, None
+            data = resp.json()
+            if 'error_code' in data:
+                logger.error(f"FRED error: {data.get('error_message')} for series {series_id} (attempt {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    continue
+                return None, None
+            for obs in data.get('observations', []):
+                if obs.get('value') and obs.get('value') != '.':
+                    try:
+                        return float(obs['value']), obs.get('date')
+                    except (ValueError, TypeError):
+                        continue
+            logger.warning(f"No valid observation for series {series_id} (attempt {attempt + 1}/{max_retries})")
+            return None, None
+        except requests.exceptions.Timeout:
+            logger.warning(f"FRED API timeout for series {series_id} (attempt {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                continue
+            return None, None
+        except Exception as e:
+            logger.error(f"Exception fetching FRED series {series_id}: {e} (attempt {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                continue
+            return None, None
+
+    return None, None
 
 
 def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None):
-    """
-    Return a sorted list of {maturity, maturityLabel, rate, date, source}.
-    Optional `from_date`/`to_date` filter observations by date.
-
-    NO FALLBACKS - only returns real FRED API data.
-    When date range is provided, returns time series data across the date range.
-    When no date range, returns current yield curve across maturities.
-    """
     if not country:
         country = 'US'
     if maturities is None:
@@ -202,10 +192,8 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
 
     points = []
 
-    # If date range is provided, fetch time series data for a key maturity
     if from_date and to_date:
         logger.info(f"Date range mode: Fetching time series from {from_date} to {to_date}")
-        # For date range mode, fetch time series for a key maturity (10Y Treasury)
         key_maturity = '10Y'
         series_id, label, used_mat, _, _, note = series_for_country(country, key_maturity)
         if series_id:
@@ -221,7 +209,7 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                 }
                 logger.info(f"Fetching FRED time series for {series_id} from {from_date} to {to_date}")
                 resp = requests.get(f'{FRED_BASE_URL}/series/observations',
-                                    params=params, timeout=10)
+                                    params=params, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
                     if 'observations' in data:
@@ -247,13 +235,12 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                 logger.error(f"Error fetching time series for {series_id}: {e}")
     else:
         logger.info("Standard yield curve mode: Fetching current rates across maturities")
-        # Standard yield curve mode: get current rates across maturities
         for mat_label in maturities:
             series_id, label, used_mat, _, _, note = series_for_country(country, mat_label)
             if not series_id:
                 logger.warning(f"No series found for {country} {mat_label} — skipping")
                 continue
-            val, date = fetch_fred_observation(series_id, from_date=from_date, to_date=to_date)
+            val, date = fetch_fred_observation(series_id, from_date=from_date, to_date=to_date, max_retries=2)
             if val is not None:
                 points.append({
                     'maturity': maturity_map.get(used_mat, 1.0),
@@ -263,7 +250,6 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                     'source': 'fred',
                 })
 
-    # Sort by date for time series, by maturity for yield curve
     if from_date and to_date:
         points.sort(key=lambda x: x['date'] or '')
     else:
@@ -274,7 +260,6 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
 
 
 def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency='USD'):
-    """Return a benchmark record. benchmark_rate is None when FRED has no data."""
     if not country:
         country = 'US'
     if not maturity:
@@ -305,7 +290,6 @@ def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency=
 
 def attach_fred_to_calculation(result, instrument_type, maturity='1Y',
                                country='US', currency='USD'):
-    """Attach FRED benchmark data to a calculation result. Never fabricates values."""
     if not country:
         country = 'US'
     if not maturity:

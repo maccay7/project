@@ -1,31 +1,55 @@
 import json
 import os
 import re
-import tempfile
+import io
+from contextlib import contextmanager
+from datetime import datetime
 from flask import request, jsonify, send_file
 from utils.db import get_db
-from datetime import datetime
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side
-import io
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from playwright.sync_api import sync_playwright
 
-# ---- Frontend URL for Playwright ----
 frontend_base = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
-# ---- A4 geometry (96 DPI) ----
 A4_WIDTH_PX = 794
 A4_HEIGHT_PX = 1123
-SCREENSHOT_SCALE = 2  # device pixel ratio for sharpness
+SCREENSHOT_SCALE = 2
+
+
+@contextmanager
+def _db():
+    conn = get_db()
+    cursor = None
+    if conn:
+        try:
+            cursor = conn.cursor()
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+    try:
+        yield conn, cursor
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def _safe_session_id(session_id):
-    """Sanitise session_id for safe use in filesystem paths.
-    Strips anything that isn't alphanumeric, dash, underscore, or dot."""
     if session_id is None:
         return 'unknown'
     s = str(session_id).strip()
@@ -35,8 +59,6 @@ def _safe_session_id(session_id):
 
 
 def _safe_filename(requested_name, fallback):
-    """Return a filesystem-safe filename, defaulting to `fallback`.
-    Preserves the .docx extension if present."""
     if not requested_name:
         return fallback
     base = os.path.basename(str(requested_name).strip())
@@ -48,35 +70,29 @@ def _safe_filename(requested_name, fallback):
 
 
 def create_reports_table():
-    """Create the reports table if it doesn't exist."""
-    conn = get_db()
-    if not conn:
-        return False
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS reports (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                session_id VARCHAR(64) NOT NULL,
-                report_type VARCHAR(50),
-                report_data JSON,
-                file_path VARCHAR(512),
-                generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_session_id (session_id)
-            )
-        """)
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"Error creating reports table: {e}")
-        conn.close()
-        return False
+    with _db() as (conn, cursor):
+        if not conn:
+            return False
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS reports (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    session_id VARCHAR(64) NOT NULL,
+                    report_type VARCHAR(50),
+                    report_data JSON,
+                    file_path VARCHAR(512),
+                    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_session_id (session_id)
+                )
+            """)
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error creating reports table: {e}")
+            return False
 
 
 def generate_appendix_data(data, instrument_type):
-    """Generate appendix data for reports."""
     appendix = {
         'instrument_details': [],
         'metadata': {
@@ -109,8 +125,6 @@ def generate_appendix_data(data, instrument_type):
 
 
 def generate_report_excel(session_id, report_data, instrument_type):
-    """Generate Excel report with cover, summary, data, and appendix sheets.
-    Uses the exact data provided without modification or recalculation."""
     output_dir = 'reports'
     os.makedirs(output_dir, exist_ok=True)
 
@@ -305,35 +319,23 @@ def generate_report_excel(session_id, report_data, instrument_type):
 
 
 def save_report(session_id, report_type, report_data, file_path):
-    """Save report metadata to database."""
-    conn = get_db()
-    if not conn:
-        return None
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """INSERT INTO reports (session_id, report_type, report_data, file_path) 
-               VALUES (%s, %s, %s, %s)""",
-            (session_id, report_type, json.dumps(report_data), file_path)
-        )
-        conn.commit()
-        report_id = cursor.lastrowid
-        cursor.close()
-        conn.close()
-        return report_id
-    except Exception as e:
-        print(f"Error saving report: {e}")
-        conn.close()
-        return None
+    with _db() as (conn, cursor):
+        if not conn:
+            return None
+        try:
+            cursor.execute(
+                """INSERT INTO reports (session_id, report_type, report_data, file_path)
+                   VALUES (%s, %s, %s, %s)""",
+                (session_id, report_type, json.dumps(report_data), file_path)
+            )
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            print(f"Error saving report: {e}")
+            return None
 
 
 def _render_html_to_page_images(html: str, tmpdir: str):
-    """Render HTML in headless Chromium and return paths of A4-sized PNGs,
-    one image per A4 page. This is what guarantees the exported Word
-    matches the Report Preview visually, page for page."""
-
-    output_dir = 'reports'
-
     html = html.replace('/DuraCapital%20logo.png', 'http://localhost:5000/reports/DuraCapital logo.png')
     html = html.replace('/DuraCapital logo.png', 'http://localhost:5000/reports/DuraCapital logo.png')
     html = html.replace('/reportbackground.png', 'http://localhost:5000/reports/reportbackground.png')
@@ -362,7 +364,6 @@ def _render_html_to_page_images(html: str, tmpdir: str):
             print(f"[reports] Could not open frontend base URL ({frontend_base}): {e}")
 
         page.set_content(html, wait_until="networkidle")
-
         page.wait_for_load_state("networkidle", timeout=15000)
 
         try:
@@ -392,6 +393,7 @@ def _render_html_to_page_images(html: str, tmpdir: str):
             print(f"[reports] Image status before screenshot: {image_status}")
         except Exception as e:
             print(f"[reports] Could not log image status: {e}")
+
         try:
             page.wait_for_function(
                 """() => {
@@ -476,12 +478,6 @@ def _render_html_to_page_images(html: str, tmpdir: str):
 
 
 def generate_word_from_html(session_id: str, report_html: str, requested_name: str = None) -> tuple:
-    """Build a .docx whose pages are exact images of the given HTML, so the
-    exported Word matches the Report Preview visually, page for page.
-
-    Returns (internal_path, display_name) where internal_path is the actual
-    file on disk (with the timestamp prefix used for download lookup) and
-    display_name is the friendly name the browser should use."""
     output_dir = 'reports'
     os.makedirs(output_dir, exist_ok=True)
 
@@ -537,14 +533,10 @@ def generate_word_from_html(session_id: str, report_html: str, requested_name: s
 
 
 def reports_routes(app):
-    """Register all report routes."""
-
     create_reports_table()
 
     @app.route('/reports/<path:filename>')
     def serve_report_image(filename):
-        """Serve static images from the reports directory.
-        Path is validated to prevent traversal outside reports/."""
         output_dir = os.path.abspath('reports')
         requested = os.path.abspath(os.path.join(output_dir, filename))
         if not requested.startswith(output_dir + os.sep) and requested != output_dir:
@@ -579,8 +571,7 @@ def reports_routes(app):
                     'report_type': report_type
                 }
             })
-        else:
-            return jsonify({'success': False, 'message': 'Failed to save report'}), 500
+        return jsonify({'success': False, 'message': 'Failed to save report'}), 500
 
     @app.route('/api/report/appendix', methods=['POST', 'OPTIONS'])
     def generate_appendix_endpoint():
@@ -593,40 +584,31 @@ def reports_routes(app):
 
         appendix = generate_appendix_data(data, instrument_type)
 
-        return jsonify({
-            'success': True,
-            'data': appendix
-        })
+        return jsonify({'success': True, 'data': appendix})
 
     @app.route('/api/report/<int:report_id>/download', methods=['GET', 'OPTIONS'])
     def download_report(report_id):
         if request.method == 'OPTIONS':
             return '', 200
 
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'Database error'}), 500
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'Database error'}), 500
+            try:
+                cursor.execute("SELECT * FROM reports WHERE id = %s", (report_id,))
+                report = cursor.fetchone()
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
 
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM reports WHERE id = %s", (report_id,))
-            report = cursor.fetchone()
-            cursor.close()
-            conn.close()
+        if not report:
+            return jsonify({'success': False, 'message': 'Report not found'}), 404
 
-            if not report:
-                return jsonify({'success': False, 'message': 'Report not found'}), 404
+        file_path = report['file_path']
 
-            file_path = report['file_path']
+        if not os.path.exists(file_path):
+            return jsonify({'success': False, 'message': 'Report file not found'}), 404
 
-            if not os.path.exists(file_path):
-                return jsonify({'success': False, 'message': 'Report file not found'}), 404
-
-            return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
-
-        except Exception as e:
-            conn.close()
-            return jsonify({'success': False, 'message': str(e)}), 500
+        return send_file(file_path, as_attachment=True, download_name=os.path.basename(file_path))
 
     @app.route('/api/report/generate-word', methods=['POST', 'OPTIONS'])
     def generate_word_report_endpoint():
@@ -655,8 +637,7 @@ def reports_routes(app):
                         'stored_file_name': os.path.basename(file_path)
                     }
                 })
-            else:
-                return jsonify({'success': False, 'message': 'Failed to generate Word document'}), 500
+            return jsonify({'success': False, 'message': 'Failed to generate Word document'}), 500
 
         except Exception as e:
             import traceback
@@ -686,7 +667,6 @@ def reports_routes(app):
             latest_file = word_files[0]
             file_path = os.path.join(output_dir, latest_file)
 
-            # Optional friendly name via query string (?name=...)
             requested = request.args.get('name')
             download_name = _safe_filename(requested, latest_file) if requested else latest_file
 
@@ -701,29 +681,26 @@ def reports_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
 
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'Database error'}), 500
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'Database error'}), 500
+            try:
+                cursor.execute(
+                    "SELECT * FROM reports WHERE session_id = %s ORDER BY generated_at DESC",
+                    (session_id,)
+                )
+                rows = cursor.fetchall()
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
 
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM reports WHERE session_id = %s ORDER BY generated_at DESC", (session_id,))
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
+        reports = []
+        for row in rows:
+            reports.append({
+                'id': row['id'],
+                'session_id': row['session_id'],
+                'report_type': row['report_type'],
+                'file_path': row['file_path'],
+                'generated_at': row['generated_at'].isoformat() if row['generated_at'] else None
+            })
 
-            reports = []
-            for row in rows:
-                reports.append({
-                    'id': row['id'],
-                    'session_id': row['session_id'],
-                    'report_type': row['report_type'],
-                    'file_path': row['file_path'],
-                    'generated_at': row['generated_at'].isoformat() if row['generated_at'] else None
-                })
-
-            return jsonify({'success': True,  'data': reports})
-
-        except Exception as e:
-            conn.close()
-            return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': True, 'data': reports})

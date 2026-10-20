@@ -5,14 +5,9 @@ import os
 from pathlib import Path
 
 
-# Phantom-range guard: Excel often declares a worksheet range as the entire
-# grid (e.g. "B2:XFD1048575") because of stray formatting, even when only a
-# few cells actually contain data. Reading every declared row would iterate
-# billions of cells. We therefore stream rows and stop once we have seen a
-# long run of fully-empty rows, with an absolute cap as a backstop.
-EMPTY_ROW_LIMIT = 200          # stop after this many consecutive blank rows (post-content)
-INITIAL_EMPTY_LIMIT = 5000     # allow more blank rows before the first content row
-HARD_ROW_CAP = 200000          # never exceed this many rows in one sheet
+EMPTY_ROW_LIMIT = 200
+INITIAL_EMPTY_LIMIT = 5000
+HARD_ROW_CAP = 200000
 
 
 def _build_sheet_dict(sheet_name, full_data, merged_ranges, max_col):
@@ -58,10 +53,6 @@ def _build_sheet_dict(sheet_name, full_data, merged_ranges, max_col):
 
 
 def _read_sheet_openpyxl(ws, max_rows):
-    """
-    Read a single worksheet into a raw grid (blank rows preserved), stopping
-    early if Excel has declared a phantom range for the sheet.
-    """
     full_data = []
     max_col = 0
     empty_run = 0

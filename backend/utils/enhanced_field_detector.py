@@ -1,32 +1,3 @@
-"""
-Enhanced Field Detector
-=======================
-
-Detects the canonical financial fields present in an uploaded workbook.
-
-For each row we look at the columns present and try to map them to a
-canonical field name for the selected instrument type
-(money-market / tbills / bonds). The detector then reads the value in
-that column for the first row where it appears and reports:
-
-    - value       : the actual value found in the uploaded data
-    - value_type  : NUMBER / DATE / PERCENTAGE / TEXT / MISSING
-    - source      : the original column name in the workbook
-    - confidence  : 0.0 .. 1.0 match confidence
-    - row / col   : zero-based location of the first successful hit
-
-HARD RULES enforced by this module:
-
-*  NEVER returns a fabricated value. If a field is not found the
-   value_type is MISSING and value is None.
-*  NEVER rounds, converts, or reformats the value. That is the
-   calculation layer's job.
-*  NEVER adds a field that is not backed by a real column.
-
-The calculation pipeline can therefore trust every FieldDetection
-object as a genuine observation from the uploaded workbook.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field as dataclass_field
@@ -36,12 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import re
 
 
-# =============================================================================
-#  VALUE TYPE ENUM
-# =============================================================================
-
 class FieldValueType(Enum):
-    """The physical shape of a detected value."""
     MISSING    = "missing"
     NUMBER     = "number"
     PERCENTAGE = "percentage"
@@ -49,36 +15,21 @@ class FieldValueType(Enum):
     TEXT       = "text"
 
 
-# =============================================================================
-#  DETECTION RESULT
-# =============================================================================
-
 @dataclass
 class FieldDetection:
-    """The result of trying to locate one canonical field in the data."""
     field_name: str
     value: Any = None
     value_type: FieldValueType = FieldValueType.MISSING
-    source: Optional[str] = None           # original column name
-    confidence: float = 0.0                # 0.0 – 1.0
-    row: Optional[int] = None              # zero-based row index of the hit
-    col: Optional[int] = None              # zero-based column index of the hit
-    raw_label: Optional[str] = None        # the original header text
+    source: Optional[str] = None
+    confidence: float = 0.0
+    row: Optional[int] = None
+    col: Optional[int] = None
+    raw_label: Optional[str] = None
 
-    # ---------------------------------------------------------------
-    # Convenience predicates used by the caller
-    # ---------------------------------------------------------------
     @property
     def found(self) -> bool:
         return self.value_type is not FieldValueType.MISSING
 
-
-# =============================================================================
-#  ALIAS TABLE  —  canonical field  →  list of source-column names
-# =============================================================================
-
-# These aliases are conservative on purpose: we match column names, we
-# do NOT substring-guess. Ordering matters only for confidence scoring.
 
 _MONEY_MARKET_ALIASES: Dict[str, List[str]] = {
     "principal":       ["principal", "investment amount", "initial investment",
@@ -178,25 +129,19 @@ _ALIAS_TABLE: Dict[str, Dict[str, List[str]]] = {
 }
 
 
-# =============================================================================
-#  VALUE-TYPE DETECTION
-# =============================================================================
-
-# A relaxed date regexp — the string parsers downstream handle many formats.
 _DATE_RE = re.compile(
     r"""^\s*
         (?:
-            \d{4}[-/]\d{1,2}[-/]\d{1,2}          # 2024-01-15, 2024/1/15
-          | \d{1,2}[-/]\d{1,2}[-/]\d{2,4}        # 15/01/2024, 1/15/24
+            \d{4}[-/]\d{1,2}[-/]\d{1,2}
+          | \d{1,2}[-/]\d{1,2}[-/]\d{2,4}
         )
-        (?:\s+\d{1,2}:\d{2}(?::\d{2})?)?         # optional time
+        (?:\s+\d{1,2}:\d{2}(?::\d{2})?)?
         \s*$""",
     re.VERBOSE,
 )
 
 
 def _classify_value(value: Any) -> FieldValueType:
-    """Determine the physical shape of one cell."""
     if value is None or value == "":
         return FieldValueType.MISSING
     if isinstance(value, bool):
@@ -206,8 +151,6 @@ def _classify_value(value: Any) -> FieldValueType:
     if isinstance(value, date):
         return FieldValueType.DATE
     if isinstance(value, (int, float)):
-        # We cannot tell percentage from number at this stage.
-        # The type will be refined by the field-level expectation below.
         return FieldValueType.NUMBER
     if isinstance(value, str):
         s = value.strip()
@@ -217,7 +160,6 @@ def _classify_value(value: Any) -> FieldValueType:
             return FieldValueType.PERCENTAGE
         if _DATE_RE.match(s):
             return FieldValueType.DATE
-        # Numeric-with-commas string
         try:
             float(s.replace(",", ""))
             return FieldValueType.NUMBER
@@ -227,10 +169,6 @@ def _classify_value(value: Any) -> FieldValueType:
     return FieldValueType.TEXT
 
 
-# Percentage-expected canonical fields — if such a field is found as
-# a NUMBER we upgrade its type to PERCENTAGE only when its magnitude
-# is consistent with a percentage (i.e. value > 1). Values 0..1 are
-# treated as decimal-rate inputs.
 _PERCENTAGE_FIELDS = {
     "interest_rate", "discount_rate", "coupon_rate",
     "yield_to_maturity", "yield", "inflation_rate",
@@ -239,7 +177,6 @@ _PERCENTAGE_FIELDS = {
 
 def _refine_value_type(field_name: str, value: Any,
                        base: FieldValueType) -> FieldValueType:
-    """Upgrade NUMBER → PERCENTAGE for percentage-shaped fields."""
     if base is not FieldValueType.NUMBER:
         return base
     if field_name not in _PERCENTAGE_FIELDS:
@@ -250,38 +187,22 @@ def _refine_value_type(field_name: str, value: Any,
         return base
     if numeric > 1:
         return FieldValueType.PERCENTAGE
-    # 0..1 decimals are left as NUMBER — the parser knows they are decimals.
     return base
 
 
-# =============================================================================
-#  COLUMN-NAME MATCHING  —  confidence scoring
-# =============================================================================
-
 def _normalise_header(text: str) -> str:
-    """Lower-case, collapse whitespace, strip punctuation we don't care about."""
     if text is None:
         return ""
     return re.sub(r"\s+", " ", str(text).strip().lower())
 
 
 def _tokens(text: str) -> List[str]:
-    """Split a header into lower-case word tokens."""
     if not text:
         return []
     return [t for t in re.split(r"[\s_\-\(\)\[\]/]+", text.lower().strip()) if t]
 
 
 def _confidence(header: str, alias: str) -> float:
-    """
-    Score a match between a workbook header and an alias.
-
-    *  1.00 — exact case-insensitive string match
-    *  0.90 — all alias tokens appear in the header, in the same order
-    *  0.75 — all alias tokens appear in the header, any order
-    *  0.50 — the header is a single token that equals a single alias token
-    *  0.00 — no match (caller must reject these)
-    """
     if not header or not alias:
         return 0.0
     h = _normalise_header(header)
@@ -298,7 +219,6 @@ def _confidence(header: str, alias: str) -> float:
     h_set = set(h_tokens)
 
     if a_set.issubset(h_set):
-        # Same order?  Compare the sequence of alias tokens in the header.
         indices = [h_tokens.index(t) for t in a_tokens if t in h_tokens]
         if indices == sorted(indices):
             return 0.90
@@ -310,43 +230,18 @@ def _confidence(header: str, alias: str) -> float:
     return 0.0
 
 
-# =============================================================================
-#  THE DETECTOR
-# =============================================================================
-
 class EnhancedFieldDetector:
-    """
-    Locates canonical fields in an uploaded workbook.
 
-    Usage (matches the existing call-site in calculations.py):
-
-        detector = create_enhanced_field_detector()
-        detected = detector.detect_fields(data, "tbills")
-        summary  = detector.get_detection_summary(detected)
-    """
-
-    #: Minimum confidence required for a hit to be reported.
     MIN_CONFIDENCE = 0.50
 
     def __init__(self) -> None:
-        # Public counters we expose in the summary; reset per detect_fields call.
         self._last_rows_scanned = 0
         self._last_columns_scanned = 0
 
-    # ------------------------------------------------------------------ public
-
     def detect_fields(self, data: List[Dict[str, Any]],
                       instrument_type: str) -> Dict[str, FieldDetection]:
-        """
-        Return one FieldDetection per canonical field for the instrument type.
-
-        Fields that could not be located are included in the result with
-        value_type=MISSING — this makes the summary deterministic and
-        lets the caller iterate safely.
-        """
         aliases = self._aliases_for(instrument_type)
         if not aliases:
-            # Unknown instrument type — return everything MISSING.
             return {}
 
         if not data or not isinstance(data, list):
@@ -358,7 +253,6 @@ class EnhancedFieldDetector:
                 for name in aliases
             }
 
-        # Discover the union of column headers across all rows.
         headers: List[str] = []
         seen = set()
         for row in data:
@@ -381,9 +275,6 @@ class EnhancedFieldDetector:
 
     def get_detection_summary(self,
                               detected_fields: Dict[str, FieldDetection]) -> Dict[str, Any]:
-        """
-        Return a compact summary suitable for logging or API responses.
-        """
         found = []
         missing = []
         by_type: Dict[str, int] = {}
@@ -411,8 +302,6 @@ class EnhancedFieldDetector:
             "by_value_type": by_type,
         }
 
-    # ----------------------------------------------------------------- internal
-
     @staticmethod
     def _aliases_for(instrument_type: Optional[str]) -> Dict[str, List[str]]:
         if not instrument_type:
@@ -425,11 +314,6 @@ class EnhancedFieldDetector:
                     alias_list: Sequence[str],
                     headers: Sequence[str],
                     data: Sequence[Dict[str, Any]]) -> FieldDetection:
-        """
-        Find the best matching column for `canonical`, then read the first
-        non-empty value from that column across the rows.
-        """
-        # 1. Score every header against every alias and keep the best (header, alias).
         best_header: Optional[str] = None
         best_alias: Optional[str] = None
         best_score = 0.0
@@ -446,7 +330,6 @@ class EnhancedFieldDetector:
             return FieldDetection(field_name=canonical,
                                   value_type=FieldValueType.MISSING)
 
-        # 2. Read the first non-empty value in that column.
         value, row_idx, col_idx = self._first_non_empty(best_header, headers, data)
 
         if value is None:
@@ -458,7 +341,6 @@ class EnhancedFieldDetector:
                 confidence=best_score,
             )
 
-        # 3. Classify and (for percentage-shaped fields) refine the type.
         base_type = _classify_value(value)
         value_type = _refine_value_type(canonical, value, base_type)
 
@@ -478,10 +360,6 @@ class EnhancedFieldDetector:
                          headers: Sequence[str],
                          data: Sequence[Dict[str, Any]]
                          ) -> Tuple[Any, Optional[int], Optional[int]]:
-        """
-        Return the first non-empty cell in `column`, plus its (row, col)
-        indices. If the column never has a value we return (None, None, None).
-        """
         try:
             col_idx: Optional[int] = list(headers).index(column)
         except ValueError:
@@ -502,10 +380,5 @@ class EnhancedFieldDetector:
         return None, None, col_idx
 
 
-# =============================================================================
-#  FACTORY
-# =============================================================================
-
 def create_enhanced_field_detector() -> EnhancedFieldDetector:
-    """Factory used by the calculation pipeline."""
     return EnhancedFieldDetector()

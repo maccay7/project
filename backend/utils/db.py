@@ -12,12 +12,6 @@ DB_PASSWORD = os.environ.get('DB_PASSWORD', '')
 DB_NAME = os.environ.get('DB_NAME', 'duracapital')
 DB_CHARSET = os.environ.get('DB_CHARSET', 'utf8mb4')
 
-DB_POOL_SIZE = int(os.environ.get('DB_POOL_SIZE', 5))
-DB_POOL_RECYCLE = int(os.environ.get('DB_POOL_RECYCLE', 3600))
-
-_connections = []
-_connection_index = 0
-
 
 def get_db_connection():
     try:
@@ -69,69 +63,71 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
     connection = get_db_connection()
     if not connection:
         return None
+    cursor = None
     try:
         cursor = connection.cursor()
         cursor.execute(query, params or ())
         if fetch_one:
-            result = cursor.fetchone()
+            return cursor.fetchone()
         elif fetch_all:
-            result = cursor.fetchall()
+            return cursor.fetchall()
         else:
-            result = cursor.rowcount
-        cursor.close()
-        connection.close()
-        return result
+            return cursor.rowcount
     except pymysql.Error as e:
         print(f"Query execution error: {e}")
-        close_connection(connection)
         return None
+    finally:
+        close_cursor(cursor)
+        close_connection(connection)
 
 
 def execute_insert(query, params=None):
     connection = get_db_connection()
     if not connection:
         return None
+    cursor = None
     try:
         cursor = connection.cursor()
         cursor.execute(query, params or ())
-        last_id = cursor.lastrowid
-        cursor.close()
-        connection.close()
-        return last_id
+        return cursor.lastrowid
     except pymysql.Error as e:
         print(f"Insert error: {e}")
-        close_connection(connection)
         return None
+    finally:
+        close_cursor(cursor)
+        close_connection(connection)
 
 
 def execute_update(query, params=None):
     connection = get_db_connection()
     if not connection:
         return 0
+    cursor = None
     try:
         cursor = connection.cursor()
-        affected = cursor.execute(query, params or ())
-        cursor.close()
-        connection.close()
-        return affected
+        return cursor.execute(query, params or ())
     except pymysql.Error as e:
         print(f"Update error: {e}")
-        close_connection(connection)
         return 0
+    finally:
+        close_cursor(cursor)
+        close_connection(connection)
 
 
 def test_connection():
     connection = get_db_connection()
     if not connection:
         return False
+    cursor = None
     try:
         cursor = connection.cursor()
         cursor.execute("SELECT 1")
-        cursor.close()
-        connection.close()
         return True
     except Exception:
         return False
+    finally:
+        close_cursor(cursor)
+        close_connection(connection)
 
 
 def get_db_info():

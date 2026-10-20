@@ -1,7 +1,3 @@
--- ═══════════════════════════════════════════════════════════════════════════
--- UI SESSIONS  (created idempotently; safe to re-run)
--- ═══════════════════════════════════════════════════════════════════════════
-
 CREATE TABLE IF NOT EXISTS ui_sessions (
     session_id VARCHAR(255) PRIMARY KEY,
     user_id INT DEFAULT 0,
@@ -20,10 +16,6 @@ CREATE TABLE IF NOT EXISTS ui_sessions (
     INDEX (created_at),
     INDEX (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ═══════════════════════════════════════════════════════════════════════════
--- VERSION HISTORY  (referenced by sessions.py and the frontend version API)
--- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS version_history (
     id INT AUTO_INCREMENT PRIMARY KEY,

@@ -2,12 +2,10 @@ import json
 import os
 import uuid
 import traceback
-from flask import request, jsonify, send_file
-from werkzeug.utils import secure_filename
-from utils.db import get_db
-import openpyxl
-import pandas as pd
+from contextlib import contextmanager
 from datetime import datetime
+from flask import request, jsonify
+from utils.db import get_db
 from utils.excel_parser import parse_full_workbook
 
 UPLOAD_FOLDER = 'uploads'
@@ -16,43 +14,67 @@ ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'xlsm', 'csv'}
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
+@contextmanager
+def _db():
+    conn = get_db()
+    cursor = None
+    if conn:
+        try:
+            cursor = conn.cursor()
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
+    try:
+        yield conn, cursor
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def create_dataset_table():
-    conn = get_db()
-    if not conn:
-        return False
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS datasets (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                file_name VARCHAR(255) NOT NULL,
-                original_file_name VARCHAR(255) NOT NULL,
-                file_path VARCHAR(512) NOT NULL,
-                file_size BIGINT,
-                instrument_type VARCHAR(50),
-                sheet_count INT,
-                row_count INT,
-                column_count INT,
-                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                user_id INT,
-                session_id INT,
-                status VARCHAR(50) DEFAULT 'uploaded',
-                metadata JSON,
-                UNIQUE KEY unique_file_path (file_path)
-            )
-        """)
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"Error creating datasets table: {e}")
-        conn.close()
-        return False
+    with _db() as (conn, cursor):
+        if not conn:
+            return False
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS datasets (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    file_name VARCHAR(255) NOT NULL,
+                    original_file_name VARCHAR(255) NOT NULL,
+                    file_path VARCHAR(512) NOT NULL,
+                    file_size BIGINT,
+                    instrument_type VARCHAR(50),
+                    sheet_count INT,
+                    row_count INT,
+                    column_count INT,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    user_id INT,
+                    session_id INT,
+                    status VARCHAR(50) DEFAULT 'uploaded',
+                    metadata JSON,
+                    UNIQUE KEY unique_file_path (file_path)
+                )
+            """)
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error creating datasets table: {e}")
+            return False
 
 
 def _safe_json_dumps(obj):
@@ -67,28 +89,28 @@ def _safe_json_dumps(obj):
             return None
 
 
-def save_dataset_metadata(file_name, original_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, user_id=None, session_id=None, metadata=None):
-    conn = get_db()
-    if not conn:
-        return None
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """INSERT INTO datasets 
-               (file_name, original_file_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, user_id, session_id, metadata) 
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (file_name, original_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, user_id, session_id, _safe_json_dumps(metadata))
-        )
-        conn.commit()
-        dataset_id = cursor.lastrowid
-        cursor.close()
-        conn.close()
-        return dataset_id
-    except Exception as e:
-        print(f"Error saving dataset metadata: {e}")
-        traceback.print_exc()
-        conn.close()
-        return None
+def save_dataset_metadata(file_name, original_name, file_path, file_size, instrument_type,
+                          sheet_count, row_count, column_count,
+                          user_id=None, session_id=None, metadata=None):
+    with _db() as (conn, cursor):
+        if not conn:
+            return None
+        try:
+            cursor.execute(
+                """INSERT INTO datasets
+                   (file_name, original_file_name, file_path, file_size, instrument_type,
+                    sheet_count, row_count, column_count, user_id, session_id, metadata)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (file_name, original_name, file_path, file_size, instrument_type,
+                 sheet_count, row_count, column_count, user_id, session_id,
+                 _safe_json_dumps(metadata))
+            )
+            conn.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            print(f"Error saving dataset metadata: {e}")
+            traceback.print_exc()
+            return None
 
 
 def intelligent_parse(file_path, instrument_type):
@@ -98,8 +120,7 @@ def intelligent_parse(file_path, instrument_type):
 
     extracted_data = []
     for sheet in parsed.get('sheets', []):
-        data = sheet.get('data', [])
-        for row in data:
+        for row in sheet.get('data', []):
             if isinstance(row, dict):
                 extracted_data.append(row)
 
@@ -222,39 +243,30 @@ def dataset_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
 
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'Database error'}), 500
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'Database error'}), 500
+            try:
+                cursor.execute("SELECT * FROM datasets WHERE id = %s", (dataset_id,))
+                dataset = cursor.fetchone()
+            except Exception as e:
+                traceback.print_exc()
+                return jsonify({'success': False, 'message': str(e)}), 500
+
+        if not dataset:
+            return jsonify({'success': False, 'message': 'Dataset not found'}), 404
+
+        file_path = dataset['file_path']
+        instrument_type = dataset['instrument_type']
+
+        if not os.path.exists(file_path):
+            return jsonify({'success': False, 'message': 'File not found on server'}), 404
 
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM datasets WHERE id = %s", (dataset_id,))
-            dataset = cursor.fetchone()
-            cursor.close()
-            conn.close()
-
-            if not dataset:
-                return jsonify({'success': False, 'message': 'Dataset not found'}), 404
-
-            file_path = dataset['file_path']
-            instrument_type = dataset['instrument_type']
-
-            if not os.path.exists(file_path):
-                return jsonify({'success': False, 'message': 'File not found on server'}), 404
-
             parsed = parse_full_workbook(file_path, instrument_type, max_rows=None)
-
-            return jsonify({
-                'success': True,
-                'data': parsed
-            })
-
+            return jsonify({'success': True, 'data': parsed})
         except Exception as e:
             traceback.print_exc()
-            try:
-                conn.close()
-            except Exception:
-                pass
             return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/dataset/<int:dataset_id>/intelligent-parse', methods=['GET', 'OPTIONS'])
@@ -262,39 +274,30 @@ def dataset_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
 
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'Database error'}), 500
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'Database error'}), 500
+            try:
+                cursor.execute("SELECT * FROM datasets WHERE id = %s", (dataset_id,))
+                dataset = cursor.fetchone()
+            except Exception as e:
+                traceback.print_exc()
+                return jsonify({'success': False, 'message': str(e)}), 500
+
+        if not dataset:
+            return jsonify({'success': False, 'message': 'Dataset not found'}), 404
+
+        file_path = dataset['file_path']
+        instrument_type = dataset['instrument_type']
+
+        if not os.path.exists(file_path):
+            return jsonify({'success': False, 'message': 'File not found on server'}), 404
 
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM datasets WHERE id = %s", (dataset_id,))
-            dataset = cursor.fetchone()
-            cursor.close()
-            conn.close()
-
-            if not dataset:
-                return jsonify({'success': False, 'message': 'Dataset not found'}), 404
-
-            file_path = dataset['file_path']
-            instrument_type = dataset['instrument_type']
-
-            if not os.path.exists(file_path):
-                return jsonify({'success': False, 'message': 'File not found on server'}), 404
-
             result = intelligent_parse(file_path, instrument_type)
-
-            return jsonify({
-                'success': True,
-                'data': result
-            })
-
+            return jsonify({'success': True, 'data': result})
         except Exception as e:
             traceback.print_exc()
-            try:
-                conn.close()
-            except Exception:
-                pass
             return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/dataset/<int:dataset_id>', methods=['DELETE', 'OPTIONS'])
@@ -302,34 +305,25 @@ def dataset_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
 
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'Database error'}), 500
-
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT file_path FROM datasets WHERE id = %s", (dataset_id,))
-            dataset = cursor.fetchone()
-
-            if dataset:
-                file_path = dataset['file_path']
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-
-                cursor.execute("DELETE FROM datasets WHERE id = %s", (dataset_id,))
-                conn.commit()
-
-            cursor.close()
-            conn.close()
-            return jsonify({'success': True, 'message': 'Dataset deleted'})
-
-        except Exception as e:
-            traceback.print_exc()
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'Database error'}), 500
             try:
-                conn.close()
-            except Exception:
-                pass
-            return jsonify({'success': False, 'message': str(e)}), 500
+                cursor.execute("SELECT file_path FROM datasets WHERE id = %s", (dataset_id,))
+                dataset = cursor.fetchone()
+
+                if dataset:
+                    file_path = dataset['file_path']
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+
+                    cursor.execute("DELETE FROM datasets WHERE id = %s", (dataset_id,))
+                    conn.commit()
+
+                return jsonify({'success': True, 'message': 'Dataset deleted'})
+            except Exception as e:
+                traceback.print_exc()
+                return jsonify({'success': False, 'message': str(e)}), 500
 
     @app.route('/api/save-dataset', methods=['POST', 'OPTIONS'])
     def save_dataset():
@@ -347,86 +341,69 @@ def dataset_routes(app):
             instrument_type = data.get('instrument_type') or None
 
             if upload_id:
-                conn = get_db()
+                with _db() as (conn, cursor):
+                    if not conn:
+                        return jsonify({'success': False, 'message': 'Database error'}), 500
+                    try:
+                        cursor.execute("SELECT * FROM datasets WHERE id = %s", (upload_id,))
+                        existing = cursor.fetchone()
+
+                        if existing:
+                            metadata = existing.get('metadata', {})
+                            if isinstance(metadata, str):
+                                metadata = json.loads(metadata)
+
+                            metadata['data'] = payload_data
+                            metadata['headers'] = headers
+                            metadata['updated_at'] = datetime.now().isoformat()
+
+                            cursor.execute(
+                                "UPDATE datasets SET metadata = %s WHERE id = %s",
+                                (_safe_json_dumps(metadata), upload_id)
+                            )
+                            conn.commit()
+
+                            return jsonify({
+                                'success': True,
+                                'data': {'id': upload_id, 'name': name}
+                            })
+                    except Exception as e:
+                        traceback.print_exc()
+                        return jsonify({'success': False, 'message': str(e)}), 500
+
+            with _db() as (conn, cursor):
                 if not conn:
                     return jsonify({'success': False, 'message': 'Database error'}), 500
-
                 try:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT * FROM datasets WHERE id = %s", (upload_id,))
-                    existing = cursor.fetchone()
+                    metadata = {
+                        'data': payload_data,
+                        'headers': headers,
+                        'sheet_names': sheet_names,
+                        'instrument_type': instrument_type,
+                        'created_at': datetime.now().isoformat()
+                    }
 
-                    if existing:
-                        metadata = existing.get('metadata', {})
-                        if isinstance(metadata, str):
-                            metadata = json.loads(metadata)
+                    cursor.execute(
+                        """INSERT INTO datasets
+                           (file_name, original_file_name, file_path, file_size,
+                            instrument_type, sheet_count, row_count, column_count, metadata)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                        (name, name, '', 0, instrument_type,
+                         len(sheet_names) if sheet_names else 1,
+                         len(payload_data) if payload_data else 0,
+                         len(headers) if headers else 0,
+                         _safe_json_dumps(metadata))
+                    )
+                    conn.commit()
+                    dataset_id = cursor.lastrowid
 
-                        metadata['data'] = payload_data
-                        metadata['headers'] = headers
-                        metadata['updated_at'] = datetime.now().isoformat()
-
-                        cursor.execute(
-                            """UPDATE datasets SET metadata = %s WHERE id = %s""",
-                            (_safe_json_dumps(metadata), upload_id)
-                        )
-                        conn.commit()
-                        cursor.close()
-                        conn.close()
-
-                        return jsonify({
-                            'success': True,
-                            'data': {'id': upload_id, 'name': name}
-                        })
-                    else:
-                        cursor.close()
-                        conn.close()
+                    return jsonify({
+                        'success': True,
+                        'data': {'id': dataset_id, 'name': name}
+                    })
                 except Exception as e:
                     traceback.print_exc()
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
                     return jsonify({'success': False, 'message': str(e)}), 500
-
-            conn = get_db()
-            if not conn:
-                return jsonify({'success': False, 'message': 'Database error'}), 500
-
-            try:
-                cursor = conn.cursor()
-                metadata = {
-                    'data': payload_data,
-                    'headers': headers,
-                    'sheet_names': sheet_names,
-                    'instrument_type': instrument_type,
-                    'created_at': datetime.now().isoformat()
-                }
-
-                cursor.execute(
-                    """INSERT INTO datasets 
-                       (file_name, original_file_name, file_path, file_size, instrument_type, sheet_count, row_count, column_count, metadata) 
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                    (name, name, '', 0, instrument_type, len(sheet_names) if sheet_names else 1,
-                     len(payload_data) if payload_data else 0, len(headers) if headers else 0,
-                     _safe_json_dumps(metadata))
-                )
-                conn.commit()
-                dataset_id = cursor.lastrowid
-                cursor.close()
-                conn.close()
-
-                return jsonify({
-                    'success': True,
-                    'data': {'id': dataset_id, 'name': name}
-                })
-
-            except Exception as e:
-                traceback.print_exc()
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-                return jsonify({'success': False, 'message': str(e)}), 500
 
         except Exception as e:
             traceback.print_exc()
@@ -437,47 +414,42 @@ def dataset_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
 
-        conn = get_db()
-        if not conn:
-            return jsonify({'success': False, 'message': 'Database error'}), 500
-
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, original_file_name, file_size, instrument_type, sheet_count, row_count, column_count, uploaded_at, metadata FROM datasets ORDER BY uploaded_at DESC")
-            datasets = cursor.fetchall()
-            cursor.close()
-            conn.close()
-
-            result = []
-            for ds in datasets:
-                metadata = ds.get('metadata', {})
-                if isinstance(metadata, str):
-                    try:
-                        metadata = json.loads(metadata)
-                    except Exception:
-                        metadata = {}
-
-                result.append({
-                    'id': ds['id'],
-                    'name': ds['original_file_name'],
-                    'rows': ds['row_count'],
-                    'file_size': ds['file_size'],
-                    'instrument_type': ds['instrument_type'],
-                    'sheet_count': ds['sheet_count'],
-                    'uploaded_at': ds['uploaded_at'].isoformat() if ds['uploaded_at'] else None,
-                    'headers': metadata.get('headers', []),
-                    'data': metadata.get('data', [])
-                })
-
-            return jsonify({'success': True, 'data': result})
-
-        except Exception as e:
-            traceback.print_exc()
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'Database error'}), 500
             try:
-                conn.close()
-            except Exception:
-                pass
-            return jsonify({'success': False, 'message': str(e)}), 500
+                cursor.execute(
+                    "SELECT id, original_file_name, file_size, instrument_type, "
+                    "sheet_count, row_count, column_count, uploaded_at, metadata "
+                    "FROM datasets ORDER BY uploaded_at DESC"
+                )
+                datasets = cursor.fetchall()
+            except Exception as e:
+                traceback.print_exc()
+                return jsonify({'success': False, 'message': str(e)}), 500
+
+        result = []
+        for ds in datasets:
+            metadata = ds.get('metadata', {})
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+
+            result.append({
+                'id': ds['id'],
+                'name': ds['original_file_name'],
+                'rows': ds['row_count'],
+                'file_size': ds['file_size'],
+                'instrument_type': ds['instrument_type'],
+                'sheet_count': ds['sheet_count'],
+                'uploaded_at': ds['uploaded_at'].isoformat() if ds['uploaded_at'] else None,
+                'headers': metadata.get('headers', []),
+                'data': metadata.get('data', [])
+            })
+
+        return jsonify({'success': True, 'data': result})
 
     @app.route('/api/load-dataset', methods=['POST', 'OPTIONS'])
     def load_dataset():
@@ -491,64 +463,55 @@ def dataset_routes(app):
             if not dataset_id:
                 return jsonify({'success': False, 'message': 'Dataset ID required'}), 400
 
-            conn = get_db()
-            if not conn:
-                return jsonify({'success': False, 'message': 'Database error'}), 500
-
-            try:
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM datasets WHERE id = %s", (dataset_id,))
-                dataset = cursor.fetchone()
-                cursor.close()
-                conn.close()
-
-                if not dataset:
-                    return jsonify({'success': False, 'message': 'Dataset not found'}), 404
-
-                metadata = dataset.get('metadata', {})
-                if isinstance(metadata, str):
-                    try:
-                        metadata = json.loads(metadata)
-                    except Exception:
-                        metadata = {}
-
-                if metadata.get('data') and metadata.get('headers'):
-                    return jsonify({
-                        'success': True,
-                        'data': {
-                            'id': dataset['id'],
-                            'name': dataset['original_file_name'],
-                            'data': metadata['data'],
-                            'headers': metadata['headers'],
-                            'instrument_type': dataset['instrument_type']
-                        }
-                    })
-
-                file_path = dataset['file_path']
-                if file_path and os.path.exists(file_path):
-                    instrument_type = dataset['instrument_type']
-                    parsed = intelligent_parse(file_path, instrument_type)
-
-                    return jsonify({
-                        'success': True,
-                        'data': {
-                            'id': dataset['id'],
-                            'name': dataset['original_file_name'],
-                            'data': parsed['data'],
-                            'headers': parsed.get('metadata', {}).get('headers', []),
-                            'instrument_type': instrument_type
-                        }
-                    })
-
-                return jsonify({'success': False, 'message': 'No data available for this dataset'}), 404
-
-            except Exception as e:
-                traceback.print_exc()
+            with _db() as (conn, cursor):
+                if not conn:
+                    return jsonify({'success': False, 'message': 'Database error'}), 500
                 try:
-                    conn.close()
+                    cursor.execute("SELECT * FROM datasets WHERE id = %s", (dataset_id,))
+                    dataset = cursor.fetchone()
+                except Exception as e:
+                    traceback.print_exc()
+                    return jsonify({'success': False, 'message': str(e)}), 500
+
+            if not dataset:
+                return jsonify({'success': False, 'message': 'Dataset not found'}), 404
+
+            metadata = dataset.get('metadata', {})
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
                 except Exception:
-                    pass
-                return jsonify({'success': False, 'message': str(e)}), 500
+                    metadata = {}
+
+            if metadata.get('data') and metadata.get('headers'):
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'id': dataset['id'],
+                        'name': dataset['original_file_name'],
+                        'data': metadata['data'],
+                        'headers': metadata['headers'],
+                        'instrument_type': dataset['instrument_type']
+                    }
+                })
+
+            file_path = dataset['file_path']
+            if file_path and os.path.exists(file_path):
+                instrument_type = dataset['instrument_type']
+                parsed = intelligent_parse(file_path, instrument_type)
+
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'id': dataset['id'],
+                        'name': dataset['original_file_name'],
+                        'data': parsed['data'],
+                        'headers': parsed.get('metadata', {}).get('headers', []),
+                        'instrument_type': instrument_type
+                    }
+                })
+
+            return jsonify({'success': False, 'message': 'No data available for this dataset'}), 404
 
         except Exception as e:
             traceback.print_exc()
@@ -566,34 +529,25 @@ def dataset_routes(app):
             if not dataset_id:
                 return jsonify({'success': False, 'message': 'Dataset ID required'}), 400
 
-            conn = get_db()
-            if not conn:
-                return jsonify({'success': False, 'message': 'Database error'}), 500
-
-            try:
-                cursor = conn.cursor()
-                cursor.execute("SELECT file_path FROM datasets WHERE id = %s", (dataset_id,))
-                dataset = cursor.fetchone()
-
-                if dataset:
-                    file_path = dataset['file_path']
-                    if file_path and os.path.exists(file_path):
-                        os.remove(file_path)
-
-                    cursor.execute("DELETE FROM datasets WHERE id = %s", (dataset_id,))
-                    conn.commit()
-
-                cursor.close()
-                conn.close()
-                return jsonify({'success': True, 'message': 'Dataset deleted'})
-
-            except Exception as e:
-                traceback.print_exc()
+            with _db() as (conn, cursor):
+                if not conn:
+                    return jsonify({'success': False, 'message': 'Database error'}), 500
                 try:
-                    conn.close()
-                except Exception:
-                    pass
-                return jsonify({'success': False, 'message': str(e)}), 500
+                    cursor.execute("SELECT file_path FROM datasets WHERE id = %s", (dataset_id,))
+                    dataset = cursor.fetchone()
+
+                    if dataset:
+                        file_path = dataset['file_path']
+                        if file_path and os.path.exists(file_path):
+                            os.remove(file_path)
+
+                        cursor.execute("DELETE FROM datasets WHERE id = %s", (dataset_id,))
+                        conn.commit()
+
+                    return jsonify({'success': True, 'message': 'Dataset deleted'})
+                except Exception as e:
+                    traceback.print_exc()
+                    return jsonify({'success': False, 'message': str(e)}), 500
 
         except Exception as e:
             traceback.print_exc()

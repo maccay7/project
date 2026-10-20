@@ -1,18 +1,8 @@
-"""
-Rounding utility for financial calculations.
-
-Rules:
-- Percentages: keep 4 decimals (never round to whole numbers, that destroys precision)
-- Money / amounts: 2 decimals
-- Other values: caller-controlled decimals (default 4)
-- NEVER fabricate values. If the input is missing/invalid, return None.
-"""
-
 from typing import Any, Dict, Optional
+from decimal import Decimal, ROUND_HALF_UP
 
 
 def _to_float(value: Any) -> Optional[float]:
-    """Return value as float, or None if it cannot be a real number."""
     if value is None or value == "":
         return None
     if isinstance(value, bool):
@@ -21,37 +11,39 @@ def _to_float(value: Any) -> Optional[float]:
         f = float(value)
     except (TypeError, ValueError):
         return None
-    if f != f:  # NaN
+    if f != f:
         return None
     return f
 
 
+def _round_half_up(value: float, decimals: int) -> float:
+    # Financial rounding: 100.125 -> 100.13, not banker's 100.12.
+    quantizer = Decimal(1).scaleb(-decimals)
+    return float(Decimal(str(value)).quantize(quantizer, rounding=ROUND_HALF_UP))
+
+
 def round_percentage(value: Any, decimal_places: int = 4) -> Optional[float]:
-    """Round a percentage value to 4 decimals. None-safe."""
     f = _to_float(value)
     if f is None:
         return None
-    return round(f, decimal_places)
+    return _round_half_up(f, decimal_places)
 
 
 def round_money(value: Any) -> Optional[float]:
-    """Round money to 2 decimals. None-safe."""
     f = _to_float(value)
     if f is None:
         return None
-    return round(f, 2)
+    return _round_half_up(f, 2)
 
 
 def round_value(value: Any, decimal_places: int = 4) -> Optional[float]:
-    """Round any value to the given decimals. None-safe."""
     f = _to_float(value)
     if f is None:
         return None
-    return round(f, decimal_places)
+    return _round_half_up(f, decimal_places)
 
 
 def round_calculation_result(result: Any, field_type: str = "default") -> Optional[float]:
-    """Round a calculation result based on field type. None-safe."""
     if result is None or result == "":
         return None
     if field_type == "percentage":
@@ -63,7 +55,6 @@ def round_calculation_result(result: Any, field_type: str = "default") -> Option
 
 def round_dict_values(data_dict: Dict[str, Any],
                       field_mappings: Dict[str, str]) -> Dict[str, Optional[float]]:
-    """Round every value in a dict using a field->type map. Missing values stay None."""
     return {
         key: round_calculation_result(value, field_mappings.get(key, "default"))
         for key, value in data_dict.items()
@@ -94,10 +85,6 @@ MONEY_FIELDS = {
 
 
 def auto_round_by_field_name(field_name: str, value: Any) -> Optional[float]:
-    """
-    Choose a rounding rule from the field name itself.
-    Percentage keywords checked first so `discount_rate` is a percentage.
-    """
     if value is None:
         return None
     field_lower = field_name.lower()

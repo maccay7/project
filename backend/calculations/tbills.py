@@ -1,8 +1,3 @@
-"""
-Treasury Bills (T-Bills) Valuation Calculations
-Every calculation uses actual uploaded values, no fallback defaults.
-"""
-
 from datetime import datetime
 from typing import Dict, Optional
 from utils.rounding import (
@@ -96,7 +91,7 @@ class TBillsCalculator:
                 validation_errors.append(self.dependency_engine.get_missing_fields_message(v))
                 results['discount_amount'] = None
 
-            # Compute price ONLY if not supplied - never overwrite real data
+            # Only compute price if user didn't supply one.
             if days_to_maturity is not None:
                 if purchase_price is None:
                     purchase_price = self._calculate_purchase_price(

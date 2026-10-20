@@ -1,4 +1,3 @@
-# backend/.../fred.py
 import os
 import requests
 from flask import request, jsonify
@@ -106,10 +105,6 @@ def fred_routes(app):
             'note': note
         })
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Yield curve — accepts POST with instrument_type, currency, maturity
-    # or from_date/to_date. Returns currency + instrument_type echoed back.
-    # ─────────────────────────────────────────────────────────────────────────
     def _fred_yield_curve_handler():
         if request.method == 'OPTIONS':
             response = jsonify({})
@@ -167,8 +162,6 @@ def fred_routes(app):
                     'note': 'Please try different filters or verify your FRED_API_KEY.'
                 }), 404
 
-            # Include dates in response for date range mode
-            # For date range mode, use dates as x-axis values instead of maturity
             if from_date and to_date:
                 chart_data = [{'x': p['date'], 'y': p['rate'], 'date': p['date']} for p in points]
                 x_labels = [p['date'] for p in points]
