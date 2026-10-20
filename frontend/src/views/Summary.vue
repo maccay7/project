@@ -464,6 +464,7 @@ function openInstrument(id) {
 function goToDashboard() { router.push('/dashboard') }
 function goToReport() {
   if (!activeSession.value) { alert('No active session'); return }
+  // Navigate to InstrumentView reports tab with session context
   router.push({ path: '/instrument/money-market', query: { session: activeSession.value.id, tab: 'reports' } })
 }
 
@@ -666,6 +667,27 @@ function exportToExcel() {
 
 async function publishPortfolioSnapshot(sid) {
   try {
+    // Build complete snapshot with all instrument details
+    const instrumentsWithDetailsList = []
+    
+    for (const inst of instruments.value) {
+      const wf = await sessionManager.getInstrumentWorkflow(sid, inst.id)
+      const details = wf?.instrumentSummary?.rows || []
+      const headers = wf?.instrumentSummary?.columns || []
+      
+      instrumentsWithDetailsList.push({
+        id: inst.id,
+        name: inst.name,
+        details: details,
+        detailHeaders: headers,
+        aggregate: wf?.allCalculations || {},
+        completed: inst.completed,
+        count: inst.count,
+        value: inst.value,
+        avgRate: inst.avgRate
+      })
+    }
+    
     const snapshot = {
       sessionId: String(sid),
       sessionName: activeSession.value?.name || '',
@@ -683,19 +705,10 @@ async function publishPortfolioSnapshot(sid) {
         completed: inst.completed,
         statusText: inst.statusText
       })),
-      instrumentsWithDetails: instrumentsWithDetails.value.map(inst => ({
-        id: inst.id,
-        name: inst.name,
-        details: inst.details,
-        detailHeaders: inst.detailHeaders
-      }))
+      instrumentsWithDetails: instrumentsWithDetailsList
     }
+
     await sessionManager.saveWorksheetData(sid, PORTFOLIO_SNAPSHOT_KEY, snapshot)
-    console.log('Portfolio summary snapshot published for report linkage:', {
-      sessionId: sid,
-      instruments: snapshot.instruments.length,
-      classes: snapshot.instruments.map(i => i.id)
-    })
   } catch (e) {
     console.warn('Failed to publish portfolio summary snapshot:', e)
   }
@@ -747,62 +760,87 @@ async function loadSummary() {
 
     const sid = activeSession.value.id
 
-    const wf = await sessionManager.getInstrumentWorkflow(sid, 'money-market')
-    const summary = wf?.instrumentSummary || { rows: [], columns: [] }
-    const portfolioSummary = wf?.portfolioSummary || { rows: [], columns: [] }
-    const completedPortfolioSummary = wf?.completedPortfolioSummary || { rows: [], columns: [] }
-
-    let allSummaryRows = [...(completedPortfolioSummary.rows || [])]
-
-    if (allSummaryRows.length === 0) {
-      allSummaryRows = [...(portfolioSummary.rows || [])]
+    // Load portfolio summaries from backend (authoritative source)
+    let backendSummaries = []
+    try {
+      const response = await api.portfolioAPI.getSummaries(sid)
+      if (response?.success && Array.isArray(response.data)) {
+        backendSummaries = response.data
+      }
+    } catch (e) {
+      console.warn('Failed to load portfolio summaries from backend, falling back to workflows:', e)
     }
 
-    if (allSummaryRows.length === 0) {
-      allSummaryRows = [...summary.rows]
-    }
+    // If backend has data, use it; otherwise fall back to workflows
+    let allSummaryRows = []
+    let useBackendData = backendSummaries.length > 0
 
-    for (const type of ['bonds', 'tbills']) {
-      const wfType = await sessionManager.getInstrumentWorkflow(sid, type)
-
-      if (wfType?.completedPortfolioSummary?.rows && wfType.completedPortfolioSummary.rows.length > 0) {
-        const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
-        if (hasData) {
-          wfType.completedPortfolioSummary.rows.forEach(row => {
-            const id = row['Portfolio Name'] + '_' + (row['Instrument Type'] || '')
-            const exists = allSummaryRows.some(r => (r['Portfolio Name'] || '') + '_' + (r['Instrument Type'] || '') === id)
-            if (!exists) allSummaryRows.push(row)
-          })
-        }
-      } else if (wfType?.portfolioSummary?.rows && wfType.portfolioSummary.rows.length > 0) {
-        const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
-        if (hasData) {
-          wfType.portfolioSummary.rows.forEach(row => {
-            const id = row['Portfolio Name'] + '_' + (row['Instrument Type'] || '')
-            const exists = allSummaryRows.some(r => (r['Portfolio Name'] || '') + '_' + (r['Instrument Type'] || '') === id)
-            if (!exists) allSummaryRows.push(row)
-          })
-        }
-      } else if (wfType?.instrumentSummary?.rows && wfType.instrumentSummary.rows.length > 0) {
-        const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
-        if (hasData) {
-          wfType.instrumentSummary.rows.forEach(row => {
-            const id = row['Instrument Name'] + '_' + (row['Worksheet'] || '')
-            const exists = allSummaryRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
-            if (!exists) allSummaryRows.push(row)
-          })
+    if (useBackendData) {
+      // Use backend portfolio summaries
+      for (const summary of backendSummaries) {
+        if (summary.details && Array.isArray(summary.details)) {
+          allSummaryRows.push(...summary.details)
         }
       }
-    }
+    } else {
+      // Fallback to workflows
+      const wf = await sessionManager.getInstrumentWorkflow(sid, 'money-market')
+      const summary = wf?.instrumentSummary || { rows: [], columns: [] }
+      const portfolioSummary = wf?.portfolioSummary || { rows: [], columns: [] }
+      const completedPortfolioSummary = wf?.completedPortfolioSummary || { rows: [], columns: [] }
 
-    if (allSummaryRows.length === 0) {
-      try {
-        const backendSummary = await api.calculationsAPI.getInstrumentSummary(sid)
-        if (backendSummary?.success && backendSummary?.data?.rows) {
-          allSummaryRows.push(...backendSummary.data.rows)
+      allSummaryRows = [...(completedPortfolioSummary.rows || [])]
+
+      if (allSummaryRows.length === 0) {
+        allSummaryRows = [...(portfolioSummary.rows || [])]
+      }
+
+      if (allSummaryRows.length === 0) {
+        allSummaryRows = [...summary.rows]
+      }
+
+      for (const type of ['bonds', 'tbills']) {
+        const wfType = await sessionManager.getInstrumentWorkflow(sid, type)
+
+        if (wfType?.completedPortfolioSummary?.rows && wfType.completedPortfolioSummary.rows.length > 0) {
+          const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
+          if (hasData) {
+            wfType.completedPortfolioSummary.rows.forEach(row => {
+              const id = row['Portfolio Name'] + '_' + (row['Instrument Type'] || '')
+              const exists = allSummaryRows.some(r => (r['Portfolio Name'] || '') + '_' + (r['Instrument Type'] || '') === id)
+              if (!exists) allSummaryRows.push(row)
+            })
+          }
+        } else if (wfType?.portfolioSummary?.rows && wfType.portfolioSummary.rows.length > 0) {
+          const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
+          if (hasData) {
+            wfType.portfolioSummary.rows.forEach(row => {
+              const id = row['Portfolio Name'] + '_' + (row['Instrument Type'] || '')
+              const exists = allSummaryRows.some(r => (r['Portfolio Name'] || '') + '_' + (r['Instrument Type'] || '') === id)
+              if (!exists) allSummaryRows.push(row)
+            })
+          }
+        } else if (wfType?.instrumentSummary?.rows && wfType.instrumentSummary.rows.length > 0) {
+          const hasData = wfType.cleanedData?.length > 0 || wfType.allCalculations?.totalValue > 0 || wfType.rawData?.length > 0
+          if (hasData) {
+            wfType.instrumentSummary.rows.forEach(row => {
+              const id = row['Instrument Name'] + '_' + (row['Worksheet'] || '')
+              const exists = allSummaryRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
+              if (!exists) allSummaryRows.push(row)
+            })
+          }
         }
-      } catch (e) {
-        console.warn('Failed to load from backend:', e)
+      }
+
+      if (allSummaryRows.length === 0) {
+        try {
+          const backendSummary = await api.calculationsAPI.getInstrumentSummary(sid)
+          if (backendSummary?.success && backendSummary?.data?.rows) {
+            allSummaryRows.push(...backendSummary.data.rows)
+          }
+        } catch (e) {
+          console.warn('Failed to load from backend:', e)
+        }
       }
     }
 
@@ -827,67 +865,85 @@ async function loadSummary() {
     }
 
     for (const template of templates) {
-      const rows = allSummaryRows.filter(r => {
-        const instType = r['Instrument Type'] || r['instrument_type'] || r['instrumentType']
-        return instType === template.id
-      })
-
+      // If backend data is available, use it for this instrument type
+      const backendSummary = backendSummaries.find(s => s.id === template.id)
+      
+      let rows = []
       let totalValue = 0, totalFaceValue = 0, totalAvgRate = 0, totalFredBench = 0, fredBenchCount = 0
       let instrumentCount = 0
+      let details = []
+      let detailHeaders = []
 
-      const wfType = await sessionManager.getInstrumentWorkflow(sid, template.id)
-      const aggregates = wfType?.allCalculations || wfType?.calculations || {}
-
-      if (Object.keys(aggregates).length > 0) {
-        totalValue = aggregates.totalValue ?? aggregates.total_value ?? 0
-        totalFaceValue = aggregates.totalPrincipal ?? aggregates.total_principal ?? aggregates.totalFaceValue ?? aggregates.total_face_value ?? 0
-        totalAvgRate = aggregates.avgRate ?? aggregates.avg_rate ?? aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? 0
-        instrumentCount = aggregates.instrumentCount ?? aggregates.instrument_count ?? 0
-        if (aggregates.fred?.benchmark_rate !== undefined && aggregates.fred.benchmark_rate !== null) {
-          totalFredBench = aggregates.fred.benchmark_rate
-          fredBenchCount = 1
-        }
-      } else if (rows.length > 0) {
-        rows.forEach(row => {
-          const value = getVal(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
-          const faceValue = getVal(row, 'Face Value', 'face_value', 'Amount', 'amount', 'Principal', 'principal', 'Total Principal', 'total_principal')
-          const rate = getVal(row, 'Average Rate', 'average_rate', 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate')
-          const count = getVal(row, 'Number of Instruments', 'number_of_instruments', 'Instrument Count', 'instrument_count')
-          const fred = getVal(row, 'FRED Benchmark', 'fred_benchmark', 'FRED_Benchmark')
-
-          totalValue += value
-          totalFaceValue += faceValue
-          totalAvgRate += rate
-          if (count > 0) instrumentCount += count
-          if (fred !== null && fred !== undefined && fred !== 0) {
-            totalFredBench += fred
-            fredBenchCount++
-          }
+      if (useBackendData && backendSummary) {
+        // Use backend summary data
+        rows = backendSummary.details || []
+        totalValue = backendSummary.totalValue || 0
+        totalFaceValue = backendSummary.faceValue || 0
+        totalAvgRate = backendSummary.avgRate || 0
+        instrumentCount = backendSummary.count || 0
+        details = backendSummary.details || []
+        detailHeaders = backendSummary.detailHeaders || []
+      } else {
+        // Fallback to workflow data
+        rows = allSummaryRows.filter(r => {
+          const instType = r['Instrument Type'] || r['instrument_type'] || r['instrumentType']
+          return instType === template.id
         })
+
+        const wfType = await sessionManager.getInstrumentWorkflow(sid, template.id)
+        const aggregates = wfType?.allCalculations || wfType?.calculations || {}
+
+        if (Object.keys(aggregates).length > 0) {
+          totalValue = aggregates.totalValue ?? aggregates.total_value ?? 0
+          totalFaceValue = aggregates.totalPrincipal ?? aggregates.total_principal ?? aggregates.totalFaceValue ?? aggregates.total_face_value ?? 0
+          totalAvgRate = aggregates.avgRate ?? aggregates.avg_rate ?? aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? 0
+          instrumentCount = aggregates.instrumentCount ?? aggregates.instrument_count ?? 0
+          if (aggregates.fred?.benchmark_rate !== undefined && aggregates.fred.benchmark_rate !== null) {
+            totalFredBench = aggregates.fred.benchmark_rate
+            fredBenchCount = 1
+          }
+        } else if (rows.length > 0) {
+          rows.forEach(row => {
+            const value = getVal(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
+            const faceValue = getVal(row, 'Face Value', 'face_value', 'Amount', 'amount', 'Principal', 'principal', 'Total Principal', 'total_principal')
+            const rate = getVal(row, 'Average Rate', 'average_rate', 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate')
+            const count = getVal(row, 'Number of Instruments', 'number_of_instruments', 'Instrument Count', 'instrument_count')
+            const fred = getVal(row, 'FRED Benchmark', 'fred_benchmark', 'FRED_Benchmark')
+
+            totalValue += value
+            totalFaceValue += faceValue
+            totalAvgRate += rate
+            if (count > 0) instrumentCount += count
+            if (fred !== null && fred !== undefined && fred !== 0) {
+              totalFredBench += fred
+              fredBenchCount++
+            }
+          })
+        }
+
+        details = rows.map(row => {
+          const obj = {}
+          Object.keys(row).forEach(k => {
+            if (!['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet'].includes(k)) {
+              obj[k] = row[k]
+            }
+          })
+          return obj
+        })
+
+        const rawHeaders = details.length ? Object.keys(details[0]) : []
+        detailHeaders = getUniqueHeaders(rawHeaders)
       }
 
       const avgRate = totalAvgRate
       const avgFredBench = fredBenchCount > 0 ? totalFredBench / fredBenchCount : null
       const completed = (rows.length > 0) || (totalValue > 0) || (instrumentCount > 0)
 
-      const details = rows.map(row => {
-        const obj = {}
-        Object.keys(row).forEach(k => {
-          if (!['_raw', '_source', 'index', '__v', 'instrument_name', 'instrument_type', 'Worksheet', 'worksheet'].includes(k)) {
-            obj[k] = row[k]
-          }
-        })
-        return obj
-      })
-
-      const rawHeaders = details.length ? Object.keys(details[0]) : []
-      const uniqueHeaders = getUniqueHeaders(rawHeaders)
-
       detailsList.push({
         id: template.id,
         name: template.name,
         details: details,
-        detailHeaders: uniqueHeaders.length ? uniqueHeaders : ['No Data']
+        detailHeaders: detailHeaders.length ? detailHeaders : ['No Data']
       })
 
       instrumentResults.push({

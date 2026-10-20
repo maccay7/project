@@ -2830,9 +2830,9 @@ const benchmarkYield = computed(() => {
 
 function getDisplayColumns() {
   const exclude = [
-    '_raw', '_source', 'index', '__v', 
-    'instrument_name', 'instrument_type', 
-    'discount_yield', 'effective_yield', 'interest_earned', 
+    '_raw', '_source', 'index', '__v',
+    'instrument_name', 'instrument_type',
+    'discount_yield', 'effective_yield', 'interest_earned',
     '_row_index', 'term_days', 'total_value',
     'total_interest', 'avg_rate', 'weighted_avg_rate',
     'avg_days_to_maturity', 'total_principal', 'annual_yield',
@@ -2841,16 +2841,16 @@ function getDisplayColumns() {
     'clean_price', 'dirty_price', 'yield_to_maturity',
     'discount_rate', 'investment_yield', 'maturity_value',
     'present_value', 'purchase_price', 'issue_price',
-    'days_to_maturity', 'face_value', 'principal'
+    'days_to_maturity', 'face_value', 'principal',
+    'bond_equivalent_yield', 'currency',
+    'Valuation Type', 'Workbook', 'Worksheet'
   ]
-  
+
   let allColumns = [...(instrumentSummary.value.columns || [])]
   if (completedInstrumentSummary.value.columns) {
     allColumns = [...allColumns, ...completedInstrumentSummary.value.columns]
   }
-  
-  allColumns = [...allColumns, 'Valuation Type', 'Workbook', 'Worksheet']
-  
+
   const cols = allColumns.filter(c => !exclude.includes(c))
   const seen = new Set()
   return cols.filter(c => {
@@ -3077,7 +3077,6 @@ async function goToReportTab() {
     await markStepCompleted(String(sid), 'calculations')
     await markStepCompleted(String(sid), 'cleaning')
     await markStepCompleted(String(sid), 'upload')
-    saveSessionData()
   }
   forceUpdate.value++
 }
@@ -4089,9 +4088,7 @@ async function openWorkbookViewer() {
   }
 }
 
-watch(showWorkbookViewer, (newVal, oldVal) => {
-  console.log('showWorkbookViewer changed from', oldVal, 'to', newVal)
-})
+
 
 function workOnSelectedSheet() {
   if (!currentSheetName.value) {
@@ -4207,6 +4204,36 @@ async function autoDetectSingleInstrument() {
     console.log('Primary fields:', Object.keys(normalized.fields).length)
     console.log('Additional fields:', Object.keys(detectionResult?.additionalFields || {}).length)
     console.log('Total merged fields:', Object.keys(mergedFields).length)
+
+    // Auto-calculate days_to_maturity if missing but dates are present
+    if (!mergedFields.days_to_maturity && !mergedFields.term_days && !mergedFields.daysToMaturity) {
+      const issueDate = mergedFields.issue_date || mergedFields.valuation_date || mergedFields.settlement_date
+      const maturityDate = mergedFields.maturity_date
+      
+      if (issueDate && maturityDate) {
+        try {
+          const issue = new Date(issueDate)
+          const maturity = new Date(maturityDate)
+          
+          if (!isNaN(issue.getTime()) && !isNaN(maturity.getTime())) {
+            const daysDiff = Math.ceil((maturity - issue) / (1000 * 60 * 60 * 24))
+            
+            if (daysDiff > 0) {
+              mergedFields.days_to_maturity = daysDiff
+              mergedFieldsWithMetadata.days_to_maturity = {
+                value: daysDiff,
+                location: 'auto-calculated from dates',
+                source: 'auto-calculation',
+                confidence: 1.0
+              }
+              console.log(`✅ Auto-calculated days_to_maturity: ${daysDiff} days (from ${issueDate} to ${maturityDate})`)
+            }
+          }
+        } catch (e) {
+          console.log('Could not auto-calculate days_to_maturity from dates:', e.message)
+        }
+      }
+    }
 
     autoDetectedFields.value = mergedFields
     autoDetectedFieldsWithMetadata.value = mergedFieldsWithMetadata
@@ -4384,7 +4411,6 @@ function useMultiTableDetectedFields() {
   
   activeTab.value = 'cleaning'
   
-  console.log('Multi-table data flow complete - values set for preview, cleaning, and calculations')
 }
 
 function formatDetectedValue(field, value) {
@@ -4533,6 +4559,36 @@ async function handleCurrencyChange() {
     }
 
     if (Object.keys(mergedFields).length > 0) {
+      // Auto-calculate days_to_maturity if missing but dates are present
+      if (!mergedFields.days_to_maturity && !mergedFields.term_days && !mergedFields.daysToMaturity) {
+        const issueDate = mergedFields.issue_date || mergedFields.valuation_date || mergedFields.settlement_date
+        const maturityDate = mergedFields.maturity_date
+        
+        if (issueDate && maturityDate) {
+          try {
+            const issue = new Date(issueDate)
+            const maturity = new Date(maturityDate)
+            
+            if (!isNaN(issue.getTime()) && !isNaN(maturity.getTime())) {
+              const daysDiff = Math.ceil((maturity - issue) / (1000 * 60 * 60 * 24))
+              
+              if (daysDiff > 0) {
+                mergedFields.days_to_maturity = daysDiff
+                mergedFieldsWithMetadata.days_to_maturity = {
+                  value: daysDiff,
+                  location: 'auto-calculated from dates',
+                  source: 'auto-calculation',
+                  confidence: 1.0
+                }
+                console.log(`✅ Auto-calculated days_to_maturity: ${daysDiff} days (from ${issueDate} to ${maturityDate})`)
+              }
+            }
+          } catch (e) {
+            console.log('Could not auto-calculate days_to_maturity from dates:', e.message)
+          }
+        }
+      }
+
       autoDetectedFields.value = mergedFields
       autoDetectedFieldsWithMetadata.value = mergedFieldsWithMetadata
       autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
@@ -4670,7 +4726,6 @@ async function useDetectedFields() {
   console.log('Cleaning tab will show autoDetectedFields:', autoDetectedFields.value)
   console.log('Cleaning tab will show extractedValues:', extractedValues.value)
   console.log('Active tab set to:', activeTab.value)
-  console.log('Data flow complete - values set for preview, cleaning, and calculations')
 }
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
@@ -5530,11 +5585,9 @@ async function continueAfterUpload() {
   activeTab.value = 'cleaning'
   await nextTick()
   forceUpdate.value++
-  debouncedSave()
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
     await markStepCompleted(String(sid), 'upload')
-    saveSessionData()
   }
 }
 
@@ -5790,9 +5843,8 @@ async function continueAfterCleaning() {
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
     await markStepCompleted(String(sid), 'cleaning')
-    saveSessionData()
   }
-  
+
   calculateMetrics().catch(err => {
     showSnackbar('Error calculating metrics: ' + err.message, 'error')
   })
@@ -5897,7 +5949,8 @@ async function calculateMetrics() {
   }
 
   try {
-    console.log('Starting calculation for', instrumentType.value, 'with', dataForCalculation.length, 'rows')
+    let shouldContinueProcessing = true
+
     const response = await api.calculationsAPI.executeByType(
       instrumentType.value,
       dataForCalculation,
@@ -5913,12 +5966,9 @@ async function calculateMetrics() {
       null,
       activeSession.value?.id
     )
-    console.log('Calculation response received:', response?.success)
-    
+
     if (response?.success) {
-      console.log('Calculation successful, processing response...')
       if (response?.is_multi_instrument) {
-        console.log('Processing multi-instrument response')
         if (response?.instrument_summary) {
           const mappedRows = response.instrument_summary.rows?.map(row => {
             const mapped = mapBackendFieldsToDisplayNames(row, instrumentType.value)
@@ -5931,25 +5981,22 @@ async function calculateMetrics() {
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
           
-          instrumentSummary.value = { 
-            columns: response.instrument_summary.columns, 
-            rows: currentRowsWithWorkbook 
+          instrumentSummary.value = {
+            columns: response.instrument_summary.columns,
+            rows: currentRowsWithWorkbook
           }
-          console.log('Instrument summary updated with', currentRowsWithWorkbook.length, 'rows')
         }
         
         if (response?.portfolio_summary) {
           portfolioSummary.value = response.portfolio_summary
         }
-        
+
         const results = response?.results || {}
         const firstInstType = Object.keys(results)[0]
-        console.log('Results for instrument type:', firstInstType)
         if (firstInstType && results[firstInstType]) {
           calculations.value = results[firstInstType].data
-          
+
           if (response?.aggregate) {
-            console.log('Setting allCalculations from aggregate')
             const agg = {
               ...response.aggregate,
               accruedInterest: response.aggregate.accrued_interest ?? null,
@@ -5979,9 +6026,7 @@ async function calculateMetrics() {
             }
             allCalculations.value = agg
             selectedCalculations.value = agg
-            console.log('allCalculations set with', Object.keys(agg).length, 'fields')
           } else if (response?.data?.aggregates) {
-            console.log('Setting allCalculations from data.aggregates')
             const aggregates = response.data.aggregates
             const agg = {
               ...aggregates,
@@ -6012,9 +6057,7 @@ async function calculateMetrics() {
             }
             allCalculations.value = agg
             selectedCalculations.value = agg
-            console.log('allCalculations set with', Object.keys(agg).length, 'fields')
           } else {
-            console.log('No aggregate found, using calculations data directly')
             allCalculations.value = results[firstInstType].data
             selectedCalculations.value = results[firstInstType].data
           }
@@ -6024,10 +6067,7 @@ async function calculateMetrics() {
 
         isUsingDetectedFields.value = false
       } else if (response?.data) {
-        console.log('Processing single-instrument/data response')
         calculations.value = response.data
-        console.log('Response.data aggregates:', response.data?.aggregates)
-        console.log('Sheet type:', sheetType.value)
 
         if (response.data?.field_detection) {
           fieldDetectionResults.value = response.data.field_detection
@@ -6035,10 +6075,8 @@ async function calculateMetrics() {
 
         const backendInstrumentNames = response?.instrument_names || []
         const calcArray = response.data.calculations || []
-        console.log('Calc array length:', calcArray.length)
-        
+
         if (sheetType.value === 'single' && calcArray.length === 1) {
-          console.log('Processing single instrument calculation')
           const singleCalc = calcArray[0]
           calculations.value = singleCalc
           
@@ -6078,8 +6116,6 @@ async function calculateMetrics() {
             const missingFields = singleCalc.missing_fields || []
             const invalidFields = singleCalc.invalid_fields || []
             
-            console.error('Calculation failed:', errorMsg, missingFields, invalidFields)
-            
             let fullErrorMsg = errorMsg
             if (missingFields.length > 0) {
               fullErrorMsg += ` Missing: ${missingFields.join(', ')}`
@@ -6100,14 +6136,12 @@ async function calculateMetrics() {
               ...agg
             }
             selectedCalculations.value = allCalculations.value
-            return
+            // Don't return - let finally block reset isCalculating
           }
           
           if (singleCalc.status === 'partial' && singleCalc.error) {
             const missingFields = singleCalc.missing_fields || []
             const invalidFields = singleCalc.invalid_fields || []
-            
-            console.warn('Partial calculation:', singleCalc.error)
             
             let warningMsg = singleCalc.error
             if (missingFields.length > 0) {
@@ -6125,12 +6159,10 @@ async function calculateMetrics() {
             agg.missing_fields = missingFields
             agg.invalid_fields = invalidFields
           }
-          
-          console.log('Setting allCalculations for single instrument')
+
           allCalculations.value = agg
           selectedCalculations.value = agg
-          console.log('allCalculations keys:', Object.keys(allCalculations.value))
-          
+
           const row = {
             'Instrument Name': backendInstrumentNames[0] || singleCalc.instrument_name || 'Instrument',
             'Instrument Type': instrumentType.value,
@@ -6150,9 +6182,8 @@ async function calculateMetrics() {
           
           Object.keys(filteredRowWithWorkbook).forEach(k => currentCols.add(k))
           instrumentSummary.value = { columns: Array.from(currentCols), rows: [filteredRowWithWorkbook] }
-          console.log('Instrument summary set with', filteredRowWithWorkbook.length, 'rows')
+          shouldContinueProcessing = false
         } else if (calcArray.length > 1) {
-          console.log('Processing multiple calculations in single mode')
           const aggregates = response.data.aggregates || {}
           
           const agg = {
@@ -6249,6 +6280,57 @@ async function calculateMetrics() {
             
             completedPortfolioSummary.value = { columns: Array.from(allPortfolioCols), rows: mergedPortfolioRows }
           }
+          
+          // Save portfolio summary snapshot for reports
+          if (portfolioSummary.value) {
+            let existingSnapshot = { instrumentsWithDetails: [] }
+            try {
+              const existing = await sessionManager.getWorksheetData(activeSession.value?.id, '__portfolio_summary__')
+              if (existing && existing.instrumentsWithDetails) {
+                existingSnapshot = existing
+              }
+            } catch (e) {
+              console.log('No existing portfolio snapshot, creating new')
+            }
+            
+            const existingInstrumentIndex = existingSnapshot.instrumentsWithDetails.findIndex(i => i.id === instrumentType.value)
+            const currentInstrumentData = {
+              id: instrumentType.value,
+              details: portfolioSummary.value.rows || [],
+              detailHeaders: portfolioSummary.value.columns || [],
+              aggregate: agg || {},
+              timestamp: Date.now()
+            }
+            
+            if (existingInstrumentIndex >= 0) {
+              existingSnapshot.instrumentsWithDetails[existingInstrumentIndex] = currentInstrumentData
+            } else {
+              existingSnapshot.instrumentsWithDetails.push(currentInstrumentData)
+            }
+            
+            await sessionManager.saveWorksheetData(activeSession.value?.id, '__portfolio_summary__', existingSnapshot)
+            console.log('Portfolio summary snapshot saved (single instrument) with', existingSnapshot.instrumentsWithDetails.length, 'instruments')
+            
+            // Also save to backend for authoritative storage
+            try {
+              await api.portfolioAPI.saveSummary({
+                session_id: activeSession.value?.id,
+                instrument_type: instrumentType.value,
+                instrument_name: currentSheetName.value || instrumentType.value,
+                total_value: agg?.totalValue || 0,
+                face_value: agg?.faceValue || 0,
+                count: agg?.instrumentCount || 0,
+                avg_rate: agg?.avgRate || 0,
+                details: portfolioSummary.value?.rows || [],
+                detail_headers: portfolioSummary.value?.columns || [],
+                aggregate: agg || {},
+                valuation_date: activeValuationDate.value || new Date().toISOString().split('T')[0]
+              })
+              console.log('Portfolio summary saved to backend (single instrument) for', instrumentType.value)
+            } catch (saveError) {
+              console.error('Failed to save portfolio summary to backend (single instrument):', saveError)
+            }
+          }
         } else if (calcArray.length) {
           const rows = calcArray.map((calc, idx) => {
             const mappedCalc = mapBackendFieldsToDisplayNames(calc, instrumentType.value)
@@ -6339,6 +6421,59 @@ async function calculateMetrics() {
           }
           selectedCalculations.value = allCalculations.value
         }
+        
+        // Save portfolio summary to backend for authoritative storage
+        if (response?.portfolio_summary || response.data?.portfolio_summary) {
+          const portfolioData = response?.portfolio_summary || response.data?.portfolio_summary
+          
+          try {
+            await api.portfolioAPI.saveSummary({
+              session_id: activeSession.value?.id,
+              instrument_type: instrumentType.value,
+              instrument_name: currentSheetName.value || instrumentType.value,
+              total_value: agg?.totalValue || 0,
+              face_value: agg?.faceValue || 0,
+              count: agg?.instrumentCount || 0,
+              avg_rate: agg?.avgRate || 0,
+              details: portfolioData.rows || [],
+              detail_headers: portfolioData.columns || [],
+              aggregate: agg || {},
+              valuation_date: activeValuationDate.value || new Date().toISOString().split('T')[0]
+            })
+          } catch (saveError) {
+            console.error('Failed to save portfolio summary to backend:', saveError)
+            // Don't fail the calculation if portfolio summary save fails
+          }
+          
+          // Also save to worksheets JSON for backward compatibility
+          let existingSnapshot = { instrumentsWithDetails: [] }
+          try {
+            const existing = await sessionManager.getWorksheetData(activeSession.value?.id, '__portfolio_summary__')
+            if (existing && existing.instrumentsWithDetails) {
+              existingSnapshot = existing
+            }
+          } catch (e) {
+            // No existing snapshot, creating new
+          }
+          
+          const existingInstrumentIndex = existingSnapshot.instrumentsWithDetails.findIndex(i => i.id === instrumentType.value)
+          const currentInstrumentData = {
+            id: instrumentType.value,
+            details: portfolioData.rows || [],
+            detailHeaders: portfolioData.columns || [],
+            aggregate: portfolioData.aggregate || allCalculations.value || {},
+            timestamp: Date.now()
+          }
+          
+          if (existingInstrumentIndex >= 0) {
+            existingSnapshot.instrumentsWithDetails[existingInstrumentIndex] = currentInstrumentData
+          } else {
+            existingSnapshot.instrumentsWithDetails.push(currentInstrumentData)
+          }
+
+          await sessionManager.saveWorksheetData(activeSession.value?.id, '__portfolio_summary__', existingSnapshot)
+        }
+        
         if (activeSession.value?.id) {
           await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
             rawData: rawData.value,
@@ -6375,7 +6510,15 @@ async function calculateMetrics() {
       }
 
       isUsingDetectedFields.value = false
-      console.log('Calculation processing complete')
+
+      try {
+        await enrichCalculationsWithFred()
+      } catch (fredError) {
+        console.error('FRED enrichment failed (non-critical):', fredError)
+      }
+
+      debouncedSave()
+      forceUpdate.value++
     }
   } catch (err) {
     console.error('Error in calculation:', err)
@@ -6383,14 +6526,7 @@ async function calculateMetrics() {
     isUsingDetectedFields.value = false
   } finally {
     isCalculating.value = false
-    console.log('Calculation animation stopped')
   }
-  console.log('Starting FRED enrichment')
-  await enrichCalculationsWithFred()
-  console.log('FRED enrichment complete')
-  debouncedSave()
-  forceUpdate.value++
-  console.log('Calculation function complete')
 }
 
 async function continueToVisualizations() {
@@ -6408,7 +6544,6 @@ async function continueToVisualizations() {
   const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
   if (sid) {
     await markStepCompleted(String(sid), 'calculations')
-    saveSessionData()
   }
 }
 
@@ -7128,10 +7263,6 @@ async function saveToSession() {
   isSavingVersion = true
   isSaving.value = true
   skipAutoSave.value = true
-  console.log('=== saveToSession START ===')
-  console.log('Session ID:', activeSession.value?.id)
-  console.log('Current version count BEFORE save:', activeSession.value?.version_count)
-  console.log('Current worksheet:', currentSheetName.value)
   
   if (!activeSession.value || !activeSession.value.id) {
     isSavingVersion = false
@@ -7266,9 +7397,7 @@ async function saveToSession() {
               }
             }
           }
-          
-          console.log('=== saveToSession COMPLETE ===')
-          console.log('Final version count:', updatedVersionCount)
+
         }
       } catch (fetchError) {
         console.warn('Failed to fetch updated versions:', fetchError)
@@ -7299,14 +7428,10 @@ function debouncedSave(explicitSave = false) {
 }
 
 async function refreshSessionVersionCount(sid) {
-  console.log('refreshSessionVersionCount called with sid:', sid)
   try {
     const updated = await sessionManager.getSession(sid, true)
-    console.log('Session refresh returned:', updated)
-    console.log('Session has ID?', updated?.id)
     if (updated && updated.id && activeSession.value?.id === sid) {
       activeSession.value = updated
-      console.log('Session refreshed, version_count =', updated.version_count)
     } else if (!updated?.id) {
       console.warn('Session refresh returned invalid session (no ID), keeping current session')
     } else {
@@ -7468,12 +7593,82 @@ function showFormula(metricKey) {
   const details = []
   
   const getValue = (key) => {
-    return calc[key] || calc[toSnakeCase(key)] || calc[toCamelCase(key)] ||
-           agg[key] || agg[toSnakeCase(key)] || agg[toCamelCase(key)] || 0
+    // Direct key lookup
+    let value = calc[key] || agg[key]
+    
+    // Try snake_case variant
+    if (value === undefined || value === null) {
+      const snake = toSnakeCase(key)
+      value = calc[snake] || agg[snake]
+    }
+    
+    // Try camelCase variant  
+    if (value === undefined || value === null) {
+      const camel = toCamelCase(key)
+      value = calc[camel] || agg[camel]
+    }
+    
+    // For specific aggregates, try common variations
+    if (value === undefined || value === null) {
+      const variations = {
+        'totalPrincipal': ['total_principal', 'totalPrincipal'],
+        'totalInterest': ['total_interest', 'totalInterest'],
+        'totalValue': ['total_value', 'totalValue'],
+        'interestEarned': ['interest_earned', 'interestEarned'],
+        'avgRate': ['avg_rate', 'avgRate'],
+        'weightedAvgRate': ['weighted_avg_rate', 'weightedAvgRate'],
+        'avgDaysToMaturity': ['avg_days_to_maturity', 'avgDaysToMaturity'],
+        'totalPrincipal': ['total_principal', 'totalPrincipal'],
+        'totalPurchasePrice': ['total_purchase_price', 'totalPurchasePrice'],
+        'totalDiscount': ['total_discount', 'totalDiscount'],
+        'avgYTM': ['avg_ytm', 'avgYTM'],
+        'avgDuration': ['avg_duration', 'avgDuration'],
+        'weightedAvgCoupon': ['weighted_avg_coupon', 'weightedAvgCoupon'],
+        'totalCouponIncome': ['total_coupon_income', 'totalAnnualIncome'],
+        'totalAnnualIncome': ['total_coupon_income', 'totalAnnualIncome'],
+        'weightedAvgDiscount': ['weighted_avg_discount', 'weightedAvgDiscount'],
+        'avgInvestment': ['avg_investment', 'avgInvestment'],
+        'annualizedYield': ['annualized_yield', 'annualizedYield'],
+        'effectiveYield': ['effective_yield', 'effectiveYield'],
+        'effectiveAnnualRate': ['effective_annual_rate', 'effectiveAnnualRate'],
+        'bondEquivalentYield': ['bond_equivalent_yield', 'bondEquivalentYield'],
+        'discountYield': ['discount_yield', 'discountYield'],
+        'moneyMarketYield': ['money_market_yield', 'moneyMarketYield'],
+        'currentYield': ['current_yield', 'currentYield'],
+        'modifiedDuration': ['modified_duration', 'modifiedDuration'],
+        'yieldToMaturity': ['yield_to_maturity', 'yieldToMaturity', 'ytm'],
+        'couponRate': ['coupon_rate', 'couponRate'],
+        'faceValue': ['face_value', 'faceValue'],
+        'purchasePrice': ['purchase_price', 'purchasePrice'],
+        'currentPrice': ['current_price', 'currentPrice', 'price'],
+        'presentValue': ['present_value', 'presentValue'],
+        'fairValue': ['fair_value', 'fairValue'],
+        'maturityValue': ['maturity_value', 'maturityValue'],
+        'yieldCurveRate': ['yield_curve_rate', 'yieldCurveRate', 'benchmark_rate'],
+        'termDays': ['term_days', 'termDays'],
+        'daysToMaturity': ['days_to_maturity', 'daysToMaturity'],
+        'pricePer100': ['price_per_100', 'pricePer100'],
+        'holdingPeriodYield': ['holding_period_yield', 'holdingPeriodYield'],
+        'daysAccrued': ['days_accrued', 'daysAccrued'],
+        'couponPerPeriod': ['coupon_per_period', 'couponPerPeriod'],
+        'principal': ['principal', 'principal'],
+        'interestRate': ['interest_rate', 'interestRate'],
+        'dayCount': ['day_count_convention', 'dayCount'],
+        'frequency': ['coupon_frequency', 'frequency'],
+        'yearsToMaturity': ['years_to_maturity', 'yearsToMaturity']
+      }
+      
+      for (const variant of variations[key] || []) {
+        value = calc[variant] || agg[variant]
+        if (value !== undefined && value !== null) break
+      }
+    }
+    
+    return value !== undefined && value !== null ? value : null
   }
   
   const formatValue = (val) => {
-    if (val === null || val === undefined || val === 0) return 'N/A'
+    if (val === null || val === undefined) return 'N/A'
     if (typeof val === 'number') {
       if (val > 10000) return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       return val.toFixed(4)
@@ -7864,6 +8059,173 @@ function showFormula(metricKey) {
     }
   }
   
+  else if (metricKey === 'interestRate') {
+    const value = getValue('interestRate') || getValue('interest_rate') || getValue('avgRate') || getValue('avg_rate')
+    details.push({ label: 'Interest Rate', value: formatValue(value) + '%', formula: 'Annual interest rate as percentage' })
+    details.push({ label: 'Answer (Interest Rate)', value: formatValue(value) + '%', formula: 'Final interest rate' })
+  }
+
+  else if (metricKey === 'effectiveYield' || metricKey === 'effectiveAnnualRate' || metricKey === 'annualYield') {
+    const effYield = getValue('effectiveYield') || getValue('effective_yield') || getValue('effectiveAnnualRate') || getValue('effective_annual_rate')
+    const principal = getValue('principal') || getValue('totalPrincipal') || getValue('total_principal')
+    const interest = getValue('interestEarned') || getValue('totalInterest') || getValue('interest_earned')
+    const days = getValue('termDays') || getValue('term_days') || getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity')
+
+    details.push({ label: 'Effective Yield', value: formatValue(effYield) + '%', formula: 'Effective yield from backend' })
+    details.push({ label: 'Interest Earned', value: formatValue(interest), formula: 'Interest amount' })
+    details.push({ label: 'Principal', value: formatValue(principal), formula: 'Principal amount' })
+    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
+    details.push({ label: 'Answer (Effective Yield)', value: formatValue(effYield) + '%', formula: '(Interest / Principal) × (365 / Days) × 100' })
+  }
+
+  else if (metricKey === 'avgDaysToMaturity' || metricKey === 'termDays' || metricKey === 'daysToMaturity') {
+    const avgDays = getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity') || getValue('termDays') || getValue('term_days')
+    details.push({ label: 'Average Days to Maturity', value: formatValue(avgDays), formula: 'Average days from backend' })
+    details.push({ label: 'Answer (Average Days)', value: formatValue(avgDays), formula: 'Final average days to maturity' })
+  }
+
+  else if (metricKey === 'maturityValue') {
+    const maturityVal = getValue('maturityValue') || getValue('maturity_value') || getValue('totalValue') || getValue('total_value')
+    const principal = getValue('principal') || getValue('totalPrincipal') || getValue('total_principal')
+    const interest = getValue('interestEarned') || getValue('totalInterest') || getValue('interest_earned')
+
+    details.push({ label: 'Maturity Value', value: formatValue(maturityVal), formula: 'Maturity value from backend' })
+    details.push({ label: 'Principal', value: formatValue(principal), formula: 'Principal amount' })
+    details.push({ label: 'Interest Earned', value: formatValue(interest), formula: 'Interest amount' })
+    details.push({ label: 'Answer (Maturity Value)', value: formatValue(maturityVal), formula: 'Principal + Interest' })
+  }
+
+  else if (metricKey === 'presentValue') {
+    const presentValue = getValue('presentValue') || getValue('present_value') || getValue('price')
+    const couponRate = getValue('couponRate') || getValue('coupon_rate')
+    const face = getValue('faceValue') || getValue('face_value')
+    const ytm = getValue('yieldToMaturity') || getValue('yield_to_maturity') || getValue('ytm')
+    const frequency = getValue('frequency') || getValue('coupon_frequency') || 2
+
+    details.push({ label: 'Present Value', value: formatValue(presentValue), formula: 'Present value from backend' })
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
+    details.push({ label: 'Coupon Rate', value: formatValue(couponRate) + '%', formula: 'Annual coupon rate' })
+    details.push({ label: 'Yield to Maturity', value: formatValue(ytm) + '%', formula: 'Discount rate' })
+    details.push({ label: 'Coupon Frequency', value: frequency, formula: 'Payments per year' })
+    details.push({ label: 'Answer (Present Value)', value: formatValue(presentValue), formula: 'DCF calculated present value' })
+  }
+
+  else if (metricKey === 'fairValue') {
+    const fairVal = getValue('fairValue') || getValue('fair_value')
+    const presentValue = getValue('presentValue') || getValue('present_value') || getValue('price')
+    const marketPrice = getValue('currentPrice') || getValue('current_price') || getValue('price')
+
+    details.push({ label: 'Fair Value', value: formatValue(fairVal), formula: 'Fair value from backend' })
+    details.push({ label: 'Present Value', value: formatValue(presentValue), formula: 'Discounted cash flow value' })
+    details.push({ label: 'Market Price', value: formatValue(marketPrice), formula: 'Current market price' })
+    details.push({ label: 'Answer (Fair Value)', value: formatValue(fairVal), formula: 'Present Value - Market Price' })
+  }
+
+  else if (metricKey === 'yieldCurveRate') {
+    const benchmark = getValue('yieldCurveRate') || getValue('yield_curve_rate') || getValue('benchmark_rate') || getValue('risk_free_rate')
+    details.push({ label: 'Benchmark Rate', value: formatValue(benchmark) + '%', formula: 'FRED API benchmark rate' })
+    details.push({ label: 'Answer (Benchmark)', value: formatValue(benchmark) + '%', formula: 'External benchmark from FRED' })
+  }
+
+  else if (metricKey === 'totalPrincipal') {
+    const totalPrincipal = getValue('totalPrincipal') || getValue('total_principal')
+    details.push({ label: 'Total Principal', value: formatValue(totalPrincipal), formula: 'Σ Principal amounts (calculated by backend)' })
+    details.push({ label: 'Answer (Total Principal)', value: formatValue(totalPrincipal), formula: 'Sum of all principal values from individual instruments' })
+  }
+
+  else if (metricKey === 'modifiedDuration') {
+    const modDur = getValue('modifiedDuration') || getValue('modified_duration')
+    const macaulay = getValue('duration') || getValue('macaulay_duration')
+    const ytm = getValue('yieldToMaturity') || getValue('yield_to_maturity') || getValue('ytm')
+    const frequency = getValue('frequency') || getValue('coupon_frequency') || 2
+
+    details.push({ label: 'Modified Duration', value: formatValue(modDur) + ' years', formula: 'Modified duration from backend' })
+    details.push({ label: 'Macaulay Duration', value: formatValue(macaulay) + ' years', formula: 'Weighted average time to cash flows' })
+    details.push({ label: 'Yield to Maturity', value: formatValue(ytm) + '%', formula: 'Discount rate' })
+    details.push({ label: 'Coupon Frequency', value: frequency, formula: 'Payments per year' })
+    details.push({ label: 'Answer (Modified Duration)', value: formatValue(modDur) + ' years', formula: 'Macaulay / (1 + YTM/Frequency)' })
+  }
+
+  else if (metricKey === 'yieldToMaturity') {
+    const ytm = getValue('yieldToMaturity') || getValue('yield_to_maturity') || getValue('ytm')
+    const price = getValue('currentPrice') || getValue('current_price') || getValue('price')
+    const couponRate = getValue('couponRate') || getValue('coupon_rate')
+    const face = getValue('faceValue') || getValue('face_value')
+    const frequency = getValue('frequency') || getValue('coupon_frequency') || 2
+    const years = getValue('yearsToMaturity') || getValue('years_to_maturity')
+
+    details.push({ label: 'Yield to Maturity', value: formatValue(ytm) + '%', formula: 'YTM from backend' })
+    details.push({ label: 'Current Price', value: formatValue(price), formula: 'Market price' })
+    details.push({ label: 'Coupon Rate', value: formatValue(couponRate) + '%', formula: 'Annual coupon rate' })
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
+    details.push({ label: 'Years to Maturity', value: formatValue(years), formula: 'Time to maturity' })
+    details.push({ label: 'Answer (YTM)', value: formatValue(ytm) + '%', formula: 'Internal rate of return (Newton-Raphson)' })
+  }
+
+  else if (metricKey === 'couponRate') {
+    const value = getValue('couponRate') || getValue('coupon_rate')
+    const face = getValue('faceValue') || getValue('face_value')
+    const annualCoupon = face * (value / 100)
+
+    details.push({ label: 'Coupon Rate', value: formatValue(value) + '%', formula: 'Coupon rate from backend' })
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
+    details.push({ label: 'Annual Coupon', value: formatValue(annualCoupon), formula: 'Face Value × Coupon Rate' })
+    details.push({ label: 'Answer (Coupon Rate)', value: formatValue(value) + '%', formula: 'Final coupon rate' })
+  }
+
+  else if (metricKey === 'holdingPeriodYield') {
+    const hpy = getValue('holdingPeriodYield') || getValue('holding_period_yield')
+    const face = getValue('faceValue') || getValue('face_value')
+    const purchase = getValue('purchasePrice') || getValue('purchase_price')
+
+    details.push({ label: 'Holding Period Yield', value: formatValue(hpy) + '%', formula: 'Holding period yield from backend' })
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Maturity value' })
+    details.push({ label: 'Purchase Price', value: formatValue(purchase), formula: 'Price paid' })
+    details.push({ label: 'Answer (Holding Period Yield)', value: formatValue(hpy) + '%', formula: '(Face Value - Purchase Price) / Purchase Price × 100' })
+  }
+
+  else if (metricKey === 'pricePer100') {
+    const pricePer100 = getValue('pricePer100') || getValue('price_per_100')
+    const price = getValue('currentPrice') || getValue('current_price') || getValue('price')
+    const face = getValue('faceValue') || getValue('face_value')
+
+    details.push({ label: 'Price per 100', value: formatValue(pricePer100), formula: 'Price per 100 from backend' })
+    details.push({ label: 'Current Price', value: formatValue(price), formula: 'Market price' })
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
+    details.push({ label: 'Answer (Price per 100)', value: formatValue(pricePer100), formula: '(Price / Face Value) × 100' })
+  }
+
+  else if (metricKey === 'totalPurchasePrice') {
+    const totalPurchase = getValue('totalPurchasePrice') || getValue('total_purchase_price')
+    details.push({ label: 'Total Purchase Price', value: formatValue(totalPurchase), formula: 'Σ Purchase prices' })
+    details.push({ label: 'Answer (Total Purchase)', value: formatValue(totalPurchase), formula: 'Sum of all purchase prices' })
+  }
+
+  else if (metricKey === 'avgInvestment') {
+    const avgInvest = getValue('avgInvestment') || getValue('avg_investment')
+    const totalPurchase = getValue('totalPurchasePrice') || getValue('total_purchase_price')
+    const count = getValue('instrumentCount') || getValue('instrument_count') || (instrumentSummary.value.rows?.length || 0)
+
+    details.push({ label: 'Average Investment', value: formatValue(avgInvest), formula: 'Average investment from backend' })
+    details.push({ label: 'Total Purchase Price', value: formatValue(totalPurchase), formula: 'Sum of all purchase prices' })
+    details.push({ label: 'Number of Instruments', value: formatValue(count), formula: 'Count' })
+    details.push({ label: 'Answer (Average Investment)', value: formatValue(avgInvest), formula: 'Total Purchase / Count' })
+  }
+
+  else if (metricKey === 'annualizedYield' || metricKey === 'moneyMarketYield' || metricKey === 'effectiveAnnualYield') {
+    const moneyMarketYield = getValue('moneyMarketYield') || getValue('money_market_yield') || getValue('annualizedYield') || getValue('annualized_yield')
+    const face = getValue('faceValue') || getValue('face_value')
+    const purchase = getValue('purchasePrice') || getValue('purchase_price')
+    const days = getValue('termDays') || getValue('term_days')
+    const discount = face - purchase
+
+    details.push({ label: 'Money Market Yield', value: formatValue(moneyMarketYield) + '%', formula: 'Money market yield from backend' })
+    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Maturity value' })
+    details.push({ label: 'Purchase Price', value: formatValue(purchase), formula: 'Price paid' })
+    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
+    details.push({ label: 'Answer (Money Market Yield)', value: formatValue(moneyMarketYield) + '%', formula: '(Discount / Purchase) × (360 / Days) × 100' })
+  }
+
   else {
     const value = getValue(metricKey)
     details.push({ label: metricKey, value: formatValue(value), formula: formulaMap[metricKey] || 'See formula above' })
@@ -8492,30 +8854,15 @@ const autoSaveEnabled = ref(false)
 let isSavingVersion = false
 
 watch([rawData, cleanedData], () => {
-  console.log('=== rawData or cleanedData changed ===')
-  console.log('rawData length:', rawData.value.length)
-  console.log('cleanedData length:', cleanedData.value.length)
   if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion) {
-    console.log('Skipping auto-save - disabled or save in progress')
     return
   }
   debouncedSave()
 }, { deep: true })
 
-watch(allCalculations, (newVal) => {
-  console.log('=== allCalculations changed ===')
-  console.log('allCalculations.value:', newVal)
-  console.log('Keys:', Object.keys(newVal || {}))
-}, { deep: true })
+
 
 watch(() => activeTab.value, async (newTab) => {
-  console.log('=== Active Tab Changed ===')
-  console.log('New tab:', newTab)
-  console.log('autoDetectedFields.value:', autoDetectedFields.value)
-  console.log('cleanedData.value:', cleanedData.value)
-  console.log('extractedValues.value:', extractedValues.value)
-  console.log('allCalculations.value:', allCalculations.value)
-  
   if (newTab === 'calculations' && hasCleanedData.value) {
     await calculateMetrics()
   }
@@ -8552,7 +8899,6 @@ async function checkAndReset() {
         activeSession.value = s || null
         if (s) {
           sessionManager.setActiveSession(s)
-          console.log('Session set as active on mount:', s.id)
         }
       } else {
         activeSession.value = null
@@ -8597,7 +8943,6 @@ onMounted(async () => {
       }
       activeSession.value = s
       sessionManager.setActiveSession(s)
-      console.log('Session set as active from URL query:', s.id)
     }
   }
   if (!activeSession.value) {
@@ -8615,21 +8960,15 @@ onMounted(async () => {
         }
         activeSession.value = refreshed
         sessionManager.setActiveSession(refreshed)
-        console.log('Session refreshed and set as active:', refreshed.id)
       } else {
         activeSession.value = current
         sessionManager.setActiveSession(current)
-        console.log('Session set as active from cache:', current.id)
       }
     } else {
       const allSessions = await sessionManager.getAllSessions()
-      console.log('All sessions from sessionManager:', allSessions)
       if (allSessions.length > 0) {
         const mostRecent = allSessions[0]
-        console.log('Most recent session:', mostRecent)
-        console.log('Most recent session.id:', mostRecent.id)
         const s = await sessionManager.getSession(mostRecent.id, true)
-        console.log('Session fetched from backend:', s)
         if (s) {
           try {
             const versionsRes = await api.versionAPI.getVersions(s.id)
@@ -8676,7 +9015,6 @@ onMounted(async () => {
 const handleSessionRestored = async (event) => {
   const { sessionId } = event.detail || {}
   if (sessionId && activeSession.value?.id === sessionId) {
-    console.log('Session restored, reloading data...')
     await loadSavedData()
     await refreshSessionVersionCount(sessionId)
     forceUpdate.value++

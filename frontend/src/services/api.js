@@ -145,6 +145,18 @@ export const sessionsAPI = {
   // 🔥 REMOVED: incrementVersion - version_count should only be updated by create_version
 }
 
+// ===== PORTFOLIO SUMMARY API =====
+export const portfolioAPI = {
+  saveSummary: (payload) => callAPI('/api/portfolio/summary', 'POST', payload),
+  getSummaries: (session_id) => callAPI(`/api/portfolio/summary/${session_id}`, 'GET')
+}
+
+// ===== REPORT CONFIGURATION API =====
+export const reportConfigAPI = {
+  saveConfiguration: (payload) => callAPI('/api/report/configuration', 'POST', payload),
+  getConfiguration: (session_id) => callAPI(`/api/report/configuration/${session_id}`, 'GET')
+}
+
 // ===== VERSION API =====
 export const versionAPI = {
   create: (session_id, instrument_type, change_summary, dataset_snapshot = null, mapping_snapshot = null, calculation_snapshot = null, portfolio_snapshot = null, report_snapshot = null, user_id = null) =>
@@ -204,6 +216,8 @@ export default {
   fredAPI,
   instrumentConfigAPI,
   sessionsAPI,
+  portfolioAPI,
+  reportConfigAPI,
   versionAPI,
   visualizationAPI,
   mappingTemplatesAPI,
