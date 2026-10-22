@@ -111,6 +111,52 @@ def _unique_instrument_count(individual_results, backend_count=0):
     return len(success_rows)
 
 
+def _resolve_instrument_name(rows, sheet_name):
+    """Apply the worksheet name as the instrument name for single-instrument
+    payloads, per Dura Capital's single-instrument-sheet rule.
+
+    - If the payload is a single dict (e.g. /api/calculations/single), treat
+      the dict as one instrument row.
+    - If the payload is a list with exactly one row, treat that row as one
+      instrument.
+    - If a specific instrument_name is already present, leave it alone.
+    - Never touches multi-row payloads (multi-instrument tables).
+    """
+    if not sheet_name:
+        return rows
+    name = str(sheet_name).strip()
+    if not name:
+        return rows
+
+    def _row_has_name(row):
+        if not isinstance(row, dict):
+            return False
+        for key in ('instrument_name', 'Instrument Name', 'instrumentName'):
+            v = row.get(key)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s and s.lower() not in ('n/a', 'na', '-', 'none', 'null'):
+                return True
+        return False
+
+    if isinstance(rows, dict):
+        if _row_has_name(rows):
+            return rows
+        updated = dict(rows)
+        updated['instrument_name'] = name
+        return updated
+
+    if not isinstance(rows, list) or len(rows) != 1:
+        return rows
+    row = rows[0]
+    if not isinstance(row, dict) or _row_has_name(row):
+        return rows
+    updated = dict(row)
+    updated['instrument_name'] = name
+    return [updated]
+
+
 def detect_instruments_from_data(data):
     if not data:
         return {'unique_instruments': [], 'instrument_counts': {},
@@ -359,6 +405,7 @@ def calculations_routes(app):
         currency = payload.get('currency')
         maturity = payload.get('maturity')
         country = payload.get('country')
+        sheet_name = payload.get('sheet_name')
 
         if not isinstance(row, dict) or not row:
             return jsonify({'status': 'error',
@@ -368,6 +415,8 @@ def calculations_routes(app):
             return jsonify({'status': 'error',
                             'errors': [{'field': 'instrument_type', 'code': 'missing',
                                         'message': 'instrument_type is required'}]}), 400
+
+        row = _resolve_instrument_name(row, sheet_name)
 
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
@@ -394,6 +443,7 @@ def calculations_routes(app):
             'currency': currency,
             'inputs': result['inputs'],
             'calculation': result['calculation'],
+            'derivations': (result['calculation'] or {}).get('derivations', {}),
             'valuation': result['valuation'],
             'methodology': f'{inst_type}-v1',
             'sourceData': row,
@@ -427,6 +477,8 @@ def calculations_routes(app):
                             'errors': [{'field': 'instrument_type', 'code': 'missing',
                                         'message': 'instrument_type is required'}]}), 400
 
+        data = _resolve_instrument_name(data, sheet_name)
+
         merged = []
         for row in data:
             r = {**row}
@@ -458,6 +510,8 @@ def calculations_routes(app):
                 'inputs': merged_inputs,
                 'sourceData': src,
                 'calculation': calc,
+                'derivations': calc.get('derivations', {}),
+                'validation_errors': calc.get('validation_errors', []),
                 'valuation': {
                     'total_value': calc.get('total_value'),
                     'principal': calc.get('principal'),
@@ -576,10 +630,14 @@ def calculations_routes(app):
         currency = payload.get('currency')
         maturity = payload.get('maturity')
         country = payload.get('country')
+        sheet_name = payload.get('sheet_name')
         if not data:
             return jsonify({'status': 'error', 'errors': [
                 {'field': 'data', 'code': 'empty',
                  'message': 'No data provided'}]}), 400
+
+        data = _resolve_instrument_name(data, sheet_name)
+
         merged = []
         for row in data:
             r = {**row}
@@ -635,9 +693,12 @@ def calculations_routes(app):
             currency = payload.get('currency')
             maturity = payload.get('maturity')
             country = payload.get('country')
+            sheet_name = payload.get('sheet_name')
             if not data:
                 return jsonify({'success': False, 'status': 'error',
                                 'message': 'No data provided'}), 400
+
+            data = _resolve_instrument_name(data, sheet_name)
 
             benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
@@ -673,9 +734,12 @@ def calculations_routes(app):
         currency = payload.get('currency')
         maturity = payload.get('maturity')
         country = payload.get('country')
+        sheet_name = payload.get('sheet_name')
         if not data:
             return jsonify({'success': False, 'status': 'error',
                             'message': 'No uploaded data'}), 400
+
+        data = _resolve_instrument_name(data, sheet_name)
 
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
@@ -719,7 +783,15 @@ def calculations_routes(app):
 
         detector = create_instrument_detector()
         det = detector.detect_from_data(data)
-        inst_type = det.instrument_type or 'money-market'
+        inst_type = det.instrument_type if det else None
+        if not inst_type:
+            return jsonify({
+                'success': False,
+                'status': 'error',
+                'message': ('Could not determine instrument type from the '
+                            'uploaded data. Please specify instrument_type '
+                            'explicitly.'),
+            }), 400
 
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 

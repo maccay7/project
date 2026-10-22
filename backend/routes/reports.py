@@ -553,7 +553,7 @@ def reports_routes(app):
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
         report_type = payload.get('report_type', 'portfolio')
-        instrument_type = payload.get('instrument_type', 'money-market')
+        instrument_type = payload.get('instrument_type') or 'portfolio'
         report_data = payload.get('report_data', {})
 
         if not session_id:
@@ -580,7 +580,7 @@ def reports_routes(app):
 
         payload = request.get_json() or {}
         data = payload.get('data', [])
-        instrument_type = payload.get('instrument_type', 'money-market')
+        instrument_type = payload.get('instrument_type') or 'portfolio'
 
         appendix = generate_appendix_data(data, instrument_type)
 

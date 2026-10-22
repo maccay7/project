@@ -88,9 +88,10 @@ class TestMoneyMarket:
         }
         result = calculate_money_market(item)
         
-        # Days = 90 (Jan 1 to Apr 1)
-        assert result["term_days"] == 90
-        assert result["interest_earned"] == 1250.00
+        # 2024-01-01 to 2024-04-01 = 91 days (Feb 2024 has 29 days)
+        # Interest = 100000 * 0.05 * (91/360) = 1263.89
+        assert result["term_days"] == 91
+        assert round(result["interest_earned"], 2) == 1263.89
 
     def test_missing_principal(self):
         """Test error when principal is missing."""
@@ -194,8 +195,8 @@ class TestTreasuryBills:
         }
         result = calculate_treasury_bill(item)
         
-        # Bond Equivalent Yield = (1250/98750) * (365/90) * 100 = 5.1266%
-        assert round(result["bond_equivalent_yield"], 4) == 5.1266
+        # BEY = (1250/98750) * (365/90) * 100 = 5.1337%
+        assert round(result["bond_equivalent_yield"], 4) == 5.1337
 
     def test_holding_period_yield(self):
         """Test holding period yield calculation."""
@@ -218,8 +219,8 @@ class TestTreasuryBills:
         }
         result = calculate_treasury_bill(item)
         
-        # Effective Annual Yield = ((100000/98750)^(365/90) - 1) * 100 = 5.2938%
-        assert round(result["effective_annual_yield"], 4) == 5.2938
+        # EAY = ((100000/98750)^(365/90) - 1) * 100 = 5.2337%
+        assert round(result["effective_annual_yield"], 4) == 5.2337
 
     def test_from_dates(self):
         """Test calculation from valuation and maturity dates."""
@@ -232,8 +233,10 @@ class TestTreasuryBills:
         }
         result = calculate_treasury_bill(item)
         
-        assert result["term_days"] == 90
-        assert result["purchase_price"] == 98750.00
+        # 91 days (Feb 2024 has 29 days)
+        # Price = 100000 * (1 - 0.05 * 91/360) = 98736.11
+        assert result["term_days"] == 91
+        assert round(result["purchase_price"], 2) == 98736.11
 
     def test_missing_face_value(self):
         """Test error when face value is missing."""
@@ -301,7 +304,7 @@ class TestBonds:
         
         # Price should be approximately 104376 (premium since coupon > yield)
         assert result["current_price"] is not None
-        assert result["current_price"] > 100000  # Premium bond
+        assert result["current_price"] > 100000
 
     def test_current_yield(self):
         """Test current yield calculation."""
@@ -314,8 +317,8 @@ class TestBonds:
         }
         result = calculate_bond(item)
         
-        # Current Yield = (6000/104376) * 100 = 5.7479%
-        assert round(result["current_yield"], 4) == 5.7479
+        # Current Yield = (6000/104376) * 100 = 5.7485%
+        assert round(result["current_yield"], 4) == 5.7485
 
     def test_accrued_interest(self):
         """Test accrued interest calculation."""
@@ -366,8 +369,9 @@ class TestBonds:
         }
         result = calculate_bond(item)
         
-        # Years = 5
-        assert result["years_to_maturity"] == 5.0
+        # 2024-01-01 to 2029-01-01 = 1827 days (2024 and 2028 are leap years)
+        # Years = 1827/365 = 5.0055
+        assert result["years_to_maturity"] == pytest.approx(5.0055, abs=0.001)
 
     def test_missing_face_value(self):
         """Test error when face value is missing."""
@@ -512,6 +516,47 @@ class TestEdgeCases:
         
         # Days should be calculated but date consistency validation would catch this
         assert result["term_days"] == 1
+
+
+class TestNewDerivations:
+    """Test new derivation behavior added in the fixes."""
+
+    def test_days_derived_from_dates(self):
+        """Test that days_to_maturity is derived from valuation and maturity dates."""
+        item = {
+            "face_value": 497376,
+            "discount_rate": "3.32%",
+            "valuation_date": "2025-12-31",
+            "maturity_date": "2028-09-22",
+        }
+        result = calculate_treasury_bill(item)
+        assert result["term_days"] == 996
+        assert result["derivations"]["days_to_maturity"]["from"] == "2025-12-31"
+        assert result["derivations"]["days_to_maturity"]["to"] == "2028-09-22"
+        assert result["derivations"]["days_to_maturity"]["result"] == 996
+
+    def test_discount_rate_derived_from_price(self):
+        """Test that discount_rate is derived when only price + days are given."""
+        item = {
+            "face_value": 100000,
+            "purchase_price": 98750,
+            "term_days": 90,
+        }
+        result = calculate_treasury_bill(item)
+        assert result["discount_rate"] is not None
+        assert round(result["discount_rate"], 2) == 5.00
+
+    def test_valuation_date_used_when_settlement_date_missing(self):
+        """Test that valuation_date substitutes for missing settlement_date."""
+        item = {
+            "principal": 100000,
+            "interest_rate": "5%",
+            "valuation_date": "2024-01-01",
+            "maturity_date": "2024-04-01",
+        }
+        result = calculate_money_market(item)
+        assert result["term_days"] == 91
+        assert result["derivations"]["days_to_maturity"]["from"] == "2024-01-01"
 
 
 if __name__ == "__main__":

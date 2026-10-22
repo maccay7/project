@@ -1,235 +1,584 @@
-from datetime import datetime
-from typing import Dict, Optional
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional
+
 from utils.rounding import (
     round_percentage, round_money, round_value, auto_round_by_field_name,
 )
-from utils.calculation_dependencies import CalculationDependencyEngine
 
 
-class TBillsCalculator:
+_DATE_FORMATS = (
+    "%Y-%m-%d", "%Y/%m/%d",
+    "%d-%m-%Y", "%d/%m/%Y",
+    "%m-%d-%Y", "%m/%d/%Y",
+    "%d-%m-%y", "%d/%m/%y",
+    "%m-%d-%y", "%m/%d/%y",
+    "%d %b %Y", "%d-%b-%Y",
+    "%d %b %y", "%d-%b-%y",
+    "%d %B %Y", "%d-%B-%Y",
+    "%b %d, %Y", "%b %d %Y",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+)
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, (int, float)):
+        n = float(value)
+        if 1 <= n <= 2958465:
+            return (datetime(1899, 12, 30) + timedelta(days=int(n))).date()
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_percentage(value: Any) -> Optional[float]:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+        return v / 100.0 if v > 1 else v
+    s = str(value).strip()
+    if not s:
+        return None
+    had_pct = s.endswith("%")
+    if had_pct:
+        s = s.rstrip("%").strip()
+    s = s.replace(",", "").replace(" ", "")
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    if had_pct:
+        return v / 100.0
+    return v / 100.0 if v > 1 else v
+
+
+def _parse_float(value: Any) -> Optional[float]:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip().replace(",", "").replace("$", "").replace(" ", "")
+    if not s:
+        return None
+    if s.startswith("(") and s.endswith(")"):
+        s = "-" + s[1:-1]
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _parse_frequency(value: Any) -> Optional[int]:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        v = int(value)
+        return v if v in (1, 2, 4, 12) else None
+    s = str(value).strip().lower()
+    mapping = {
+        'annual': 1, 'annually': 1, 'yearly': 1, '1': 1,
+        'once per year': 1, 'once': 1, 'bullet': 1, 'zero': 1, 'none': 1,
+        'semi-annual': 2, 'semiannual': 2, 'semi-annually': 2,
+        'semiannually': 2, 'semi annual': 2, 'semi annually': 2,
+        'biannual': 2, 'bi-annual': 2, 'half-yearly': 2, 'half yearly': 2,
+        'twice per year': 2, '2': 2,
+        'quarterly': 4, 'quarter': 4, '4': 4, 'four times per year': 4,
+        'monthly': 12, 'month': 12, '12': 12, 'twelve times per year': 12,
+    }
+    return mapping.get(s)
+
+
+def _basis_from(day_count: Any, default: float = 365.0) -> float:
+    s = str(day_count or "").upper()
+    if "365" in s:
+        return 365.0
+    if "360" in s:
+        return 360.0
+    return default
+
+
+def _last_coupon_date(issue_date: Optional[date],
+                      settlement_date: Optional[date],
+                      frequency: int) -> Optional[date]:
+    if not issue_date or not settlement_date or frequency <= 0:
+        return issue_date
+    elapsed = (settlement_date - issue_date).days
+    if elapsed <= 0:
+        return issue_date
+    period_days = 365.0 / frequency
+    periods = int(elapsed / period_days)
+    return issue_date + timedelta(days=int(round(periods * period_days)))
+
+
+def _next_coupon_date(last_coupon_date: Optional[date],
+                      frequency: int) -> Optional[date]:
+    if not last_coupon_date or frequency <= 0:
+        return None
+    period_days = 365.0 / frequency
+    return last_coupon_date + timedelta(days=int(round(period_days)))
+
+
+class BondsCalculator:
     def __init__(self):
-        self.day_count_convention = 360
-        self.bond_day_count = 365
-        self.dependency_engine = CalculationDependencyEngine()
+        self.day_count_convention = 365
+        self.compounding_frequency = 2
 
-    def calculate_all_metrics(self, inputs: Dict,
-                              benchmark_yield: Optional[float] = None,
-                              inflation_rate: Optional[float] = None) -> Dict:
+    def calculate_all_metrics(self, inputs, benchmark_yield=None,
+                              benchmark_curve=None, inflation_rate=None,
+                              valuation_date=None):
         results: Dict = {}
-        validation_errors = []
+        derivations: Dict = {}
+        validation_errors: List[str] = []
 
-        face_value = inputs.get('face_value')
-        discount_rate = inputs.get('discount_rate')
-        purchase_price = inputs.get('purchase_price')
-        issue_date = inputs.get('issue_date')
-        maturity_date = inputs.get('maturity_date')
-        settlement_date = inputs.get('settlement_date')
-        days_to_maturity = inputs.get('days_to_maturity')
-        day_count_convention = inputs.get('day_count_convention', self.day_count_convention)
+        face_value = _parse_float(inputs.get('face_value') or inputs.get('par_value'))
+        coupon_rate = _parse_percentage(
+            inputs.get('coupon_rate') or inputs.get('interest_rate')
+        )
+        ytm_input = _parse_percentage(
+            inputs.get('yield_to_maturity') or inputs.get('ytm') or inputs.get('yield')
+        )
+        market_price = _parse_float(
+            inputs.get('market_price')
+            or inputs.get('clean_price')
+            or inputs.get('price')
+            or inputs.get('current_price')
+        )
 
-        available_fields = {
-            'face_value': face_value,
-            'discount_rate': discount_rate,
-            'purchase_price': purchase_price,
-            'issue_date': issue_date,
-            'maturity_date': maturity_date,
-            'settlement_date': settlement_date,
-            'days_to_maturity': days_to_maturity,
-            'day_count_convention': day_count_convention,
-        }
+        day_count_input = inputs.get('day_count_convention', 'ACT/365')
+        basis = _basis_from(day_count_input, self.day_count_convention)
 
-        if maturity_date and settlement_date:
-            v = self.dependency_engine.validate_calculation(
-                'days_to_maturity', available_fields, 'tbills')
-            if v.can_calculate:
-                days_to_maturity = self._calculate_days_to_maturity(settlement_date, maturity_date)
-                results['days_to_maturity'] = days_to_maturity
-                available_fields['days_to_maturity'] = days_to_maturity
-            else:
-                validation_errors.append(self.dependency_engine.get_missing_fields_message(v))
-                results['days_to_maturity'] = None
-        elif days_to_maturity is not None:
-            results['days_to_maturity'] = days_to_maturity
+        frequency = _parse_frequency(
+            inputs.get('coupon_frequency') or inputs.get('frequency')
+        )
+        if frequency is None or frequency not in (1, 2, 4, 12):
+            frequency = None
+
+        issue_date = _parse_date(inputs.get('issue_date'))
+        maturity_date = _parse_date(inputs.get('maturity_date'))
+        settlement_date = _parse_date(
+            inputs.get('settlement_date')
+            or inputs.get('valuation_date')
+            or valuation_date
+        )
+        call_date = _parse_date(inputs.get('call_date'))
+        call_price = _parse_float(inputs.get('call_price'))
+        put_date = _parse_date(inputs.get('put_date'))
+        put_price = _parse_float(inputs.get('put_price'))
+
+        provided_years = _parse_float(inputs.get('years_to_maturity'))
+        provided_days = _parse_float(inputs.get('days_to_maturity'))
+
+        # ---- Time to maturity ----
+        years_to_maturity: Optional[float] = None
+        days_to_maturity: Optional[int] = None
+
+        if provided_years is not None and provided_years > 0:
+            years_to_maturity = float(provided_years)
+            days_to_maturity = int(round(years_to_maturity * 365))
+            derivations['years_to_maturity'] = {
+                'formula': 'provided directly',
+                'result': round(years_to_maturity, 4),
+                'unit': 'years',
+            }
+        elif provided_days is not None and provided_days > 0:
+            days_to_maturity = int(provided_days)
+            years_to_maturity = days_to_maturity / 365.0
+        elif settlement_date and maturity_date:
+            days_to_maturity = (maturity_date - settlement_date).days
+            years_to_maturity = days_to_maturity / 365.0
+            derivations['days_to_maturity'] = {
+                'formula': 'maturity_date - valuation_date',
+                'from': settlement_date.isoformat(),
+                'to': maturity_date.isoformat(),
+                'result': days_to_maturity,
+                'unit': 'days',
+            }
+            derivations['years_to_maturity'] = {
+                'formula': 'days_to_maturity / 365',
+                'result': round(years_to_maturity, 4),
+                'unit': 'years',
+            }
+            if days_to_maturity < 0:
+                validation_errors.append(
+                    f"Maturity date {maturity_date.isoformat()} is before valuation date "
+                    f"{settlement_date.isoformat()}"
+                )
+                years_to_maturity = None
+                days_to_maturity = None
         else:
-            validation_errors.append("Cannot calculate days to maturity: missing settlement_date and maturity_date")
-            results['days_to_maturity'] = None
+            validation_errors.append(
+                "Cannot determine time to maturity: missing maturity_date + settlement_date"
+            )
 
-        if issue_date and settlement_date:
-            results['days_since_issue'] = self._calculate_days_since_issue(issue_date, settlement_date)
+        results['years_to_maturity'] = (round_value(years_to_maturity, 4)
+                                        if years_to_maturity else None)
+        results['days_to_maturity'] = days_to_maturity
+        results['time_to_maturity'] = results['years_to_maturity']
 
-        if issue_date and maturity_date:
-            total_days = self._calculate_days_to_maturity(issue_date, maturity_date)
-            if settlement_date:
-                remaining = total_days - self._calculate_days_since_issue(issue_date, settlement_date)
-            elif days_to_maturity is not None:
-                remaining = days_to_maturity
-            else:
-                remaining = None
-            results['remaining_days'] = remaining
-
-        if days_to_maturity is not None:
-            results['time_to_maturity'] = round_value(days_to_maturity / day_count_convention, 4)
-        else:
-            results['time_to_maturity'] = None
-
+        # ---- Face value + coupon ----
         results['face_value'] = round_money(face_value) if face_value is not None else None
-        results['nominal_value'] = results['face_value']
+        results['par_value'] = results['face_value']
+        results['coupon_rate'] = (round_percentage(coupon_rate * 100)
+                                  if coupon_rate is not None else None)
+        results['coupon_frequency'] = frequency
 
-        if discount_rate is not None and face_value is not None:
-            available_fields['discount_rate'] = discount_rate
-            available_fields['face_value'] = face_value
-            available_fields['days_to_maturity'] = days_to_maturity
-            available_fields['day_count_convention'] = day_count_convention
+        coupon_payment = None
+        if face_value is not None and coupon_rate is not None and frequency:
+            annual_coupon = face_value * coupon_rate
+            results['annual_coupon'] = round_money(annual_coupon)
+            coupon_payment = annual_coupon / frequency
+            results['coupon_payment'] = round_money(coupon_payment)
 
-            v = self.dependency_engine.validate_calculation(
-                'discount_amount', available_fields, 'tbills')
-            if v.can_calculate:
-                results['discount_amount'] = round_money(
-                    self._calculate_discount_amount(face_value, discount_rate,
-                                                    days_to_maturity, day_count_convention))
+        # ---- Price / YTM resolution ----
+        price = market_price
+        ytm = ytm_input
+
+        can_solve = (face_value is not None and face_value > 0
+                     and coupon_rate is not None
+                     and years_to_maturity is not None and years_to_maturity > 0
+                     and frequency is not None and frequency > 0)
+
+        if price is None and ytm is not None and can_solve:
+            price = self._calculate_clean_price(
+                face_value, coupon_rate, ytm, years_to_maturity, frequency
+            )
+            derivations['clean_price'] = {
+                'formula': 'PV(coupons) + PV(face) discounted at ytm/frequency',
+                'inputs': {
+                    'face_value': face_value, 'coupon_rate': coupon_rate,
+                    'ytm': ytm, 'years': years_to_maturity, 'frequency': frequency,
+                },
+                'result': round(price, 2) if price else None,
+            }
+
+        if price is not None and ytm is None and can_solve:
+            solved = self._solve_yield(
+                price, face_value, face_value, coupon_rate,
+                years_to_maturity, frequency
+            )
+            if solved is not None:
+                ytm = solved
+                derivations['yield_to_maturity'] = {
+                    'formula': 'solve: price = PV(coupons) + PV(face)',
+                    'inputs': {
+                        'price': price, 'face_value': face_value,
+                        'coupon_rate': coupon_rate, 'years': years_to_maturity,
+                        'frequency': frequency,
+                    },
+                    'result': round(ytm * 100, 4),
+                    'unit': '%',
+                }
+
+        if price is None and ytm is None:
+            validation_errors.append(
+                "Need either market_price or yield_to_maturity to value the bond"
+            )
+
+        if price is not None and price > 0:
+            results['clean_price'] = round_money(price)
+            results['present_value'] = results['clean_price']
+            results['fair_value'] = results['clean_price']
+            results['market_value'] = results['clean_price']
+            results['current_price'] = results['clean_price']
+
+        if ytm is not None:
+            results['yield_to_maturity'] = round_percentage(ytm * 100)
+
+        # ---- Accrued interest using last coupon date ----
+        if (face_value is not None and coupon_rate is not None
+                and frequency and settlement_date):
+            annual_coupon = face_value * coupon_rate
+            coupon_payment = annual_coupon / frequency
+            last_coupon = _last_coupon_date(issue_date, settlement_date, frequency)
+            if last_coupon:
+                days_accrued = (settlement_date - last_coupon).days
+                days_in_period = basis / frequency
+                if days_in_period > 0:
+                    accrued = coupon_payment * (days_accrued / days_in_period)
+                    results['accrued_interest'] = round_money(accrued)
+                    results['days_accrued'] = days_accrued
+                    results['days_in_coupon_period'] = int(round(days_in_period))
+                    derivations['accrued_interest'] = {
+                        'formula': 'coupon_payment * (days_accrued / days_in_period)',
+                        'inputs': {
+                            'coupon_payment': round(coupon_payment, 2),
+                            'days_accrued': days_accrued,
+                            'days_in_period': int(round(days_in_period)),
+                            'last_coupon_date': last_coupon.isoformat(),
+                            'settlement_date': settlement_date.isoformat(),
+                        },
+                        'result': round(accrued, 2),
+                    }
+                    next_coupon = _next_coupon_date(last_coupon, frequency)
+                    if next_coupon:
+                        results['next_coupon_date'] = next_coupon.isoformat()
+                        results['days_to_next_coupon'] = (next_coupon - settlement_date).days
+                        derivations['days_to_next_coupon'] = {
+                            'formula': 'next_coupon_date - valuation_date',
+                            'from': settlement_date.isoformat(),
+                            'to': next_coupon.isoformat(),
+                            'result': results['days_to_next_coupon'],
+                            'unit': 'days',
+                        }
+
+        if (results.get('clean_price') is not None
+                and results.get('accrued_interest') is not None):
+            results['dirty_price'] = round_money(
+                results['clean_price'] + results['accrued_interest']
+            )
+            results['settlement_value'] = results['dirty_price']
+
+        # ---- Premium / discount / redemption ----
+        if face_value is not None:
+            results['redemption_value'] = round_money(face_value)
+        if results.get('clean_price') is not None and face_value is not None:
+            if results['clean_price'] > face_value:
+                results['premium'] = round_money(results['clean_price'] - face_value)
+                results['discount'] = round_money(0)
+            elif results['clean_price'] < face_value:
+                results['discount'] = round_money(face_value - results['clean_price'])
+                results['premium'] = round_money(0)
             else:
-                validation_errors.append(self.dependency_engine.get_missing_fields_message(v))
-                results['discount_amount'] = None
+                results['premium'] = round_money(0)
+                results['discount'] = round_money(0)
 
-            # Only compute price if user didn't supply one.
-            if days_to_maturity is not None:
-                if purchase_price is None:
-                    purchase_price = self._calculate_purchase_price(
-                        face_value, discount_rate, days_to_maturity, day_count_convention)
-                results['purchase_price'] = round_money(purchase_price)
-                results['present_value'] = results['purchase_price']
-                available_fields['purchase_price'] = purchase_price
+        # ---- Current yield ----
+        if (results.get('annual_coupon') is not None
+                and results.get('clean_price')
+                and results['clean_price'] > 0):
+            cy = results['annual_coupon'] / results['clean_price'] * 100
+            results['current_yield'] = round_percentage(cy)
 
-            if 'purchase_price' in results:
-                results['fair_value'] = results['purchase_price']
-                results['market_value'] = results['purchase_price']
+        # ---- Durations, convexity, DV01 ----
+        if (ytm is not None and face_value is not None
+                and coupon_rate is not None
+                and years_to_maturity and frequency):
+            mac = self._calculate_macaulay_duration(
+                face_value, coupon_rate, ytm, years_to_maturity, frequency
+            )
+            results['macaulay_duration'] = round_value(mac, 4) if mac is not None else None
+            results['duration'] = results['macaulay_duration']
 
-            results['discount_rate'] = round_percentage(discount_rate * 100)
-            results['bank_discount_yield'] = round_percentage(discount_rate * 100)
+            mod = self._calculate_modified_duration(mac, ytm, frequency)
+            results['modified_duration'] = round_value(mod, 4) if mod is not None else None
 
-            if purchase_price is not None and days_to_maturity is not None:
-                bey = self._calculate_bond_equivalent_yield(
-                    purchase_price, face_value, days_to_maturity)
-                results['bond_equivalent_yield'] = round_percentage(bey * 100)
-                results['yield_to_maturity'] = round_percentage(bey * 100)
+            conv = self._calculate_convexity(
+                face_value, coupon_rate, ytm, years_to_maturity, frequency
+            )
+            results['convexity'] = round_value(conv, 4) if conv is not None else None
 
-                eay = self._calculate_effective_annual_yield(bey, days_to_maturity)
-                results['effective_annual_yield'] = round_percentage(eay * 100)
-
-                hpy = self._calculate_holding_period_yield(purchase_price, face_value)
-                results['holding_period_yield'] = round_percentage(hpy * 100)
-
-                ahpy = self._calculate_annualized_holding_period_yield(hpy, days_to_maturity)
-                results['annualized_holding_period_yield'] = round_percentage(ahpy * 100)
-
-                mmy = self._calculate_money_market_yield(face_value, purchase_price, days_to_maturity)
-                results['money_market_yield'] = round_percentage(mmy * 100)
-
-                results['current_market_yield'] = round_percentage(bey * 100)
-
-            if purchase_price is not None:
-                results['settlement_amount'] = round_money(purchase_price)
-                results['net_proceeds'] = round_money(purchase_price)
-                results['investment_cost'] = round_money(purchase_price)
-                results['clean_price'] = round_money(purchase_price)
-                results['dirty_price'] = round_money(purchase_price)
-            if face_value is not None:
-                results['maturity_value'] = round_money(face_value)
-                results['gross_proceeds'] = round_money(face_value)
-            if face_value is not None and purchase_price is not None:
-                results['gain_loss_maturity'] = round_money(face_value - purchase_price)
-
-            if 'holding_period_yield' in results and results['holding_period_yield'] is not None:
-                results['percentage_return'] = results['holding_period_yield']
-
-            if purchase_price is not None and days_to_maturity is not None:
-                dv01 = self._calculate_dv01(purchase_price, days_to_maturity)
+            if results.get('clean_price') and mod is not None:
+                dv01 = results['clean_price'] * mod * 0.0001
                 results['dv01'] = round_value(dv01, 4)
-                results['sensitivity_yield_changes'] = round_value(dv01, 4)
+                results['pvbp'] = results['dv01']
 
+        # ---- YTC / YTP / YTW ----
+        if (call_date and call_price and settlement_date
+                and face_value is not None and coupon_rate is not None
+                and frequency and results.get('clean_price')):
+            years_to_call = (call_date - settlement_date).days / 365.0
+            if years_to_call > 0:
+                ytc = self._solve_yield(
+                    results['clean_price'], call_price, face_value,
+                    coupon_rate, years_to_call, frequency
+                )
+                if ytc is not None:
+                    results['yield_to_call'] = round_percentage(ytc * 100)
+
+        if (put_date and put_price and settlement_date
+                and face_value is not None and coupon_rate is not None
+                and frequency and results.get('clean_price')):
+            years_to_put = (put_date - settlement_date).days / 365.0
+            if years_to_put > 0:
+                ytp = self._solve_yield(
+                    results['clean_price'], put_price, face_value,
+                    coupon_rate, years_to_put, frequency
+                )
+                if ytp is not None:
+                    results['yield_to_put'] = round_percentage(ytp * 100)
+
+        if ytm is not None:
+            candidates = [ytm]
+            if results.get('yield_to_call') is not None:
+                candidates.append(results['yield_to_call'] / 100)
+            if results.get('yield_to_put') is not None:
+                candidates.append(results['yield_to_put'] / 100)
+            results['yield_to_worst'] = round_percentage(min(candidates) * 100)
+
+        # ---- Effective annual yield ----
+        if ytm is not None and frequency:
+            eay = (1 + ytm / frequency) ** frequency - 1
+            results['effective_annual_yield'] = round_percentage(eay * 100)
+
+        # ---- Benchmark ----
         if benchmark_yield is not None:
-            if results.get('bond_equivalent_yield') is not None:
-                spread = (results['bond_equivalent_yield'] / 100) - benchmark_yield
-                results['benchmark_spread'] = round_percentage(spread * 100)
             results['benchmark_yield'] = round_percentage(benchmark_yield * 100)
             results['benchmark_yield_comparison'] = round_percentage(benchmark_yield * 100)
-            if face_value is not None and days_to_maturity is not None:
-                results['benchmark_valuation'] = round_money(
-                    self._calculate_benchmark_valuation(face_value, benchmark_yield,
-                                                        days_to_maturity, day_count_convention))
+            if results.get('yield_to_maturity') is not None:
+                spread = results['yield_to_maturity'] / 100 - benchmark_yield
+                results['benchmark_spread'] = round_percentage(spread * 100)
+                results['g_spread'] = results['benchmark_spread']
 
-        if inflation_rate is not None and results.get('bond_equivalent_yield') is not None:
-            real = self._calculate_real_yield(results['bond_equivalent_yield'] / 100, inflation_rate)
+        # ---- Real yield ----
+        if inflation_rate is not None and results.get('yield_to_maturity') is not None:
+            real = (1 + results['yield_to_maturity'] / 100) / (1 + inflation_rate) - 1
             results['real_yield'] = round_percentage(real * 100)
 
+        # ---- Holding period return (only if price is user-supplied, not YTM-derived) ----
+        if (market_price is not None and results.get('coupon_payment') is not None
+                and years_to_maturity and frequency and results.get('clean_price')):
+            annual_coupon = results['coupon_payment'] * frequency
+            total_coupons = annual_coupon * years_to_maturity
+            hpr = (total_coupons + (face_value - results['clean_price'])) / results['clean_price'] / years_to_maturity
+            results['holding_period_return'] = round_percentage(hpr * 100)
+            results['coupon_income'] = round_money(total_coupons)
+            results['capital_gain_loss'] = round_money(face_value - results['clean_price'])
+            results['total_return'] = round_money(total_coupons + (face_value - results['clean_price']))
+
+        if valuation_date:
+            results['valuation_date'] = valuation_date
+            results['Valuation Date'] = valuation_date
+
+        results['derivations'] = derivations
         results['validation_errors'] = validation_errors
         results['calculation_status'] = 'partial_success' if validation_errors else 'success'
         return results
 
-    def _calculate_days_to_maturity(self, settlement_date: str, maturity_date: str) -> int:
-        return (datetime.strptime(maturity_date, '%Y-%m-%d')
-                - datetime.strptime(settlement_date, '%Y-%m-%d')).days
+    # ---- Helpers ----
 
-    def _calculate_days_since_issue(self, issue_date: str, settlement_date: str) -> int:
-        return (datetime.strptime(settlement_date, '%Y-%m-%d')
-                - datetime.strptime(issue_date, '%Y-%m-%d')).days
-
-    def _calculate_discount_amount(self, face_value, discount_rate, days, basis=360):
-        if days is None or basis is None:
+    def _calculate_coupon_payment(self, face_value, coupon_rate, frequency):
+        if face_value is None or coupon_rate is None or not frequency:
             return None
-        return face_value * discount_rate * (days / basis)
+        return face_value * coupon_rate / frequency
 
-    def _calculate_purchase_price(self, face_value, discount_rate, days, basis=360):
-        da = self._calculate_discount_amount(face_value, discount_rate, days, basis)
-        if da is None:
+    def _calculate_clean_price(self, face_value, coupon_rate, ytm,
+                               years, frequency):
+        coupon_payment = self._calculate_coupon_payment(face_value, coupon_rate, frequency)
+        if coupon_payment is None or years is None or years <= 0:
             return None
-        return face_value - da
-
-    def _calculate_bond_equivalent_yield(self, purchase_price, face_value, days):
-        if purchase_price is None or purchase_price == 0 or days is None:
+        n = max(1, int(round(years * frequency)))
+        r = ytm / frequency
+        if r <= -1:
             return None
-        discount = face_value - purchase_price
-        return (discount / purchase_price) * (self.bond_day_count / days)
-
-    def _calculate_effective_annual_yield(self, bey, days):
-        if days is None or days == 0:
+        try:
+            pv = sum(coupon_payment / ((1 + r) ** t) for t in range(1, n + 1))
+            pv += face_value / ((1 + r) ** n)
+            return pv
+        except (OverflowError, ZeroDivisionError):
             return None
-        periods = self.bond_day_count / days
-        return (1 + bey / periods) ** periods - 1
 
-    def _calculate_holding_period_yield(self, purchase_price, face_value):
-        if purchase_price is None or purchase_price == 0:
+    def _solve_yield(self, current_price, final_cash_flow, face_value,
+                     coupon_rate, years, frequency):
+        if not current_price or current_price <= 0:
             return None
-        return (face_value - purchase_price) / purchase_price
-
-    def _calculate_annualized_holding_period_yield(self, hpy, days):
-        if days is None:
+        if not final_cash_flow or final_cash_flow <= 0:
             return None
-        return hpy * (self.bond_day_count / days)
-
-    def _calculate_money_market_yield(self, face_value, purchase_price, days):
-        if purchase_price is None or purchase_price == 0 or days is None:
+        if not face_value or face_value <= 0:
             return None
-        return (face_value - purchase_price) / purchase_price * (self.bond_day_count / days)
-
-    def _calculate_dv01(self, purchase_price, days):
-        if days is None:
+        if coupon_rate is None or years is None or years <= 0:
             return None
-        return purchase_price * (days / self.bond_day_count) * 0.0001
-
-    def _calculate_benchmark_valuation(self, face_value, benchmark_yield, days, basis=360):
-        if days is None or basis is None:
+        if not frequency or frequency <= 0:
             return None
-        return face_value / (1 + benchmark_yield * (days / basis))
 
-    def _calculate_real_yield(self, nominal_yield, inflation_rate):
-        if inflation_rate is None:
+        n = max(1, int(round(years * frequency)))
+        coupon = face_value * coupon_rate / frequency
+
+        def pv(y):
+            r = y / frequency
+            if r <= -1:
+                return float('inf')
+            try:
+                total = sum(coupon / ((1 + r) ** t) for t in range(1, n + 1))
+                total += final_cash_flow / ((1 + r) ** n)
+                return total
+            except (OverflowError, ZeroDivisionError):
+                return float('inf')
+
+        lo, hi = -0.99, 10.0
+        f_lo = pv(lo) - current_price
+        f_hi = pv(hi) - current_price
+        if f_lo * f_hi > 0:
             return None
-        return (1 + nominal_yield) / (1 + inflation_rate) - 1
+        for _ in range(200):
+            mid = (lo + hi) / 2
+            f_mid = pv(mid) - current_price
+            if abs(f_mid) < 1e-6 or (hi - lo) < 1e-10:
+                return mid
+            if f_mid * f_lo < 0:
+                hi = mid
+            else:
+                lo = mid
+                f_lo = f_mid
+        return (lo + hi) / 2
+
+    def _calculate_macaulay_duration(self, face_value, coupon_rate, ytm,
+                                     years, frequency):
+        coupon_payment = self._calculate_coupon_payment(face_value, coupon_rate, frequency)
+        clean_price = self._calculate_clean_price(
+            face_value, coupon_rate, ytm, years, frequency
+        )
+        if coupon_payment is None or clean_price is None or clean_price == 0:
+            return None
+        n = max(1, int(round(years * frequency)))
+        r = ytm / frequency
+        if r <= -1:
+            return None
+        try:
+            weighted = sum(
+                t * coupon_payment / ((1 + r) ** t) for t in range(1, n + 1)
+            )
+            weighted += n * face_value / ((1 + r) ** n)
+            return (weighted / clean_price) / frequency
+        except (OverflowError, ZeroDivisionError):
+            return None
+
+    def _calculate_modified_duration(self, macaulay_duration, ytm, frequency):
+        if macaulay_duration is None or ytm is None or not frequency:
+            return None
+        return macaulay_duration / (1 + ytm / frequency)
+
+    def _calculate_convexity(self, face_value, coupon_rate, ytm,
+                             years, frequency):
+        coupon_payment = self._calculate_coupon_payment(face_value, coupon_rate, frequency)
+        clean_price = self._calculate_clean_price(
+            face_value, coupon_rate, ytm, years, frequency
+        )
+        if coupon_payment is None or clean_price is None or clean_price == 0:
+            return None
+        n = max(1, int(round(years * frequency)))
+        r = ytm / frequency
+        if r <= -1:
+            return None
+        try:
+            total = 0.0
+            for t in range(1, n + 1):
+                pv = coupon_payment / ((1 + r) ** t)
+                total += (t * (t + 1) * pv) / ((1 + r) ** 2)
+            pv_face = face_value / ((1 + r) ** n)
+            total += (n * (n + 1) * pv_face) / ((1 + r) ** 2)
+            return total / clean_price / (frequency ** 2)
+        except (OverflowError, ZeroDivisionError):
+            return None
 
 
-def calculate_tbills(inputs: Dict, benchmark_yield: Optional[float] = None,
-                     inflation_rate: Optional[float] = None) -> Dict:
-    results = TBillsCalculator().calculate_all_metrics(
-        inputs, benchmark_yield, inflation_rate)
-    return {k: auto_round_by_field_name(k, v) for k, v in results.items()}
+def calculate_bonds(inputs, benchmark_yield=None, benchmark_curve=None,
+                    inflation_rate=None, valuation_date=None):
+    calculator = BondsCalculator()
+    results = calculator.calculate_all_metrics(
+        inputs, benchmark_yield, benchmark_curve, inflation_rate, valuation_date
+    )
+    return {key: auto_round_by_field_name(key, value) for key, value in results.items()}

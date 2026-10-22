@@ -163,6 +163,19 @@ def days_between(d1: date, d2: date) -> int:
     return abs((d2 - d1).days)
 
 
+def _days_derivation(val_d: Optional[date], mat_d: Optional[date], days: Optional[int]) -> Optional[Dict[str, Any]]:
+    """Return a from → to → N days breakdown for display."""
+    if not (val_d and mat_d and days is not None):
+        return None
+    return {
+        "from": val_d.isoformat(),
+        "to": mat_d.isoformat(),
+        "result": int(days),
+        "unit": "days",
+        "formula": "maturity_date - valuation_date",
+    }
+
+
 SPECIFIC_ALIASES: Dict[str, List[str]] = {
     "principal": [
         "principal", "principle", "principal amount", "principle amount",
@@ -236,17 +249,24 @@ SPECIFIC_ALIASES: Dict[str, List[str]] = {
         "security", "security id", "securityid",
         "instrument id", "instrumentid", "isin", "ticker",
     ],
+    # REMOVED: counterparty, instrument, bond, tbill, t-bill
+    # These were hijacking instrument_name for single-instrument sheets.
     "instrument_name": [
-        "parent company name", "parent company",
-        "issuer", "company", "entity",
-        "short name", "shortname",
         "instrument name", "instrumentname", "instrument_name",
-        "instrument", "description", "counterparty",
-        "bond name", "bondname", "bond_name", "bond",
+        "bond name", "bondname", "bond_name",
         "t-bill name", "tbill name", "tbillname", "tbill_name",
-        "tbill", "t-bill", "treasury bill name",
+        "treasury bill name",
         "security name", "securityname",
+        "issuer", "parent company name", "parent company",
+        "company", "entity",
+        "short name", "shortname",
+        "description",
         "name", "ticker", "symbol",
+    ],
+    # NEW: keep counterparty visible as its own field
+    "counterparty": [
+        "counterparty", "counter party", "counter-party", "cp",
+        "account name", "client name",
     ],
     "classification": ["classification", "category", "asset class", "type"],
     "currency": ["currency", "ccy", "iso code", "currency code"],
@@ -380,7 +400,7 @@ def _extract_instrument_name(row: Dict[str, Any]) -> Optional[str]:
     candidates = [
         "instrument_name",
         "BondName", "TBillName",
-        "Instrument Name", "Instrument", "Security", "Name",
+        "Instrument Name", "Security", "Name",
         "Ticker", "Symbol", "ISIN", "isin", "Security ID",
     ]
     for key in candidates:
@@ -644,15 +664,13 @@ def calculate_treasury_bill(item: Dict[str, Any], benchmark_yield: Optional[floa
     else:
         discount_basis = 360.0
 
+    val_d = parse_date(item.get("valuation_date"))
+    mat_d = parse_date(item.get("maturity_date"))
     days = safe_float(item.get("term_days")) or safe_float(item.get("days_to_maturity"))
-    if days is None:
-        val_d = parse_date(item.get("valuation_date"))
-        mat_d = parse_date(item.get("maturity_date"))
-        if val_d and mat_d:
-            days = days_between(val_d, mat_d)
+    if days is None and val_d and mat_d:
+        days = days_between(val_d, mat_d)
     if days is None:
         iss_d = parse_date(item.get("issue_date"))
-        mat_d = parse_date(item.get("maturity_date"))
         if iss_d and mat_d:
             days = days_between(iss_d, mat_d)
 
@@ -665,6 +683,10 @@ def calculate_treasury_bill(item: Dict[str, Any], benchmark_yield: Optional[floa
         "day_count_convention": day_count_str,
         "currency": currency,
     }
+
+    derivation = _days_derivation(val_d, mat_d, days)
+    if derivation:
+        result["derivations"] = {"days_to_maturity": derivation}
 
     if face is not None and days is not None and days > 0 and discount_rate is not None:
         if purchase_price is None:
@@ -737,7 +759,17 @@ def calculate_bond(item: Dict[str, Any], benchmark_yield: Optional[float] = None
     day_count = item.get("day_count_convention") or item.get("day_count") or "ACT/365"
     day_count_str = str(day_count).upper() if day_count else "ACT/365"
 
+    val_d = parse_date(item.get("valuation_date"))
+    mat_d = parse_date(item.get("maturity_date"))
+
     years = safe_float(item.get('years_to_maturity'))
+    if years is None and val_d and mat_d:
+        years = days_between(val_d, mat_d) / 365.0
+    if years is None:
+        d2m = safe_float(item.get("days_to_maturity"))
+        if d2m is not None and d2m > 0:
+            years = d2m / 365.0
+
     frequency = (parse_frequency(item.get('frequency'))
                  or parse_frequency(item.get('coupon_frequency'))
                  or parse_frequency(item.get('instrument_type'))
@@ -746,16 +778,6 @@ def calculate_bond(item: Dict[str, Any], benchmark_yield: Optional[float] = None
 
     if frequency is not None and (frequency <= 0 or frequency > 365):
         frequency = None
-
-    if years is None:
-        val_d = parse_date(item.get("valuation_date"))
-        mat_d = parse_date(item.get("maturity_date"))
-        if val_d and mat_d:
-            years = days_between(val_d, mat_d) / 365.0
-    if years is None:
-        d2m = safe_float(item.get("days_to_maturity"))
-        if d2m is not None and d2m > 0:
-            years = d2m / 365.0
 
     result = {
         "status": ("partial" if (face is None or coupon_rate is None or years is None
@@ -768,6 +790,11 @@ def calculate_bond(item: Dict[str, Any], benchmark_yield: Optional[float] = None
         "day_count_convention": day_count_str,
         "currency": currency,
     }
+
+    if val_d and mat_d:
+        days_derivation = _days_derivation(val_d, mat_d, days_between(val_d, mat_d))
+        if days_derivation:
+            result["derivations"] = {"days_to_maturity": days_derivation}
 
     if frequency is None:
         result["error"] = ("Invalid or missing coupon frequency. Full calculations require "
@@ -868,13 +895,11 @@ def calculate_bond(item: Dict[str, Any], benchmark_yield: Optional[float] = None
             days_accrued = None
             last_coupon_d = (parse_date(item.get("last_coupon_date"))
                              or parse_date(item.get("issue_date")))
-            val_d = (parse_date(item.get("valuation_date"))
-                     or parse_date(item.get("settlement_date")))
-            if last_coupon_d and val_d:
-                days_accrued = days_between(last_coupon_d, val_d)
-                if "30" in day_count_str:
-                    days_in_period = 360.0 / frequency
-                elif "360" in day_count_str:
+            settle_d = (parse_date(item.get("valuation_date"))
+                        or parse_date(item.get("settlement_date")))
+            if last_coupon_d and settle_d:
+                days_accrued = days_between(last_coupon_d, settle_d)
+                if "30" in day_count_str or "360" in day_count_str:
                     days_in_period = 360.0 / frequency
                 elif "ACT" in day_count_str:
                     days_in_period = 365.0 / frequency
@@ -935,15 +960,13 @@ def calculate_money_market(item: Dict[str, Any], benchmark_yield: Optional[float
     else:
         day_count_divisor = 360.0
 
+    val_d = parse_date(item.get("valuation_date"))
+    mat_d = parse_date(item.get("maturity_date"))
     days = safe_float(item.get("term_days")) or safe_float(item.get("days_to_maturity"))
-    if days is None:
-        val_d = parse_date(item.get("valuation_date"))
-        mat_d = parse_date(item.get("maturity_date"))
-        if val_d and mat_d:
-            days = days_between(val_d, mat_d)
+    if days is None and val_d and mat_d:
+        days = days_between(val_d, mat_d)
     if days is None:
         iss_d = parse_date(item.get("issue_date"))
-        mat_d = parse_date(item.get("maturity_date"))
         if iss_d and mat_d:
             days = days_between(iss_d, mat_d)
 
@@ -958,6 +981,10 @@ def calculate_money_market(item: Dict[str, Any], benchmark_yield: Optional[float
         "day_count_convention": day_count_str,
         "currency": currency,
     }
+
+    derivation = _days_derivation(val_d, mat_d, days)
+    if derivation:
+        result["derivations"] = {"days_to_maturity": derivation}
 
     if market_value is not None:
         result["market_value"] = round_money(market_value)

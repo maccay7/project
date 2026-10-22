@@ -82,12 +82,18 @@ class FieldMappingEngine:
                 'issuer', 'company', 'entity',
                 'short name', 'shortname',
                 'instrument name', 'instrumentname', 'instrument_name',
-                'instrument', 'description', 'counterparty',
+                'instrument', 'description',
                 'bond name', 'bondname', 'bond_name', 'bond',
                 't-bill name', 'tbill name', 'tbillname', 'tbill_name',
                 'tbill', 't-bill', 'treasury bill name',
                 'security name', 'securityname',
                 'name', 'ticker', 'symbol',
+            ],
+            # Kept separate from instrument_name so counterparty stays
+            # visible but never replaces the real instrument name.
+            'counterparty': [
+                'counterparty', 'counter party', 'counter-party', 'cp',
+                'account name', 'client name',
             ],
             'instrument_type': [
                 'instrument type', 'type', 'category', 'class', 'asset class'
@@ -255,6 +261,7 @@ class FieldMappingEngine:
             'term': 'duration',
             'coupon_frequency': 'frequency',
             'instrument_name': 'identifier',
+            'counterparty': 'identifier',
             'instrument_type': 'type',
             'quantity': 'quantity'
         }

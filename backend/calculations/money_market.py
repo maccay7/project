@@ -1,354 +1,308 @@
-from datetime import datetime
-from typing import Dict, Optional
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional
+
 from utils.rounding import (
-    round_percentage, round_money, round_value, auto_round_by_field_name
+    round_percentage, round_money, round_value, auto_round_by_field_name,
 )
-from utils.calculation_dependencies import CalculationDependencyEngine
+
+
+_DATE_FORMATS = (
+    "%Y-%m-%d", "%Y/%m/%d",
+    "%d-%m-%Y", "%d/%m/%Y",
+    "%m-%d-%Y", "%m/%d/%Y",
+    "%d-%m-%y", "%d/%m/%y",
+    "%m-%d-%y", "%m/%d/%y",
+    "%d %b %Y", "%d-%b-%Y",
+    "%d %b %y", "%d-%b-%y",
+    "%d %B %Y", "%d-%B-%Y",
+    "%b %d, %Y", "%b %d %Y",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+)
+
+
+def _parse_date(value: Any) -> Optional[date]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, (int, float)):
+        n = float(value)
+        if 1 <= n <= 2958465:
+            return (datetime(1899, 12, 30) + timedelta(days=int(n))).date()
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_percentage(value: Any) -> Optional[float]:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+        return v / 100.0 if v > 1 else v
+    s = str(value).strip()
+    if not s:
+        return None
+    had_pct = s.endswith("%")
+    if had_pct:
+        s = s.rstrip("%").strip()
+    s = s.replace(",", "").replace(" ", "")
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    if had_pct:
+        return v / 100.0
+    return v / 100.0 if v > 1 else v
+
+
+def _parse_float(value: Any) -> Optional[float]:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip().replace(",", "").replace("$", "").replace(" ", "")
+    if not s:
+        return None
+    if s.startswith("(") and s.endswith(")"):
+        s = "-" + s[1:-1]
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _basis_from(day_count: Any, default: float = 365.0) -> float:
+    s = str(day_count or "").upper()
+    if "365" in s:
+        return 365.0
+    if "360" in s:
+        return 360.0
+    return default
 
 
 class MoneyMarketCalculator:
-
     def __init__(self):
         self.day_count_convention = 365
         self.compounding_frequency = 1
-        self.dependency_engine = CalculationDependencyEngine()
 
     def calculate_all_metrics(self, inputs: Dict,
                               benchmark_yield: Optional[float] = None,
                               inflation_rate: Optional[float] = None) -> Dict:
-        results = {}
-        validation_errors = []
+        results: Dict = {}
+        derivations: Dict = {}
+        validation_errors: List[str] = []
 
-        face_value = inputs.get('face_value')
-        principal = inputs.get('principal')
-        interest_rate = inputs.get('interest_rate')
-        discount_rate = inputs.get('discount_rate')
-        purchase_price = inputs.get('purchase_price')
-        issue_date = inputs.get('issue_date')
-        maturity_date = inputs.get('maturity_date')
-        settlement_date = inputs.get('settlement_date')
-        days_to_maturity = inputs.get('days_to_maturity')
-        compounding_frequency = inputs.get('compounding_frequency', self.compounding_frequency)
-        day_count_convention = inputs.get('day_count_convention', self.day_count_convention)
+        face_value = _parse_float(inputs.get('face_value'))
+        principal = _parse_float(inputs.get('principal') or inputs.get('amount'))
+        interest_rate = _parse_percentage(
+            inputs.get('interest_rate') or inputs.get('rate')
+        )
+        discount_rate = _parse_percentage(inputs.get('discount_rate'))
+        purchase_price = _parse_float(
+            inputs.get('purchase_price')
+            or inputs.get('current_price')
+            or inputs.get('price')
+        )
+        compounding_frequency = _parse_float(
+            inputs.get('compounding_frequency', self.compounding_frequency)
+        ) or 1
+        compounding_frequency = int(compounding_frequency)
 
-        available_fields = {
-            'face_value': face_value,
-            'principal': principal,
-            'interest_rate': interest_rate,
-            'discount_rate': discount_rate,
-            'purchase_price': purchase_price,
-            'issue_date': issue_date,
-            'maturity_date': maturity_date,
-            'settlement_date': settlement_date,
-            'days_to_maturity': days_to_maturity,
-            'compounding_frequency': compounding_frequency,
-            'day_count_convention': day_count_convention,
-        }
+        day_count_input = inputs.get('day_count_convention', 'ACT/365')
+        basis = _basis_from(day_count_input, self.day_count_convention)
 
-        if maturity_date and settlement_date:
-            validation = self.dependency_engine.validate_calculation(
-                'term_days_to_maturity', available_fields, 'money-market'
-            )
-            if validation.can_calculate:
-                days_to_maturity = self._calculate_days_to_maturity(settlement_date, maturity_date)
-                results['days_to_maturity'] = days_to_maturity
-                available_fields['days_to_maturity'] = days_to_maturity
-            else:
-                validation_errors.append(self.dependency_engine.get_missing_fields_message(validation))
-                results['days_to_maturity'] = None
-        elif days_to_maturity is not None:
-            results['days_to_maturity'] = days_to_maturity
+        issue_date = _parse_date(inputs.get('issue_date'))
+        maturity_date = _parse_date(inputs.get('maturity_date'))
+        settlement_date = _parse_date(
+            inputs.get('settlement_date') or inputs.get('valuation_date')
+        )
+        provided_days = _parse_float(
+            inputs.get('days_to_maturity') or inputs.get('term_days')
+        )
+
+        # ---- Days to maturity ----
+        days_to_maturity = None
+        if provided_days is not None and provided_days > 0:
+            days_to_maturity = int(provided_days)
+            derivations['days_to_maturity'] = {
+                'formula': 'provided directly',
+                'result': days_to_maturity,
+                'unit': 'days',
+            }
+        elif settlement_date and maturity_date:
+            days_to_maturity = (maturity_date - settlement_date).days
+            derivations['days_to_maturity'] = {
+                'formula': 'maturity_date - valuation_date',
+                'from': settlement_date.isoformat(),
+                'to': maturity_date.isoformat(),
+                'result': days_to_maturity,
+                'unit': 'days',
+            }
+            if days_to_maturity < 0:
+                validation_errors.append(
+                    f"Maturity date {maturity_date.isoformat()} is before valuation date "
+                    f"{settlement_date.isoformat()}"
+                )
+                days_to_maturity = None
         else:
             validation_errors.append(
-                "Cannot calculate days to maturity: missing settlement_date and maturity_date"
-            )
-            results['days_to_maturity'] = None
-
-        # Reject zero/negative days — yields are undefined.
-        if results.get('days_to_maturity') is not None and results['days_to_maturity'] <= 0:
-            validation_errors.append(
-                "days_to_maturity must be greater than zero for a valid calculation"
+                "Missing days_to_maturity (or both Valuation Date and Maturity Date)"
             )
 
+        if days_to_maturity is not None and days_to_maturity <= 0:
+            validation_errors.append("days_to_maturity must be greater than zero")
+            days_to_maturity = None
+
+        results['days_to_maturity'] = days_to_maturity
+        results['term_days'] = days_to_maturity
+
+        # ---- Auxiliary day counts ----
+        if issue_date and settlement_date:
+            results['days_since_issue'] = (settlement_date - issue_date).days
+            derivations['days_since_issue'] = {
+                'formula': 'valuation_date - issue_date',
+                'from': issue_date.isoformat(),
+                'to': settlement_date.isoformat(),
+                'result': results['days_since_issue'],
+                'unit': 'days',
+            }
         if issue_date and maturity_date:
-            total_days = self._calculate_days_to_maturity(issue_date, maturity_date)
-            if settlement_date:
-                days_since_issue = self._calculate_days_since_issue(issue_date, settlement_date)
-                results['remaining_days'] = total_days - days_since_issue
-            else:
-                results['remaining_days'] = None
+            total = (maturity_date - issue_date).days
+            results['total_term_days'] = total
+            derivations['total_term_days'] = {
+                'formula': 'maturity_date - issue_date',
+                'from': issue_date.isoformat(),
+                'to': maturity_date.isoformat(),
+                'result': total,
+                'unit': 'days',
+            }
+            if issue_date and settlement_date:
+                results['remaining_days'] = total - (settlement_date - issue_date).days
 
         if days_to_maturity is not None:
-            time_to_maturity = days_to_maturity / day_count_convention
-            results['time_to_maturity'] = round_value(time_to_maturity, 4)
+            results['time_to_maturity'] = round_value(days_to_maturity / basis, 4)
         else:
-            time_to_maturity = None
             results['time_to_maturity'] = None
 
         results['face_value'] = round_money(face_value) if face_value is not None else None
         results['principal'] = round_money(principal) if principal is not None else None
+        results['day_count_convention'] = str(day_count_input)
 
-        if principal is not None and interest_rate is not None:
-            available_fields['principal'] = principal
-            available_fields['interest_rate'] = interest_rate
-            available_fields['days_to_maturity'] = days_to_maturity
-            available_fields['day_count_convention'] = day_count_convention
+        # ---- Interest-based calculations ----
+        if (principal is not None and principal > 0
+                and interest_rate is not None and days_to_maturity):
 
-            validation = self.dependency_engine.validate_calculation(
-                'simple_interest', available_fields, 'money-market'
-            )
-            if validation.can_calculate:
-                simple_interest = self._calculate_simple_interest(
-                    principal, interest_rate, days_to_maturity, day_count_convention
-                )
-                results['simple_interest'] = round_money(simple_interest)
-                results['interest_earned'] = round_money(simple_interest)
-                available_fields['interest_earned'] = simple_interest
-            else:
-                validation_errors.append(self.dependency_engine.get_missing_fields_message(validation))
-                results['simple_interest'] = None
-                results['interest_earned'] = None
+            simple_interest = principal * interest_rate * (days_to_maturity / basis)
+            results['simple_interest'] = round_money(simple_interest)
+            results['interest_earned'] = round_money(simple_interest)
+            derivations['simple_interest'] = {
+                'formula': 'principal * interest_rate * days / basis',
+                'inputs': {
+                    'principal': principal, 'interest_rate': interest_rate,
+                    'days': days_to_maturity, 'basis': basis,
+                },
+                'result': results['simple_interest'],
+            }
 
-            if compounding_frequency > 1 and days_to_maturity is not None:
-                available_fields['compounding_frequency'] = compounding_frequency
-                compound_interest = self._calculate_compound_interest(
-                    principal, interest_rate, time_to_maturity, compounding_frequency
-                )
-                results['compound_interest'] = round_money(compound_interest)
+            if compounding_frequency > 1 and results.get('time_to_maturity'):
+                t = results['time_to_maturity']
+                compound = principal * (
+                    (1 + interest_rate / compounding_frequency)
+                    ** (compounding_frequency * t)
+                ) - principal
+                results['compound_interest'] = round_money(compound)
 
-            validation = self.dependency_engine.validate_calculation(
-                'present_value', available_fields, 'money-market'
-            )
-            if validation.can_calculate:
-                present_value = self._calculate_present_value(
-                    principal, interest_rate, time_to_maturity, day_count_convention
-                )
-                results['present_value'] = round_money(present_value)
-                if purchase_price is None:
-                    results['purchase_price'] = round_money(present_value)
-            else:
-                validation_errors.append(self.dependency_engine.get_missing_fields_message(validation))
-                results['present_value'] = None
+            present_value = principal / (1 + interest_rate * (days_to_maturity / basis))
+            results['present_value'] = round_money(present_value)
+            results['fair_value'] = results['present_value']
+            results['market_value'] = results['present_value']
+            results['settlement_amount'] = results['present_value']
+            results['investment_cost'] = results['present_value']
+            results['net_investment'] = results['present_value']
+            derivations['present_value'] = {
+                'formula': 'principal / (1 + interest_rate * days / basis)',
+                'result': results['present_value'],
+            }
 
-            if results.get('present_value') is not None:
-                results['fair_value'] = results['present_value']
-                results['market_value'] = results['present_value']
-                results['settlement_amount'] = results['present_value']
-                results['investment_cost'] = results['present_value']
-                results['net_investment'] = results['present_value']
-
-            if results.get('interest_earned') is not None:
-                results['redemption_value'] = round_money(principal + results['interest_earned'])
-
+            redemption = principal + simple_interest
+            results['redemption_value'] = round_money(redemption)
             results['gross_investment'] = round_money(principal)
+            results['investment_return'] = round_money(redemption - present_value)
 
-            if results.get('redemption_value') is not None and results.get('present_value') is not None:
-                results['investment_return'] = round_money(
-                    results['redemption_value'] - results['present_value']
-                )
+            hpy = (redemption - present_value) / present_value if present_value else None
+            if hpy is not None:
+                results['holding_period_yield'] = round_percentage(hpy * 100)
 
-            hpy = None
-            if results.get('present_value') is not None and results.get('redemption_value') is not None:
-                hpy = self._calculate_holding_period_yield(
-                    results['present_value'], results['redemption_value']
-                )
-                if hpy is not None:
-                    results['holding_period_yield'] = round_percentage(hpy * 100)
+            t = days_to_maturity / basis
+            if t > 0 and hpy is not None:
+                annualized_hpy = hpy / t
+                results['annualized_holding_period_yield'] = round_percentage(annualized_hpy * 100)
 
-            if hpy is not None and time_to_maturity is not None:
-                annualized_hpy = self._calculate_annualized_holding_period_yield(hpy, time_to_maturity)
-                if annualized_hpy is not None:
-                    results['annualized_holding_period_yield'] = round_percentage(annualized_hpy * 100)
+            mmy = (principal - present_value) / present_value * (basis / days_to_maturity)
+            results['money_market_yield'] = round_percentage(mmy * 100)
 
-            if (results.get('present_value') is not None
-                    and days_to_maturity is not None and days_to_maturity > 0):
-                mm_yield = self._calculate_money_market_yield(
-                    principal, results['present_value'], days_to_maturity, day_count_convention
-                )
-                if mm_yield is not None:
-                    results['money_market_yield'] = round_percentage(mm_yield * 100)
+            effective = (1 + interest_rate / compounding_frequency) ** compounding_frequency - 1
+            results['effective_yield'] = round_percentage(effective * 100)
+            results['effective_annual_rate'] = results['effective_yield']
+            results['annual_percentage_yield'] = results['effective_yield']
 
-            validation = self.dependency_engine.validate_calculation(
-                'effective_annual_yield', available_fields, 'money-market'
-            )
-            if validation.can_calculate:
-                effective_yield = self._calculate_effective_yield(interest_rate, compounding_frequency)
-                results['effective_yield'] = round_percentage(effective_yield * 100)
-            else:
-                validation_errors.append(self.dependency_engine.get_missing_fields_message(validation))
-                results['effective_yield'] = None
+            current_yield = simple_interest / present_value if present_value else None
+            if current_yield is not None:
+                results['current_yield'] = round_percentage(current_yield * 100)
 
-            if results.get('interest_earned') is not None and results.get('present_value') is not None:
-                current_yield = self._calculate_current_yield(
-                    results['interest_earned'], results['present_value']
-                )
-                if current_yield is not None:
-                    results['current_yield'] = round_percentage(current_yield * 100)
-
-            if (results.get('present_value') is not None
-                    and results.get('redemption_value') is not None
-                    and time_to_maturity is not None):
-                ytm = self._calculate_yield_to_maturity(
-                    results['present_value'], results['redemption_value'], time_to_maturity
-                )
-                if ytm is not None:
-                    results['yield_to_maturity'] = round_percentage(ytm * 100)
+            ytm = (redemption - present_value) / present_value / t if t > 0 else None
+            if ytm is not None:
+                results['yield_to_maturity'] = round_percentage(ytm * 100)
 
             results['nominal_annual_rate'] = round_percentage(interest_rate * 100)
 
-            results['effective_annual_rate'] = results.get('effective_yield')
-            if results.get('effective_yield') is not None:
-                results['annual_percentage_yield'] = results['effective_yield']
+        # ---- Discount-based calculations ----
+        if (discount_rate is not None and face_value is not None
+                and face_value > 0 and days_to_maturity):
 
-        if discount_rate is not None and face_value is not None:
-            available_fields['discount_rate'] = discount_rate
-            available_fields['face_value'] = face_value
-            available_fields['days_to_maturity'] = days_to_maturity
-            available_fields['day_count_convention'] = day_count_convention
+            discount_amount = face_value * discount_rate * days_to_maturity / basis
+            results['discount_amount'] = round_money(discount_amount)
+            derivations['discount_amount'] = {
+                'formula': 'face_value * discount_rate * days / basis',
+                'result': results['discount_amount'],
+            }
 
-            validation = self.dependency_engine.validate_calculation(
-                'discount_amount', available_fields, 'money-market'
-            )
-            if validation.can_calculate:
-                discount_amount = self._calculate_discount_amount(
-                    face_value, discount_rate, days_to_maturity, day_count_convention
-                )
-                results['discount_amount'] = round_money(discount_amount)
-            else:
-                validation_errors.append(self.dependency_engine.get_missing_fields_message(validation))
-                results['discount_amount'] = None
-
-            if days_to_maturity is not None:
-                discount_price = self._calculate_discount_price(
-                    face_value, discount_rate, days_to_maturity, day_count_convention
-                )
-                results['purchase_price'] = round_money(discount_price)
-                results['present_value'] = round_money(discount_price)
+            discount_price = face_value - discount_amount
+            results['purchase_price'] = round_money(discount_price)
+            results['present_value'] = round_money(discount_price)
 
             results['annual_discount_rate'] = round_percentage(discount_rate * 100)
             results['discount_rate'] = round_percentage(discount_rate * 100)
 
+        # ---- Benchmark ----
         if benchmark_yield is not None:
-            if results.get('yield_to_maturity') is not None:
-                spread = (results['yield_to_maturity'] / 100) - benchmark_yield
-                results['benchmark_spread'] = round_percentage(spread * 100)
-                results['risk_free_spread'] = round_percentage(spread * 100)
-
             results['benchmark_yield'] = round_percentage(benchmark_yield * 100)
             results['benchmark_yield_comparison'] = round_percentage(benchmark_yield * 100)
+            if results.get('yield_to_maturity') is not None:
+                spread = results['yield_to_maturity'] / 100 - benchmark_yield
+                results['benchmark_spread'] = round_percentage(spread * 100)
+                results['risk_free_spread'] = results['benchmark_spread']
 
-            if face_value is not None and time_to_maturity is not None:
-                results['benchmark_valuation'] = round_money(
-                    self._calculate_benchmark_valuation(
-                        face_value, benchmark_yield, time_to_maturity, day_count_convention
-                    )
-                )
-
+        # ---- Real yield ----
         if inflation_rate is not None and results.get('yield_to_maturity') is not None:
-            real_yield = self._calculate_real_yield(
-                results['yield_to_maturity'] / 100, inflation_rate
-            )
-            if real_yield is not None:
-                results['real_yield'] = round_percentage(real_yield * 100)
+            real = (1 + results['yield_to_maturity'] / 100) / (1 + inflation_rate) - 1
+            results['real_yield'] = round_percentage(real * 100)
 
-        if validation_errors:
-            results['validation_errors'] = validation_errors
-            results['calculation_status'] = 'partial_success'
-        else:
-            results['calculation_status'] = 'success'
-
+        results['derivations'] = derivations
+        results['validation_errors'] = validation_errors
+        results['calculation_status'] = 'partial_success' if validation_errors else 'success'
         return results
-
-    def _calculate_days_to_maturity(self, settlement_date, maturity_date):
-        settlement = datetime.strptime(settlement_date, '%Y-%m-%d')
-        maturity = datetime.strptime(maturity_date, '%Y-%m-%d')
-        return (maturity - settlement).days
-
-    def _calculate_days_since_issue(self, issue_date, settlement_date):
-        issue = datetime.strptime(issue_date, '%Y-%m-%d')
-        settlement = datetime.strptime(settlement_date, '%Y-%m-%d')
-        return (settlement - issue).days
-
-    def _calculate_simple_interest(self, principal, interest_rate, days_to_maturity,
-                                   day_count_convention=365):
-        if days_to_maturity is None or not day_count_convention:
-            return None
-        return principal * interest_rate * (days_to_maturity / day_count_convention)
-
-    def _calculate_compound_interest(self, principal, interest_rate,
-                                     time_to_maturity, compounding_frequency):
-        if time_to_maturity is None:
-            return None
-        future = principal * (1 + interest_rate / compounding_frequency) ** (
-            compounding_frequency * time_to_maturity
-        )
-        return future - principal
-
-    def _calculate_present_value(self, principal, interest_rate, time_to_maturity,
-                                 day_count_convention=365):
-        if time_to_maturity is None or not day_count_convention:
-            return None
-        return principal / (1 + interest_rate * time_to_maturity)
-
-    def _calculate_discount_amount(self, face_value, discount_rate, days_to_maturity,
-                                   day_count_convention=365):
-        if days_to_maturity is None or not day_count_convention:
-            return None
-        return face_value * discount_rate * (days_to_maturity / day_count_convention)
-
-    def _calculate_discount_price(self, face_value, discount_rate, days_to_maturity,
-                                  day_count_convention=365):
-        discount = self._calculate_discount_amount(
-            face_value, discount_rate, days_to_maturity, day_count_convention
-        )
-        if discount is None:
-            return None
-        return face_value - discount
-
-    def _calculate_holding_period_yield(self, present_value, redemption_value):
-        if not present_value:
-            return None
-        return (redemption_value - present_value) / present_value
-
-    def _calculate_annualized_holding_period_yield(self, hpy, time_to_maturity):
-        if not time_to_maturity:
-            return None
-        return hpy / time_to_maturity
-
-    def _calculate_money_market_yield(self, principal, present_value, days_to_maturity,
-                                      day_count_convention=365):
-        if not present_value or not days_to_maturity or not day_count_convention:
-            return None
-        return (principal - present_value) / present_value * (
-            day_count_convention / days_to_maturity
-        )
-
-    def _calculate_effective_yield(self, interest_rate, compounding_frequency):
-        return (1 + interest_rate / compounding_frequency) ** compounding_frequency - 1
-
-    def _calculate_current_yield(self, interest_earned, present_value):
-        if not present_value:
-            return None
-        return interest_earned / present_value
-
-    def _calculate_yield_to_maturity(self, present_value, redemption_value, time_to_maturity):
-        if not present_value or not time_to_maturity:
-            return None
-        return (redemption_value - present_value) / present_value / time_to_maturity
-
-    def _calculate_apy(self, interest_rate, compounding_frequency):
-        return (1 + interest_rate / compounding_frequency) ** compounding_frequency - 1
-
-    def _calculate_benchmark_valuation(self, face_value, benchmark_yield, time_to_maturity,
-                                       day_count_convention=365):
-        if time_to_maturity is None or not day_count_convention:
-            return None
-        return face_value / (1 + benchmark_yield * time_to_maturity)
-
-    def _calculate_real_yield(self, nominal_yield, inflation_rate):
-        if inflation_rate is None:
-            return None
-        return (1 + nominal_yield) / (1 + inflation_rate) - 1
 
 
 def calculate_money_market(inputs: Dict, benchmark_yield: Optional[float] = None,
