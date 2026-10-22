@@ -463,28 +463,21 @@ function renderYieldChart() {
     xAxisTitle = 'Date'
 
     filteredData = yieldData.value.datasets.map(ds => {
-      // Filter out data points without dates and sort by date
       const dateFilteredData = ds.data
         .filter(pt => pt.date !== null && pt.date !== undefined)
         .sort((a, b) => new Date(a.date) - new Date(b.date))
 
-      // Use actual dates as x values (time scale)
       const data = dateFilteredData.map(pt => {
         const dateObj = new Date(pt.date)
         return {
-          x: dateObj.getTime(),  // Use timestamp for time scale
+          x: dateObj.getTime(),
           y: pt.y,
-          label: pt.date,  // Keep original date string
+          label: pt.date,
           originalDate: pt.date
         }
       })
       return { ...ds, data }
     })
-
-    console.log('Date range mode data:', filteredData[0]?.data?.map(t => ({ 
-      x: new Date(t.x).toISOString().split('T')[0], 
-      y: t.y 
-    })))
 
     xScaleOptions = {
       type: 'time',
@@ -501,13 +494,12 @@ function renderYieldChart() {
       }
     }
   } else {
-    // Maturity mode: show maturity labels on x-axis
+    // Maturity mode: show every integer year 0…N on the x-axis
     const maturities = yieldData.value.maturities || []
     const maxMaturity = maturities.length ? Math.max(...maturities) : 10
     const selectedMaturityStr = fredFilters.value.maturity || '1Y'
 
     let effectiveMax = maxMaturity
-    let stepSize = 1
 
     const match = selectedMaturityStr.match(/^(\d+)([YMW])$/)
     if (match) {
@@ -515,7 +507,6 @@ function renderYieldChart() {
       const unit = match[2]
       if (unit === 'Y') {
         xAxisTitle = 'Years'
-        stepSize = num > 5 ? 5 : 1
         effectiveMax = Math.min(maxMaturity, num)
       } else if (unit === 'M') {
         xAxisTitle = 'Months'
@@ -528,7 +519,6 @@ function renderYieldChart() {
       xAxisTitle = 'Years'
       const num = parseFloat(selectedMaturityStr) || 10
       effectiveMax = Math.min(maxMaturity, num)
-      stepSize = num > 5 ? 5 : 1
     }
 
     filteredData = yieldData.value.datasets.map(ds => {
@@ -555,12 +545,17 @@ function renderYieldChart() {
       min: 0,
       max: effectiveMax,
       ticks: {
-        callback: function(value) {
+        // 🔥 FIX: never let Chart.js hide intermediate ticks.
+        autoSkip: false,
+        stepSize: 1,
+        maxRotation: 0,
+        minRotation: 0,
+        callback: function (value) {
+          if (!Number.isInteger(value) || value < 0) return null
+          if (value > effectiveMax) return null
           if (labelsMap[value]) return labelsMap[value]
-          if (Number.isInteger(value) && value >= 0) return value.toString()
-          return null
-        },
-        stepSize: stepSize
+          return value.toString()
+        }
       }
     }
   }
@@ -638,8 +633,10 @@ async function loadComparisonChart() {
             min: 0,
             max: maxMaturity,
             ticks: {
-              callback: (val) => Number.isInteger(val) ? val : '',
-              stepSize: 1
+              // 🔥 FIX: show every integer year label
+              autoSkip: false,
+              stepSize: 1,
+              callback: (val) => Number.isInteger(val) && val >= 0 ? val : ''
             }
           }
         }

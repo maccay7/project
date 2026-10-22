@@ -1,15 +1,22 @@
+import {
+  buildReportYieldCurvesSectionHtml,
+  buildReportYieldCurvesAppendixHtml
+} from './reportYieldCurves.js'
+
 /**
  * Generate IFRS-style report HTML with yield curve appendix from session filters.
- * @param {Array} data - The instrument data rows (can be single instrument or all instruments).
- * @param {string} instrument - Instrument type (e.g., 'money-market') or 'portfolio' for all instruments.
+ * @param {Array} data - The instrument data rows.
+ * @param {string} instrument - Instrument type or 'portfolio' for all instruments.
  * @param {string} session - Session name.
  * @param {string} date - Report generation date.
  * @param {string} valuationDate - Valuation date (YYYY-MM-DD).
- * @param {string} chartImageData - Base64 PNG of yield curve chart.
- * @param {Object} fredFilters - { country, currency, maturity } from session.
- * @param {Array} yieldCurveData - Array of { maturity, maturityLabel, rate }.
- * @param {Object} allInstrumentsData - Object with instrument types as keys and their data arrays as values.
+ * @param {string} chartImageData - Base64 PNG of yield curve chart (legacy single-image path).
+ * @param {Object} fredFilters - { country, currency, maturity } from session (legacy single-curve path).
+ * @param {Array} yieldCurveData - Array of { maturity, maturityLabel, rate } (legacy single-curve path).
+ * @param {Object} allInstrumentsData - Object with instrument types as keys.
  * @param {Object} options - Optional overrides: { currencySymbol, logoBase64, backgroundBase64 }.
+ * @param {Array} reportCurves - Output of loadReportYieldCurves(); when non-empty, renders one
+ *                               block per selected instrument (preferred multi-instrument path).
  * @returns {string} Full HTML report.
  */
 export function generateReportHtml(
@@ -22,7 +29,8 @@ export function generateReportHtml(
   fredFilters = null,
   yieldCurveData = [],
   allInstrumentsData = {},
-  options = {}
+  options = {},
+  reportCurves = []
 ) {
   const valDate = valuationDate || ''
   const currencySymbol = options.currencySymbol || ''
@@ -40,7 +48,6 @@ export function generateReportHtml(
     for (const key of keys) {
       if (row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key]
     }
-    // Case-insensitive fallback
     const lower = Object.keys(row).reduce((acc, k) => { acc[k.toLowerCase()] = row[k]; return acc }, {})
     for (const key of keys) {
       const v = lower[key.toLowerCase()]
@@ -49,7 +56,7 @@ export function generateReportHtml(
     return undefined
   }
 
-  // ---- Safe numeric coercion: handles "1,234.56", "$1,234", "5.25%", plain numbers, null.
+  // ---- Safe numeric coercion
   function toNumber(val) {
     if (val === undefined || val === null || val === '') return 0
     if (typeof val === 'number') return isNaN(val) ? 0 : val
@@ -58,13 +65,11 @@ export function generateReportHtml(
     return isNaN(n) ? 0 : n
   }
 
-  // ---- Read a numeric value from a row using multiple key candidates, coerced to number.
   function numFrom(row, keys) {
     const raw = pick(row, keys)
     return toNumber(raw)
   }
 
-  // ---- Human-readable label for the report (e.g., "money-market" -> "Money Market")
   function labelFor(value) {
     if (!value) return ''
     return String(value)
@@ -85,7 +90,6 @@ export function generateReportHtml(
     reportInstrument = 'Portfolio'
   }
 
-  // Total value across rows
   const totalValue = reportData.reduce((s, r) => s + numFrom(r, [
     'Total Value', 'total_value',
     'Calculated Value', 'calculated_value',
@@ -144,7 +148,7 @@ export function generateReportHtml(
     assumptions = 'Standard market conventions applied.'
   }
 
-  // ---- Appendix rows
+  // ---- Appendix instrument rows
   let instrumentRows = ''
   reportData.forEach((item, idx) => {
     const name = pick(item, [
@@ -208,7 +212,7 @@ export function generateReportHtml(
     instrumentRows = `<tr><td colspan="6" style="text-align:center; color:#999;">No instrument rows available for this selection.</td></tr>`
   }
 
-  // ---- Yield curve appendix
+  // ---- Legacy single-curve appendix rows (used only if reportCurves is empty)
   let appendixRows = ''
   if (yieldCurveData && yieldCurveData.length) {
     appendixRows = yieldCurveData.map(point => `
@@ -220,9 +224,38 @@ export function generateReportHtml(
     `).join('')
   }
 
-  const chartHtml = chartImageData ?
-    `<div class="chart-container"><img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" /><p class="chart-caption">FRED Yield Curve – ${labelFor(instrument)} (${filterCountry} / ${filterCurrency})</p></div>` :
-    '<p>Yield curve chart not available.</p>'
+  // ── Yield Curve section: prefer multi-instrument curves if provided ──
+  let chartHtml
+  if (Array.isArray(reportCurves) && reportCurves.length > 0) {
+    chartHtml = buildReportYieldCurvesSectionHtml(reportCurves)
+  } else if (chartImageData) {
+    chartHtml = `<div class="chart-container"><img src="${chartImageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" /><p class="chart-caption">FRED Yield Curve – ${labelFor(instrument)} (${filterCountry} / ${filterCurrency})</p></div>`
+  } else {
+    chartHtml = '<p>Yield curve chart not available.</p>'
+  }
+
+  // ── Appendix FRED block: prefer multi-curve appendix when reportCurves provided ──
+  const useMulti = Array.isArray(reportCurves) && reportCurves.length > 0
+  const appendixFredBlock = useMulti
+    ? buildReportYieldCurvesAppendixHtml(reportCurves, valDate)
+    : (appendixRows
+        ? `
+<br>
+<h2 style="font-size:18px; color:#0B2044; margin-top:20px;">FRED Yield Curve Data</h2>
+<p><strong>Country:</strong> ${filterCountry} &nbsp;|&nbsp; <strong>Currency:</strong> ${filterCurrency} &nbsp;|&nbsp; <strong>Maturity:</strong> ${filterMaturity}</p>
+<table class="appendix-table">
+  <thead><tr><th>Maturity Label</th><th>Term (Yr)</th><th>Rate (%)</th></tr></thead>
+  <tbody>${appendixRows}</tbody>
+</table>
+`
+        : '')
+
+  // Intro sentence for the Yield Curve page: singular vs plural
+  const yieldCurveIntro = useMulti
+    ? (reportCurves.length > 1
+        ? 'The following yield curves were used as benchmarks, one per selected instrument type:'
+        : 'The following yield curve was used as a benchmark for valuation, sourced from FRED.')
+    : 'The following yield curve was used as a benchmark for valuation, sourced from FRED.'
 
   const instrumentLabel = labelFor(instrument)
 
@@ -298,18 +331,10 @@ export function generateReportHtml(
 <div class="page"><h1 class="section-title">Methodology</h1><div class="methodology-box"><p>${methodology}</p><div class="formula">${formulas}</div><p><strong>Assumptions:</strong> ${assumptions}</p></div></div>
 <div class="page"><h1 class="section-title">Market Inputs</h1><p>Rates sourced from FRED for ${valDate}. Filters used: Country = ${filterCountry}, Currency = ${filterCurrency}, Maturity = ${filterMaturity}.</p></div>
 <div class="page"><h1 class="section-title">Results</h1><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Total Portfolio Value</td><td>${currencySymbol}${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Number of Instruments</td><td>${reportData.length}</td></tr><tr><td>Average Rate</td><td>${avgRate.toFixed(2)}%</td></tr><tr><td>Total Interest Earned</td><td>${currencySymbol}${totalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr><tr><td>Valuation Date</td><td>${valDate}</td></tr></tbody></table></div>
-<div class="page"><h1 class="section-title">Yield Curve</h1><p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>${chartHtml}</div>
+<div class="page"><h1 class="section-title">Yield Curve</h1><p>${yieldCurveIntro}</p>${chartHtml}</div>
 <div class="page"><h1 class="section-title">Conclusion</h1><p>The valuation assessment is in accordance with IFRS 13 fair value measurement principles as at ${valDate}.</p></div>
 <div class="page"><h1 class="section-title">Appendix: Detailed Instrument Data</h1><table class="appendix-table"><thead><tr><th>Instrument Name</th><th>BB Ticker</th><th>Face Value</th><th>Rate (%)</th><th>Term (Yrs)</th><th>Valuation Date</th></tr></thead><tbody>${instrumentRows}</tbody></table>
-${appendixRows ? `
-<br>
-<h2 style="font-size:18px; color:#0B2044; margin-top:20px;">FRED Yield Curve Data</h2>
-<p><strong>Country:</strong> ${filterCountry} &nbsp;|&nbsp; <strong>Currency:</strong> ${filterCurrency} &nbsp;|&nbsp; <strong>Maturity:</strong> ${filterMaturity}</p>
-<table class="appendix-table">
-  <thead><tr><th>Maturity Label</th><th>Term (Yr)</th><th>Rate (%)</th></tr></thead>
-  <tbody>${appendixRows}</tbody>
-</table>
-` : ''}
+${appendixFredBlock}
 </div>
 <div class="page"><h1 class="section-title">Reference</h1><ul class="reference-list"><li>FRED – Federal Reserve Economic Data</li><li>IFRS 13: Fair Value Measurement</li><li>IFRS 9: Financial Instruments</li></ul><div class="footer"><p>© ${new Date().getFullYear()} Dura Capital (Private) Limited. Report generated ${date || valDate}.</p></div></div>
 </body></html>`

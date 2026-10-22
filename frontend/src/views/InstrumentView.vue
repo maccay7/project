@@ -1,7 +1,6 @@
 <template>
   <FixedLayout>
     <div class="instrument-page">
-      <!-- Page Header -->
       <div class="page-header">
         <div class="header-left">
           <h1>{{ instrumentLabel }}</h1>
@@ -26,7 +25,6 @@
         </div>
       </div>
 
-      <!-- Progress Bar -->
       <div class="progress-bar-container">
         <div class="progress-steps">
           <div
@@ -42,14 +40,11 @@
         </div>
       </div>
 
-      <!-- Tab content wrapper with overflow scroll -->
       <div class="tab-content-wrapper">
-        <!-- ===== UPLOAD ===== -->
         <div v-if="activeTab === 'upload'" class="content-card">
           <v-card>
             <v-card-title>Upload {{ instrumentLabel }} Dataset</v-card-title>
             <v-card-text>
-              <!-- Valuation Date Selector -->
               <div class="valuation-date-section">
                 <label class="filter-label">Valuation Date</label>
                 <input 
@@ -102,7 +97,6 @@
                 <button v-if="sheetType === 'multi'" class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
               </div>
 
-              <!-- Worksheet Selector - hidden after a sheet is processed -->
               <div v-if="worksheetWorkflow.workbookSheets.length > 0 && !worksheetSelected" class="worksheet-selector-section">
                 <WorksheetSelector
                   :workbook-sheets="worksheetWorkflow.workbookSheets"
@@ -118,16 +112,10 @@
                 />
               </div>
 
-              <!-- ===== PREVIEW SECTION ===== -->
               <div v-if="rawData.length && showPreview" class="excel-preview-section">
-                <h4 v-if="sheetType === 'single'">File Preview – {{ currentSheetName || 'Selected Sheet' }}</h4>
-                <h4 v-else>File Preview – {{ currentSheetName || 'Selected Sheet' }}</h4>
-                <p v-if="sheetType === 'single'" class="preview-info">
-                  {{ rawData.length }} total rows — edit cells below like Excel
-                </p>
-                <p v-else class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
+                <h4>File Preview – {{ currentSheetName || 'Selected Sheet' }}</h4>
+                <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
                 
-                <!-- Multiple Instruments: Show mapped dataset in Excel viewer with mapping controls -->
                 <ExcelViewer
                   v-if="sheetType === 'multi' && rawData.length"
                   :data="rawData.slice(0, 500)"
@@ -144,7 +132,6 @@
                   @mapping-update="updateColumnMapping"
                 ></ExcelViewer>
                 
-                <!-- Single Instrument: Show extracted values in Excel viewer -->
                 <ExcelViewer
                   v-else-if="sheetType === 'single' && rawData.length"
                   :data="rawData.slice(0, 500)"
@@ -160,13 +147,11 @@
                   @data-update="onRawExcelUpdate"
                 ></ExcelViewer>
                 
-                <!-- Preview actions - removed "Full Screen" button -->
                 <div v-if="sheetType === 'multi'" class="preview-actions">
                   <button class="btn-primary" @click="saveFinalMapping">Save Mapping</button>
                 </div>
               </div>
 
-              <!-- ===== MAPPING DIALOG (only shown for multi) ===== -->
               <v-dialog v-model="showMappingDialog" max-width="650px">
                 <v-card>
                   <v-card-title class="mapping-dialog-title">
@@ -205,7 +190,6 @@
                 </v-card>
               </v-dialog>
 
-              <!-- Saved Mappings Popup -->
               <v-dialog v-model="showSavedMappingsDialog" max-width="700px">
                 <v-card>
                   <v-card-title class="saved-mappings-popup-title">
@@ -214,7 +198,6 @@
                     <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">×</button>
                   </v-card-title>
                   <v-card-text class="saved-mappings-popup-body">
-                    <!-- Save New Mapping Section -->
                     <div class="save-section">
                       <div class="save-row">
                         <input 
@@ -227,7 +210,6 @@
                       </div>
                     </div>
 
-                    <!-- Saved Mappings List -->
                     <div v-if="!savedTemplates.length" class="empty-state">
                       <p>No saved mappings yet.</p>
                     </div>
@@ -245,7 +227,6 @@
                 </v-card>
               </v-dialog>
 
-              <!-- Multi-Table Detection Success Popup -->
               <v-dialog v-model="showMultiTableDetectionSuccess" max-width="700px">
                 <v-card>
                   <v-card-title class="detection-success-title">
@@ -255,11 +236,9 @@
                   </v-card-title>
                   <v-card-text class="detection-success-body">
                     <div class="instrument-type-display">
-                      <strong>Instrument:</strong> {{ instrumentType === 'money-market' ? 'Money Market' : instrumentType === 'treasury-bills' ? 'Treasury Bills' : 'Bonds' }}
-                      ({{ instrumentType }})
+                      <strong>Instrument:</strong> {{ formatInstrumentTypeLabel(instrumentType) }}
                     </div>
                     
-                    <!-- Currency Selection for Auto-Detection -->
                     <div class="currency-selection-section">
                       <label class="currency-label">Select Currency to Include in Auto-Detected Values:</label>
                       <v-select
@@ -335,7 +314,6 @@
                 </v-card>
               </v-dialog>
 
-              <!-- Auto Detection Success Popup -->
               <v-dialog v-model="showDetectionSuccess" max-width="500px">
                 <v-card>
                   <v-card-title class="detection-success-title">
@@ -344,25 +322,17 @@
                     <button class="btn-close-dialog" @click="showDetectionSuccess = false">×</button>
                   </v-card-title>
                   <v-card-text class="detection-success-body">
-                    <!-- Show instrument type from detection time (stored) -->
                     <div class="instrument-type-display">
-                      <strong>Instrument:</strong> {{ detectedInstrumentType === 'money-market' ? 'Money Market' : detectedInstrumentType === 'treasury-bills' ? 'Treasury Bills' : 'Bonds' }}
-                      ({{ detectedInstrumentType }})
+                      <strong>Instrument:</strong> {{ formatInstrumentTypeLabel(detectedInstrumentType) }}
                     </div>
                     
                     <div class="detected-fields-list">
                       <div v-if="Object.keys(autoDetectedFields).length > 0">
                         <h4>Detected Fields ({{ Object.keys(autoDetectedFields).length }})</h4>
                         <div v-for="(value, field) in autoDetectedFields" :key="field" class="detected-field-item">
-                          <span class="detected-field-label">{{ field }}:</span>
+                          <span class="detected-field-label">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}:</span>
                           <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
                           <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="detected-field-location">@ {{ autoDetectedFieldsWithMetadata[field].location }}</span>
-                          <!-- DEBUG: Show currency variants info -->
-                          <div v-if="typeof value === 'object' && value !== null" class="debug-info" style="font-size: 11px; color: #666; margin-top: 4px;">
-                            <span v-if="value.currencyVariants">Currency variants: {{ Object.keys(value.currencyVariants).join(', ') }}</span>
-                            <span v-else>No currency variants ({{ typeof value }})</span>
-                          </div>
-                          <!-- Currency selector for fields with multiple currency variants -->
                           <div v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1" class="currency-variant-selector">
                             <select v-model="value.selectedCurrency" @change="updateSelectedCurrency(field, value.selectedCurrency)" class="currency-select">
                               <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
@@ -376,9 +346,8 @@
                       <div v-if="Object.keys(autoDetectedAdditionalFields).length > 0">
                         <h4>Additional Detected Fields ({{ Object.keys(autoDetectedAdditionalFields).length }})</h4>
                         <div v-for="(value, field) in autoDetectedAdditionalFields" :key="'add-' + field" class="detected-field-item">
-                          <span class="detected-field-label">{{ field }}:</span>
+                          <span class="detected-field-label">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}:</span>
                           <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                          <!-- Currency selector for additional fields with multiple currency variants -->
                           <div v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1" class="currency-variant-selector">
                             <select v-model="value.selectedCurrency" @change="updateSelectedCurrency(field, value.selectedCurrency, true)" class="currency-select">
                               <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
@@ -395,31 +364,11 @@
                       </div>
                     </div>
                     
-                    <!-- Show missing fields if any -->
                     <div v-if="Object.keys(autoDetectedFields).length < requiredColumns.length" class="missing-fields-warning">
                       <p><strong>Missing Required Fields:</strong></p>
                       <ul>
                         <li v-for="col in requiredColumns.filter(c => !autoDetectedFields[c])" :key="col">{{ col }}</li>
                       </ul>
-                    </div>
-                    
-                    <!-- Show additional detected fields that aren't in required columns -->
-                    <div v-if="autoDetectedAdditionalFields && Object.keys(autoDetectedAdditionalFields).length > 0" class="additional-fields-section">
-                      <h4>Additional Detected Fields ({{ Object.keys(autoDetectedAdditionalFields).length }})</h4>
-                      <p class="section-hint">These fields were detected but are not required for calculations.</p>
-                      <div v-for="(field, label) in autoDetectedAdditionalFields" :key="label" class="additional-field-item">
-                        <span class="additional-field-label">{{ label }}:</span>
-                        <span class="additional-field-value">{{ formatDetectedValue(label, typeof field === 'object' && field !== null ? field.value : field) }}</span>
-                        <span v-if="typeof field === 'object' && field?.location" class="additional-field-location">@ {{ field.location }}</span>
-                        <!-- Currency selector for additional fields with multiple currency variants -->
-                        <div v-if="typeof field === 'object' && field?.currencyVariants && Object.keys(field.currencyVariants).length > 1" class="currency-variant-selector">
-                          <select v-model="field.selectedCurrency" @change="updateSelectedCurrency(label, field.selectedCurrency, true)" class="currency-select">
-                            <option v-for="(variantValue, currency) in field.currencyVariants" :key="currency" :value="currency">
-                              {{ currency }}: {{ formatDetectedValue(label, variantValue) }}
-                            </option>
-                          </select>
-                        </div>
-                      </div>
                     </div>
                   </v-card-text>
                   <v-card-actions>
@@ -429,7 +378,6 @@
                 </v-card>
               </v-dialog>
 
-              <!-- Workbook Viewer Dialog -->
               <v-dialog v-model="showWorkbookViewer" max-width="95%" persistent>
                 <v-card style="height: 90vh;">
                   <v-card-title class="excel-dialog-title-no-logo">
@@ -452,14 +400,13 @@
                       :file-name="uploadedFile?.name || 'Workbook'"
                       :instrument-type="instrumentType"
                       :worksheet-statuses="worksheetStatuses"
+                      :detecting-from-parent="isDetecting"
                       @close="showWorkbookViewer = false"
                       @sheet-selected="handleSheetSelectedFromViewer"
                       @single-instrument-extracted="handleSingleInstrumentExtracted"
                       @table-isolated="handleTableIsolated"
                       @multi-table-detect="handleMultiTableDetect"
                       @workbook-loaded="handleWorkbookLoaded"
-                      @detect-start="isDetecting = true"
-                      @detect-end="isDetecting = false"
                     />
                   </v-card-text>
                   <div class="popup-footer">
@@ -470,12 +417,10 @@
                 </v-card>
               </v-dialog>
 
-              <!-- ===== Required Columns / Extracted Values ===== -->
               <div class="required-columns">
                 <h4 v-if="sheetType === 'multi'">Required Columns</h4>
                 <h4 v-else>Required Values (Single Instrument)</h4>
                 
-                <!-- Multi-sheet: Column badges -->
                 <div v-if="sheetType === 'multi'" class="columns-list">
                   <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
                     <span class="badge-icon">{{ hasRequiredColumn(col) ? '✓' : '○' }}</span>
@@ -483,7 +428,6 @@
                   </span>
                 </div>
                 
-                <!-- Single-sheet: Extracted values table (like mapping preview) -->
                 <div v-else class="extracted-values-table">
                   <div class="table-header">
                     <span class="header-field">Field</span>
@@ -491,7 +435,7 @@
                     <span class="header-status">Status</span>
                   </div>
                   <div v-for="(value, key) in extractedValues" :key="key" class="table-row" :class="{ 'row-missing': !value || value === 'N/A' }">
-                    <span class="row-field">{{ key }}</span>
+                    <span class="row-field">{{ autoDetectedFieldsWithMetadata[key]?.originalLabel || key }}</span>
                     <div class="row-value">
                       <input
                         v-if="value && value !== 'N/A'"
@@ -517,7 +461,6 @@
                   </div>
                 </div>
                 
-                <!-- Status messages -->
                 <div v-if="rawData.length && sheetType === 'multi' && missingColumns.length" class="warning-message">
                   <span class="warning-icon">⚠</span>
                   <span>Missing required columns. Use the dropdowns on the column headers or click "Map Columns" to assign them.</span>
@@ -541,7 +484,6 @@
           </v-card>
         </div>
 
-        <!-- ===== CLEANING ===== -->
         <div v-if="activeTab === 'cleaning'" class="content-card">
           <v-card>
             <v-card-title>Clean {{ instrumentLabel }} Data</v-card-title>
@@ -589,7 +531,6 @@
                   </div>
                 </div>
 
-                <!-- ===== NEW: Detected Values for Single Instrument ===== -->
                 <div v-if="sheetType === 'single'" class="detected-values-section">
                   <h3>Detected Values (Single Instrument)</h3>
                   <p class="section-hint">Review the values detected by Auto Detection. Exclude values you don't want to use for calculations.</p>
@@ -602,7 +543,7 @@
                       <span class="header-action">Action</span>
                     </div>
                     <div v-for="(value, key) in autoDetectedFields" :key="key" class="table-row" :class="{ 'row-excluded': excludedDetectedFields.has(key) }">
-                      <span class="row-field">{{ key }}</span>
+                      <span class="row-field">{{ autoDetectedFieldsWithMetadata[key]?.originalLabel || key }}</span>
                       <div class="row-value">
                         <span class="value-display">{{ formatDetectedValue(key, typeof value === 'object' && value !== null ? value.value : value) }}</span>
                       </div>
@@ -619,7 +560,6 @@
                         </button>
                       </div>
                     </div>
-                    <!-- Display currency separately if it was selected but not in autoDetectedFields -->
                     <div v-if="selectedCurrency && !autoDetectedFields['Currency']" class="table-row">
                       <span class="row-field">Currency</span>
                       <div class="row-value">
@@ -637,7 +577,6 @@
                       </span>
                     </div>
 
-                    <!-- Add Field Section -->
                     <div class="add-field-section">
                       <h4>Add Field</h4>
                       <p class="section-hint">Add a custom field that will be included in calculations.</p>
@@ -670,7 +609,6 @@
                   </div>
                 </div>
 
-                <!-- ===== FIXED: Redesigned Cleaning Summary with KPI Cards ===== -->
                 <div v-if="cleanedData.length" class="cleaning-summary-cards">
                   <v-row>
                     <v-col cols="12" sm="6" md="3" v-for="stat in cleaningResultStats" :key="stat.title">
@@ -691,7 +629,6 @@
                     </v-col>
                   </v-row>
                   
-                  <!-- ===== NEW: Cleaning Operations Performed ===== -->
                   <div v-if="cleaningOperationsSummary.length" class="cleaning-operations-summary">
                     <h4 class="operations-title">Operations Performed:</h4>
                     <ul class="operations-list">
@@ -718,7 +655,6 @@
           </v-card>
         </div>
 
-        <!-- ===== CALCULATIONS ===== -->
         <div v-if="activeTab === 'calculations'" class="content-card">
           <v-card>
             <v-card-title class="calc-header">
@@ -744,15 +680,15 @@
                 <div class="summary-cards">
                   <div class="summary-card total" @click="showFormula('Total Portfolio Value')">
                     <div class="card-label">Total Portfolio Value</div>
-                    <div class="card-value">{{ formatNumber(allCalculations.totalValue || 0) }}</div>
+                    <div class="card-value">{{ formatNumber(allCalculations.totalValue) }}</div>
                   </div>
                   <div class="summary-card rate" @click="showFormula('Average Rate')">
                     <div class="card-label">{{ rateLabel }}</div>
-                    <div class="card-value">{{ formatNumber(allCalculations.avgRate || 0) }}%</div>
+                    <div class="card-value">{{ allCalculations.avgRate != null ? formatNumber(allCalculations.avgRate) + '%' : '—' }}</div>
                   </div>
                   <div class="summary-card count" @click="showFormula('Number of Instruments')">
                     <div class="card-label">Number of Instruments</div>
-                    <div class="card-value">{{ allCalculations.instrumentCount || 0 }}</div>
+                    <div class="card-value">{{ allCalculations.instrumentCount != null ? allCalculations.instrumentCount : '—' }}</div>
                   </div>
                 </div>
 
@@ -769,7 +705,11 @@
                   <small v-if="allCalculations.fred.note" class="fred-meta">{{ allCalculations.fred.note }}</small>
                 </div>
 
-                <!-- Field Detection Results -->
+                <div v-if="allCalculations.status === 'error'" class="warning-message" style="margin-bottom: 20px;">
+                  <span class="warning-icon">⚠</span>
+                  <span><strong>Calculation Error:</strong> {{ allCalculations.message }}</span>
+                </div>
+
                 <div v-if="fieldDetectionResults.summary && fieldDetectionResults.summary.total_fields_detected > 0" class="field-detection-card">
                   <div class="field-detection-header">
                     <v-icon small>mdi-magnify</v-icon>
@@ -809,7 +749,6 @@
                 <div class="calculations-section">
                   <h3>{{ instrumentLabel }} Calculations</h3>
                   
-                  <!-- Calculating Animation -->
                   <div v-if="isCalculating" class="calculating-animation">
                     <v-icon size="16" class="spin-animation">mdi-loading</v-icon>
                     <span>Calculating...</span>
@@ -896,7 +835,6 @@
           </v-card>
         </div>
 
-        <!-- ===== VISUALIZATIONS ===== -->
         <div v-if="activeTab === 'visualizations'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-chart-line</v-icon> {{ instrumentLabel }} – Yield Curve</v-card-title>
@@ -1018,7 +956,6 @@
           </v-card>
         </div>
 
-        <!-- ===== SUMMARY ===== -->
         <div v-if="activeTab === 'summary'" class="content-card">
           <v-card class="summary-pro-card">
             <v-card-title>
@@ -1029,7 +966,6 @@
                 <p>No summary data available. Please run calculations first.</p>
               </div>
               <div v-else>
-                <!-- Summary Tabs -->
                 <div class="summary-tabs">
                   <button 
                     class="summary-tab" 
@@ -1063,7 +999,6 @@
                   </button>
                 </div>
 
-                <!-- Current Summary Section -->
                 <div v-if="activeSummaryTab === 'current' || activeSummaryTab === 'all'" class="summary-section">
                   <div v-if="instrumentSummary.rows.length" class="section-header">
                     <h3>
@@ -1163,7 +1098,6 @@
                   </div>
                 </div>
 
-                <!-- Previous Summaries Section -->
                 <div v-if="activeSummaryTab === 'previous' || activeSummaryTab === 'all'" class="summary-section">
                   <div v-if="currentWorkbookPreviousSummaries.length" class="section-header">
                     <h3>
@@ -1298,7 +1232,6 @@
           </v-card>
         </div>
 
-        <!-- ===== REPORTS ===== -->
         <div v-if="activeTab === 'reports'" class="content-card">
           <v-card>
             <v-card-title><v-icon>mdi-file-pdf-box</v-icon> Generate Combined Report</v-card-title>
@@ -1343,7 +1276,6 @@
       </div>
     </div>
 
-    <!-- Excel Review Dialog -->
     <v-dialog v-model="showExcelDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title-white">
@@ -1365,7 +1297,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- Formula Dialog -->
     <v-dialog v-model="formulaDialog" max-width="700px">
       <v-card>
         <v-card-title class="formula-dialog-title">
@@ -1418,7 +1349,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- Report Preview Dialog -->
     <v-dialog v-model="reportPreviewDialog" max-width="90%" fullscreen hide-overlay>
       <v-card>
         <v-card-title class="excel-dialog-title-white">
@@ -1440,7 +1370,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- Modal Excel Viewer -->
     <ExcelModalViewer
       :visible="showModalViewer"
       :fileData="viewerFileData"
@@ -1449,7 +1378,6 @@
       @process-sheet="handleProcessSheetFromModal"
     />
 
-    <!-- Snackbar for notifications -->
     <v-snackbar
       v-model="snackbar.show"
       :color="snackbar.color"
@@ -1483,16 +1411,21 @@ import Chart from 'chart.js/auto'
 import 'chartjs-adapter-date-fns'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
 
+function formatInstrumentTypeLabel(type) {
+  if (type === 'money-market') return 'Money Market (money-market)'
+  if (type === 'tbills') return 'Treasury Bills (tbills)'
+  if (type === 'bonds') return 'Bonds (bonds)'
+  return type || 'Unknown'
+}
+
 function autoDetectTable(data) {
   if (!data || data.length === 0) return { type: 'empty', data: [] }
-
   const firstRow = data[0]
   let hasHeaders = false
   if (firstRow && typeof firstRow === 'object') {
     const values = Object.values(firstRow)
     hasHeaders = values.some(v => typeof v === 'string' && v.length > 0 && isNaN(v) && !v.match(/^[\d\.,\-]+$/))
   }
-
   if (!hasHeaders) {
     const columnCount = Math.max(...data.map(row => Object.keys(row).length))
     const headers = Array.from({ length: columnCount }, (_, i) => `Column ${i + 1}`)
@@ -1506,7 +1439,6 @@ function autoDetectTable(data) {
     })
     return { type: 'table', headers, data: tableData }
   }
-
   return { type: 'columns', data }
 }
 
@@ -1602,73 +1534,37 @@ const INPUT_FIELDS = {
   ]
 }
 
-const CALCULATED_FIELDS = {
-  'money-market': [
-    'total_value', 'calculated_value', 'present_value', 'fair_value', 'market_value',
-    'interest_earned', 'simple_interest', 'compound_interest',
-    'discount_amount', 'discount_yield', 'money_market_yield',
-    'holding_period_yield', 'annualized_holding_period_yield',
-    'effective_yield', 'effective_annual_rate', 'annual_percentage_yield',
-    'current_yield', 'yield_to_maturity',
-    'yield_curve_rate', 'benchmark_valuation', 'real_yield',
-    'investment_return', 'investment_cost', 'net_investment', 'gross_investment'
-  ],
-  'bonds': [
-    'total_value', 'calculated_value', 'present_value', 'fair_value', 'market_value',
-    'clean_price', 'dirty_price', 'current_price',
-    'coupon_payment', 'annual_coupon',
-    'current_yield', 'yield_to_maturity', 'yield_to_call', 'yield_to_worst',
-    'macaulay_duration', 'modified_duration', 'effective_duration',
-    'dollar_duration', 'convexity', 'dv01', 'pvbp',
-    'accrued_interest', 'settlement_value', 'redemption_value',
-    'days_accrued', 'days_to_next_coupon', 'days_to_maturity',
-    'benchmark_spread', 'g_spread', 'i_spread', 'z_spread',
-    'real_yield', 'nominal_yield', 'effective_annual_yield',
-    'holding_period_return', 'total_return', 'capital_gain_loss',
-    'coupon_income', 'unrealized_gain_loss', 'realized_gain_loss',
-    'yield_curve_rate'
-  ],
-  'tbills': [
-    'total_value', 'calculated_value', 'present_value', 'fair_value', 'market_value',
-    'discount_amount', 'discount_yield', 'investment_yield',
-    'bond_equivalent_yield', 'holding_period_yield',
-    'annualized_holding_period_yield', 'money_market_yield',
-    'purchase_price', 'redemption_value',
-    'days_to_maturity', 'yield_curve_rate'
-  ]
-}
-
 function mapBackendFieldsToDisplayNames(row, instrumentType) {
   const mapping = FIELD_MAPPINGS[instrumentType] || {}
   const mappedRow = {}
-  
+
   for (const [key, value] of Object.entries(row)) {
     const displayKey = mapping[key] || key
     mappedRow[displayKey] = value
   }
-  
+
   return mappedRow
 }
 
 function filterToCalculatedFields(row, instrumentType) {
   const inputFields = INPUT_FIELDS[instrumentType] || []
   const filteredRow = {}
-  
+
   const alwaysInclude = ['Instrument Name', 'Instrument Type', 'Worksheet', 'Workbook']
-  
+
   for (const [key, value] of Object.entries(row)) {
     if (alwaysInclude.includes(key)) {
       filteredRow[key] = value
       continue
     }
-    
+
     const isInput = inputFields.includes(key)
-    
+
     if (!isInput) {
       filteredRow[key] = value
     }
   }
-  
+
   return filteredRow
 }
 
@@ -1679,7 +1575,7 @@ function isPlausibleValue(canonicalKey, value) {
 
   const lc = String(canonicalKey).toLowerCase()
 
-  if (lc.includes('frequency') || lc.includes('interest') && lc.includes('payment') && lc.includes('frequency') || lc.includes('payment') && lc.includes('frequency')) {
+  if (lc.includes('frequency') || (lc.includes('interest') && lc.includes('payment') && lc.includes('frequency')) || (lc.includes('payment') && lc.includes('frequency'))) {
     return VALID_FREQUENCIES.test(String(value).trim())
   }
 
@@ -1695,12 +1591,13 @@ function isPlausibleValue(canonicalKey, value) {
     return n >= 0
   }
 
-  if (lc.includes('date') || lc.includes('maturity') || lc.includes('auction') || lc.includes('settlement') || lc.includes('issue') || lc.includes('coupon') && lc.includes('date')) {
+  if (lc.includes('date') || lc.includes('maturity') || lc.includes('auction') || lc.includes('settlement') || lc.includes('issue') || (lc.includes('coupon') && lc.includes('date'))) {
+    if (value instanceof Date) return !isNaN(value.getTime())
     const d = new Date(value)
     return !isNaN(d.getTime())
   }
 
-  if (lc.includes('days') || lc.includes('term') || lc.includes('tenor') || lc.includes('maturity') && !lc.includes('date')) {
+  if (lc.includes('days') || lc.includes('term') || lc.includes('tenor') || (lc.includes('maturity') && !lc.includes('date'))) {
     const n = typeof value === 'number' ? value : parseFloat(String(value))
     if (isNaN(n)) return false
     return n >= 0 && Number.isInteger(n)
@@ -1709,127 +1606,63 @@ function isPlausibleValue(canonicalKey, value) {
   return true
 }
 
+const SEMANTIC_FIELD_GROUPS = {
+  name: ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name', 'Instrument'],
+  faceValue: ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount', 'Notional Amount', 'Purchase Price', 'Future Value'],
+  rate: ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon', 'Investment Yield', 'Effective Annual Yield', 'Benchmark Rate', 'Reference Rate', 'Spread', 'Margin'],
+  date: ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date', 'Call Date', 'Put Date', 'Coupon Date'],
+  frequency: ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency', 'Compounding Frequency'],
+  term: ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years', 'Accrued Days', 'Days in Coupon Period', 'Term to Maturity'],
+  currency: ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency', 'Exchange Rate', 'FX Rate'],
+  status: ['Status', 'State', 'Type', 'Category', 'Classification'],
+  price: ['Price', 'Purchase Price', 'Clean Price', 'Dirty Price', 'Market Price', 'Current Price', 'Price per 100', 'Call Price', 'Put Price'],
+  interest: ['Accrued Interest', 'Interest Accrued', 'Coupon', 'Coupon Amount', 'Coupon Payment', 'Annual Coupon', 'Interest Earned', 'Interest Income', 'Discount Amount'],
+  duration: ['Macaulay Duration', 'Modified Duration', 'Convexity', 'DV01'],
+  return: ['Capital Gain Loss', 'Total Return', 'Profit Return', 'Market Value', 'Present Value', 'Carrying Value', 'Book Value', 'Fair Value', 'Maturity Value', 'Current Value', 'Purchase Cost']
+}
+
+function normalizeKeyForMatch(key) {
+  return String(key).toLowerCase().replace(/[\s_\-()]+/g, '')
+}
+
+function findSemanticType(key) {
+  const lower = normalizeKeyForMatch(key)
+  for (const [type, list] of Object.entries(SEMANTIC_FIELD_GROUPS)) {
+    if (list.some(f => {
+      const fLower = normalizeKeyForMatch(f)
+      return lower.includes(fLower) || fLower.includes(lower)
+    })) {
+      return type
+    }
+  }
+  return null
+}
+
+function isSemanticMatch(detectedKey, targetField, semanticType) {
+  const detectedLower = normalizeKeyForMatch(detectedKey)
+  const targetLower = normalizeKeyForMatch(targetField)
+
+  if (detectedLower === targetLower) return true
+  if (detectedLower.includes(targetLower) || targetLower.includes(detectedLower)) return true
+
+  const fields = SEMANTIC_FIELD_GROUPS[semanticType] || []
+  const detectedInList = fields.some(f => normalizeKeyForMatch(f) === detectedLower)
+  const targetInList = fields.some(f => normalizeKeyForMatch(f) === targetLower)
+
+  return detectedInList && targetInList
+}
+
 function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, requiredColsOverride = null) {
   const normalised = {}
   const normalisedMeta = {}
   const usedCanonical = new Set()
-  
+
   const targetColumns = requiredColsOverride || requiredColumns.value || []
-  console.log('normalizeDetectedFields target columns:', targetColumns)
-  console.log('normalizeDetectedFields input fields:', Object.keys(fields || {}))
-
-  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name', 'Instrument']
-  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount', 'Notional Amount', 'Purchase Price', 'Future Value']
-  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon', 'Investment Yield', 'Effective Annual Yield', 'Benchmark Rate', 'Reference Rate', 'Spread', 'Margin']
-  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date', 'Call Date', 'Put Date', 'Coupon Date']
-  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency', 'Compounding Frequency']
-  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years', 'Accrued Days', 'Days in Coupon Period', 'Term to Maturity']
-  const currencyFields = ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency', 'Exchange Rate', 'FX Rate']
-  const statusFields = ['Status', 'State', 'Type', 'Category', 'Classification']
-  const priceFields = ['Price', 'Purchase Price', 'Clean Price', 'Dirty Price', 'Market Price', 'Current Price', 'Price per 100', 'Call Price', 'Put Price']
-  const interestFields = ['Accrued Interest', 'Interest Accrued', 'Coupon', 'Coupon Amount', 'Coupon Payment', 'Annual Coupon', 'Interest Earned', 'Interest Income', 'Discount Amount']
-  const durationFields = ['Macaulay Duration', 'Modified Duration', 'Convexity', 'DV01']
-  const returnFields = ['Capital Gain Loss', 'Total Return', 'Profit Return', 'Market Value', 'Present Value', 'Carrying Value', 'Book Value', 'Fair Value', 'Maturity Value', 'Current Value', 'Purchase Cost']
-
-  function isSemanticMatch(detectedKey, targetField, semanticType) {
-    const detectedLower = String(detectedKey).toLowerCase().replace(/[\s_\-()]+/g, '')
-    const targetLower = String(targetField).toLowerCase().replace(/[\s_\-()]+/g, '')
-    
-    if (detectedLower === targetLower) return true
-    if (detectedLower.includes(targetLower) || targetLower.includes(detectedLower)) return true
-    
-    const semanticFields = {
-      'name': nameStyleFields,
-      'faceValue': faceValueFields,
-      'rate': rateFields,
-      'date': dateFields,
-      'frequency': frequencyFields,
-      'term': termFields,
-      'currency': currencyFields,
-      'status': statusFields,
-      'price': priceFields,
-      'interest': interestFields,
-      'duration': durationFields,
-      'return': returnFields
-    }
-    
-    const fields = semanticFields[semanticType] || []
-    const detectedInList = fields.some(f => f.toLowerCase().replace(/[\s_\-()]+/g, '') === detectedLower)
-    const targetInList = fields.some(f => f.toLowerCase().replace(/[\s_\-()]+/g, '') === targetLower)
-    
-    return detectedInList && targetInList
-  }
 
   const detectedSemantics = {}
-  for (const [rawKey, rawValue] of Object.entries(fields || {})) {
-    const keyLower = String(rawKey).toLowerCase().replace(/[\s_\-()]+/g, '')
-    
-    if (nameStyleFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'name'
-    } else if (faceValueFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'faceValue'
-    } else if (rateFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'rate'
-    } else if (dateFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'date'
-    } else if (frequencyFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'frequency'
-    } else if (termFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'term'
-    } else if (currencyFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'currency'
-    } else if (statusFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'status'
-    } else if (priceFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'price'
-    } else if (interestFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'interest'
-    } else if (durationFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'duration'
-    } else if (returnFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return keyLower.includes(fLower) || fLower.includes(keyLower)
-    })) {
-      detectedSemantics[rawKey] = 'return'
-    } else {
-      detectedSemantics[rawKey] = 'generic'
-    }
+  for (const rawKey of Object.keys(fields || {})) {
+    detectedSemantics[rawKey] = findSemanticType(rawKey) || 'generic'
   }
-
-  console.log('Detected semantics:', detectedSemantics)
 
   const rawEntries = Object.entries(fields || {}).sort(
     (a, b) => String(b[0]).length - String(a[0]).length
@@ -1837,38 +1670,35 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
 
   for (const [rawKey, rawValue] of rawEntries) {
     const semantic = detectedSemantics[rawKey]
-    
+
     let matchedCanonical = null
     for (const targetCol of targetColumns) {
-      const targetLower = String(targetCol).toLowerCase().replace(/[\s_\-()]+/g, '')
-      const rawKeyLower = String(rawKey).toLowerCase().replace(/[\s_\-()]+/g, '')
-      
+      if (usedCanonical.has(targetCol)) continue
+
+      const targetLower = normalizeKeyForMatch(targetCol)
+      const rawKeyLower = normalizeKeyForMatch(rawKey)
+
       if (rawKeyLower === targetLower) {
         matchedCanonical = targetCol
-        console.log(`Exact match "${rawKey}" to "${targetCol}"`)
         break
       }
-      
-      if (semantic && isSemanticMatch(rawKey, targetCol, semantic)) {
+
+      if (semantic && semantic !== 'generic' && isSemanticMatch(rawKey, targetCol, semantic)) {
         matchedCanonical = targetCol
-        console.log(`Matched "${rawKey}" to "${targetCol}" (${semantic})`)
         break
       }
-      
+
       if (rawKeyLower.includes(targetLower) || targetLower.includes(rawKeyLower)) {
         matchedCanonical = targetCol
-        console.log(`Generic match "${rawKey}" to "${targetCol}"`)
         break
       }
     }
-    
+
     if (!matchedCanonical) {
-      console.log(`No match found for "${rawKey}" - will keep as-is`)
       matchedCanonical = rawKey
     }
-    
+
     if (usedCanonical.has(matchedCanonical)) {
-      console.log(`Skipping "${matchedCanonical}" - already mapped`)
       continue
     }
 
@@ -1878,7 +1708,6 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
         : rawValue
 
     if (semantic !== 'generic' && !isPlausibleValue(matchedCanonical, actualValue)) {
-      console.log(`Rejected "${matchedCanonical}": "${actualValue}" (implausible value)`)
       continue
     }
 
@@ -1886,272 +1715,50 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
     usedCanonical.add(matchedCanonical)
 
     const meta = fieldsWithMetadata ? fieldsWithMetadata[rawKey] : null
-    if (meta) normalisedMeta[matchedCanonical] = meta
+    const metaCopy = meta && typeof meta === 'object' ? { ...meta } : {}
+    metaCopy.originalLabel = rawKey
+    normalisedMeta[matchedCanonical] = metaCopy
   }
 
-  console.log('Normalized fields:', normalised)
   return { fields: normalised, fieldsWithMetadata: normalisedMeta }
 }
 
-function scanSheetForMissingFields(missingFields, instrumentType, requiredColsOverride = null) {
-  if (!originalFileBuffer.value || !currentSheetName.value) return {}
-  if (!missingFields || missingFields.length === 0) return {}
+function deriveDaysToMaturity(fields, metadata) {
+  const normalizedKeys = Object.keys(fields).map(k => normalizeKeyForMatch(k))
+  const alreadyHasDays = normalizedKeys.some(k =>
+    k === 'daystomaturity' || k === 'termdays' || k === 'term' || k === 'tenor'
+  )
+  if (alreadyHasDays) return
 
-  const targetColumns = requiredColsOverride || requiredColumns.value || []
-  console.log('Secondary scan for missing fields:', missingFields)
-  console.log('Target columns:', targetColumns)
-
-  const nameStyleFields = ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name', 'Instrument']
-  const faceValueFields = ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount', 'Notional Amount', 'Purchase Price', 'Future Value']
-  const rateFields = ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon', 'Investment Yield', 'Effective Annual Yield', 'Benchmark Rate', 'Reference Rate', 'Spread', 'Margin']
-  const dateFields = ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date', 'Call Date', 'Put Date', 'Coupon Date']
-  const frequencyFields = ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency', 'Compounding Frequency']
-  const termFields = ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years', 'Accrued Days', 'Days in Coupon Period', 'Term to Maturity']
-  const currencyFields = ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency', 'Exchange Rate', 'FX Rate']
-  const statusFields = ['Status', 'State', 'Type', 'Category', 'Classification']
-  const priceFields = ['Price', 'Purchase Price', 'Clean Price', 'Dirty Price', 'Market Price', 'Current Price', 'Price per 100', 'Call Price', 'Put Price']
-  const interestFields = ['Accrued Interest', 'Interest Accrued', 'Coupon', 'Coupon Amount', 'Coupon Payment', 'Annual Coupon', 'Interest Earned', 'Interest Income', 'Discount Amount']
-  const durationFields = ['Macaulay Duration', 'Modified Duration', 'Convexity', 'DV01']
-  const returnFields = ['Capital Gain Loss', 'Total Return', 'Profit Return', 'Market Value', 'Present Value', 'Carrying Value', 'Book Value', 'Fair Value', 'Maturity Value', 'Current Value', 'Purchase Cost']
-
-  function isSemanticMatch(detectedKey, targetField, semanticType) {
-    const detectedLower = String(detectedKey).toLowerCase().replace(/[\s_\-()]+/g, '')
-    const targetLower = String(targetField).toLowerCase().replace(/[\s_\-()]+/g, '')
-    
-    if (detectedLower === targetLower) return true
-    if (detectedLower.includes(targetLower) || targetLower.includes(detectedLower)) return true
-    
-    const semanticFields = {
-      'name': nameStyleFields,
-      'faceValue': faceValueFields,
-      'rate': rateFields,
-      'date': dateFields,
-      'frequency': frequencyFields,
-      'term': termFields,
-      'currency': currencyFields,
-      'status': statusFields,
-      'price': priceFields,
-      'interest': interestFields,
-      'duration': durationFields,
-      'return': returnFields
-    }
-    
-    const fields = semanticFields[semanticType] || []
-    const detectedInList = fields.some(f => f.toLowerCase().replace(/[\s_\-()]+/g, '') === detectedLower)
-    const targetInList = fields.some(f => f.toLowerCase().replace(/[\s_\-()]+/g, '') === targetLower)
-    
-    return detectedInList && targetInList
+  const normalized = {}
+  for (const [k, v] of Object.entries(fields)) {
+    normalized[normalizeKeyForMatch(k)] = v
   }
 
-  const targetSemantics = {}
-  for (const targetCol of targetColumns) {
-    const targetLower = targetCol.toLowerCase().replace(/[\s_\-()]+/g, '')
-    
-    if (nameStyleFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'name'
-    } else if (faceValueFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'faceValue'
-    } else if (rateFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'rate'
-    } else if (dateFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'date'
-    } else if (frequencyFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'frequency'
-    } else if (termFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'term'
-    } else if (currencyFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'currency'
-    } else if (statusFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'status'
-    } else if (priceFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'price'
-    } else if (interestFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'interest'
-    } else if (durationFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'duration'
-    } else if (returnFields.some(f => {
-      const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-      return targetLower.includes(fLower) || fLower.includes(targetLower)
-    })) {
-      targetSemantics[targetCol] = 'return'
-    }
+  const startDate = normalized['valuationdate'] || normalized['settlementdate'] || normalized['issuedate']
+  const maturityDate = normalized['maturitydate']
+
+  if (!startDate || !maturityDate) return
+
+  const start = new Date(startDate)
+  const maturity = new Date(maturityDate)
+  if (isNaN(start.getTime()) || isNaN(maturity.getTime())) return
+
+  const days = Math.ceil((maturity.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+  if (days <= 0) return
+
+  const daysKey = (requiredColumns.value || []).find(c => {
+    const n = normalizeKeyForMatch(c)
+    return n === 'daystomaturity' || n === 'termdays'
+  }) || 'days_to_maturity'
+
+  fields[daysKey] = days
+  metadata[daysKey] = {
+    value: days,
+    location: `auto-calculated: ${startDate} → ${maturityDate}`,
+    source: 'auto-calculation',
+    confidence: 1.0
   }
-
-  console.log('Target semantics:', targetSemantics)
-
-  const found = {}
-
-  try {
-    const wb = XLSX.read(originalFileBuffer.value, {
-      type: 'array',
-      cellDates: true,
-      cellNF: false,
-      cellText: true
-    })
-    const sheet = wb.Sheets[currentSheetName.value]
-    if (!sheet) return {}
-
-    const aoa = XLSX.utils.sheet_to_json(sheet, {
-      header: 1,
-      raw: false,
-      defval: '',
-      blankrows: false
-    })
-
-    console.log(`Secondary scan scanning all ${aoa.length} rows`)
-
-    const foundFields = new Set()
-    const maxRows = Math.min(aoa.length, 10000)
-
-    for (let r = 0; r < maxRows; r++) {
-      if (foundFields.size === missingFields.length) {
-        console.log(`Secondary scan found all ${missingFields.length} fields, stopping at row ${r}`)
-        break
-      }
-      
-      const row = aoa[r]
-      if (!row) continue
-      for (let c = 0; c < row.length; c++) {
-        const cell = row[c]
-        if (cell === null || cell === undefined || cell === '') continue
-
-        const cellLower = String(cell).toLowerCase().replace(/[\s_\-()]+/g, '')
-
-        let cellSemantic = null
-        
-        if (nameStyleFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'name'
-        } else if (faceValueFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'faceValue'
-        } else if (rateFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'rate'
-        } else if (dateFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'date'
-        } else if (frequencyFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'frequency'
-        } else if (termFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'term'
-        } else if (currencyFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'currency'
-        } else if (statusFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'status'
-        } else if (priceFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'price'
-        } else if (interestFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'interest'
-        } else if (durationFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'duration'
-        } else if (returnFields.some(f => {
-          const fLower = f.toLowerCase().replace(/[\s_\-()]+/g, '')
-          return cellLower.includes(fLower) || fLower.includes(cellLower)
-        })) {
-          cellSemantic = 'return'
-        }
-
-        if (!cellSemantic) continue
-
-        for (const missingField of missingFields) {
-          if (found[missingField] !== undefined) continue
-          if (!targetSemantics[missingField]) continue
-          if (targetSemantics[missingField] !== cellSemantic) continue
-
-          if (!isSemanticMatch(cell, missingField, cellSemantic)) continue
-
-          let value = null
-          for (let cc = c + 1; cc < Math.min(c + 7, row.length); cc++) {
-            const next = row[cc]
-            if (next !== null && next !== undefined && next !== '') {
-              value = next
-              break
-            }
-          }
-          if (value === null && r + 1 < aoa.length) {
-            const below = aoa[r + 1] ? aoa[r + 1][c] : ''
-            if (below !== null && below !== undefined && below !== '') {
-              value = below
-            }
-          }
-
-          if (value !== null && isPlausibleValue(missingField, value)) {
-            found[missingField] = value
-            foundFields.add(missingField)
-            console.log(`[secondary scan] recovered "${missingField}": "${value}" at row ${r}, col ${c}`)
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.error('scanSheetForMissingFields failed:', e)
-  }
-
-  console.log('Secondary scan found:', found)
-  return found
 }
 
 const instrumentType = ref('')
@@ -2352,10 +1959,10 @@ const fixedValuesTracker = ref(new Map())
 const calculations = ref({})
 const allCalculations = ref({})
 const selectedCalculations = ref({})
-const cleaningStats = ref({ 
-  totalRows: 0, 
-  validRows: 0, 
-  removedRows: 0, 
+const cleaningStats = ref({
+  totalRows: 0,
+  validRows: 0,
+  removedRows: 0,
   fixedMissing: 0,
   removedEmptyRows: 0,
   removedSpecificColumnEmpty: 0,
@@ -2393,6 +2000,14 @@ const sessionSavedAt = ref(null)
 const showPreview = ref(false)
 const worksheetSelected = ref(false)
 const forceUpdate = ref(0)
+
+const isSaving = ref(false)
+const skipAutoSave = ref(false)
+let isSavingVersion = false
+let lastInstrument = ''
+let lastSessionId = ''
+let lastSaveTime = 0
+const SAVE_DEBOUNCE_MS = 2000
 
 const snackbar = ref({
   show: false,
@@ -2506,10 +2121,6 @@ const formulas = ref({})
 const manualInputs = ref({})
 
 let saveTimeout = null
-let lastInstrument = ''
-let lastSessionId = ''
-let lastSaveTime = 0
-const SAVE_DEBOUNCE_MS = 2000
 
 const selectedSummaryWorksheet = ref('')
 const availableSummaryWorksheets = computed(() => [])
@@ -2552,7 +2163,7 @@ const descriptiveAnalytics = computed(() => {
 
     for (const [k, v] of Object.entries(stats)) {
       if (typeof v === 'number') {
-        const isTimeField = k.toLowerCase().includes('day') || k.toLowerCase().includes('maturity') || k.toLowerCase().includes('duration') || k.toLowerCase().includes('term') || k.toLowerCase().includes('month') || k.toLowerCase().includes('year') || k.toLowerCase().includes('week') || k.toLowerCase().includes('time')
+        const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(k.toLowerCase())
         if (isTimeField) {
           stats[k] = Math.round(v).toLocaleString()
         } else {
@@ -2562,8 +2173,6 @@ const descriptiveAnalytics = computed(() => {
     }
     return stats
   }
-
-  console.warn('⚠️ No backend aggregate data available, using frontend fallback for descriptiveAnalytics')
 
   const getValue = (row) => parseFloat(row['Total Value'] ?? row['total_value'] ?? row['Calculated Value'] ?? row['calculated_value'] ?? row['Value'] ?? row['value'] ?? 0)
   const getYield = (row) => parseFloat(row['Yield'] ?? row['yield'] ?? row['Rate'] ?? row['rate'] ?? row['Interest Rate'] ?? row['interest_rate'] ?? row['Coupon Rate'] ?? row['coupon_rate'] ?? row['Discount Rate'] ?? row['discount_rate'] ?? 0)
@@ -2591,7 +2200,7 @@ const descriptiveAnalytics = computed(() => {
   }
   for (const [k, v] of Object.entries(stats)) {
     if (typeof v === 'number') {
-      const isTimeField = k.toLowerCase().includes('day') || k.toLowerCase().includes('maturity') || k.toLowerCase().includes('duration') || k.toLowerCase().includes('term') || k.toLowerCase().includes('month') || k.toLowerCase().includes('year') || k.toLowerCase().includes('week') || k.toLowerCase().includes('time')
+      const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(k.toLowerCase())
       if (isTimeField) {
         stats[k] = Math.round(v).toLocaleString()
       } else {
@@ -2767,7 +2376,7 @@ const instrumentSearchQuery = ref('')
 
 const sortedInstrumentSummaryRows = computed(() => {
   let rows = []
-  
+
   if (excelPopupMode.value === 'current') {
     rows = instrumentSummary.value.rows.map(row => ({
       ...row,
@@ -2787,24 +2396,24 @@ const sortedInstrumentSummaryRows = computed(() => {
       ...row,
       'Valuation Type': 'Current'
     }))
-    
+
     const previousRows = (completedInstrumentSummary.value.rows || []).map(row => ({
       ...row,
       'Valuation Type': 'Previous'
     }))
-    
+
     rows = [...currentRows, ...previousRows]
   }
-  
+
   if (instrumentSearchQuery.value) {
     const query = instrumentSearchQuery.value.toLowerCase()
     rows = rows.filter(row => {
-      return Object.values(row).some(val => 
+      return Object.values(row).some(val =>
         String(val).toLowerCase().includes(query)
       )
     })
   }
-  
+
   if (!sortColumn.value) return rows
   return [...rows].sort((a, b) => {
     let valA = a[sortColumn.value]
@@ -2840,19 +2449,19 @@ const calculationFields = computed(() => {
   const fields = config.value.calculationFields || []
   const allCalc = allCalculations.value || {}
   const selectedCalc = selectedCalculations.value || {}
-  
+
   return fields.map(field => {
     let value = selectedCalc[field.key] !== undefined ? selectedCalc[field.key] :
                 allCalc[field.key] !== undefined ? allCalc[field.key] :
                 selectedCalc[toSnakeCase(field.key)] !== undefined ? selectedCalc[toSnakeCase(field.key)] :
                 allCalc[toSnakeCase(field.key)] !== undefined ? allCalc[toSnakeCase(field.key)] : null
-    
+
     if (value === null || value === undefined) {
       const agg = allCalc.agg || selectedCalc.agg || {}
       value = agg[field.key] !== undefined ? agg[field.key] :
               agg[toSnakeCase(field.key)] !== undefined ? agg[toSnakeCase(field.key)] : null
     }
-    
+
     return {
       ...field,
       value
@@ -2863,7 +2472,10 @@ const calculationFields = computed(() => {
 function toSnakeCase(str) {
   if (!str || typeof str !== 'string') return str
   try {
-    return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)
+    return str
+      .replace(/([a-z])([A-Z])/g, '$1_$2')
+      .replace(/[\s\-]+/g, '_')
+      .toLowerCase()
   } catch (e) {
     return str
   }
@@ -2904,9 +2516,9 @@ function formatCalcValue(key, value) {
   if (value === null || value === undefined) return '—'
   const field = config.value.calculationFields.find(f => f.key === key)
   if (!field) return value
-  
+
   if (typeof value === 'number' && !isNaN(value)) {
-    const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term') || key.toLowerCase().includes('month') || key.toLowerCase().includes('year') || key.toLowerCase().includes('week') || key.toLowerCase().includes('time')
+    const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(key.toLowerCase())
     if (isTimeField) {
       const rounded = Math.round(value)
       if (field.prefix) return field.prefix + rounded.toLocaleString()
@@ -2918,7 +2530,7 @@ function formatCalcValue(key, value) {
     if (field.suffix) return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + field.suffix
     return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
-  
+
   if (field.prefix) return field.prefix + value
   if (field.suffix) return value + field.suffix
   return value
@@ -2944,16 +2556,14 @@ function switchTab(tab) {
 
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToCalculations() { activeTab.value = 'calculations'; forceUpdate.value++ }
-function goToPortfolioSummary() { 
-  saveSessionData(); 
+function goToPortfolioSummary() {
+  saveSessionData();
   const sessionId = activeSession.value?.id || sessionManager.getActiveSessionId() || localStorage.getItem('dura_active_session_id')
-  console.log('goToPortfolioSummary - sessionId:', sessionId)
   if (sessionId) {
     sessionManager.setActiveSession({ id: sessionId })
     localStorage.setItem('dura_active_session_id', sessionId)
     router.push({ path: '/summary', query: { session: sessionId } })
   } else {
-    console.error('No session ID available for navigation')
     router.push('/summary')
   }
 }
@@ -3157,31 +2767,18 @@ function computeAggregate(rows) {
   agg.instrumentCount = count
   agg.avgRate = avgRate
   agg.weightedAvgRate = weightedAvg
-  agg.totalInterest = null
-  agg.interestEarned = null
-  agg.annualYield = avgRate || null
-  agg.effectiveAnnualRate = null
   agg.avgDaysToMaturity = avgDays
   agg.totalPrincipal = total
 
   const couponSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate'), 0)
   agg.avgCouponRate = count > 0 ? couponSum / count : 0
   agg.weightedAvgCoupon = weightedAvg
-  agg.totalAnnualIncome = null
   agg.avgYTM = avgRate || null
-  agg.duration = null
 
   const discountSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate'), 0)
   agg.avgDiscountRate = count > 0 ? discountSum / count : 0
   agg.weightedAvgDiscount = weightedAvg
-  agg.totalDiscount = null
-  agg.effectiveYield = null
-  agg.bondEquivalentYield = null
-  agg.totalPurchasePrice = null
   agg.avgInvestment = count > 0 ? total / count : null
-  agg.holdingPeriodYield = null
-  agg.annualizedYield = null
-  agg.pricePer100 = null
 
   return agg
 }
@@ -3297,8 +2894,6 @@ function processInstrumentData(sheetName, data, instrumentType) {
   mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
   instrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
 
-  console.warn('processInstrumentData uses deprecated frontend calculations. Use backend calculateMetrics instead.')
-
   const agg = computeAggregate(mergedRows)
   const uniqueNames = new Set(mergedRows.map(r => r['Instrument Name']))
   agg.instrumentCount = uniqueNames.size
@@ -3342,7 +2937,7 @@ async function loadHistoryFile(item) {
     alert('This file cannot be loaded because the file data is missing. Please upload the file again.')
     return
   }
-  
+
   if (confirm(`Load ${item.name}? Current unsaved data will be lost.`)) {
     const base64String = item.fileData.split(',')[1]
     const binaryString = atob(base64String)
@@ -3362,18 +2957,16 @@ async function loadHistoryFile(item) {
         worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
         originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
         showSnackbar(`Loaded ${item.name} from history`, 'success')
-        
+
         clearActiveCache(true)
-        
+
         showWorkbookViewer.value = true
         activeTab.value = 'upload'
         forceUpdate.value++
       } else {
-        console.error('Workbook parse failed:', result.error)
         showSnackbar('Failed to parse workbook', 'error')
       }
     } catch (err) {
-      console.error('Failed to parse workbook from history:', err)
       showSnackbar('Failed to load file', 'error')
     }
 
@@ -3389,18 +2982,10 @@ function deleteHistoryItem(idx) {
 function handleFileUpload(e) {
   const file = e.target.files[0]
   if (file) {
-    console.log('File details:', {
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      lastModified: file.lastModified
-    })
     const fileCopy = new File([file], file.name, { type: file.type })
     uploadedFile.value = fileCopy
     worksheetStatuses.value = {}
     readFileData(fileCopy)
-  } else {
-    console.warn('No file selected')
   }
 }
 
@@ -3438,9 +3023,9 @@ async function readFileData(file) {
       worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
       originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
       worksheetStatuses.value = {}
-      
+
       clearActiveCache(false)
-      
+
       worksheetSelected.value = false
       currentSheetName.value = ''
       showPreview.value = false
@@ -3453,8 +3038,6 @@ async function readFileData(file) {
       throw new Error(result.error || 'Failed to upload workbook')
     }
   } catch (err) {
-    console.error('Upload error:', err)
-    console.error('Error stack:', err.stack)
     uploadError.value = err.message
     showSnackbar(`Failed to parse file: ${err.message}`, 'error')
     rawData.value = []
@@ -3491,15 +3074,13 @@ function removeFile() {
 }
 
 function handleWorksheetSelect(sheetName) {
-  console.log(`🔄 handleWorksheetSelect: Selecting worksheet "${sheetName}"`)
-  
   const result = worksheetWorkflow.selectWorksheet(sheetName)
   if (result.success) {
     currentSheetName.value = sheetName
     worksheetSelected.value = true
-    
+
     clearActiveCache(true)
-    
+
     const sheet = workbookSheets.value.find(s => s.name === sheetName)
     if (sheet) {
       const previewResult = worksheetWorkflow.parseSheetPreview(sheetName, 100)
@@ -3511,7 +3092,7 @@ function handleWorksheetSelect(sheetName) {
         sheetTotalRows.value = previewResult.totalRows || 0
       }
       sheetType.value = 'multi'
-      
+
       if (rawData.value.length > 0) {
         const detection = detectSheetType(rawData.value, instrumentType.value)
         sheetType.value = detection.type
@@ -3523,7 +3104,7 @@ function handleWorksheetSelect(sheetName) {
           mappingApplied.value = true
         }
       }
-      
+
       showPreview.value = true
       activeTab.value = 'upload'
       forceUpdate.value++
@@ -3532,19 +3113,15 @@ function handleWorksheetSelect(sheetName) {
 }
 
 function clearActiveCache(preservePreviousValuations = true) {
-  console.log('🔄 Clearing active cache for worksheet/section change, preservePreviousValuations:', preservePreviousValuations)
-  
   if (preservePreviousValuations) {
     if (instrumentSummary.value.rows.length > 0) {
       completedInstrumentSummary.value = JSON.parse(JSON.stringify(instrumentSummary.value))
-      console.log('💾 Saved current instrument summary as completed (previous valuations)')
     }
     if (portfolioSummary.value.rows.length > 0) {
       completedPortfolioSummary.value = JSON.parse(JSON.stringify(portfolioSummary.value))
-      console.log('💾 Saved current portfolio summary as completed (previous valuations)')
     }
   }
-  
+
   if (!isUsingDetectedFields.value) {
     cleanedData.value = []
     calculations.value = {}
@@ -3563,19 +3140,19 @@ function clearActiveCache(preservePreviousValuations = true) {
     selectedCalculations.value = {}
     columnMapping.value = {}
   }
-  
+
   instrumentSummary.value = { columns: [], rows: [] }
   portfolioSummary.value = { columns: [], rows: [] }
-  
+
   if (!preservePreviousValuations) {
     completedInstrumentSummary.value = { columns: [], rows: [] }
     completedPortfolioSummary.value = { columns: [], rows: [] }
   }
-  
+
   fieldDetectionResults.value = { detected_fields: {}, summary: {} }
   showMultiTableDetectionSuccess.value = false
   multiTableDetectionResults.value = []
-  
+
   rawData.value = []
   originalRawData.value = []
   previewData.value = []
@@ -3584,11 +3161,11 @@ function clearActiveCache(preservePreviousValuations = true) {
   extractedValues.value = {}
   singleInstrumentExtractedValues.value = {}
   isolatedTableData.value = null
-  
+
   mappingApplied.value = false
   showMappingDialog.value = false
   fixedValuesTracker.value.clear()
-  
+
   cleaningStats.value = {
     totalRows: 0,
     cleanedRows: 0,
@@ -3596,17 +3173,12 @@ function clearActiveCache(preservePreviousValuations = true) {
     duplicateRows: 0,
     missingValueRows: 0
   }
-  
+
   formulas.value = {}
   manualInputs.value = {}
-  
-  console.log('✅ Active cache cleared - workbook data preserved for viewer')
 }
 
 function handleSheetSelectedFromViewer(sheetName) {
-  console.log(`🔄 handleSheetSelectedFromViewer: Switching to worksheet "${sheetName}"`)
-  console.log('🔄 Current activeTab:', activeTab.value)
-  console.log('🔄 isUsingDetectedFields:', isUsingDetectedFields.value)
   currentSheetName.value = sheetName
 }
 
@@ -3616,12 +3188,10 @@ function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
 }
 
 function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }) {
-  console.log(`🔄 handleTableIsolated: Switching to section "${tableName}" in worksheet "${sheetName}"`)
-  
   currentSheetName.value = sheetName
-  
+
   clearActiveCache(true)
-  
+
   isolatedTableData.value = {
     sheetName,
     tableName,
@@ -3629,7 +3199,7 @@ function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }
     headers,
     tableRange
   }
-  
+
   showWorkbookViewer.value = false
   rawData.value = data
   originalRawData.value = JSON.parse(JSON.stringify(data))
@@ -3656,9 +3226,7 @@ async function handleAutoDetectSheet(sheetName) {
 async function handleWorkOnSheet(sheetName) {
   fileLoading.value = true
   uploadError.value = ''
-  
-  console.log(`🔄 handleWorkOnSheet: Switching to worksheet "${sheetName}"`)
-  
+
   clearActiveCache(true)
 
   try {
@@ -3728,7 +3296,6 @@ async function handleWorkOnSheet(sheetName) {
       uploadError.value = result.error || 'Failed to process worksheet'
     }
   } catch (err) {
-    console.error('Worksheet processing error:', err)
     uploadError.value = err.message
   } finally {
     fileLoading.value = false
@@ -3744,7 +3311,6 @@ function handleViewResults(sheetName) {
 
 function applyCurrentMapping() {
   if (!originalRawData.value.length) {
-    console.warn('applyCurrentMapping: originalRawData is empty')
     return
   }
   if (sheetType.value === 'single') {
@@ -3790,12 +3356,10 @@ function updateColumnMapping(newMapping) {
 async function saveFinalMapping() {
   if (currentMappingTemplateId.value) {
     try {
-      console.log('Updating existing template from preview:', currentMappingTemplateId.value)
       const result = await mappingTemplateManager.updateTemplate(currentMappingTemplateId.value, {
         columnMapping: columnMapping.value,
         fileColumns: fileColumns.value
       })
-      console.log('Update result:', result)
       if (result) {
         await loadSavedTemplates()
         showSnackbar('Mapping saved successfully', 'success')
@@ -3803,13 +3367,11 @@ async function saveFinalMapping() {
         showSnackbar('Failed to update mapping: No response from server', 'error')
       }
     } catch (e) {
-      console.error('Error updating template:', e)
       showSnackbar('Failed to update mapping: ' + (e.message || e), 'error')
     }
   } else {
     const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'} - ${new Date().toLocaleDateString()}`
     try {
-      console.log('Creating new template from preview:', templateName)
       const result = await mappingTemplateManager.saveTemplate(
         templateName,
         instrumentType.value,
@@ -3825,7 +3387,6 @@ async function saveFinalMapping() {
         showSnackbar('Failed to save mapping: No response from server', 'error')
       }
     } catch (e) {
-      console.error('Error saving template:', e)
       showSnackbar('Failed to save mapping: ' + (e.message || e), 'error')
     }
   }
@@ -3856,7 +3417,7 @@ function refreshFileColumns() {
 
 function getCellValue(cell) {
   if (cell == null) return ""
-  
+
   if (typeof cell === 'object' && cell !== null) {
     if (cell.w !== undefined && cell.w !== null) return cell.w
     if (cell.v !== undefined && cell.v !== null) return cell.v
@@ -3868,7 +3429,7 @@ function getCellValue(cell) {
       return String(cell)
     }
   }
-  
+
   return cell
 }
 
@@ -3918,7 +3479,7 @@ async function applyColumnMappingAndClose() {
         fileColumns: fileColumns.value
       })
     } catch (e) {
-      console.error('Error updating template on apply:', e)
+      // non-fatal
     }
   }
 
@@ -3935,15 +3496,6 @@ function resetMapping() {
 }
 
 async function openWorkbookViewer() {
-  console.log('=== openWorkbookViewer called ===')
-  console.log('uploadedFile.value:', uploadedFile.value)
-  console.log('originalFileBuffer.value:', originalFileBuffer.value)
-  console.log('workbookSheets.value:', workbookSheets.value)
-  console.log('workbookSheets.value.length:', workbookSheets.value?.length)
-  console.log('worksheetWorkflow.workbookSheets.value:', worksheetWorkflow.workbookSheets.value)
-  console.log('worksheetWorkflow.workbookSheets.value.length:', worksheetWorkflow.workbookSheets.value?.length)
-  console.log('currentSheetName.value:', currentSheetName.value)
-
   if (!originalFileBuffer.value) {
     alert('File buffer not available. Please upload a file first.')
     return
@@ -3955,38 +3507,28 @@ async function openWorkbookViewer() {
 
   if (worksheetWorkflow.workbookSheets.value?.length > 0) {
     workbookSheets.value = [...worksheetWorkflow.workbookSheets.value]
-    console.log('Using pre-parsed sheets from workflow:', workbookSheets.value.length)
   } else {
     workbookSheets.value = []
-    console.log('No pre-parsed sheets available, will parse from buffer')
   }
 
   if (activeSession.value?.id) {
     loadWorksheetStatuses()
   }
 
-  console.log('Setting showWorkbookViewer.value = true')
-
   try {
     showWorkbookViewer.value = true
-    console.log('showWorkbookViewer.value after set:', showWorkbookViewer.value)
-
     await nextTick()
-    console.log('After nextTick, showWorkbookViewer.value:', showWorkbookViewer.value)
   } catch (error) {
-    console.error('Error opening workbook viewer:', error)
     alert('Failed to open workbook viewer: ' + error.message)
   }
 }
-
-
 
 function workOnSelectedSheet() {
   if (!currentSheetName.value) {
     alert('Please select a sheet first')
     return
   }
-  
+
   if (!originalFileBuffer.value) {
     alert('File buffer not available')
     return
@@ -4002,7 +3544,6 @@ async function autoDetectSingleInstrument() {
   }
 
   if (isDetecting.value) {
-    console.log('Detection already in progress, ignoring duplicate request')
     return
   }
   isDetecting.value = true
@@ -4016,17 +3557,13 @@ async function autoDetectSingleInstrument() {
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
 
-  console.log(`🔍 Starting auto-detection on sheet: "${currentSheetName.value}"`)
-
   try {
     if (!requiredColumns.value || requiredColumns.value.length === 0) {
-      console.log('⚠️ Required columns not loaded, loading config...')
       await loadConfig()
-      console.log('✅ Config loaded, required columns:', requiredColumns.value)
     }
 
     detectionStatus.value = 'analyzing'
-    
+
     let currencyFilter = null
     if (selectedCurrency.value) {
       if (selectedCurrency.value === 'custom') {
@@ -4035,11 +3572,6 @@ async function autoDetectSingleInstrument() {
         currencyFilter = selectedCurrency.value.toUpperCase()
       }
     }
-
-    console.log(`🔍 Starting auto-detection on sheet: "${currentSheetName.value}"`)
-    console.log('Currency filter:', currencyFilter)
-    console.log('Required columns:', requiredColumns.value)
-    console.log('Instrument type:', instrumentType.value)
 
     detectionStatus.value = 'detecting'
 
@@ -4055,91 +3587,56 @@ async function autoDetectSingleInstrument() {
         detectionStatus.value = status
       }
     )
-    
-    const timeoutPromise = new Promise((_, reject) => 
+
+    const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('Detection timeout - scan took too long')), 30000)
     )
-    
+
     const detectionResult = await Promise.race([detectionPromise, timeoutPromise])
 
-    console.log('=== Detection Result ===')
-    console.log('Raw detected fields:', detectionResult?.fields)
-    console.log('Detected currencies:', detectionResult?.currencies)
-    console.log('Missing fields:', detectionResult?.missingFields)
-    console.log('Additional fields:', Object.keys(detectionResult?.additionalFields || {}))
-
     detectionStatus.value = 'validating'
-    
-    console.log('=== Normalizing Detected Fields ===')
+
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
       detectionResult?.fieldsWithMetadata,
       instrumentType.value,
       requiredColumns.value
     )
-    console.log('Normalized fields:', normalized.fields)
-    console.log('Normalized fields with metadata:', normalized.fieldsWithMetadata)
 
     detectionStatus.value = 'complete'
 
-    const mergedFields = { ...normalized.fields }
-    const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
-    for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
-      if (!(key in mergedFields)) {
-        mergedFields[key] = value
-        mergedFieldsWithMetadata[key] = value
-      }
+    const deriveUnion = {
+      ...normalized.fields,
+      ...(detectionResult?.additionalFields || {}),
     }
-
-    console.log('=== Merged Detection Results ===')
-    console.log('Primary fields:', Object.keys(normalized.fields).length)
-    console.log('Additional fields:', Object.keys(detectionResult?.additionalFields || {}).length)
-    console.log('Total merged fields:', Object.keys(mergedFields).length)
-
-    // Auto-calculate days_to_maturity if missing but dates are present
-    if (!mergedFields.days_to_maturity && !mergedFields.term_days && !mergedFields.daysToMaturity) {
-      const issueDate = mergedFields.issue_date || mergedFields.valuation_date || mergedFields.settlement_date
-      const maturityDate = mergedFields.maturity_date
-      
-      if (issueDate && maturityDate) {
-        try {
-          const issue = new Date(issueDate)
-          const maturity = new Date(maturityDate)
-          
-          if (!isNaN(issue.getTime()) && !isNaN(maturity.getTime())) {
-            const daysDiff = Math.ceil((maturity - issue) / (1000 * 60 * 60 * 24))
-            
-            if (daysDiff > 0) {
-              mergedFields.days_to_maturity = daysDiff
-              mergedFieldsWithMetadata.days_to_maturity = {
-                value: daysDiff,
-                location: 'auto-calculated from dates',
-                source: 'auto-calculation',
-                confidence: 1.0
-              }
-              console.log(`✅ Auto-calculated days_to_maturity: ${daysDiff} days (from ${issueDate} to ${maturityDate})`)
-            }
-          }
-        } catch (e) {
-          console.log('Could not auto-calculate days_to_maturity from dates:', e.message)
+    const deriveUnionMeta = { ...normalized.fieldsWithMetadata }
+    for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
+      if (!(key in deriveUnionMeta)) {
+        deriveUnionMeta[key] = {
+          ...(value && typeof value === 'object' ? value : {}),
+          originalLabel: key,
         }
       }
     }
+    deriveDaysToMaturity(deriveUnion, deriveUnionMeta)
 
-    autoDetectedFields.value = mergedFields
-    autoDetectedFieldsWithMetadata.value = mergedFieldsWithMetadata
+    const primaryAfterDerive = { ...normalized.fields }
+    const metaAfterDerive = { ...normalized.fieldsWithMetadata }
+    for (const [key, value] of Object.entries(deriveUnion)) {
+      if (!(key in primaryAfterDerive) && deriveUnionMeta[key]?.source === 'auto-calculation') {
+        primaryAfterDerive[key] = value
+        metaAfterDerive[key] = deriveUnionMeta[key]
+      }
+    }
+
+    autoDetectedFields.value = primaryAfterDerive
+    autoDetectedFieldsWithMetadata.value = metaAfterDerive
     autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
     detectedCurrencies.value = detectionResult?.currencies || []
     detectedInstrumentType.value = instrumentType.value
 
     await nextTick()
 
-    console.log('=== Setting State for Popup ===')
-    console.log('autoDetectedFields:', autoDetectedFields.value)
-    console.log('autoDetectedFieldsWithMetadata:', autoDetectedFieldsWithMetadata.value)
-    console.log('autoDetectedAdditionalFields:', autoDetectedAdditionalFields.value)
-    console.log('detectedCurrencies:', detectedCurrencies.value)
-    
     if (!selectedCurrency.value) {
       if (detectedCurrencies.value.length === 1) {
         selectedCurrency.value = detectedCurrencies.value[0]
@@ -4147,12 +3644,10 @@ async function autoDetectSingleInstrument() {
         selectedCurrency.value = ''
       }
     }
-    
+
     showDetectionSuccess.value = true
   } catch (error) {
-    console.error('Auto Detect error:', error)
     if (Object.keys(autoDetectedFields.value).length > 0) {
-      console.log('Showing partial detection results despite error')
       showDetectionSuccess.value = true
     } else {
       alert('Auto Detect failed: ' + error.message)
@@ -4163,10 +3658,14 @@ async function autoDetectSingleInstrument() {
 }
 
 async function handleMultiTableDetect(event) {
-  if (isDetecting.value) {
+  if (!event?.tables?.length) return
+  if (!originalFileBuffer.value) {
+    alert('File buffer not available — please re-upload the workbook.')
     return
   }
+
   isDetecting.value = true
+  detectionStatus.value = 'scanning'
 
   autoDetectedFields.value = {}
   autoDetectedFieldsWithMetadata.value = {}
@@ -4176,10 +3675,12 @@ async function handleMultiTableDetect(event) {
   selectedCurrency.value = ''
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
+  showMultiTableDetectionSuccess.value = false
+  multiTableDetectionResults.value = []
 
   try {
     const detectedInstruments = []
-    
+
     let currencyFilter = null
     if (selectedCurrency.value) {
       if (selectedCurrency.value === 'custom') {
@@ -4188,17 +3689,26 @@ async function handleMultiTableDetect(event) {
         currencyFilter = selectedCurrency.value.toUpperCase()
       }
     }
-    
+
+    const totalTables = event.tables.length
+    let processedTables = 0
+
     for (const table of event.tables) {
-      console.log(`Processing table: ${table.tableName}`)
-      console.log(`Table range: Row ${table.range.startRow + 1} - ${table.range.endRow + 1}, Col ${table.range.startCol} - ${table.range.endCol}`)
-      console.log(`Table data length:`, table.data?.length)
-      console.log(`Table data sample:`, table.data?.slice(0, 3))
-      
+      processedTables++
+      detectionStatus.value = `analyzing (table ${processedTables} of ${totalTables})`
+
       try {
         const tableData = table.data
-        
-        const detectionResult = await autoDetectInstrumentFields(
+
+        const TABLE_TIMEOUT_MS = 20000
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Table "${table.tableName}" detection timed out after ${TABLE_TIMEOUT_MS / 1000}s`)),
+            TABLE_TIMEOUT_MS
+          )
+        )
+
+        const detectionPromise = autoDetectInstrumentFields(
           originalFileBuffer.value,
           event.sheetName,
           requiredColumns.value,
@@ -4211,7 +3721,7 @@ async function handleMultiTableDetect(event) {
           }
         )
 
-        console.log(`Detection result for ${table.tableName}:`, detectionResult)
+        const detectionResult = await Promise.race([detectionPromise, timeoutPromise])
 
         const normalized = normalizeDetectedFields(
           detectionResult?.fields,
@@ -4222,14 +3732,27 @@ async function handleMultiTableDetect(event) {
 
         const mergedFields = { ...normalized.fields }
         const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
+
+        const deriveUnion = {
+          ...mergedFields,
+          ...(detectionResult?.additionalFields || {}),
+        }
+        const deriveUnionMeta = { ...mergedFieldsWithMetadata }
         for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
-          if (!(key in mergedFields)) {
-            mergedFields[key] = value
-            mergedFieldsWithMetadata[key] = value
+          if (!(key in deriveUnionMeta)) {
+            deriveUnionMeta[key] = {
+              ...(value && typeof value === 'object' ? value : {}),
+              originalLabel: key,
+            }
           }
         }
-
-        console.log(`Merged fields for ${table.tableName}:`, Object.keys(mergedFields).length)
+        deriveDaysToMaturity(deriveUnion, deriveUnionMeta)
+        for (const [key, value] of Object.entries(deriveUnion)) {
+          if (!(key in mergedFields) && deriveUnionMeta[key]?.source === 'auto-calculation') {
+            mergedFields[key] = value
+            mergedFieldsWithMetadata[key] = deriveUnionMeta[key]
+          }
+        }
 
         if (Object.keys(mergedFields).length > 0) {
           detectedInstruments.push({
@@ -4247,16 +3770,16 @@ async function handleMultiTableDetect(event) {
       }
     }
 
-    if (detectedInstruments.length > 0) {
-      multiTableDetectionResults.value = detectedInstruments
-      showMultiTableDetectionSuccess.value = true
-      showWorkbookViewer.value = false
-    } else {
-      showMultiTableDetectionSuccess.value = true
-      showWorkbookViewer.value = false
-    }
+    detectionStatus.value = 'complete'
+    multiTableDetectionResults.value = detectedInstruments
+    showMultiTableDetectionSuccess.value = true
+    showWorkbookViewer.value = false
+  } catch (err) {
+    console.error('Multi-table detection failed:', err)
+    alert('Multi-table detection failed: ' + (err.message || 'Unknown error'))
   } finally {
     isDetecting.value = false
+    detectionStatus.value = 'idle'
   }
 }
 
@@ -4278,30 +3801,25 @@ function useMultiTableDetectedFields() {
     combinedFields.InstrumentName = multiTableDetectionResults.value[0].instrumentName || ''
   }
 
-  console.log('=== Use Multi-Table Detected Fields ===')
-  console.log('Combined fields:', combinedFields)
-  console.log('Keys:', Object.keys(combinedFields))
-
   const tabularData = [combinedFields]
 
   rawData.value = tabularData
   originalRawData.value = JSON.parse(JSON.stringify(tabularData))
   cleanedData.value = JSON.parse(JSON.stringify(tabularData))
-  
+
   const headers = Object.keys(combinedFields)
   fileColumns.value = headers
   originalFileColumns.value = [...headers]
-  
+
   worksheetSelected.value = true
   showPreview.value = true
   sheetType.value = 'single'
   mappingApplied.value = true
-  
+
   extractedValues.value = combinedFields
   autoDetectedFields.value = combinedFields
-  
+
   activeTab.value = 'cleaning'
-  
 }
 
 function formatDetectedValue(field, value) {
@@ -4309,7 +3827,7 @@ function formatDetectedValue(field, value) {
 
   const lc = String(field).toLowerCase()
 
-  if (lc.includes('frequency') || lc.includes('coupon') && lc.includes('frequency')) {
+  if (lc.includes('frequency') || (lc.includes('coupon') && lc.includes('frequency'))) {
     return String(value)
   }
 
@@ -4324,7 +3842,12 @@ function formatDetectedValue(field, value) {
     try {
       const date = new Date(value)
       if (!isNaN(date.getTime())) {
-        return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+        return date.toLocaleDateString('en-GB', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          timeZone: 'UTC'
+        })
       }
     } catch {}
   }
@@ -4350,7 +3873,6 @@ function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
     fieldData.selectedCurrency = currency
     fieldData.value = fieldData.currencyVariants[currency]
     fieldData.currency = currency
-    console.log(`Updated ${fieldName} to use ${currency}: ${fieldData.value}`)
   }
 }
 
@@ -4358,7 +3880,7 @@ async function handleCustomCurrencyInput() {
   if (customCurrency.value) {
     customCurrency.value = customCurrency.value.toUpperCase()
   }
-  
+
   if (customCurrency.value && customCurrency.value.length === 3) {
     try {
       const detectionResult = await autoDetectInstrumentFields(
@@ -4387,21 +3909,17 @@ async function handleCustomCurrencyInput() {
         detectedCurrencies.value = detectionResult?.currencies || []
       }
     } catch (error) {
-      console.error('Error re-running detection with custom currency:', error)
+      // non-fatal
     }
   }
 }
 
 async function handleCurrencyChange() {
-  console.log('handleCurrencyChange called with selectedCurrency:', selectedCurrency.value)
-  
   if (!currentSheetName.value || !originalFileBuffer.value) {
-    console.log('Missing sheet name or file buffer')
     return
   }
 
   if (isDetecting.value) {
-    console.log('Detection already in progress')
     return
   }
   isDetecting.value = true
@@ -4415,8 +3933,6 @@ async function handleCurrencyChange() {
         currencyFilter = selectedCurrency.value.toUpperCase()
       }
     }
-    
-    console.log('Currency filter for re-detection:', currencyFilter)
 
     const detectionResult = await autoDetectInstrumentFields(
       originalFileBuffer.value,
@@ -4431,8 +3947,6 @@ async function handleCurrencyChange() {
       }
     )
 
-    console.log('Detection result after currency change:', detectionResult)
-
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
       detectionResult?.fieldsWithMetadata,
@@ -4442,41 +3956,26 @@ async function handleCurrencyChange() {
 
     const mergedFields = { ...normalized.fields }
     const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
-    for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
-      if (!(key in mergedFields)) {
-        mergedFields[key] = value
-        mergedFieldsWithMetadata[key] = value
-      }
-    }
 
     if (Object.keys(mergedFields).length > 0) {
-      // Auto-calculate days_to_maturity if missing but dates are present
-      if (!mergedFields.days_to_maturity && !mergedFields.term_days && !mergedFields.daysToMaturity) {
-        const issueDate = mergedFields.issue_date || mergedFields.valuation_date || mergedFields.settlement_date
-        const maturityDate = mergedFields.maturity_date
-        
-        if (issueDate && maturityDate) {
-          try {
-            const issue = new Date(issueDate)
-            const maturity = new Date(maturityDate)
-            
-            if (!isNaN(issue.getTime()) && !isNaN(maturity.getTime())) {
-              const daysDiff = Math.ceil((maturity - issue) / (1000 * 60 * 60 * 24))
-              
-              if (daysDiff > 0) {
-                mergedFields.days_to_maturity = daysDiff
-                mergedFieldsWithMetadata.days_to_maturity = {
-                  value: daysDiff,
-                  location: 'auto-calculated from dates',
-                  source: 'auto-calculation',
-                  confidence: 1.0
-                }
-                console.log(`✅ Auto-calculated days_to_maturity: ${daysDiff} days (from ${issueDate} to ${maturityDate})`)
-              }
-            }
-          } catch (e) {
-            console.log('Could not auto-calculate days_to_maturity from dates:', e.message)
+      const deriveUnion = {
+        ...mergedFields,
+        ...(detectionResult?.additionalFields || {}),
+      }
+      const deriveUnionMeta = { ...mergedFieldsWithMetadata }
+      for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
+        if (!(key in deriveUnionMeta)) {
+          deriveUnionMeta[key] = {
+            ...(value && typeof value === 'object' ? value : {}),
+            originalLabel: key,
           }
+        }
+      }
+      deriveDaysToMaturity(deriveUnion, deriveUnionMeta)
+      for (const [key, value] of Object.entries(deriveUnion)) {
+        if (!(key in mergedFields) && deriveUnionMeta[key]?.source === 'auto-calculation') {
+          mergedFields[key] = value
+          mergedFieldsWithMetadata[key] = deriveUnionMeta[key]
         }
       }
 
@@ -4485,26 +3984,17 @@ async function handleCurrencyChange() {
       autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
       detectedCurrencies.value = detectionResult?.currencies || []
       detectedInstrumentType.value = instrumentType.value
-      console.log('Updated detected fields:', autoDetectedFields.value)
-      console.log('Total fields after merge:', Object.keys(mergedFields).length)
-    } else {
-      console.log('No fields detected with currency filter')
     }
-    
+
     showDetectionSuccess.value = true
   } catch (error) {
-    console.error('Error re-running detection with currency change:', error)
+    // non-fatal
   } finally {
     isDetecting.value = false
   }
 }
 
 async function useDetectedFields() {
-  console.log('=== useDetectedFields Called ===')
-  console.log('Input autoDetectedFields.value:', autoDetectedFields.value)
-  console.log('Input autoDetectedFieldsWithMetadata.value:', autoDetectedFieldsWithMetadata.value)
-  console.log('Input autoDetectedAdditionalFields.value:', autoDetectedAdditionalFields.value)
-
   const preservedDetectedFields = JSON.parse(JSON.stringify(autoDetectedFields.value))
   const preservedDetectedFieldsWithMetadata = JSON.parse(JSON.stringify(autoDetectedFieldsWithMetadata.value))
   const preservedDetectedAdditionalFields = JSON.parse(JSON.stringify(autoDetectedAdditionalFields.value))
@@ -4517,15 +4007,10 @@ async function useDetectedFields() {
     }
   }
 
-  console.log('Merged fields for Cleaning:', Object.keys(mergedDetectedFields).length)
-
   autoDetectedFields.value = mergedDetectedFields
   autoDetectedFieldsWithMetadata.value = preservedDetectedFieldsWithMetadata
   autoDetectedAdditionalFields.value = preservedDetectedAdditionalFields
   detectedCurrencies.value = preservedDetectedCurrencies
-
-  console.log('=== Detection fields restored BEFORE tab switch ===')
-  console.log('autoDetectedFields:', Object.keys(autoDetectedFields.value).length)
 
   isUsingDetectedFields.value = true
 
@@ -4538,7 +4023,6 @@ async function useDetectedFields() {
     if (typeof value === 'object' && value !== null) {
       if (value.currencyVariants && value.selectedCurrency && value.currencyVariants[value.selectedCurrency]) {
         values[key] = value.currencyVariants[value.selectedCurrency]
-        console.log(`Primary field ${key}: using ${value.selectedCurrency} variant = ${values[key]}`)
       } else {
         values[key] = value.value
       }
@@ -4547,21 +4031,17 @@ async function useDetectedFields() {
     }
   }
 
-  console.log('Adding additional detected fields...')
-  console.log('Additional fields count:', Object.keys(autoDetectedAdditionalFields.value).length)
   for (const [key, value] of Object.entries(autoDetectedAdditionalFields.value)) {
     if (!(key in values)) {
       if (typeof value === 'object' && value !== null) {
         if (value.currencyVariants && value.selectedCurrency && value.currencyVariants[value.selectedCurrency]) {
           values[key] = value.currencyVariants[value.selectedCurrency]
-          console.log(`Additional field ${key}: using ${value.selectedCurrency} variant = ${values[key]}`)
         } else {
           values[key] = value.value
         }
       } else {
         values[key] = value
       }
-      console.log(`Added additional field: ${key} = ${values[key]}`)
     }
   }
 
@@ -4571,62 +4051,46 @@ async function useDetectedFields() {
     values['Currency'] = customCurrency.value.toUpperCase()
   }
 
-  console.log('=== Use Detected Fields ===')
-  console.log('Values to be used:', values)
-  console.log('Keys:', Object.keys(values))
-  console.log('Number of values:', Object.keys(values).length)
-  console.log('Primary fields:', Object.keys(autoDetectedFields.value).length)
-  console.log('Additional fields:', Object.keys(autoDetectedAdditionalFields.value).length)
-  
+  if (currentSheetName.value && String(currentSheetName.value).trim()) {
+    const sheetName = String(currentSheetName.value).trim()
+    if (!values['TBillName']) values['TBillName'] = sheetName
+    if (!values['BondName']) values['BondName'] = sheetName
+    if (!values['InstrumentName']) values['InstrumentName'] = sheetName
+    if (!values['Instrument Name']) values['Instrument Name'] = sheetName
+    if (!values['instrument_name']) values['instrument_name'] = sheetName
+  }
+
+  const instType = String(instrumentType.value || '').trim()
+  if (instType) {
+    if (!values['instrument_type']) values['instrument_type'] = instType
+    if (!values['Instrument Type']) values['Instrument Type'] = instType
+  }
+
   extractedValues.value = values
-  
+
   rawData.value = [{ ...values }]
   originalRawData.value = [{ ...values }]
   cleanedData.value = [{ ...values }]
   fileColumns.value = Object.keys(values)
   originalFileColumns.value = [...fileColumns.value]
-  
-  console.log('Data state after setting:')
-  console.log('rawData.value:', JSON.stringify(rawData.value))
-  console.log('cleanedData.value:', JSON.stringify(cleanedData.value))
-  console.log('fileColumns.value:', JSON.stringify(fileColumns.value))
-  console.log('extractedValues.value:', JSON.stringify(extractedValues.value))
-  console.log('autoDetectedFields.value (should remain unchanged):', JSON.stringify(autoDetectedFields.value))
-  
-  console.log('DEBUG - extractedValues keys:', Object.keys(extractedValues.value))
-  console.log('DEBUG - cleanedData[0]:', JSON.stringify(cleanedData.value[0]))
-  console.log('DEBUG - fileColumns:', JSON.stringify(fileColumns.value))
-  
+
   worksheetSelected.value = true
   showPreview.value = true
   sheetType.value = 'single'
   mappingApplied.value = true
-  
-  console.log('Before setting activeTab to cleaning, current value:', activeTab.value)
-  
+
   showWorkbookViewer.value = false
-  
+
   await nextTick()
   activeTab.value = 'cleaning'
   await nextTick()
-  
-  console.log('After setting activeTab to cleaning, current value:', activeTab.value)
-
-  console.log('=== Tab Switched to Cleaning ===')
-  console.log('Cleaning tab will show cleanedData:', cleanedData.value)
-  console.log('Cleaning tab will show autoDetectedFields:', autoDetectedFields.value)
-  console.log('Cleaning tab will show extractedValues:', extractedValues.value)
-  console.log('Active tab set to:', activeTab.value)
 }
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
-  console.log(`🔄 handleProcessSheetFromViewer: Processing worksheet "${sheetName}"`)
-  console.log('🔄 This function sets activeTab to upload - this may be overwriting the cleaning tab')
-  
   currentSheetName.value = sheetName
-  
+
   clearActiveCache(true)
-  
+
   originalRawData.value = sheetData || []
   rawData.value = sheetData.map(row => {
     const normalized = {}
@@ -4636,7 +4100,7 @@ function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
     }
     return normalized
   })
-  
+
   fileColumns.value = sheetHeaders || []
   originalFileColumns.value = [...fileColumns.value]
   worksheetSelected.value = true
@@ -4659,20 +4123,17 @@ function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
 }
 
 function handleSheetSelected(sheetName, sheetData, sheetHeaders) {
-  console.log('Sheet selected:', sheetName)
   currentSheetName.value = sheetName
   rawData.value = sheetData
 }
 
 function handleProcessSheet(sheetName, sheetData, sheetHeaders) {
-  console.log('Processing sheet:', sheetName)
   showWorkbookViewer.value = false
   rawData.value = sheetData
   applyCurrentMapping()
 }
 
 function handleProcessSheetFromModal(payload) {
-  console.log('Processing from modal viewer:', payload.sheetName)
   worksheetStatus.value[payload.sheetName] = 'in_progress'
 
   rawData.value = payload.data
@@ -4695,7 +4156,6 @@ function handleMultiInstrumentSheet(data, headers) {
   columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
   applyCurrentMapping()
   showMappingDialog.value = true
-  console.log('Multi-instrument sheet processed, mapping dialog shown')
 }
 
 function handleSingleInstrumentSheet(data, sheetName) {
@@ -4710,7 +4170,6 @@ function handleSingleInstrumentSheet(data, sheetName) {
   mappingApplied.value = true
   applyCurrentMapping()
   activeTab.value = 'preview'
-  console.log('Single-instrument sheet processed, skipping to preview')
 }
 
 function convertExtractedToTabular(extractedValues) {
@@ -4771,6 +4230,12 @@ function addCustomField() {
     semanticMatch: fieldName
   }
 
+  autoDetectedFieldsWithMetadata.value[fieldName] = {
+    location: 'custom',
+    source: 'manual',
+    originalLabel: fieldName
+  }
+
   extractedValues.value[fieldName] = fieldValue
 
   if (cleanedData.value.length > 0) {
@@ -4785,8 +4250,6 @@ function addCustomField() {
     fileColumns.value.push(fieldName)
   }
 
-  console.log(`Added custom field: ${fieldName} = ${fieldValue}`)
-
   newFieldName.value = ''
   newFieldValue.value = ''
 
@@ -4795,7 +4258,7 @@ function addCustomField() {
 
 async function loadWorksheetStatuses() {
   if (!activeSession.value?.id) return
-  
+
   try {
     const worksheets = await sessionManager.getAllWorksheets(activeSession.value.id)
     worksheetStatuses.value = {}
@@ -4803,7 +4266,7 @@ async function loadWorksheetStatuses() {
       worksheetStatuses.value[name] = data.status || 'saved'
     }
   } catch (err) {
-    console.error('Failed to load worksheet statuses:', err)
+    // non-fatal
   }
 }
 
@@ -4811,7 +4274,6 @@ function markWorksheetAsSaved() {
   const worksheetName = currentSheetName.value
   if (worksheetName) {
     worksheetStatuses.value[worksheetName] = 'saved'
-    console.log('Marked worksheet as saved:', worksheetName)
   }
 }
 
@@ -4852,7 +4314,6 @@ function autoDetectColumns(data, instrumentType) {
   })
 
   const matchRatio = matchCount / systemColumns.length
-  console.log(`Auto-detection: ${matchCount}/${systemColumns.length} matches (${(matchRatio * 100).toFixed(1)}%)`)
 
   return { success: matchRatio > 0.4, data: data }
 }
@@ -4870,16 +4331,6 @@ function buildDynamicColumns(results) {
   })
 
   return [...allFields]
-}
-
-function editInstrumentRow(index, field, value) {
-  instrumentSummary.value.rows[index][field] = value
-  console.log(`Edited instrument row ${index}, field ${field}: ${value}`)
-}
-
-function editPortfolioRow(index, field, value) {
-  portfolioSummary.value.rows[index][field] = value
-  console.log(`Edited portfolio row ${index}, field ${field}: ${value}`)
 }
 
 function formatCellValue(value, col) {
@@ -4900,7 +4351,12 @@ function formatCellValue(value, col) {
 
   if (isDateField(value)) {
     const d = new Date(value)
-    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC'
+    })
   }
 
   return value
@@ -4942,16 +4398,16 @@ function calculateTotal(field) {
 function exportSummary() {
   const currentData = instrumentSummary.value.rows || []
   const completedData = completedInstrumentSummary.value.rows || []
-  
+
   if (!currentData.length && !completedData.length) { return }
 
   const allColumns = new Set()
   currentData.forEach(row => Object.keys(row).forEach(k => allColumns.add(k)))
   completedData.forEach(row => Object.keys(row).forEach(k => allColumns.add(k)))
   const displayCols = Array.from(allColumns)
-  
+
   const wb = XLSX.utils.book_new()
-  
+
   if (currentData.length) {
     const currentSheetData = currentData.map(row => {
       const obj = {}
@@ -4966,11 +4422,11 @@ function exportSummary() {
       })
       return obj
     })
-    
+
     const wsCurrent = XLSX.utils.json_to_sheet(currentSheetData)
     XLSX.utils.book_append_sheet(wb, wsCurrent, 'Current Selection')
   }
-  
+
   if (completedData.length) {
     const completedSheetData = completedData.map(row => {
       const obj = {}
@@ -4985,11 +4441,11 @@ function exportSummary() {
       })
       return obj
     })
-    
+
     const wsCompleted = XLSX.utils.json_to_sheet(completedSheetData)
     XLSX.utils.book_append_sheet(wb, wsCompleted, 'All Completed History')
   }
-  
+
   const summaryInfo = [
     ['Instrument Summary Export'],
     ['Export Date', new Date().toLocaleString()],
@@ -4997,15 +4453,11 @@ function exportSummary() {
     [''],
     ['Current Selection Records', currentData.length],
     ['Total Completed Records', completedData.length],
-    ['Total Columns', displayCols.length],
-    [''],
-    ['Note: "Current Selection" shows results from the current worksheet/section only.'],
-    ['"All Completed History" shows accumulated results from all processed selections.'],
-    ['All calculated fields from the Calculations page are included.']
+    ['Total Columns', displayCols.length]
   ]
   const wsInfo = XLSX.utils.aoa_to_sheet(summaryInfo)
   XLSX.utils.book_append_sheet(wb, wsInfo, 'Summary Info')
-  
+
   const suffix = activeValuationDate.value ? `_${activeValuationDate.value}` : ''
   XLSX.writeFile(wb, `instrument_summary${suffix}.xlsx`)
 }
@@ -5016,8 +4468,6 @@ function viewCurrentSummary() {
   sortColumn.value = ''
   sortOrder.value = 'asc'
   currentPage.value = 1
-  console.log('Opening Current Valuations popup')
-  console.log('Current workbook:', currentWorkbookName.value)
 }
 
 function viewPreviousSummary() {
@@ -5026,7 +4476,6 @@ function viewPreviousSummary() {
   sortColumn.value = ''
   sortOrder.value = 'asc'
   currentPage.value = 1
-  console.log('Opening Last Previous Valuation popup')
 }
 
 function viewAllSummaries() {
@@ -5035,7 +4484,6 @@ function viewAllSummaries() {
   sortColumn.value = ''
   sortOrder.value = 'asc'
   currentPage.value = 1
-  console.log('Opening All Valuations popup')
 }
 
 function viewInstrumentSummaryExcel() {
@@ -5044,8 +4492,6 @@ function viewInstrumentSummaryExcel() {
   sortColumn.value = ''
   sortOrder.value = 'asc'
   currentPage.value = 1
-  console.log('Opening Instrument Summary Excel popup')
-  console.log('Current workbook:', currentWorkbookName.value)
 }
 
 function viewPreviousSummariesExcel() {
@@ -5054,24 +4500,10 @@ function viewPreviousSummariesExcel() {
   sortColumn.value = ''
   sortOrder.value = 'asc'
   currentPage.value = 1
-  console.log('Opening Previous Summaries Excel popup')
 }
 
 function handleWorkbookLoaded(fileName) {
-  console.log('=== handleWorkbookLoaded called ===')
-  console.log('fileName:', fileName)
-  console.log('showWorkbookViewer.value:', showWorkbookViewer.value)
-  console.log('workbookSheets.value.length:', workbookSheets.value?.length)
   currentWorkbookName.value = fileName || 'Unknown'
-
-  nextTick(() => {
-    const dialog = document.querySelector('.v-dialog')
-    console.log('Dialog element in DOM:', !!dialog)
-    if (dialog) {
-      console.log('Dialog display:', window.getComputedStyle(dialog).display)
-      console.log('Dialog visibility:', window.getComputedStyle(dialog).visibility)
-    }
-  })
 }
 
 function closeInstrumentExcelPopup() {
@@ -5079,25 +4511,19 @@ function closeInstrumentExcelPopup() {
 }
 
 function continueWorkingOnCurrent() {
-  console.log('Continue on Current Sheet - returning to workbook view:', currentSheetName.value)
-  console.log('Current workbook:', currentWorkbookName.value)
-  
   clearActiveCache(true)
-  
+
   showWorkbookViewer.value = true
   activeTab.value = 'upload'
   forceUpdate.value++
 }
 
 function chooseAnotherSheet() {
-  console.log('Choose Another Sheet - returning to workbook view')
-  console.log('Current workbook:', currentWorkbookName.value)
-  
   clearActiveCache(true)
-  
+
   currentSheetName.value = ''
   worksheetSelected.value = false
-  
+
   showWorkbookViewer.value = true
   activeTab.value = 'upload'
   forceUpdate.value++
@@ -5116,12 +4542,12 @@ function formatForExcel(value, type = 'number', key = '') {
   if (value === null || value === undefined || value === '') return ''
   const num = parseFloat(value)
   if (isNaN(num)) return value
-  
+
   const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
   if (isTimeField) {
     return Math.round(num)
   }
-  
+
   if (type === 'percentage') {
     return Math.round(num * 100) / 100
   } else if (type === 'money') {
@@ -5141,11 +4567,9 @@ function exportInstrumentSummaryExcel() {
     const displayCols = getDisplayColumns()
 
     let allRows = [...rows]
-    
+
     if (activeSession.value?.id) {
       sessionManager.getAllWorksheets(activeSession.value.id).then(worksheets => {
-        console.log('Aggregating data from worksheets:', Object.keys(worksheets))
-        
         for (const [worksheetName, worksheetData] of Object.entries(worksheets)) {
           if (worksheetData.instrumentSummary && worksheetData.instrumentSummary.rows) {
             const worksheetRows = worksheetData.instrumentSummary.rows.map(row => ({
@@ -5155,9 +4579,7 @@ function exportInstrumentSummaryExcel() {
             allRows = [...allRows, ...worksheetRows]
           }
         }
-        
-        console.log('Total rows after aggregation:', allRows.length)
-        
+
         const data = allRows.map(row => {
           const obj = {}
           displayCols.forEach(col => {
@@ -5192,15 +4614,13 @@ function exportInstrumentSummaryExcel() {
         XLSX.utils.book_append_sheet(wb, ws2, 'Analytics')
 
         XLSX.writeFile(wb, `instrument_summary_${Date.now()}.xlsx`)
-      }).catch(err => {
-        console.error('Failed to aggregate worksheets:', err)
+      }).catch(() => {
         exportCurrentRowsOnly(wb, displayCols, rows)
       })
     } else {
       exportCurrentRowsOnly(wb, displayCols, rows)
     }
   } catch (e) {
-    console.error(e)
     showSnackbar('Failed to export Excel: ' + e.message, 'error')
   }
 }
@@ -5246,7 +4666,6 @@ function openWorkflowPopup(row, idx) {
   selectedWorkflowInstrument.value = row
   selectedWorkflowIndex.value = idx
   showWorkflowPopup.value = true
-  console.log('Opening workflow popup for instrument:', row['Instrument Name'] || `Instrument ${idx + 1}`)
 }
 
 function closeWorkflowPopup() {
@@ -5377,7 +4796,7 @@ function downloadCalculatedInstrumentsExcel() {
   }
 
   const workbook = XLSX.utils.book_new()
-  
+
   const allColumns = new Set()
   summaryRows.forEach(row => {
     Object.keys(row).forEach(key => allColumns.add(key))
@@ -5395,12 +4814,12 @@ function downloadCalculatedInstrumentsExcel() {
   })
 
   const worksheet = XLSX.utils.aoa_to_sheet(data)
-  
+
   const columnWidths = columns.map(col => {
     const isNumeric = col.toLowerCase().includes('value') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('rate') || col.toLowerCase().includes('yield') || col.toLowerCase().includes('price') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest') || col.toLowerCase().includes('discount') || col.toLowerCase().includes('coupon')
     const isDate = col.toLowerCase().includes('date')
     const isName = col.toLowerCase().includes('name') || col.toLowerCase().includes('instrument') || col.toLowerCase().includes('ticker') || col.toLowerCase().includes('worksheet') || col.toLowerCase().includes('workbook')
-    
+
     if (isNumeric) return { wch: 18 }
     if (isDate) return { wch: 14 }
     if (isName) return { wch: 25 }
@@ -5423,10 +4842,10 @@ function downloadCalculatedInstrumentsExcel() {
     for (let C = range.s.c; C <= range.e.c; ++C) {
       const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
       if (!worksheet[cellAddress]) continue
-      
+
       const colName = columns[C]
       const isNumeric = colName.toLowerCase().includes('value') || colName.toLowerCase().includes('amount') || colName.toLowerCase().includes('rate') || colName.toLowerCase().includes('yield') || colName.toLowerCase().includes('price') || colName.toLowerCase().includes('percentage')
-      
+
       worksheet[cellAddress].s = {
         alignment: {
           horizontal: isNumeric ? "right" : "left",
@@ -5563,46 +4982,42 @@ function applyCleaning() {
     if (cleaningOptions.value.standardizeDates) {
       let standardized = 0
       const format = selectedDateFormat.value || 'YYYY-MM-DD'
-      data = data.map(row => { 
-        Object.keys(row).forEach(k => { 
-          if (k.toLowerCase().includes('date') && row[k]) { 
-            const d = new Date(row[k]); 
-            if (!isNaN(d)) { 
+      data = data.map(row => {
+        Object.keys(row).forEach(k => {
+          if (k.toLowerCase().includes('date') && row[k]) {
+            const d = new Date(row[k]);
+            if (!isNaN(d)) {
+              const utcDay = String(d.getUTCDate()).padStart(2, '0')
+              const utcMonth = String(d.getUTCMonth() + 1).padStart(2, '0')
+              const utcYear = d.getUTCFullYear()
+              const utcShortYear = utcYear.toString().slice(-2)
+
               let formattedDate = ''
               if (format === 'YYYY-MM-DD') {
-                formattedDate = d.toISOString().split('T')[0]
+                formattedDate = `${utcYear}-${utcMonth}-${utcDay}`
               } else if (format === 'DD-MM-YYYY') {
-                formattedDate = d.toLocaleDateString('en-GB').replace(/\//g, '-')
+                formattedDate = `${utcDay}-${utcMonth}-${utcYear}`
               } else if (format === 'MM-DD-YYYY') {
-                formattedDate = d.toLocaleDateString('en-US').replace(/\//g, '-')
+                formattedDate = `${utcMonth}-${utcDay}-${utcYear}`
               } else if (format === 'DD/MM/YYYY') {
-                formattedDate = d.toLocaleDateString('en-GB')
+                formattedDate = `${utcDay}/${utcMonth}/${utcYear}`
               } else if (format === 'MM/DD/YYYY') {
-                formattedDate = d.toLocaleDateString('en-US')
+                formattedDate = `${utcMonth}/${utcDay}/${utcYear}`
               } else if (format === 'YYYY/MM/DD') {
-                const year = d.getFullYear()
-                const month = String(d.getMonth() + 1).padStart(2, '0')
-                const day = String(d.getDate()).padStart(2, '0')
-                formattedDate = `${year}/${month}/${day}`
+                formattedDate = `${utcYear}/${utcMonth}/${utcDay}`
               } else if (format === 'DD-MM-YY') {
-                const year = String(d.getFullYear()).slice(-2)
-                const month = String(d.getMonth() + 1).padStart(2, '0')
-                const day = String(d.getDate()).padStart(2, '0')
-                formattedDate = `${day}-${month}-${year}`
+                formattedDate = `${utcDay}-${utcMonth}-${utcShortYear}`
               } else if (format === 'MM-DD-YY') {
-                const year = String(d.getFullYear()).slice(-2)
-                const month = String(d.getMonth() + 1).padStart(2, '0')
-                const day = String(d.getDate()).padStart(2, '0')
-                formattedDate = `${month}-${day}-${year}`
+                formattedDate = `${utcMonth}-${utcDay}-${utcShortYear}`
               } else {
-                formattedDate = d.toISOString().split('T')[0]
+                formattedDate = `${utcYear}-${utcMonth}-${utcDay}`
               }
               row[k] = formattedDate
-              standardized++ 
-            } 
-          } 
-        }); 
-        return row 
+              standardized++
+            }
+          }
+        });
+        return row
       })
       if (standardized > 0) operations.push(`Standardized ${standardized} date values to ${format}`)
     }
@@ -5679,16 +5094,13 @@ function applyCleaning() {
         return newRow
       })
       operations.push(`Removed ${excludedCount} excluded fields from data`)
-      console.log('=== Applied excluded fields in cleaning ===')
-      console.log('Excluded fields:', Array.from(excludedDetectedFields.value))
-      console.log('Remaining fields:', Object.keys(data[0] || {}))
     }
 
     cleanedData.value = data
-    cleaningStats.value = { 
-      totalRows: originalLength, 
-      validRows: cleanedData.value.length, 
-      removedRows: originalLength - cleanedData.value.length, 
+    cleaningStats.value = {
+      totalRows: originalLength,
+      validRows: cleanedData.value.length,
+      removedRows: originalLength - cleanedData.value.length,
       fixedMissing: 0,
       removedEmptyRows: cleaningOptions.value.removeEmptyRows ? (originalLength - data.filter(row => Object.values(row).some(v => v !== null && v !== '' && v !== undefined)).length) : 0,
       removedSpecificColumnEmpty: cleaningOptions.value.removeRowsSpecificColumnEmpty && cleaningOptions.value.specificColumn ? (originalLength - data.filter(row => row[cleaningOptions.value.specificColumn] !== null && row[cleaningOptions.value.specificColumn] !== '').length) : 0,
@@ -5698,11 +5110,10 @@ function applyCleaning() {
       removedDuplicates: cleaningOptions.value.removeDuplicates ? 1 : 0,
       operationsPerformed: operations
     }
-    
+
     debouncedSave()
     forceUpdate.value++
   } catch (error) {
-    console.error('Error during cleaning:', error)
     showSnackbar('Error during cleaning: ' + error.message, 'error')
   }
 }
@@ -5711,7 +5122,7 @@ async function continueAfterCleaning() {
   if (!cleanedData.value.length) {
     return
   }
-  
+
   if (sheetType.value === 'single' && excludedDetectedFields.value.size > 0) {
     const filteredData = cleanedData.value.map(row => {
       const filteredRow = {}
@@ -5723,10 +5134,10 @@ async function continueAfterCleaning() {
       }
       return filteredRow
     })
-    
+
     cleanedData.value = filteredData
   }
-  
+
   activeTab.value = 'calculations'
   await nextTick()
   forceUpdate.value++
@@ -5753,39 +5164,8 @@ async function calculateMetrics() {
 
   isCalculating.value = true
 
-  const requiredFields = requiredColumns.value[instrumentType.value] || []
-  const missingFields = []
-  
-  if (sheetType.value === 'single') {
-    for (const field of requiredFields) {
-      const hasColumn = cleanedData.value.some(row => row.hasOwnProperty(field))
-      if (!hasColumn) {
-        missingFields.push(field)
-      }
-    }
-  } else {
-    for (const field of requiredFields) {
-      const mappedColumn = columnMapping.value[field]
-      if (!mappedColumn) {
-        missingFields.push(field)
-        continue
-      }
-      
-      const hasColumn = cleanedData.value.some(row => row.hasOwnProperty(mappedColumn))
-      if (!hasColumn) {
-        missingFields.push(field)
-      }
-    }
-  }
-  
-  if (missingFields.length > 0) {
-    showSnackbar(`Missing required fields: ${missingFields.join(', ')}. Please complete the mapping before calculating.`, 'error')
-    isCalculating.value = false
-    return
-  }
-
   let dataForCalculation = JSON.parse(JSON.stringify(cleanedData.value))
-  
+
   try {
     dataForCalculation = dataForCalculation.map(row => {
       const normalizedRow = {}
@@ -5823,10 +5203,9 @@ async function calculateMetrics() {
       return normalizedRow
     })
   } catch (e) {
-    console.error('Error normalizing data:', e)
     dataForCalculation = JSON.parse(JSON.stringify(cleanedData.value))
   }
-  
+
   if (excludedDetectedFields.value.size > 0) {
     dataForCalculation = dataForCalculation.map(row => {
       const newRow = {}
@@ -5840,8 +5219,6 @@ async function calculateMetrics() {
   }
 
   try {
-    let shouldContinueProcessing = true
-
     const response = await api.calculationsAPI.executeByType(
       instrumentType.value,
       dataForCalculation,
@@ -5865,19 +5242,19 @@ async function calculateMetrics() {
             const mapped = mapBackendFieldsToDisplayNames(row, instrumentType.value)
             return filterToCalculatedFields(mapped, instrumentType.value)
           }) || []
-          
+
           const currentRowsWithWorkbook = mappedRows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
-          
+
           instrumentSummary.value = {
             columns: response.instrument_summary.columns,
             rows: currentRowsWithWorkbook
           }
         }
-        
+
         if (response?.portfolio_summary) {
           portfolioSummary.value = response.portfolio_summary
         }
@@ -5952,8 +5329,6 @@ async function calculateMetrics() {
             allCalculations.value = results[firstInstType].data
             selectedCalculations.value = results[firstInstType].data
           }
-        } else {
-          console.warn('No results found in response')
         }
 
         isUsingDetectedFields.value = false
@@ -5970,7 +5345,7 @@ async function calculateMetrics() {
         if (sheetType.value === 'single' && calcArray.length === 1) {
           const singleCalc = calcArray[0]
           calculations.value = singleCalc
-          
+
           const agg = {
             totalValue: singleCalc.total_value ?? singleCalc.calculated_value ?? null,
             instrumentCount: 1,
@@ -6001,53 +5376,52 @@ async function calculateMetrics() {
             termDays: singleCalc.term_days ?? null,
             status: singleCalc.status ?? null
           }
-          
+
           if (singleCalc.status === 'cannot_calculate' || singleCalc.error) {
             const errorMsg = singleCalc.error || 'Calculation failed'
-            const missingFields = singleCalc.missing_fields || []
+            const missingFieldsList = singleCalc.missing_fields || []
             const invalidFields = singleCalc.invalid_fields || []
-            
+
             let fullErrorMsg = errorMsg
-            if (missingFields.length > 0) {
-              fullErrorMsg += ` Missing: ${missingFields.join(', ')}`
+            if (missingFieldsList.length > 0) {
+              fullErrorMsg += ` Missing: ${missingFieldsList.join(', ')}`
             }
             if (invalidFields.length > 0) {
               const invalidMsg = invalidFields.map(f => `${f.field} (${f.reason})`).join(', ')
               fullErrorMsg += ` Invalid: ${invalidMsg}`
             }
-            
+
             showSnackbar(`Calculation failed: ${fullErrorMsg}`, 'error')
             allCalculations.value = {
               status: 'error',
               message: fullErrorMsg,
               error: singleCalc.error,
               missing_field: singleCalc.missing_field,
-              missing_fields: missingFields,
+              missing_fields: missingFieldsList,
               invalid_fields: invalidFields,
               ...agg
             }
             selectedCalculations.value = allCalculations.value
-            // Don't return - let finally block reset isCalculating
           }
-          
+
           if (singleCalc.status === 'partial' && singleCalc.error) {
-            const missingFields = singleCalc.missing_fields || []
+            const missingFieldsList = singleCalc.missing_fields || []
             const invalidFields = singleCalc.invalid_fields || []
-            
+
             let warningMsg = singleCalc.error
-            if (missingFields.length > 0) {
-              warningMsg += ` Missing: ${missingFields.join(', ')}`
+            if (missingFieldsList.length > 0) {
+              warningMsg += ` Missing: ${missingFieldsList.join(', ')}`
             }
             if (invalidFields.length > 0) {
               const invalidMsg = invalidFields.map(f => `${f.field} (${f.reason})`).join(', ')
               warningMsg += ` Invalid: ${invalidMsg}`
             }
-            
+
             showSnackbar(`Partial calculation: ${warningMsg}`, 'warning')
             agg.status = 'partial'
             agg.error = singleCalc.error
             agg.missing_field = singleCalc.missing_field
-            agg.missing_fields = missingFields
+            agg.missing_fields = missingFieldsList
             agg.invalid_fields = invalidFields
           }
 
@@ -6064,19 +5438,18 @@ async function calculateMetrics() {
           const currentCols = new Set()
           const mappedRow = mapBackendFieldsToDisplayNames(row, instrumentType.value)
           const filteredRow = filterToCalculatedFields(mappedRow, instrumentType.value)
-          
+
           const filteredRowWithWorkbook = {
             ...filteredRow,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }
-          
+
           Object.keys(filteredRowWithWorkbook).forEach(k => currentCols.add(k))
           instrumentSummary.value = { columns: Array.from(currentCols), rows: [filteredRowWithWorkbook] }
-          shouldContinueProcessing = false
         } else if (calcArray.length > 1) {
           const aggregates = response.data.aggregates || {}
-          
+
           const agg = {
             totalValue: aggregates.totalValue ?? aggregates.total_value ?? null,
             instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? calcArray.length,
@@ -6111,14 +5484,12 @@ async function calculateMetrics() {
             effectiveAnnualYield: aggregates.effective_annual_yield ?? null,
             principal: aggregates.principal ?? null,
             interestRate: aggregates.interest_rate ?? null,
-            interestEarned: aggregates.interest_earned ?? null,
-            discountYield: aggregates.discount_yield ?? null,
             effectiveYield: aggregates.effective_yield ?? null
           }
-          
+
           allCalculations.value = agg
           selectedCalculations.value = agg
-          
+
           const rows = calcArray.map((calc, idx) => {
             const mappedCalc = mapBackendFieldsToDisplayNames(calc, instrumentType.value)
             const filteredCalc = filterToCalculatedFields(mappedCalc, instrumentType.value)
@@ -6129,50 +5500,49 @@ async function calculateMetrics() {
               'Worksheet': currentSheetName.value || 'Calculated'
             }
           })
-          
+
           const currentCols = new Set()
           rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
-          
+
           const rowsWithWorkbook = rows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
-          
+
           instrumentSummary.value = { columns: Array.from(currentCols), rows: rowsWithWorkbook }
-          
+
           if (response.data.portfolio_summary) {
             portfolioSummary.value = response.data.portfolio_summary
           } else {
             const portfolioRow = {
               'Portfolio Name': currentSheetName.value || 'Current Portfolio',
               'Instrument Type': instrumentType.value,
-              'Total Value': agg.totalValue || 0,
-              'Number of Instruments': agg.instrumentCount || calcArray.length,
-              'Average Rate': agg.avgRate || 0,
-              'Weighted Average Rate': agg.weightedAvgRate || 0,
-              'Total Interest': agg.totalInterest || 0,
-              'Interest Earned': agg.interestEarned || 0,
-              'Annual Yield': agg.annualYield || 0,
-              'Effective Annual Rate': agg.effectiveAnnualRate || 0,
-              'Average Days to Maturity': agg.avgDaysToMaturity || 0,
-              'Total Principal': agg.totalPrincipal || 0
+              'Total Value': agg.totalValue ?? null,
+              'Number of Instruments': agg.instrumentCount ?? null,
+              'Average Rate': agg.avgRate ?? null,
+              'Weighted Average Rate': agg.weightedAvgRate ?? null,
+              'Total Interest': agg.totalInterest ?? null,
+              'Interest Earned': agg.interestEarned ?? null,
+              'Annual Yield': agg.annualYield ?? null,
+              'Effective Annual Rate': agg.effectiveAnnualRate ?? null,
+              'Average Days to Maturity': agg.avgDaysToMaturity ?? null,
+              'Total Principal': agg.totalPrincipal ?? null
             }
-            
+
             const portfolioCols = new Set()
             Object.keys(portfolioRow).forEach(k => portfolioCols.add(k))
             portfolioSummary.value = { columns: Array.from(portfolioCols), rows: [portfolioRow] }
-            
+
             const existingPortfolioRows = completedPortfolioSummary.value.rows || []
             const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
-            
+
             const allPortfolioCols = new Set()
             mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => allPortfolioCols.add(k)))
-            
+
             completedPortfolioSummary.value = { columns: Array.from(allPortfolioCols), rows: mergedPortfolioRows }
           }
-          
-          // Save portfolio summary snapshot for reports
+
           if (portfolioSummary.value) {
             let existingSnapshot = { instrumentsWithDetails: [] }
             try {
@@ -6181,9 +5551,9 @@ async function calculateMetrics() {
                 existingSnapshot = existing
               }
             } catch (e) {
-              console.log('No existing portfolio snapshot, creating new')
+              // no existing snapshot
             }
-            
+
             const existingInstrumentIndex = existingSnapshot.instrumentsWithDetails.findIndex(i => i.id === instrumentType.value)
             const currentInstrumentData = {
               id: instrumentType.value,
@@ -6192,34 +5562,31 @@ async function calculateMetrics() {
               aggregate: agg || {},
               timestamp: Date.now()
             }
-            
+
             if (existingInstrumentIndex >= 0) {
               existingSnapshot.instrumentsWithDetails[existingInstrumentIndex] = currentInstrumentData
             } else {
               existingSnapshot.instrumentsWithDetails.push(currentInstrumentData)
             }
-            
+
             await sessionManager.saveWorksheetData(activeSession.value?.id, '__portfolio_summary__', existingSnapshot)
-            console.log('Portfolio summary snapshot saved (single instrument) with', existingSnapshot.instrumentsWithDetails.length, 'instruments')
-            
-            // Also save to backend for authoritative storage
+
             try {
               await api.portfolioAPI.saveSummary({
                 session_id: activeSession.value?.id,
                 instrument_type: instrumentType.value,
                 instrument_name: currentSheetName.value || instrumentType.value,
-                total_value: agg?.totalValue || 0,
-                face_value: agg?.faceValue || 0,
-                count: agg?.instrumentCount || 0,
-                avg_rate: agg?.avgRate || 0,
+                total_value: agg?.totalValue ?? 0,
+                face_value: agg?.faceValue ?? 0,
+                count: agg?.instrumentCount ?? 0,
+                avg_rate: agg?.avgRate ?? 0,
                 details: portfolioSummary.value?.rows || [],
                 detail_headers: portfolioSummary.value?.columns || [],
                 aggregate: agg || {},
                 valuation_date: activeValuationDate.value || new Date().toISOString().split('T')[0]
               })
-              console.log('Portfolio summary saved to backend (single instrument) for', instrumentType.value)
             } catch (saveError) {
-              console.error('Failed to save portfolio summary to backend (single instrument):', saveError)
+              // non-fatal
             }
           }
         } else if (calcArray.length) {
@@ -6236,13 +5603,13 @@ async function calculateMetrics() {
 
           const currentCols = new Set()
           rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
-          
+
           const rowsWithWorkbook = rows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
-          
+
           instrumentSummary.value = { columns: Array.from(currentCols), rows: rowsWithWorkbook }
 
           const aggregates = response.data.aggregates || response.data || {}
@@ -6258,7 +5625,7 @@ async function calculateMetrics() {
             avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? null,
             totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? null
           }
-          
+
           allCalculations.value = agg
           selectedCalculations.value = agg
 
@@ -6276,12 +5643,12 @@ async function calculateMetrics() {
             'Average Days to Maturity': agg.avgDaysToMaturity ?? null,
             'Total Principal': agg.totalPrincipal ?? null
           }
-          
+
           if (response.data.fred?.benchmark_rate) {
             portfolioRow['FRED Benchmark'] = response.data.fred.benchmark_rate
             portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market ?? null
           }
-          
+
           const currentPortfolioCols = new Set()
           Object.keys(portfolioRow).forEach(k => currentPortfolioCols.add(k))
           portfolioSummary.value = { columns: Array.from(currentPortfolioCols), rows: [portfolioRow] }
@@ -6289,7 +5656,7 @@ async function calculateMetrics() {
           const backendErrors = response.data?.errors || []
           const missingFields = response.data?.missing_fields || []
           const invalidFields = response.data?.invalid_fields || []
-          
+
           let errorMsg = 'Not calculable — required input not detected.'
           if (backendErrors.length > 0) {
             errorMsg = backendErrors.map(e => e.message || e).join('; ')
@@ -6301,7 +5668,7 @@ async function calculateMetrics() {
             const invalidMsg = invalidFields.map(f => `${f.field} (${f.reason})`).join(', ')
             errorMsg += ` Invalid: ${invalidMsg}`
           }
-          
+
           showSnackbar(`Calculation failed: ${errorMsg}`, 'error')
           allCalculations.value = {
             status: 'error',
@@ -6312,31 +5679,28 @@ async function calculateMetrics() {
           }
           selectedCalculations.value = allCalculations.value
         }
-        
-        // Save portfolio summary to backend for authoritative storage
+
         if (response?.portfolio_summary || response.data?.portfolio_summary) {
           const portfolioData = response?.portfolio_summary || response.data?.portfolio_summary
-          
+
           try {
             await api.portfolioAPI.saveSummary({
               session_id: activeSession.value?.id,
               instrument_type: instrumentType.value,
               instrument_name: currentSheetName.value || instrumentType.value,
-              total_value: agg?.totalValue || 0,
-              face_value: agg?.faceValue || 0,
-              count: agg?.instrumentCount || 0,
-              avg_rate: agg?.avgRate || 0,
+              total_value: allCalculations.value?.totalValue ?? 0,
+              face_value: allCalculations.value?.faceValue ?? 0,
+              count: allCalculations.value?.instrumentCount ?? 0,
+              avg_rate: allCalculations.value?.avgRate ?? 0,
               details: portfolioData.rows || [],
               detail_headers: portfolioData.columns || [],
-              aggregate: agg || {},
+              aggregate: allCalculations.value || {},
               valuation_date: activeValuationDate.value || new Date().toISOString().split('T')[0]
             })
           } catch (saveError) {
-            console.error('Failed to save portfolio summary to backend:', saveError)
-            // Don't fail the calculation if portfolio summary save fails
+            // non-fatal
           }
-          
-          // Also save to worksheets JSON for backward compatibility
+
           let existingSnapshot = { instrumentsWithDetails: [] }
           try {
             const existing = await sessionManager.getWorksheetData(activeSession.value?.id, '__portfolio_summary__')
@@ -6344,9 +5708,9 @@ async function calculateMetrics() {
               existingSnapshot = existing
             }
           } catch (e) {
-            // No existing snapshot, creating new
+            // no existing
           }
-          
+
           const existingInstrumentIndex = existingSnapshot.instrumentsWithDetails.findIndex(i => i.id === instrumentType.value)
           const currentInstrumentData = {
             id: instrumentType.value,
@@ -6355,7 +5719,7 @@ async function calculateMetrics() {
             aggregate: portfolioData.aggregate || allCalculations.value || {},
             timestamp: Date.now()
           }
-          
+
           if (existingInstrumentIndex >= 0) {
             existingSnapshot.instrumentsWithDetails[existingInstrumentIndex] = currentInstrumentData
           } else {
@@ -6364,7 +5728,7 @@ async function calculateMetrics() {
 
           await sessionManager.saveWorksheetData(activeSession.value?.id, '__portfolio_summary__', existingSnapshot)
         }
-        
+
         if (activeSession.value?.id) {
           await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
             rawData: rawData.value,
@@ -6405,14 +5769,13 @@ async function calculateMetrics() {
       try {
         await enrichCalculationsWithFred()
       } catch (fredError) {
-        console.error('FRED enrichment failed (non-critical):', fredError)
+        // non-fatal
       }
 
       debouncedSave()
       forceUpdate.value++
     }
   } catch (err) {
-    console.error('Error in calculation:', err)
     showSnackbar('Error calculating metrics: ' + (err.message || 'Unknown error'), 'error')
     isUsingDetectedFields.value = false
   } finally {
@@ -6483,7 +5846,7 @@ async function fetchYieldCurve() {
   const from_date = yieldCurveStartDate.value || null
   const to_date = yieldCurveEndDate.value || null
 
-  const normalizedCountry = country === 'USA' ? 'US' : 
+  const normalizedCountry = country === 'USA' ? 'US' :
                             country === 'GBR' ? 'GB' :
                             country === 'JPN' ? 'JP' :
                             country === 'CAN' ? 'CA' :
@@ -6574,21 +5937,17 @@ async function fetchYieldCurve() {
         yieldCurveData.value = points
         chartSeriesLabel.value = `FRED Yield Curve (${curveData.country || normalizedCountry})`
         yieldCurveError.value = ''
-        console.log('Successfully loaded FRED yield curve data:', points.length, 'points')
       } else {
         yieldCurveData.value = []
         yieldCurveError.value = curveData.note || 'No yield curve data available for the selected filters.'
         chartSeriesLabel.value = ''
-        console.warn('No FRED data available in response:', curveData)
       }
     } else {
       yieldCurveData.value = []
       yieldCurveError.value = response?.data?.note || response?.message || 'Failed to fetch yield curve from FRED'
       chartSeriesLabel.value = ''
-      console.error('FRED API request failed:', response)
     }
   } catch (err) {
-    console.error('Yield curve fetch error:', err)
     yieldCurveData.value = []
     yieldCurveError.value = err.message || 'Network error – please try again'
     chartSeriesLabel.value = ''
@@ -6622,7 +5981,7 @@ async function renderYieldCurveChart() {
     chartInstanceRef.current.destroy()
     chartInstanceRef.current = null
   }
-  
+
   if (!yieldCurveChart.value || !yieldCurveData.value.length) {
     return
   }
@@ -6659,11 +6018,6 @@ async function renderYieldCurveChart() {
         originalDate: d.date
       }
     })
-
-    console.log('Date range mode data:', transformed.map(t => ({ 
-      x: new Date(t.x).toISOString().split('T')[0], 
-      y: t.y 
-    })))
 
     xScaleOptions = {
       type: 'time',
@@ -6713,7 +6067,6 @@ async function renderYieldCurveChart() {
     const filteredData = yieldCurveData.value.filter(d => d.maturity <= filterYears)
 
     if (!filteredData.length) {
-      console.warn('No yield curve data points for selected maturity:', period)
       yieldCurveError.value = `No yield curve data available for maturity ${period}`
       if (chartInstanceRef.current) {
         chartInstanceRef.current.destroy()
@@ -6795,9 +6148,8 @@ async function renderYieldCurveChart() {
     if (yieldCurveChart.value) {
       try {
         chartImageData.value = yieldCurveChart.value.toDataURL('image/png', 1.0)
-        console.log('Chart image captured successfully')
       } catch (e) {
-        console.warn('Failed to capture chart image:', e)
+        // non-fatal
       }
     }
   }, 1000)
@@ -6870,18 +6222,15 @@ async function enrichCalculationsWithFred() {
       if (calculations.value.fred) delete calculations.value.fred
     }
   } catch (e) {
-    console.error('FRED benchmark fetch error:', e)
+    // non-fatal
   }
 }
 
 async function loadSavedTemplates() {
   try {
-    console.log('Loading templates for instrument type:', instrumentType.value)
     const templates = await mappingTemplateManager.getTemplatesByInstrument(instrumentType.value)
-    console.log('Loaded templates:', templates)
     savedTemplates.value = templates || []
   } catch (e) {
-    console.error('Error loading saved templates:', e)
     savedTemplates.value = []
   }
 }
@@ -6923,7 +6272,6 @@ async function saveCurrentMappingAsTemplate() {
       showSnackbar('Failed to save mapping')
     }
   } catch (e) {
-    console.error('Error saving template:', e)
     showSnackbar('Error saving mapping: ' + e.message)
   }
 }
@@ -6946,7 +6294,6 @@ async function applyTemplate(templateId) {
     forceUpdate.value++
     showSnackbar('Mapping loaded successfully', 'success')
   } catch (e) {
-    console.error('Error loading template:', e)
     showSnackbar('Error loading mapping')
   }
 }
@@ -6955,7 +6302,7 @@ async function deleteTemplate(templateId) {
   if (!templateId) return
   const template = savedTemplates.value.find(t => t.id === templateId)
   if (!template) return
-  
+
   if (confirm(`Delete template "${template.name}"?`)) {
     try {
       const success = await mappingTemplateManager.deleteTemplate(templateId)
@@ -6969,7 +6316,6 @@ async function deleteTemplate(templateId) {
         showSnackbar('Failed to delete mapping')
       }
     } catch (e) {
-      console.error('Error deleting template:', e)
       showSnackbar('Error deleting mapping')
     }
   }
@@ -7008,7 +6354,6 @@ function selectInstrumentFromPopup(index) {
 
   selectedCalculations.value = newCalculations
   calculations.value = newCalculations
-  console.log('Loaded instrument calculations:', instrumentName, newCalculations)
   closeAllCalculationsPopup()
 }
 
@@ -7020,7 +6365,6 @@ function loadAllInstruments() {
     selectedCalculations.value = allCalculations.value
     calculations.value = allCalculations.value
   } else {
-    console.error('No backend aggregate data available in allCalculations')
     showSnackbar('No calculation data available. Please recalculate.', 'error')
   }
   currentlyViewingInstrument.value = null
@@ -7030,13 +6374,13 @@ function loadAllInstruments() {
 
 function formatTableCell(value, column) {
   if (value === null || value === undefined || value === '') return '—'
-  
+
   const isTimeField = column.toLowerCase().includes('day') || column.toLowerCase().includes('maturity') || column.toLowerCase().includes('duration') || column.toLowerCase().includes('term') || column.toLowerCase().includes('month') || column.toLowerCase().includes('year') || column.toLowerCase().includes('week') || column.toLowerCase().includes('time')
-  
+
   if (isTimeField && typeof value === 'number') {
     return formatNumber(value, true)
   }
-  
+
   if (isPercentageField(column)) {
     return formatNumber(value) + '%'
   }
@@ -7101,60 +6445,55 @@ function notifySessionUpdated(explicitSave = false, saveOptions = {}) {
   window.dispatchEvent(new CustomEvent('session-updated', { detail: { sessionId: sid, explicitSave, ...saveOptions } }))
 }
 
-const isSaving = ref(false)
-const skipAutoSave = ref(false)
-
 const previousSnapshot = ref(null)
 
 function generateVersionDescription(newSnapshot, oldSnapshot) {
   const changes = []
-  
+
   if (!oldSnapshot) {
     return `Initial ${instrumentType.value} workflow setup`
   }
-  
+
   if (JSON.stringify(newSnapshot.rawData) !== JSON.stringify(oldSnapshot.rawData)) {
     changes.push('uploaded new data')
   }
-  
+
   if (JSON.stringify(newSnapshot.cleanedData) !== JSON.stringify(oldSnapshot.cleanedData)) {
     changes.push('cleaned data')
   }
-  
+
   if (JSON.stringify(newSnapshot.calculations) !== JSON.stringify(oldSnapshot.calculations)) {
     changes.push('recalculated metrics')
   }
-  
+
   if (JSON.stringify(newSnapshot.columnMapping) !== JSON.stringify(oldSnapshot.columnMapping)) {
     changes.push('updated column mapping')
   }
-  
+
   if (JSON.stringify(newSnapshot.manualInputs) !== JSON.stringify(oldSnapshot.manualInputs)) {
     changes.push('updated manual inputs')
   }
-  
+
   if (JSON.stringify(newSnapshot.formulas) !== JSON.stringify(oldSnapshot.formulas)) {
     changes.push('updated formulas')
   }
-  
+
   if (changes.length === 0) {
     return `Saved ${instrumentType.value} workflow (no changes)`
   }
-  
-  const changeText = changes.join(', ')
-  return `${instrumentType.value} — ${changeText}`
+
+  return `${instrumentType.value} — ${changes.join(', ')}`
 }
 
 async function saveToSession() {
   if (isSavingVersion) {
-    console.log('Version save already in progress, ignoring duplicate click')
     return
   }
-  
+
   isSavingVersion = true
   isSaving.value = true
   skipAutoSave.value = true
-  
+
   if (!activeSession.value || !activeSession.value.id) {
     isSavingVersion = false
     isSaving.value = false
@@ -7166,11 +6505,9 @@ async function saveToSession() {
   const worksheetName = currentSheetName.value || 'Unknown'
 
   try {
-    console.log('Fetching current version count from database...')
     const currentVersionsRes = await api.versionAPI.getVersions(sid)
     if (currentVersionsRes && currentVersionsRes.success) {
       const actualCount = currentVersionsRes.total || 0
-      console.log(`Actual version count from database: ${actualCount}`)
       if (activeSession.value?.id === sid) {
         activeSession.value.version_count = actualCount
       }
@@ -7198,7 +6535,6 @@ async function saveToSession() {
       sheetType: sheetType.value
     }
 
-    console.log('Saving worksheet data for:', worksheetName)
     const worksheetData = {
       worksheetName,
       workbookName: uploadedFile.value?.name || 'Workbook',
@@ -7215,28 +6551,20 @@ async function saveToSession() {
       timestamp: Date.now()
     }
     await sessionManager.saveWorksheetData(sid, worksheetName, worksheetData)
-    console.log('Worksheet data saved successfully')
-    
+
     markWorksheetAsSaved()
 
-    console.log('Step 1: Saving workflow data...')
     await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
-    console.log('Step 1 complete: Workflow data saved')
-    
-    console.log('Step 2: Updating instrument count...')
+
     const count = sessionManager.countSessionInstruments(sid)
     await sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
-    
+
     if (activeSession.value?.id === sid) {
       activeSession.value.instrument_count = Math.min(count, 3)
     }
-    console.log('Step 2 complete: Instrument count updated to:', Math.min(count, 3))
-    
-    console.log('Step 3: Creating version via API...')
-    
+
     const versionDescription = generateVersionDescription(datasetSnapshot, previousSnapshot.value)
-    console.log('Generated version description:', versionDescription)
-    
+
     const versionResponse = await api.versionAPI.create(
       sid,
       instrumentType.value,
@@ -7244,25 +6572,17 @@ async function saveToSession() {
       datasetSnapshot,
       null, null, null, null, null
     )
-    
-    console.log('Version API response:', versionResponse)
-    
+
     if (!versionResponse?.success) {
-      console.error('❌ Version creation failed:', versionResponse)
       showSnackbar('Failed to create version', 'error')
     } else {
-      console.log('✅ Version created successfully, ID:', versionResponse?.version_id || versionResponse?.data?.id)
-      
       previousSnapshot.value = JSON.parse(JSON.stringify(datasetSnapshot))
-      
-      console.log('Step 4: Fetching updated version count from backend...')
+
       try {
         const versionsRes = await api.versionAPI.getVersions(sid)
-        console.log('Get versions response:', versionsRes)
         if (versionsRes && versionsRes.success) {
           const updatedVersionCount = versionsRes.total || 0
-          console.log(`✅ Updated version count from backend: ${updatedVersionCount}`)
-          
+
           const session = sessionManager.sessions.find(s => s.id === sid)
           if (session) {
             session.version_count = updatedVersionCount
@@ -7280,7 +6600,7 @@ async function saveToSession() {
                 fieldsChanged: v.fieldsChanged || []
               }))
             }
-            
+
             if (activeSession.value?.id === sid) {
               activeSession.value.version_count = updatedVersionCount
               if (versionsRes.data && versionsRes.data.length > 0) {
@@ -7288,23 +6608,19 @@ async function saveToSession() {
               }
             }
           }
-
         }
       } catch (fetchError) {
-        console.warn('Failed to fetch updated versions:', fetchError)
+        // non-fatal
       }
     }
   } catch (err) {
-    console.error('❌ Save to session error:', err)
     showSnackbar('Failed to save to session: ' + err.message, 'error')
   } finally {
     isSavingVersion = false
     isSaving.value = false
     setTimeout(() => {
       skipAutoSave.value = false
-      console.log('Skip auto-save flag reset')
     }, 3000)
-    console.log('isSavingVersion and isSaving flags reset to false')
   }
 }
 
@@ -7323,13 +6639,9 @@ async function refreshSessionVersionCount(sid) {
     const updated = await sessionManager.getSession(sid, true)
     if (updated && updated.id && activeSession.value?.id === sid) {
       activeSession.value = updated
-    } else if (!updated?.id) {
-      console.warn('Session refresh returned invalid session (no ID), keeping current session')
-    } else {
-      console.warn('Session refresh condition failed: updated?', !!updated, 'activeSession.value?.id === sid?', activeSession.value?.id === sid)
     }
   } catch (err) {
-    console.warn('Failed to refresh session count:', err)
+    // non-fatal
   }
 }
 
@@ -7363,9 +6675,9 @@ function saveSessionData(explicitSave = false) {
     detectedCurrencies: detectedCurrencies.value,
     excludedDetectedFields: Array.from(excludedDetectedFields.value)
   }
-  
+
   sessionManager.setActiveSession(activeSession.value)
-  
+
   sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
     .then(() => {
       if (explicitSave) {
@@ -7412,7 +6724,6 @@ async function loadSavedData() {
 
       if (wf.autoDetectedFields) {
         autoDetectedFields.value = wf.autoDetectedFields
-        console.log('Restored autoDetectedFields from session:', Object.keys(autoDetectedFields.value).length)
       }
       if (wf.autoDetectedFieldsWithMetadata) {
         autoDetectedFieldsWithMetadata.value = wf.autoDetectedFieldsWithMetadata
@@ -7425,704 +6736,889 @@ async function loadSavedData() {
       }
       if (wf.excludedDetectedFields && Array.isArray(wf.excludedDetectedFields)) {
         excludedDetectedFields.value = new Set(wf.excludedDetectedFields)
-        console.log('Restored excludedDetectedFields from session:', Array.from(excludedDetectedFields.value))
       }
 
       loaded = true
     }
   } catch (err) {
-    console.error('Failed to load saved data:', err)
+    // non-fatal
   }
   return loaded
 }
 
+// ============================================================
+// ENHANCED showFormula — shows every input, every step, and
+// explicitly narrates date calculations.
+// ============================================================
 function showFormula(metricKey) {
   const formulaMap = {
-    'Total Portfolio Value': 'Σ Principal for all instruments',
-    'Average Rate': 'Σ (Interest Rate × Principal) / Σ Principal',
+    'Total Portfolio Value': 'Σ (Total Value of each instrument)',
+    'Average Rate': 'Σ (Rate × Principal) / Σ Principal',
     'Number of Instruments': 'Count of all instrument rows',
+    'totalValue': 'Σ (Total Value of each instrument)',
+    'avgRate': 'Σ (Rate × Principal) / Σ Principal',
     'weightedAvgRate': 'Σ (Interest Rate × Principal) / Σ Principal',
-    'totalInterest': 'Σ (Principal × Interest Rate × Days/360)',
-    'interestEarned': 'Σ (Principal × Interest Rate × Days/360)',
+    'totalInterest': 'Σ (Principal × Interest Rate × Days / DayCountBasis)',
+    'interestEarned': 'Σ (Principal × Interest Rate × Days / DayCountBasis)',
     'annualYield': '(Interest / Principal) × (365 / Days) × 100',
-    'effectiveAnnualRate': '(Interest / Principal) × (365 / Days) × 100',
-    'avgDaysToMaturity': 'Σ Days / Number of Instruments',
-    'totalPrincipal': 'Σ Principal',
-    'weightedAvgDiscount': 'Σ (Discount Rate × Face Value) / Σ Face Value',
-    'totalDiscount': 'Σ ((Face Value - Purchase Price) / Face Value × Face Value)',
+    'effectiveAnnualRate': '((1 + Interest / Principal)^(365 / Days) - 1) × 100',
     'effectiveYield': '((Face Value / Purchase Price)^(365/Days) - 1) × 100',
     'bondEquivalentYield': '((Face Value - Purchase Price) / Purchase Price) × (365 / Days) × 100',
-    'pricePer100': 'Purchase Price / Face Value × 100',
-    'totalPurchasePrice': 'Σ Purchase Price',
-    'avgInvestment': 'Total Purchase Price / Number of Instruments',
+    'discountYield': '((Face Value - Purchase Price) / Face Value) × (360 / Days) × 100',
+    'moneyMarketYield': '((Face Value - Purchase Price) / Purchase Price) × (360 / Days) × 100',
     'holdingPeriodYield': '((Face Value - Purchase Price) / Purchase Price) × 100',
     'annualizedYield': '((Face Value - Purchase Price) / Purchase Price) × (365 / Days) × 100',
-    'weightedAvgCoupon': 'Σ (Coupon Rate × Face Value) / Σ Face Value',
-    'totalAnnualIncome': 'Σ (Coupon Rate × Face Value)',
-    'avgYTM': 'Σ Yield to Maturity / Number of Instruments',
-    'duration': 'Macaulay Duration = Σ (t × PV(C_t)) / Price',
-    'totalValue': 'Σ of all calculated values',
-    'interestRate': 'Interest rate as percentage',
-    'discountYield': '(Discount Amount / Face Value) × (360 / Days) × 100',
-    'moneyMarketYield': '(Discount Amount / Purchase Price) × (360 / Days) × 100',
     'effectiveAnnualYield': '((Face Value / Purchase Price)^(365/Days) - 1) × 100',
-    'currentPrice': 'Market price of the bond',
-    'couponRate': 'Annual coupon rate as percentage',
-    'yieldToMaturity': 'Internal rate of return',
-    'currentYield': '(Annual Coupon / Price) × 100',
-    'modifiedDuration': 'Macaulay Duration / (1 + YTM/Frequency)',
-    'accruedInterest': 'Coupon per Period × (Days Accrued / Days in Period)',
-    'presentValue': 'Σ (Cash Flow / (1 + YTM/Frequency)^t)',
+    'avgDaysToMaturity': 'Σ Days to Maturity / Number of Instruments',
+    'totalPrincipal': 'Σ Principal',
+    'maturityValue': 'Principal × (1 + Rate × Days / DayCountBasis)',
+    'presentValue': 'Future Value / (1 + Rate × Days / DayCountBasis)',
     'fairValue': 'Present Value - Purchase Price',
-    'termDays': 'Days from valuation to maturity',
-    'yieldCurveRate': 'Benchmark rate from FRED API'
+    'yieldCurveRate': 'Benchmark rate from FRED (matched to maturity)',
+    'couponRate': 'Annual coupon rate (%)',
+    'avgCouponRate': 'Σ Coupon Rate / Number of Instruments',
+    'weightedAvgCoupon': 'Σ (Coupon Rate × Face Value) / Σ Face Value',
+    'totalAnnualIncome': 'Σ (Coupon Rate × Face Value / 100)',
+    'annualCoupon': 'Face Value × Coupon Rate / 100',
+    'couponPerPeriod': 'Annual Coupon / Coupon Frequency',
+    'yieldToMaturity': 'IRR of bond cash flows',
+    'avgYTM': 'Σ Yield to Maturity / Number of Instruments',
+    'currentYield': '(Annual Coupon / Current Price) × 100',
+    'duration': 'Macaulay Duration = Σ (t × PV(C_t)) / Price',
+    'modifiedDuration': 'Macaulay Duration / (1 + YTM / Frequency)',
+    'accruedInterest': 'Coupon per Period × (Days Accrued / Days in Period)',
+    'yearsToMaturity': '(Maturity Date - Valuation Date) / 365',
+    'termDays': 'Days from Valuation Date to Maturity Date',
+    'daysToMaturity': 'Days from Valuation Date to Maturity Date',
+    'pricePer100': '(Purchase Price / Face Value) × 100',
+    'currentPrice': 'Market price of the bond',
+    'totalDiscount': 'Σ (Face Value - Purchase Price)',
+    'avgDiscountRate': 'Σ Discount Rate / Number of Instruments',
+    'weightedAvgDiscount': 'Σ (Discount Rate × Face Value) / Σ Face Value',
+    'totalFaceValue': 'Σ Face Value',
+    'totalPurchasePrice': 'Σ Purchase Price',
+    'avgInvestment': 'Total Purchase Price / Number of Instruments',
+    'discountRate': 'Annual discount rate (%)',
+    'totalMarketValue': 'Σ (Market Value of each bond)'
   }
   formulaText.value = formulaMap[metricKey] || 'No formula available for this metric.'
-  
+
   const agg = allCalculations.value || {}
   const calc = calculations.value || {}
+  const rows = instrumentSummary.value.rows || []
+  const firstRow = (cleanedData.value && cleanedData.value[0]) || (rawData.value && rawData.value[0]) || {}
+
   const details = []
-  
-  const getValue = (key) => {
-    // Direct key lookup
-    let value = calc[key] || agg[key]
-    
-    // Try snake_case variant
-    if (value === undefined || value === null) {
-      const snake = toSnakeCase(key)
-      value = calc[snake] || agg[snake]
-    }
-    
-    // Try camelCase variant  
-    if (value === undefined || value === null) {
-      const camel = toCamelCase(key)
-      value = calc[camel] || agg[camel]
-    }
-    
-    // For specific aggregates, try common variations
-    if (value === undefined || value === null) {
-      const variations = {
-        'totalPrincipal': ['total_principal', 'totalPrincipal'],
-        'totalInterest': ['total_interest', 'totalInterest'],
-        'totalValue': ['total_value', 'totalValue'],
-        'interestEarned': ['interest_earned', 'interestEarned'],
-        'avgRate': ['avg_rate', 'avgRate'],
-        'weightedAvgRate': ['weighted_avg_rate', 'weightedAvgRate'],
-        'avgDaysToMaturity': ['avg_days_to_maturity', 'avgDaysToMaturity'],
-        'totalPrincipal': ['total_principal', 'totalPrincipal'],
-        'totalPurchasePrice': ['total_purchase_price', 'totalPurchasePrice'],
-        'totalDiscount': ['total_discount', 'totalDiscount'],
-        'avgYTM': ['avg_ytm', 'avgYTM'],
-        'avgDuration': ['avg_duration', 'avgDuration'],
-        'weightedAvgCoupon': ['weighted_avg_coupon', 'weightedAvgCoupon'],
-        'totalCouponIncome': ['total_coupon_income', 'totalAnnualIncome'],
-        'totalAnnualIncome': ['total_coupon_income', 'totalAnnualIncome'],
-        'weightedAvgDiscount': ['weighted_avg_discount', 'weightedAvgDiscount'],
-        'avgInvestment': ['avg_investment', 'avgInvestment'],
-        'annualizedYield': ['annualized_yield', 'annualizedYield'],
-        'effectiveYield': ['effective_yield', 'effectiveYield'],
-        'effectiveAnnualRate': ['effective_annual_rate', 'effectiveAnnualRate'],
-        'bondEquivalentYield': ['bond_equivalent_yield', 'bondEquivalentYield'],
-        'discountYield': ['discount_yield', 'discountYield'],
-        'moneyMarketYield': ['money_market_yield', 'moneyMarketYield'],
-        'currentYield': ['current_yield', 'currentYield'],
-        'modifiedDuration': ['modified_duration', 'modifiedDuration'],
-        'yieldToMaturity': ['yield_to_maturity', 'yieldToMaturity', 'ytm'],
-        'couponRate': ['coupon_rate', 'couponRate'],
-        'faceValue': ['face_value', 'faceValue'],
-        'purchasePrice': ['purchase_price', 'purchasePrice'],
-        'currentPrice': ['current_price', 'currentPrice', 'price'],
-        'presentValue': ['present_value', 'presentValue'],
-        'fairValue': ['fair_value', 'fairValue'],
-        'maturityValue': ['maturity_value', 'maturityValue'],
-        'yieldCurveRate': ['yield_curve_rate', 'yieldCurveRate', 'benchmark_rate'],
-        'termDays': ['term_days', 'termDays'],
-        'daysToMaturity': ['days_to_maturity', 'daysToMaturity'],
-        'pricePer100': ['price_per_100', 'pricePer100'],
-        'holdingPeriodYield': ['holding_period_yield', 'holdingPeriodYield'],
-        'daysAccrued': ['days_accrued', 'daysAccrued'],
-        'couponPerPeriod': ['coupon_per_period', 'couponPerPeriod'],
-        'principal': ['principal', 'principal'],
-        'interestRate': ['interest_rate', 'interestRate'],
-        'dayCount': ['day_count_convention', 'dayCount'],
-        'frequency': ['coupon_frequency', 'frequency'],
-        'yearsToMaturity': ['years_to_maturity', 'yearsToMaturity']
-      }
-      
-      for (const variant of variations[key] || []) {
-        value = calc[variant] || agg[variant]
-        if (value !== undefined && value !== null) break
-      }
-    }
-    
-    return value !== undefined && value !== null ? value : null
+
+  // ---------- helpers ----------
+  const toCamelCase = (str) => {
+    if (!str) return str
+    return String(str).replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
   }
-  
-  const formatValue = (val) => {
-    if (val === null || val === undefined) return 'N/A'
-    if (typeof val === 'number') {
-      if (val > 10000) return val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      return val.toFixed(4)
-    }
-    return val
+
+  const fmtNum = (v, decimals = 2) => {
+    if (v === null || v === undefined || v === '') return 'N/A'
+    const n = typeof v === 'number' ? v : parseFloat(v)
+    if (isNaN(n)) return String(v)
+    if (Number.isInteger(n)) return n.toLocaleString()
+    return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
   }
-  
-  const toSnakeCase = (str) => str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)
-  
-  const toCamelCase = (str) => str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
-  
-  if (metricKey === 'interestEarned' || metricKey === 'totalInterest') {
-    const principal = getValue('principal') || getValue('totalPrincipal') || getValue('total_principal')
-    const rate = getValue('interestRate') || getValue('interest_rate') || getValue('avgRate') || getValue('avg_rate')
-    const days = getValue('termDays') || getValue('term_days') || getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity')
-    const dayCount = getValue('dayCount') || getValue('day_count_convention') || 'ACT/360'
-    const divisor = dayCount.includes('360') ? 360 : 365
-    const interest = principal * (rate / 100) * (days / divisor)
-    
-    details.push({ label: 'Principal', value: formatValue(principal), formula: 'Principal amount invested' })
-    details.push({ label: 'Interest Rate', value: formatValue(rate) + '%', formula: 'Annual interest rate' })
-    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
-    details.push({ label: 'Answer (Interest Earned)', value: formatValue(interest), formula: 'Final calculated interest' })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Principal Component', calculation: formatValue(principal), formula: 'Principal amount' },
-        { componentName: 'Rate Component', calculation: formatValue(rate) + '% (as decimal: ' + formatValue(rate/100) + ')', formula: 'Interest rate' },
-        { componentName: 'Time Component (Days/Divisor)', calculation: formatValue(days) + '/' + divisor + ' = ' + formatValue(days/divisor), formula: 'Time fraction' },
-        { componentName: 'Full Calculation (Principal × Rate × Days/Divisor)', calculation: `${formatValue(principal)} × ${formatValue(rate/100)} × ${formatValue(days/divisor)} = ${formatValue(interest)}`, formula: 'Principal × Rate × (Days/Divisor)' }
-      ]
+
+  const fmtPct = (v, decimals = 2) => {
+    if (v === null || v === undefined || v === '') return 'N/A'
+    const n = typeof v === 'number' ? v : parseFloat(v)
+    if (isNaN(n)) return String(v)
+    return n.toFixed(decimals) + '%'
+  }
+
+  const fmtDate = (v) => {
+    if (!v) return 'N/A'
+    try {
+      const d = new Date(v)
+      if (isNaN(d.getTime())) return String(v)
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    } catch { return String(v) }
+  }
+
+  const daysBetween = (a, b) => {
+    if (!a || !b) return null
+    const d1 = new Date(a), d2 = new Date(b)
+    if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return null
+    return Math.ceil((d2.getTime() - d1.getTime()) / 86400000)
+  }
+
+  const getCalcVal = (key) => {
+    const variants = [key, toSnakeCase(key), toCamelCase(key)]
+    for (const v of variants) {
+      if (calc[v] !== undefined && calc[v] !== null && calc[v] !== '') return calc[v]
+      if (agg[v] !== undefined && agg[v] !== null && agg[v] !== '') return agg[v]
+    }
+    return null
+  }
+
+  const getRowVal = (key) => {
+    const variants = [key, toSnakeCase(key), toCamelCase(key)]
+    for (const v of variants) {
+      if (firstRow[v] !== undefined && firstRow[v] !== null && firstRow[v] !== '') return firstRow[v]
+    }
+    return null
+  }
+
+  const getRowField = (row, key) => {
+    if (!row) return null
+    const variants = [key, toSnakeCase(key), toCamelCase(key)]
+    for (const v of variants) {
+      if (row[v] !== undefined && row[v] !== null && row[v] !== '') return row[v]
+    }
+    return null
+  }
+
+  // ---------- common values ----------
+  const issueDate    = getRowVal('Issue Date')
+  const maturityDate = getRowVal('Maturity Date')
+  const valuationDateRow = getRowVal('Valuation Date') || getRowVal('Settlement Date')
+  const faceValue       = getCalcVal('faceValue')    || getRowVal('Face Value')
+  const principal       = getCalcVal('principal')    || getRowVal('Principal') || faceValue
+  const purchasePrice   = getCalcVal('purchasePrice')|| getRowVal('Purchase Price')
+  const couponRate      = getCalcVal('couponRate')   || getRowVal('Coupon Rate')
+  const interestRate    = getCalcVal('interestRate') || getRowVal('Interest Rate')
+  const discountRate    = getCalcVal('discountRate') || getRowVal('Discount Rate')
+  const ytm             = getCalcVal('yieldToMaturity') || getRowVal('Yield to Maturity')
+  const currentPrice    = getCalcVal('currentPrice') || getRowVal('Current Price') || getRowVal('Price')
+  const frequency       = getCalcVal('frequency')    || getRowVal('Coupon Frequency') || getRowVal('Frequency')
+  const dayCountConv    = getCalcVal('dayCount') || getRowVal('Day Count Convention') || 'ACT/360'
+  const divisor         = String(dayCountConv).includes('360') ? 360 : 365
+
+  let daysToMat = getCalcVal('daysToMaturity') || getCalcVal('termDays')
+  let daysNarration = ''
+  if (valuationDateRow && maturityDate) {
+    const d = daysBetween(valuationDateRow, maturityDate)
+    if (d !== null) {
+      daysNarration = `From ${fmtDate(valuationDateRow)} to ${fmtDate(maturityDate)} = ${d} days`
+      if (!daysToMat) daysToMat = d
+    }
+  } else if (issueDate && maturityDate) {
+    const d = daysBetween(issueDate, maturityDate)
+    if (d !== null) {
+      daysNarration = `From ${fmtDate(issueDate)} to ${fmtDate(maturityDate)} = ${d} days`
+      if (!daysToMat) daysToMat = d
     }
   }
-  
-  else if (metricKey === 'discountYield') {
-    const face = getValue('faceValue') || getValue('face_value') || getValue('totalFaceValue') || getValue('total_face_value')
-    const purchase = getValue('purchasePrice') || getValue('purchase_price') || getValue('totalPurchasePrice') || getValue('total_purchase_price')
-    const days = getValue('termDays') || getValue('term_days') || getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity')
-    const discount = face - purchase
-    const dayCount = getValue('dayCount') || getValue('day_count_convention') || 'ACT/360'
-    const divisor = dayCount.includes('360') ? 360 : 365
-    const discountYield = (discount / face) * (divisor / days) * 100
-    
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Maturity value' })
-    details.push({ label: 'Purchase Price', value: formatValue(purchase), formula: 'Price paid' })
-    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
-    details.push({ label: 'Answer (Discount Yield)', value: formatValue(discountYield) + '%', formula: 'Final discount yield' })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Face Value Component', calculation: formatValue(face), formula: 'Maturity value' },
-        { componentName: 'Purchase Price Component', calculation: formatValue(purchase), formula: 'Price paid' },
-        { componentName: 'Discount Amount Component (Face Value - Purchase Price)', calculation: `${formatValue(face)} - ${formatValue(purchase)} = ${formatValue(discount)}`, formula: 'Face Value - Purchase Price' },
-        { componentName: 'Discount Yield Calculation ((Discount / Face) × (Divisor / Days) × 100)', calculation: `(${formatValue(discount)} / ${formatValue(face)}) × (${divisor} / ${formatValue(days)}) × 100 = ${formatValue(discountYield)}%`, formula: '(Discount / Face) × (Divisor / Days) × 100' }
-      ]
-    }
+
+  const pushDatesIfAny = () => {
+    if (valuationDateRow) details.push({ label: 'Valuation Date', value: fmtDate(valuationDateRow), formula: 'From data (Valuation Date / Settlement Date)' })
+    if (issueDate) details.push({ label: 'Issue Date', value: fmtDate(issueDate), formula: 'From data (Issue Date)' })
+    if (maturityDate) details.push({ label: 'Maturity Date', value: fmtDate(maturityDate), formula: 'From data (Maturity Date)' })
+    if (daysNarration) details.push({ label: 'Days to Maturity (from dates)', value: daysNarration, formula: 'Maturity Date − Valuation/Issue Date' })
   }
-  
-  else if (metricKey === 'bondEquivalentYield') {
-    const face = getValue('faceValue') || getValue('face_value') || getValue('totalFaceValue') || getValue('total_face_value')
-    const purchase = getValue('purchasePrice') || getValue('purchase_price') || getValue('totalPurchasePrice') || getValue('total_purchase_price')
-    const days = getValue('termDays') || getValue('term_days') || getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity')
-    const discount = face - purchase
-    const bey = (discount / purchase) * (365 / days) * 100
-    
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Maturity value' })
-    details.push({ label: 'Purchase Price', value: formatValue(purchase), formula: 'Price paid' })
-    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
-    details.push({ label: 'Answer (Bond Equivalent Yield)', value: formatValue(bey) + '%', formula: 'Final BEY' })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Face Value Component', calculation: formatValue(face), formula: 'Maturity value' },
-        { componentName: 'Purchase Price Component', calculation: formatValue(purchase), formula: 'Price paid' },
-        { componentName: 'Discount Amount Component (Face Value - Purchase Price)', calculation: `${formatValue(face)} - ${formatValue(purchase)} = ${formatValue(discount)}`, formula: 'Face Value - Purchase Price' },
-        { componentName: 'BEY Calculation ((Discount / Purchase) × (365 / Days) × 100)', calculation: `(${formatValue(discount)} / ${formatValue(purchase)}) × (365 / ${formatValue(days)}) × 100 = ${formatValue(bey)}%`, formula: '(Discount / Purchase) × (365 / Days) × 100' }
-      ]
-    }
-  }
-  
-  else if (metricKey === 'currentYield') {
-    const price = getValue('currentPrice') || getValue('current_price') || getValue('price')
-    const couponRate = getValue('couponRate') || getValue('coupon_rate')
-    const face = getValue('faceValue') || getValue('face_value') || 100000
-    const annualCoupon = face * (couponRate / 100)
-    const currentYield = (annualCoupon / price) * 100
-    
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
-    details.push({ label: 'Coupon Rate', value: formatValue(couponRate) + '%', formula: 'Annual coupon rate' })
-    details.push({ label: 'Current Price', value: formatValue(price), formula: 'Market price' })
-    details.push({ label: 'Answer (Current Yield)', value: formatValue(currentYield) + '%', formula: 'Final current yield' })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Face Value Component', calculation: formatValue(face), formula: 'Par value' },
-        { componentName: 'Coupon Rate Component', calculation: formatValue(couponRate) + '% (as decimal: ' + formatValue(couponRate/100) + ')', formula: 'Annual coupon rate' },
-        { componentName: 'Annual Coupon Component (Face Value × Coupon Rate)', calculation: `${formatValue(face)} × ${formatValue(couponRate/100)} = ${formatValue(annualCoupon)}`, formula: 'Face Value × Coupon Rate' },
-        { componentName: 'Current Yield Calculation ((Annual Coupon / Price) × 100)', calculation: `(${formatValue(annualCoupon)} / ${formatValue(price)}) × 100 = ${formatValue(currentYield)}%`, formula: '(Annual Coupon / Price) × 100' }
-      ]
-    }
-  }
-  
-  else if (metricKey === 'accruedInterest') {
-    const couponRate = getValue('couponRate') || getValue('coupon_rate')
-    const frequency = getValue('frequency') || getValue('coupon_frequency') || 2
-    const face = getValue('faceValue') || getValue('face_value') || 100000
-    const dayCount = getValue('dayCount') || getValue('day_count_convention') || 'ACT/365'
-    const daysAccrued = getValue('daysAccrued') || getValue('days_accrued') || 45
-    const divisor = dayCount.includes('360') ? 360 : 365
-    const couponPerPeriod = face * (couponRate / 100) / frequency
-    const daysInPeriod = divisor / frequency
-    const accrued = couponPerPeriod * (daysAccrued / daysInPeriod)
-    
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
-    details.push({ label: 'Coupon Rate', value: formatValue(couponRate) + '%', formula: 'Annual coupon rate' })
-    details.push({ label: 'Coupon Frequency', value: frequency, formula: 'Payments per year' })
-    details.push({ label: 'Answer (Accrued Interest)', value: formatValue(accrued), formula: 'Final accrued interest' })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Face Value Component', calculation: formatValue(face), formula: 'Par value' },
-        { componentName: 'Coupon Rate Component', calculation: formatValue(couponRate) + '% (as decimal: ' + formatValue(couponRate/100) + ')', formula: 'Annual coupon rate' },
-        { componentName: 'Coupon per Period Component (Annual Coupon / Frequency)', calculation: `${formatValue(face * (couponRate/100))} / ${frequency} = ${formatValue(couponPerPeriod)}`, formula: 'Annual Coupon / Frequency' },
-        { componentName: 'Days Accrued Component', calculation: formatValue(daysAccrued), formula: 'Days since last coupon' },
-        { componentName: 'Days in Period Component (Divisor / Frequency)', calculation: `${divisor} / ${frequency} = ${formatValue(daysInPeriod)}`, formula: `${divisor} / ${frequency}` },
-        { componentName: 'Accrued Interest Calculation (Coupon per Period × (Days Accrued / Days in Period))', calculation: `${formatValue(couponPerPeriod)} × (${formatValue(daysAccrued)} / ${formatValue(daysInPeriod)}) = ${formatValue(accrued)}`, formula: 'Coupon per Period × (Days Accrued / Days in Period)' }
-      ]
-    }
-  }
-  
-  else if (metricKey === 'Total Portfolio Value' || metricKey === 'totalValue') {
-    const rows = instrumentSummary.value.rows || []
-    const valueField = 'Total Value' in rows[0] ? 'Total Value' : 'total_value' in rows[0] ? 'total_value' : 'Calculated Value'
-    const principalField = 'Principal' in rows[0] ? 'Principal' : 'principal' in rows[0] ? 'principal' : 'Face Value'
-    
-    let totalValue = 0
-    let totalPrincipal = 0
-    const valueBreakdown = []
-    const principalBreakdown = []
-    
+
+  // Row-by-row multi aggregation helper
+  const aggregateRows = (label, rateKeys, weightKeys, dayKeys) => {
+    const items = []
+    let totalWeight = 0
+    let weightedSum = 0
+    let rateSum = 0
+    let count = 0
+    let daysSum = 0
+    let daysCount = 0
+
     rows.forEach((row, idx) => {
-      const val = parseFloat(row[valueField] || row[valueField.toLowerCase()] || 0)
-      const princ = parseFloat(row[principalField] || row[principalField.toLowerCase()] || 0)
-      if (!isNaN(val)) {
-        totalValue += val
-        valueBreakdown.push(val)
-      }
-      if (!isNaN(princ)) {
-        totalPrincipal += princ
-        principalBreakdown.push(princ)
-      }
-    })
-    
-    details.push({ label: 'Total Value', value: formatValue(totalValue), formula: 'Sum of all instrument values' })
-    if (principalBreakdown.length > 0) {
-      details.push({ label: 'Total Principal', value: formatValue(totalPrincipal), formula: 'Sum of principal amounts' })
-    }
-    details.push({ label: 'Answer (Total Portfolio Value)', value: formatValue(totalValue), formula: 'Final portfolio value' })
-    
-    if (valueBreakdown.length > 0) {
-      details.breakdown = {
-        title: 'Formula Component Breakdown',
-        components: [
-          { componentName: 'Value Component', calculation: valueBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalValue), formula: 'Individual instrument values' }
-        ]
-      }
-      if (principalBreakdown.length > 0) {
-        details.breakdown.components.push({
-          componentName: 'Principal Component',
-          calculation: principalBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalPrincipal),
-          formula: 'Individual principal amounts'
+      const rate = rateKeys.map(k => getRowField(row, k)).find(v => v !== null && v !== undefined && v !== '')
+      const weight = weightKeys.map(k => getRowField(row, k)).find(v => v !== null && v !== undefined && v !== '')
+      const days = dayKeys ? dayKeys.map(k => getRowField(row, k)).find(v => v !== null && v !== undefined && v !== '') : null
+      const name = row['Instrument Name'] || row['instrument_name'] || row['Name'] || `Row ${idx + 1}`
+
+      if (rate !== null && rate !== undefined && rate !== '') {
+        const rNum = parseFloat(rate) || 0
+        const wNum = parseFloat(weight) || 0
+        rateSum += rNum
+        weightedSum += rNum * wNum
+        totalWeight += wNum
+        count++
+        if (days !== null && days !== undefined && days !== '') {
+          daysSum += parseFloat(days) || 0
+          daysCount++
+        }
+        items.push({
+          name,
+          rate: rNum,
+          weight: wNum,
+          contribution: rNum * wNum,
+          days: days !== null && days !== undefined && days !== '' ? parseFloat(days) : null
         })
       }
-    }
-  }
-  
-  else if (metricKey === 'Average Rate' || metricKey === 'avgRate' || metricKey === 'weightedAvgRate') {
-    const rows = instrumentSummary.value.rows || []
-    const rateField = 'Avg Rate' in rows[0] ? 'Avg Rate' : 'avg_rate' in rows[0] ? 'avg_rate' : 'Interest Rate'
-    const principalField = 'Principal' in rows[0] ? 'Principal' : 'principal' in rows[0] ? 'principal' : 'Face Value'
-    
-    let totalWeightedRate = 0
-    let totalPrincipal = 0
-    const rateBreakdown = []
-    const principalBreakdown = []
-    const weightedBreakdown = []
-    
-    rows.forEach((row, idx) => {
-      const rate = parseFloat(row[rateField] || row[rateField.toLowerCase()] || 0)
-      const princ = parseFloat(row[principalField] || row[principalField.toLowerCase()] || 0)
-      if (!isNaN(rate) && !isNaN(princ)) {
-        const weighted = rate * princ
-        totalWeightedRate += weighted
-        totalPrincipal += princ
-        rateBreakdown.push(rate)
-        principalBreakdown.push(princ)
-        weightedBreakdown.push(weighted)
-      }
     })
-    
-    const avgRate = totalPrincipal > 0 ? totalWeightedRate / totalPrincipal : 0
-    
-    details.push({ label: 'Total Weighted Rate', value: formatValue(totalWeightedRate), formula: 'Σ (Rate × Principal)' })
-    details.push({ label: 'Total Principal', value: formatValue(totalPrincipal), formula: 'Σ Principal' })
-    details.push({ label: 'Calculation', value: `${formatValue(totalWeightedRate)} / ${formatValue(totalPrincipal)} = ${formatValue(avgRate)}%`, formula: 'Σ (Rate × Principal) / Σ Principal' })
-    details.push({ label: 'Answer (Average Rate)', value: formatValue(avgRate) + '%', formula: 'Final weighted average rate' })
-    
+
+    return { items, totalWeight, weightedSum, rateSum, count, daysSum, daysCount }
+  }
+
+  // ---------- INTEREST EARNED / TOTAL INTEREST ----------
+  if (metricKey === 'interestEarned' || metricKey === 'totalInterest') {
+    const rate = interestRate || couponRate || discountRate
+    pushDatesIfAny()
+    details.push({ label: 'Principal (amount invested)', value: fmtNum(principal), formula: 'Field: Principal / Face Value' })
+    details.push({ label: 'Annual Interest Rate', value: fmtPct(rate), formula: 'Field: Interest Rate / Coupon Rate / Discount Rate' })
+    details.push({ label: 'Days to Maturity', value: fmtNum(daysToMat, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({ label: 'Day Count Basis', value: String(divisor) + ' days', formula: dayCountConv })
+    const interest = (parseFloat(principal) || 0) * ((parseFloat(rate) || 0) / 100) * ((parseFloat(daysToMat) || 0) / divisor)
+    details.push({
+      label: 'Calculation',
+      value: `${fmtNum(principal)} × (${fmtNum(rate)} / 100) × (${fmtNum(daysToMat, 0)} / ${divisor}) = ${fmtNum(interest)}`,
+      formula: 'Principal × Rate ÷ 100 × Days ÷ DayCountBasis'
+    })
+    details.push({ label: 'Answer (Interest Earned)', value: fmtNum(interest), formula: 'Simple interest' })
     details.breakdown = {
       title: 'Formula Component Breakdown',
       components: [
-        { componentName: 'Rate Component', calculation: rateBreakdown.map(v => formatValue(v) + '%').join(' + '), formula: 'Individual interest rates' },
-        { componentName: 'Principal Component', calculation: principalBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalPrincipal), formula: 'Individual principal amounts' },
-        { componentName: 'Weighted Rate Component (Rate × Principal)', calculation: weightedBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalWeightedRate), formula: 'Rate × Principal for each instrument' }
+        { componentName: 'Rate as Decimal', calculation: `${fmtNum(rate)}% ÷ 100 = ${(parseFloat(rate) / 100).toFixed(6)}`, formula: 'Rate ÷ 100' },
+        { componentName: 'Time Fraction', calculation: `${fmtNum(daysToMat, 0)} ÷ ${divisor} = ${((parseFloat(daysToMat) || 0) / divisor).toFixed(6)}`, formula: 'Days ÷ DayCountBasis' },
+        { componentName: 'Full Calculation', calculation: `${fmtNum(principal)} × ${(parseFloat(rate) / 100).toFixed(6)} × ${((parseFloat(daysToMat) || 0) / divisor).toFixed(6)} = ${fmtNum(interest)}`, formula: 'Principal × Rate × Time' }
       ]
     }
   }
-  
-  else if (metricKey === 'Number of Instruments' || metricKey === 'instrumentCount') {
-    const count = getValue('instrumentCount') || getValue('instrument_count') || (instrumentSummary.value.rows?.length || 0)
-    const successful = getValue('successful_rows')
-    const rows = instrumentSummary.value.rows || []
-    
-    details.push({ label: 'Total Count', value: formatValue(count), formula: 'Number of rows' })
-    if (successful) {
-      details.push({ label: 'Successful Calculations', value: formatValue(successful), formula: 'Rows with successful calculations' })
-    }
-    details.push({ label: 'Answer (Number of Instruments)', value: formatValue(count), formula: 'Final instrument count' })
-    
-    const instrumentNames = rows.map((row, idx) => {
-      const name = row['Instrument Name'] || row['instrument_name'] || row['Issuer'] || row['Name'] || row['instrument'] || `Instrument ${idx + 1}`
-      return name
-    })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Individual Instruments', calculation: instrumentNames.join(', '), formula: 'List of all instruments in the portfolio' }
-      ]
-    }
-  }
-  
-  else if (metricKey === 'weightedAvgCoupon' || metricKey === 'totalAnnualIncome') {
-    const rows = instrumentSummary.value.rows || []
-    const couponField = 'Coupon Rate' in rows[0] ? 'Coupon Rate' : 'coupon_rate' in rows[0] ? 'coupon_rate' : 'Interest Rate'
-    const faceField = 'Face Value' in rows[0] ? 'Face Value' : 'face_value' in rows[0] ? 'face_value' : 'Principal'
-    
-    let totalCouponIncome = 0
-    let totalFaceValue = 0
-    const couponBreakdown = []
-    const faceBreakdown = []
-    const incomeBreakdown = []
-    
-    rows.forEach((row, idx) => {
-      const coupon = parseFloat(row[couponField] || row[couponField.toLowerCase()] || 0)
-      const face = parseFloat(row[faceField] || row[faceField.toLowerCase()] || 0)
-      if (!isNaN(coupon) && !isNaN(face)) {
-        const income = face * (coupon / 100)
-        totalCouponIncome += income
-        totalFaceValue += face
-        couponBreakdown.push(coupon)
-        faceBreakdown.push(face)
-        incomeBreakdown.push(income)
-      }
-    })
-    
-    const avgCoupon = totalFaceValue > 0 ? (totalCouponIncome / totalFaceValue) * 100 : 0
-    
-    details.push({ label: 'Total Annual Income', value: formatValue(totalCouponIncome), formula: 'Σ (Face Value × Coupon Rate)' })
-    details.push({ label: 'Total Face Value', value: formatValue(totalFaceValue), formula: 'Σ Face Value' })
-    details.push({ label: 'Answer (Total Annual Income)', value: formatValue(totalCouponIncome), formula: 'Final annual coupon income' })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Coupon Rate Component', calculation: couponBreakdown.map(v => formatValue(v) + '%').join(' + '), formula: 'Individual coupon rates' },
-        { componentName: 'Face Value Component', calculation: faceBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalFaceValue), formula: 'Individual face values' },
-        { componentName: 'Annual Income Component (Face Value × Coupon Rate)', calculation: incomeBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalCouponIncome), formula: 'Face Value × Coupon Rate for each instrument' }
-      ]
-    }
-  }
-  
-  else if (metricKey === 'avgYTM') {
-    const rows = instrumentSummary.value.rows || []
-    const ytmField = 'YTM' in rows[0] ? 'YTM' : 'ytm' in rows[0] ? 'ytm' : 'Yield to Maturity'
-    
-    let totalYTM = 0
-    let count = 0
-    const ytmBreakdown = []
-    
-    rows.forEach((row, idx) => {
-      const ytm = parseFloat(row[ytmField] || row[ytmField.toLowerCase()] || 0)
-      if (!isNaN(ytm)) {
-        totalYTM += ytm
-        count++
-        ytmBreakdown.push(ytm)
-      }
-    })
-    
-    const avgYTM = count > 0 ? totalYTM / count : 0
-    
-    details.push({ label: 'Sum of YTMs', value: formatValue(totalYTM) + '%', formula: 'Σ YTM' })
-    details.push({ label: 'Number of Instruments', value: formatValue(count), formula: 'Count' })
-    details.push({ label: 'Calculation', value: `${formatValue(totalYTM)}% / ${count} = ${formatValue(avgYTM)}%`, formula: 'Σ YTM / Count' })
-    details.push({ label: 'Answer (Average YTM)', value: formatValue(avgYTM) + '%', formula: 'Final average YTM' })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'YTM Component', calculation: ytmBreakdown.map(v => formatValue(v) + '%').join(' + ') + ' = ' + formatValue(totalYTM) + '%', formula: 'Individual YTM values' }
-      ]
-    }
-  }
-  
-  else if (metricKey === 'duration') {
-    const rows = instrumentSummary.value.rows || []
-    const durationField = 'Duration' in rows[0] ? 'Duration' : 'duration' in rows[0] ? 'duration' : 'Macaulay Duration'
-    
-    let totalDuration = 0
-    let count = 0
-    const durationBreakdown = []
-    
-    rows.forEach((row, idx) => {
-      const dur = parseFloat(row[durationField] || row[durationField.toLowerCase()] || 0)
-      if (!isNaN(dur)) {
-        totalDuration += dur
-        count++
-        durationBreakdown.push(dur)
-      }
-    })
-    
-    const avgDuration = count > 0 ? totalDuration / count : 0
-    
-    details.push({ label: 'Sum of Durations', value: formatValue(totalDuration) + ' years', formula: 'Σ Duration' })
-    details.push({ label: 'Number of Instruments', value: formatValue(count), formula: 'Count' })
-    details.push({ label: 'Calculation', value: `${formatValue(totalDuration)} / ${count} = ${formatValue(avgDuration)} years`, formula: 'Σ Duration / Count' })
-    details.push({ label: 'Answer (Duration)', value: formatValue(avgDuration) + ' years', formula: 'Final duration' })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Duration Component', calculation: durationBreakdown.map(v => formatValue(v) + ' years').join(' + ') + ' = ' + formatValue(totalDuration) + ' years', formula: 'Individual duration values' }
-      ]
-    }
-  }
-  
-  else if (metricKey === 'weightedAvgDiscount' || metricKey === 'totalDiscount') {
-    const rows = instrumentSummary.value.rows || []
-    const discountField = 'Discount Rate' in rows[0] ? 'Discount Rate' : 'discount_rate' in rows[0] ? 'discount_rate' : 'Discount'
-    const faceField = 'Face Value' in rows[0] ? 'Face Value' : 'face_value' in rows[0] ? 'face_value' : 'Principal'
-    
-    let totalDiscount = 0
-    let totalFaceValue = 0
-    const discountBreakdown = []
-    const faceBreakdown = []
-    const discountAmountBreakdown = []
-    
-    rows.forEach((row, idx) => {
-      const discount = parseFloat(row[discountField] || row[discountField.toLowerCase()] || 0)
-      const face = parseFloat(row[faceField] || row[faceField.toLowerCase()] || 0)
-      if (!isNaN(discount) && !isNaN(face)) {
-        const discountAmount = face * (discount / 100)
-        totalDiscount += discountAmount
-        totalFaceValue += face
-        discountBreakdown.push(discount)
-        faceBreakdown.push(face)
-        discountAmountBreakdown.push(discountAmount)
-      }
-    })
-    
-    const avgDiscount = totalFaceValue > 0 ? (totalDiscount / totalFaceValue) * 100 : 0
-    
-    details.push({ label: 'Total Discount Amount', value: formatValue(totalDiscount), formula: 'Σ (Face Value × Discount Rate)' })
-    details.push({ label: 'Total Face Value', value: formatValue(totalFaceValue), formula: 'Σ Face Value' })
-    details.push({ label: 'Answer (Total Discount)', value: formatValue(totalDiscount), formula: 'Final total discount' })
-    
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Discount Rate Component', calculation: discountBreakdown.map(v => formatValue(v) + '%').join(' + '), formula: 'Individual discount rates' },
-        { componentName: 'Face Value Component', calculation: faceBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalFaceValue), formula: 'Individual face values' },
-        { componentName: 'Discount Amount Component (Face Value × Discount Rate)', calculation: discountAmountBreakdown.map(v => formatValue(v)).join(' + ') + ' = ' + formatValue(totalDiscount), formula: 'Face Value × Discount Rate for each instrument' }
-      ]
-    }
-  }
-  
-  else if (metricKey === 'interestRate') {
-    const value = getValue('interestRate') || getValue('interest_rate') || getValue('avgRate') || getValue('avg_rate')
-    details.push({ label: 'Interest Rate', value: formatValue(value) + '%', formula: 'Annual interest rate as percentage' })
-    details.push({ label: 'Answer (Interest Rate)', value: formatValue(value) + '%', formula: 'Final interest rate' })
-  }
 
-  else if (metricKey === 'effectiveYield' || metricKey === 'effectiveAnnualRate' || metricKey === 'annualYield') {
-    const effYield = getValue('effectiveYield') || getValue('effective_yield') || getValue('effectiveAnnualRate') || getValue('effective_annual_rate')
-    const principal = getValue('principal') || getValue('totalPrincipal') || getValue('total_principal')
-    const interest = getValue('interestEarned') || getValue('totalInterest') || getValue('interest_earned')
-    const days = getValue('termDays') || getValue('term_days') || getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity')
-
-    details.push({ label: 'Effective Yield', value: formatValue(effYield) + '%', formula: 'Effective yield from backend' })
-    details.push({ label: 'Interest Earned', value: formatValue(interest), formula: 'Interest amount' })
-    details.push({ label: 'Principal', value: formatValue(principal), formula: 'Principal amount' })
-    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
-    details.push({ label: 'Answer (Effective Yield)', value: formatValue(effYield) + '%', formula: '(Interest / Principal) × (365 / Days) × 100' })
-  }
-
-  else if (metricKey === 'avgDaysToMaturity' || metricKey === 'termDays' || metricKey === 'daysToMaturity') {
-    const avgDays = getValue('avgDaysToMaturity') || getValue('avg_days_to_maturity') || getValue('termDays') || getValue('term_days')
-    details.push({ label: 'Average Days to Maturity', value: formatValue(avgDays), formula: 'Average days from backend' })
-    details.push({ label: 'Answer (Average Days)', value: formatValue(avgDays), formula: 'Final average days to maturity' })
-  }
-
-  else if (metricKey === 'maturityValue') {
-    const maturityVal = getValue('maturityValue') || getValue('maturity_value') || getValue('totalValue') || getValue('total_value')
-    const principal = getValue('principal') || getValue('totalPrincipal') || getValue('total_principal')
-    const interest = getValue('interestEarned') || getValue('totalInterest') || getValue('interest_earned')
-
-    details.push({ label: 'Maturity Value', value: formatValue(maturityVal), formula: 'Maturity value from backend' })
-    details.push({ label: 'Principal', value: formatValue(principal), formula: 'Principal amount' })
-    details.push({ label: 'Interest Earned', value: formatValue(interest), formula: 'Interest amount' })
-    details.push({ label: 'Answer (Maturity Value)', value: formatValue(maturityVal), formula: 'Principal + Interest' })
-  }
-
-  else if (metricKey === 'presentValue') {
-    const presentValue = getValue('presentValue') || getValue('present_value') || getValue('price')
-    const couponRate = getValue('couponRate') || getValue('coupon_rate')
-    const face = getValue('faceValue') || getValue('face_value')
-    const ytm = getValue('yieldToMaturity') || getValue('yield_to_maturity') || getValue('ytm')
-    const frequency = getValue('frequency') || getValue('coupon_frequency') || 2
-
-    details.push({ label: 'Present Value', value: formatValue(presentValue), formula: 'Present value from backend' })
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
-    details.push({ label: 'Coupon Rate', value: formatValue(couponRate) + '%', formula: 'Annual coupon rate' })
-    details.push({ label: 'Yield to Maturity', value: formatValue(ytm) + '%', formula: 'Discount rate' })
-    details.push({ label: 'Coupon Frequency', value: frequency, formula: 'Payments per year' })
-    details.push({ label: 'Answer (Present Value)', value: formatValue(presentValue), formula: 'DCF calculated present value' })
-  }
-
-  else if (metricKey === 'fairValue') {
-    const fairVal = getValue('fairValue') || getValue('fair_value')
-    const presentValue = getValue('presentValue') || getValue('present_value') || getValue('price')
-    const marketPrice = getValue('currentPrice') || getValue('current_price') || getValue('price')
-
-    details.push({ label: 'Fair Value', value: formatValue(fairVal), formula: 'Fair value from backend' })
-    details.push({ label: 'Present Value', value: formatValue(presentValue), formula: 'Discounted cash flow value' })
-    details.push({ label: 'Market Price', value: formatValue(marketPrice), formula: 'Current market price' })
-    details.push({ label: 'Answer (Fair Value)', value: formatValue(fairVal), formula: 'Present Value - Market Price' })
-  }
-
-  else if (metricKey === 'yieldCurveRate') {
-    const benchmark = getValue('yieldCurveRate') || getValue('yield_curve_rate') || getValue('benchmark_rate') || getValue('risk_free_rate')
-    details.push({ label: 'Benchmark Rate', value: formatValue(benchmark) + '%', formula: 'FRED API benchmark rate' })
-    details.push({ label: 'Answer (Benchmark)', value: formatValue(benchmark) + '%', formula: 'External benchmark from FRED' })
-  }
-
-  else if (metricKey === 'totalPrincipal') {
-    const totalPrincipal = getValue('totalPrincipal') || getValue('total_principal')
-    details.push({ label: 'Total Principal', value: formatValue(totalPrincipal), formula: 'Σ Principal amounts (calculated by backend)' })
-    details.push({ label: 'Answer (Total Principal)', value: formatValue(totalPrincipal), formula: 'Sum of all principal values from individual instruments' })
-  }
-
-  else if (metricKey === 'modifiedDuration') {
-    const modDur = getValue('modifiedDuration') || getValue('modified_duration')
-    const macaulay = getValue('duration') || getValue('macaulay_duration')
-    const ytm = getValue('yieldToMaturity') || getValue('yield_to_maturity') || getValue('ytm')
-    const frequency = getValue('frequency') || getValue('coupon_frequency') || 2
-
-    details.push({ label: 'Modified Duration', value: formatValue(modDur) + ' years', formula: 'Modified duration from backend' })
-    details.push({ label: 'Macaulay Duration', value: formatValue(macaulay) + ' years', formula: 'Weighted average time to cash flows' })
-    details.push({ label: 'Yield to Maturity', value: formatValue(ytm) + '%', formula: 'Discount rate' })
-    details.push({ label: 'Coupon Frequency', value: frequency, formula: 'Payments per year' })
-    details.push({ label: 'Answer (Modified Duration)', value: formatValue(modDur) + ' years', formula: 'Macaulay / (1 + YTM/Frequency)' })
-  }
-
-  else if (metricKey === 'yieldToMaturity') {
-    const ytm = getValue('yieldToMaturity') || getValue('yield_to_maturity') || getValue('ytm')
-    const price = getValue('currentPrice') || getValue('current_price') || getValue('price')
-    const couponRate = getValue('couponRate') || getValue('coupon_rate')
-    const face = getValue('faceValue') || getValue('face_value')
-    const frequency = getValue('frequency') || getValue('coupon_frequency') || 2
-    const years = getValue('yearsToMaturity') || getValue('years_to_maturity')
-
-    details.push({ label: 'Yield to Maturity', value: formatValue(ytm) + '%', formula: 'YTM from backend' })
-    details.push({ label: 'Current Price', value: formatValue(price), formula: 'Market price' })
-    details.push({ label: 'Coupon Rate', value: formatValue(couponRate) + '%', formula: 'Annual coupon rate' })
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
-    details.push({ label: 'Years to Maturity', value: formatValue(years), formula: 'Time to maturity' })
-    details.push({ label: 'Answer (YTM)', value: formatValue(ytm) + '%', formula: 'Internal rate of return (Newton-Raphson)' })
-  }
-
-  else if (metricKey === 'couponRate') {
-    const value = getValue('couponRate') || getValue('coupon_rate')
-    const face = getValue('faceValue') || getValue('face_value')
-    const annualCoupon = face * (value / 100)
-
-    details.push({ label: 'Coupon Rate', value: formatValue(value) + '%', formula: 'Coupon rate from backend' })
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
-    details.push({ label: 'Annual Coupon', value: formatValue(annualCoupon), formula: 'Face Value × Coupon Rate' })
-    details.push({ label: 'Answer (Coupon Rate)', value: formatValue(value) + '%', formula: 'Final coupon rate' })
-  }
-
-  else if (metricKey === 'holdingPeriodYield') {
-    const hpy = getValue('holdingPeriodYield') || getValue('holding_period_yield')
-    const face = getValue('faceValue') || getValue('face_value')
-    const purchase = getValue('purchasePrice') || getValue('purchase_price')
-
-    details.push({ label: 'Holding Period Yield', value: formatValue(hpy) + '%', formula: 'Holding period yield from backend' })
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Maturity value' })
-    details.push({ label: 'Purchase Price', value: formatValue(purchase), formula: 'Price paid' })
-    details.push({ label: 'Answer (Holding Period Yield)', value: formatValue(hpy) + '%', formula: '(Face Value - Purchase Price) / Purchase Price × 100' })
-  }
-
-  else if (metricKey === 'pricePer100') {
-    const pricePer100 = getValue('pricePer100') || getValue('price_per_100')
-    const price = getValue('currentPrice') || getValue('current_price') || getValue('price')
-    const face = getValue('faceValue') || getValue('face_value')
-
-    details.push({ label: 'Price per 100', value: formatValue(pricePer100), formula: 'Price per 100 from backend' })
-    details.push({ label: 'Current Price', value: formatValue(price), formula: 'Market price' })
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Par value' })
-    details.push({ label: 'Answer (Price per 100)', value: formatValue(pricePer100), formula: '(Price / Face Value) × 100' })
-  }
-
-  else if (metricKey === 'totalPurchasePrice') {
-    const totalPurchase = getValue('totalPurchasePrice') || getValue('total_purchase_price')
-    details.push({ label: 'Total Purchase Price', value: formatValue(totalPurchase), formula: 'Σ Purchase prices' })
-    details.push({ label: 'Answer (Total Purchase)', value: formatValue(totalPurchase), formula: 'Sum of all purchase prices' })
-  }
-
-  else if (metricKey === 'avgInvestment') {
-    const avgInvest = getValue('avgInvestment') || getValue('avg_investment')
-    const totalPurchase = getValue('totalPurchasePrice') || getValue('total_purchase_price')
-    const count = getValue('instrumentCount') || getValue('instrument_count') || (instrumentSummary.value.rows?.length || 0)
-
-    details.push({ label: 'Average Investment', value: formatValue(avgInvest), formula: 'Average investment from backend' })
-    details.push({ label: 'Total Purchase Price', value: formatValue(totalPurchase), formula: 'Sum of all purchase prices' })
-    details.push({ label: 'Number of Instruments', value: formatValue(count), formula: 'Count' })
-    details.push({ label: 'Answer (Average Investment)', value: formatValue(avgInvest), formula: 'Total Purchase / Count' })
-  }
-
-  else if (metricKey === 'annualizedYield' || metricKey === 'moneyMarketYield' || metricKey === 'effectiveAnnualYield') {
-    const moneyMarketYield = getValue('moneyMarketYield') || getValue('money_market_yield') || getValue('annualizedYield') || getValue('annualized_yield')
-    const face = getValue('faceValue') || getValue('face_value')
-    const purchase = getValue('purchasePrice') || getValue('purchase_price')
-    const days = getValue('termDays') || getValue('term_days')
+  // ---------- DISCOUNT YIELD ----------
+  else if (metricKey === 'discountYield') {
+    pushDatesIfAny()
+    const face = parseFloat(faceValue) || parseFloat(principal) || 0
+    const purchase = parseFloat(purchasePrice) || (face - (parseFloat(getCalcVal('totalDiscount')) || 0))
     const discount = face - purchase
-
-    details.push({ label: 'Money Market Yield', value: formatValue(moneyMarketYield) + '%', formula: 'Money market yield from backend' })
-    details.push({ label: 'Face Value', value: formatValue(face), formula: 'Maturity value' })
-    details.push({ label: 'Purchase Price', value: formatValue(purchase), formula: 'Price paid' })
-    details.push({ label: 'Term Days', value: formatValue(days), formula: 'Days to maturity' })
-    details.push({ label: 'Answer (Money Market Yield)', value: formatValue(moneyMarketYield) + '%', formula: '(Discount / Purchase) × (360 / Days) × 100' })
+    const dYield = daysToMat ? (discount / face) * (360 / daysToMat) * 100 : 0
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
+    details.push({ label: 'Discount Amount', value: fmtNum(discount), formula: 'Face Value − Purchase Price' })
+    details.push({ label: 'Days to Maturity', value: fmtNum(daysToMat, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({
+      label: 'Calculation',
+      value: `(${fmtNum(discount)} ÷ ${fmtNum(face)}) × (360 ÷ ${fmtNum(daysToMat, 0)}) × 100 = ${fmtNum(dYield)}%`,
+      formula: '(Discount ÷ Face) × (360 ÷ Days) × 100'
+    })
+    details.push({ label: 'Answer (Discount Yield)', value: fmtPct(dYield), formula: 'Bank discount yield' })
   }
 
+  // ---------- BOND EQUIVALENT YIELD ----------
+  else if (metricKey === 'bondEquivalentYield') {
+    pushDatesIfAny()
+    const face = parseFloat(faceValue) || parseFloat(principal) || 0
+    const purchase = parseFloat(purchasePrice) || 0
+    const discount = face - purchase
+    const bey = purchase && daysToMat ? (discount / purchase) * (365 / daysToMat) * 100 : 0
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
+    details.push({ label: 'Discount Amount', value: fmtNum(discount), formula: 'Face Value − Purchase Price' })
+    details.push({ label: 'Days to Maturity', value: fmtNum(daysToMat, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({
+      label: 'Calculation',
+      value: `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (365 ÷ ${fmtNum(daysToMat, 0)}) × 100 = ${fmtNum(bey)}%`,
+      formula: '(Discount ÷ Purchase) × (365 ÷ Days) × 100'
+    })
+    details.push({ label: 'Answer (Bond Equivalent Yield)', value: fmtPct(bey), formula: 'BEY on purchase price, 365-day basis' })
+  }
+
+  // ---------- CURRENT YIELD ----------
+  else if (metricKey === 'currentYield') {
+    const coupon = parseFloat(couponRate) || 0
+    const price = parseFloat(currentPrice) || parseFloat(purchasePrice) || parseFloat(faceValue) || 0
+    const face = parseFloat(faceValue) || 100
+    const annualCoupon = (face * coupon) / 100
+    const cy = price ? (annualCoupon / price) * 100 : 0
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Coupon Rate', value: fmtPct(coupon), formula: 'Field: Coupon Rate' })
+    details.push({ label: 'Annual Coupon', value: fmtNum(annualCoupon), formula: 'Face × Coupon ÷ 100' })
+    details.push({ label: 'Current Price', value: fmtNum(price), formula: 'Field: Current Price / Purchase Price' })
+    details.push({
+      label: 'Calculation',
+      value: `(${fmtNum(annualCoupon)} ÷ ${fmtNum(price)}) × 100 = ${fmtNum(cy)}%`,
+      formula: '(Annual Coupon ÷ Current Price) × 100'
+    })
+    details.push({ label: 'Answer (Current Yield)', value: fmtPct(cy), formula: 'Current yield' })
+  }
+
+  // ---------- ACCRUED INTEREST ----------
+  else if (metricKey === 'accruedInterest') {
+    pushDatesIfAny()
+    const coupon = parseFloat(couponRate) || 0
+    const freq = parseFloat(frequency) || 2
+    const face = parseFloat(faceValue) || 100
+    const daysAccrued = parseFloat(getCalcVal('daysAccrued')) || 0
+    const couponPerPeriod = (face * coupon) / 100 / freq
+    const daysInPeriod = divisor / freq
+    const accrued = daysInPeriod ? couponPerPeriod * (daysAccrued / daysInPeriod) : 0
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Coupon Rate', value: fmtPct(coupon), formula: 'Field: Coupon Rate' })
+    details.push({ label: 'Coupon Frequency', value: String(freq) + ' / year', formula: 'Field: Coupon Frequency' })
+    details.push({ label: 'Days Accrued', value: fmtNum(daysAccrued, 0) + ' days', formula: 'Field: Days Accrued' })
+    details.push({ label: 'Coupon per Period', value: fmtNum(couponPerPeriod), formula: 'Face × Coupon ÷ 100 ÷ Frequency' })
+    details.push({ label: 'Days in Coupon Period', value: fmtNum(daysInPeriod, 0), formula: `${divisor} ÷ ${freq}` })
+    details.push({
+      label: 'Calculation',
+      value: `${fmtNum(couponPerPeriod)} × (${fmtNum(daysAccrued, 0)} ÷ ${fmtNum(daysInPeriod, 0)}) = ${fmtNum(accrued)}`,
+      formula: 'Coupon per Period × (Days Accrued ÷ Days in Period)'
+    })
+    details.push({ label: 'Answer (Accrued Interest)', value: fmtNum(accrued), formula: 'Accrued interest' })
+  }
+
+  // ---------- TOTAL PORTFOLIO VALUE / TOTAL VALUE ----------
+  else if (metricKey === 'Total Portfolio Value' || metricKey === 'totalValue') {
+    if (rows.length > 0) {
+      let sum = 0
+      const parts = []
+      rows.forEach((row, idx) => {
+        const v = parseFloat(getRowField(row, 'Total Value') || getRowField(row, 'total_value') || getRowField(row, 'Calculated Value') || 0) || 0
+        const name = row['Instrument Name'] || `Row ${idx + 1}`
+        sum += v
+        parts.push(`${name}: ${fmtNum(v)}`)
+      })
+      details.push({ label: 'Per-Instrument Values', value: parts.join(' | '), formula: 'Total Value field for each row' })
+      details.push({ label: 'Sum of Values', value: fmtNum(sum), formula: 'Σ (Total Value)' })
+      details.push({ label: 'Answer (Total Portfolio Value)', value: fmtNum(sum), formula: 'Sum of all instrument values' })
+      details.breakdown = {
+        title: 'Formula Component Breakdown',
+        components: rows.map((row, idx) => {
+          const v = parseFloat(getRowField(row, 'Total Value') || getRowField(row, 'total_value') || getRowField(row, 'Calculated Value') || 0) || 0
+          return {
+            componentName: row['Instrument Name'] || `Row ${idx + 1}`,
+            calculation: fmtNum(v),
+            formula: 'Total Value for this instrument'
+          }
+        })
+      }
+    } else {
+      const total = parseFloat(agg.totalValue) || parseFloat(calc.totalValue) || 0
+      details.push({ label: 'Total Portfolio Value', value: fmtNum(total), formula: 'Aggregate totalValue from calculation engine' })
+      details.push({ label: 'Answer (Total Portfolio Value)', value: fmtNum(total), formula: 'Sum of all instrument values' })
+    }
+  }
+
+  // ---------- AVERAGE RATE / WEIGHTED AVG RATE ----------
+  else if (metricKey === 'Average Rate' || metricKey === 'avgRate' || metricKey === 'weightedAvgRate') {
+    const result = aggregateRows('Average Rate', ['Avg Rate', 'avg_rate', 'Rate', 'rate', 'Interest Rate', 'interest_rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate', 'Yield', 'yield'], ['Total Value', 'total_value', 'Principal', 'principal', 'Face Value', 'face_value'])
+    const isWeighted = metricKey === 'weightedAvgRate'
+    if (result.items.length > 0) {
+      details.push({
+        label: 'Per-Instrument Rates & Weights',
+        value: result.items.map(i => `${i.name}: Rate ${fmtPct(i.rate)} × Weight ${fmtNum(i.weight)}`).join(' | '),
+        formula: 'Each row\'s rate and weight (Total Value / Principal)'
+      })
+      details.push({ label: 'Sum of (Rate × Weight)', value: fmtNum(result.weightedSum), formula: 'Σ (Rate × Weight)' })
+      details.push({ label: 'Sum of Weights', value: fmtNum(result.totalWeight), formula: 'Σ (Weight)' })
+      const finalVal = result.totalWeight ? result.weightedSum / result.totalWeight : 0
+      details.push({
+        label: 'Calculation',
+        value: `${fmtNum(result.weightedSum)} ÷ ${fmtNum(result.totalWeight)} = ${fmtNum(finalVal)}%`,
+        formula: 'Σ (Rate × Weight) ÷ Σ Weight'
+      })
+      details.push({ label: isWeighted ? 'Answer (Weighted Average Rate)' : 'Answer (Average Rate)', value: fmtPct(finalVal), formula: 'Weighted average of rates' })
+      details.breakdown = {
+        title: 'Formula Component Breakdown',
+        components: result.items.map((item) => ({
+          componentName: item.name,
+          calculation: `${fmtPct(item.rate)} × ${fmtNum(item.weight)} = ${fmtNum(item.contribution)}`,
+          formula: 'Rate × Weight'
+        }))
+      }
+    } else {
+      const val = parseFloat(agg.avgRate) || parseFloat(agg.weightedAvgRate) || 0
+      details.push({ label: isWeighted ? 'Weighted Average Rate' : 'Average Rate', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- NUMBER OF INSTRUMENTS ----------
+  else if (metricKey === 'Number of Instruments' || metricKey === 'instrumentCount') {
+    const count = rows.length || parseFloat(agg.instrumentCount) || 0
+    if (rows.length > 0) {
+      details.push({ label: 'Instruments Identified', value: rows.map(r => r['Instrument Name'] || 'Unnamed').join(', '), formula: 'Instrument Name column' })
+    }
+    details.push({ label: 'Total Count', value: String(count), formula: 'Count of all rows' })
+    details.push({ label: 'Answer (Number of Instruments)', value: String(count), formula: 'Number of instruments' })
+  }
+
+  // ---------- AVG DAYS TO MATURITY ----------
+  else if (metricKey === 'avgDaysToMaturity') {
+    pushDatesIfAny()
+    const result = aggregateRows('Avg Days', [], [], ['Days to Maturity', 'days_to_maturity', 'Term', 'term', 'Term Days', 'term_days', 'Avg Days to Maturity', 'avg_days_to_maturity'])
+    if (result.daysCount > 0) {
+      details.push({
+        label: 'Per-Instrument Days',
+        value: rows.map((r, idx) => {
+          const d = parseFloat(getRowField(r, 'Days to Maturity') || getRowField(r, 'days_to_maturity') || getRowField(r, 'Term') || getRowField(r, 'term') || 0)
+          return `${r['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(d, 0)} days`
+        }).join(' | '),
+        formula: 'Days to Maturity for each row'
+      })
+      details.push({ label: 'Sum of Days', value: fmtNum(result.daysSum, 0), formula: 'Σ Days' })
+      details.push({ label: 'Count', value: String(result.daysCount), formula: 'Number of rows with Days' })
+      details.push({
+        label: 'Calculation',
+        value: `${fmtNum(result.daysSum, 0)} ÷ ${result.daysCount} = ${fmtNum(result.daysSum / result.daysCount, 1)} days`,
+        formula: 'Σ Days ÷ Count'
+      })
+      details.push({ label: 'Answer (Average Days to Maturity)', value: fmtNum(result.daysSum / result.daysCount, 1) + ' days', formula: 'Average across instruments' })
+    } else {
+      const val = parseFloat(agg.avgDaysToMaturity) || 0
+      details.push({ label: 'Average Days to Maturity', value: fmtNum(val, 1) + ' days', formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- TERM DAYS / DAYS TO MATURITY ----------
+  else if (metricKey === 'termDays' || metricKey === 'daysToMaturity') {
+    if (valuationDateRow && maturityDate) {
+      const d = daysBetween(valuationDateRow, maturityDate)
+      details.push({ label: 'Valuation Date', value: fmtDate(valuationDateRow), formula: 'From data (Valuation Date / Settlement Date)' })
+      details.push({ label: 'Maturity Date', value: fmtDate(maturityDate), formula: 'From data (Maturity Date)' })
+      details.push({
+        label: 'Calculation',
+        value: `${fmtDate(maturityDate)} − ${fmtDate(valuationDateRow)} = ${d} days`,
+        formula: 'Maturity Date − Valuation Date'
+      })
+      details.push({ label: 'Answer (Days to Maturity)', value: d + ' days', formula: 'Day difference' })
+    } else if (issueDate && maturityDate) {
+      const d = daysBetween(issueDate, maturityDate)
+      details.push({ label: 'Issue Date', value: fmtDate(issueDate), formula: 'From data (Issue Date)' })
+      details.push({ label: 'Maturity Date', value: fmtDate(maturityDate), formula: 'From data (Maturity Date)' })
+      details.push({
+        label: 'Calculation',
+        value: `${fmtDate(maturityDate)} − ${fmtDate(issueDate)} = ${d} days`,
+        formula: 'Maturity Date − Issue Date'
+      })
+      details.push({ label: 'Answer (Days to Maturity)', value: d + ' days', formula: 'Day difference' })
+    } else {
+      details.push({ label: 'Days to Maturity', value: fmtNum(daysToMat, 0) + ' days', formula: 'Field: Days to Maturity / Term Days' })
+      details.push({ label: 'Answer', value: fmtNum(daysToMat, 0) + ' days', formula: 'From data' })
+    }
+  }
+
+  // ---------- YEARS TO MATURITY ----------
+  else if (metricKey === 'yearsToMaturity') {
+    const d = daysToMat
+    if (d !== null && d !== undefined) {
+      pushDatesIfAny()
+      const years = parseFloat(d) / 365
+      details.push({ label: 'Days to Maturity', value: fmtNum(d, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
+      details.push({ label: 'Calculation', value: `${fmtNum(d, 0)} ÷ 365 = ${years.toFixed(4)} years`, formula: 'Days ÷ 365' })
+      details.push({ label: 'Answer (Years to Maturity)', value: years.toFixed(4) + ' years', formula: 'Years from valuation to maturity' })
+    } else {
+      details.push({ label: 'Years to Maturity', value: fmtNum(getCalcVal('yearsToMaturity')), formula: 'Field: Years to Maturity' })
+    }
+  }
+
+  // ---------- TOTAL PRINCIPAL ----------
+  else if (metricKey === 'totalPrincipal' || metricKey === 'totalFaceValue') {
+    if (rows.length > 0) {
+      let sum = 0
+      const parts = rows.map((row, idx) => {
+        const v = parseFloat(getRowField(row, 'Principal') || getRowField(row, 'principal') || getRowField(row, 'Face Value') || getRowField(row, 'face_value') || getRowField(row, 'Amount') || 0) || 0
+        sum += v
+        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(v)}`
+      })
+      details.push({ label: 'Per-Instrument Values', value: parts.join(' | '), formula: 'Principal / Face Value from each row' })
+      details.push({ label: 'Sum', value: fmtNum(sum), formula: 'Σ (Principal / Face Value)' })
+      details.push({ label: `Answer (${metricKey === 'totalFaceValue' ? 'Total Face Value' : 'Total Principal'})`, value: fmtNum(sum), formula: 'Sum across instruments' })
+    } else {
+      const val = parseFloat(agg.totalPrincipal) || parseFloat(agg.totalValue) || 0
+      details.push({ label: 'Total', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- EFFECTIVE ANNUAL RATE ----------
+  else if (metricKey === 'effectiveAnnualRate') {
+    pushDatesIfAny()
+    const rate = parseFloat(interestRate) || parseFloat(couponRate) || 0
+    const days = parseFloat(daysToMat) || 365
+    const ear = rate && days ? (Math.pow(1 + (rate / 100) * (days / divisor), divisor / days) - 1) * 100 : 0
+    details.push({ label: 'Nominal Annual Rate', value: fmtPct(rate), formula: 'Field: Interest Rate' })
+    details.push({ label: 'Days', value: fmtNum(days, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({ label: 'Day Count Basis', value: String(divisor), formula: dayCountConv })
+    details.push({ label: 'Calculation', value: `(1 + ${(rate / 100).toFixed(6)} × ${days}/${divisor})^(${divisor}/${days}) − 1) × 100 = ${fmtNum(ear)}%`, formula: 'Effective annual yield conversion' })
+    details.push({ label: 'Answer (Effective Annual Rate)', value: fmtPct(ear), formula: 'Compounded equivalent rate' })
+  }
+
+  // ---------- ANNUAL YIELD ----------
+  else if (metricKey === 'annualYield') {
+    pushDatesIfAny()
+    const interest = parseFloat(getCalcVal('interestEarned')) || parseFloat(getCalcVal('totalInterest')) || 0
+    const p = parseFloat(principal) || 0
+    const days = parseFloat(daysToMat) || 365
+    const yieldVal = p && days ? (interest / p) * (365 / days) * 100 : 0
+    details.push({ label: 'Interest Earned', value: fmtNum(interest), formula: 'Computed from Principal × Rate × Days ÷ Basis' })
+    details.push({ label: 'Principal', value: fmtNum(p), formula: 'Field: Principal' })
+    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0), formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({ label: 'Calculation', value: `(${fmtNum(interest)} ÷ ${fmtNum(p)}) × (365 ÷ ${fmtNum(days, 0)}) × 100 = ${fmtNum(yieldVal)}%`, formula: '(Interest ÷ Principal) × (365 ÷ Days) × 100' })
+    details.push({ label: 'Answer (Annual Yield)', value: fmtPct(yieldVal), formula: 'Annualised yield' })
+  }
+
+  // ---------- MATURITY VALUE ----------
+  else if (metricKey === 'maturityValue') {
+    pushDatesIfAny()
+    const p = parseFloat(principal) || parseFloat(faceValue) || 0
+    const rate = parseFloat(interestRate) || parseFloat(couponRate) || parseFloat(discountRate) || 0
+    const days = parseFloat(daysToMat) || 0
+    const interest = p * (rate / 100) * (days / divisor)
+    const mv = p + interest
+    details.push({ label: 'Principal', value: fmtNum(p), formula: 'Field: Principal' })
+    details.push({ label: 'Rate', value: fmtPct(rate), formula: 'Field: Interest / Coupon / Discount Rate' })
+    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({ label: 'Interest Amount', value: fmtNum(interest), formula: 'Principal × Rate ÷ 100 × Days ÷ Basis' })
+    details.push({ label: 'Calculation', value: `${fmtNum(p)} + ${fmtNum(interest)} = ${fmtNum(mv)}`, formula: 'Principal + Interest' })
+    details.push({ label: 'Answer (Maturity Value)', value: fmtNum(mv), formula: 'Value at maturity' })
+  }
+
+  // ---------- PRESENT VALUE ----------
+  else if (metricKey === 'presentValue' || metricKey === 'fairValue') {
+    pushDatesIfAny()
+    const face = parseFloat(faceValue) || parseFloat(principal) || 0
+    const rate = parseFloat(interestRate) || parseFloat(discountRate) || 0
+    const days = parseFloat(daysToMat) || 0
+    const pv = face / (1 + (rate / 100) * (days / divisor))
+    details.push({ label: 'Face / Maturity Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Discount / Interest Rate', value: fmtPct(rate), formula: 'Field: Interest / Discount Rate' })
+    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({ label: 'Calculation', value: `${fmtNum(face)} ÷ (1 + ${(rate / 100).toFixed(6)} × ${days}/${divisor}) = ${fmtNum(pv)}`, formula: 'FV ÷ (1 + r × t)' })
+    if (metricKey === 'fairValue') {
+      const purchase = parseFloat(purchasePrice) || 0
+      const fv = pv - purchase
+      details.push({ label: 'Present Value', value: fmtNum(pv), formula: 'Computed above' })
+      details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
+      details.push({ label: 'Calculation', value: `${fmtNum(pv)} − ${fmtNum(purchase)} = ${fmtNum(fv)}`, formula: 'PV − Purchase Price' })
+      details.push({ label: 'Answer (Fair Value)', value: fmtNum(fv), formula: 'Fair value adjustment' })
+    } else {
+      details.push({ label: 'Answer (Present Value)', value: fmtNum(pv), formula: 'Discounted value' })
+    }
+  }
+
+  // ---------- YIELD CURVE RATE (FRED) ----------
+  else if (metricKey === 'yieldCurveRate') {
+    const bench = parseFloat(agg.fred?.benchmark_rate) || parseFloat(getCalcVal('yieldCurveRate')) || 0
+    details.push({ label: 'Data Source', value: 'FRED (Federal Reserve Economic Data)', formula: 'Benchmark curve' })
+    details.push({ label: 'Country', value: agg.fred?.country || effectiveCountry.value || 'N/A', formula: 'Selected filter' })
+    details.push({ label: 'Currency', value: agg.fred?.currency || effectiveCurrency.value || 'N/A', formula: 'Selected filter' })
+    details.push({ label: 'Maturity', value: agg.fred?.maturity || effectiveMaturity.value || 'N/A', formula: 'Selected filter' })
+    details.push({ label: 'Series Label', value: agg.fred?.series_label || 'N/A', formula: 'FRED series identifier' })
+    details.push({ label: 'Benchmark Yield', value: fmtPct(bench), formula: 'Matched benchmark rate' })
+    details.push({ label: 'Answer (Yield Curve Rate)', value: fmtPct(bench), formula: 'Market benchmark' })
+  }
+
+  // ---------- COUPON RATE ----------
+  else if (metricKey === 'couponRate') {
+    const cr = parseFloat(couponRate) || 0
+    details.push({ label: 'Source', value: 'Coupon Rate field from data', formula: 'Original input' })
+    details.push({ label: 'Coupon Rate', value: fmtPct(cr), formula: 'Annual coupon as % of face value' })
+    details.push({ label: 'Answer', value: fmtPct(cr), formula: 'Annual coupon rate' })
+  }
+
+  // ---------- AVG COUPON RATE ----------
+  else if (metricKey === 'avgCouponRate') {
+    const result = aggregateRows('Average Coupon', ['Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate'], ['Face Value', 'face_value', 'Principal', 'principal'])
+    if (result.items.length > 0) {
+      const avg = result.count ? result.rateSum / result.count : 0
+      details.push({ label: 'Per-Instrument Coupons', value: result.items.map(i => `${i.name}: ${fmtPct(i.rate)}`).join(' | '), formula: 'Coupon Rate for each row' })
+      details.push({ label: 'Sum of Coupons', value: fmtPct(result.rateSum), formula: 'Σ Coupon Rate' })
+      details.push({ label: 'Count', value: String(result.count), formula: 'Number of instruments' })
+      details.push({ label: 'Calculation', value: `${fmtPct(result.rateSum)} ÷ ${result.count} = ${fmtNum(avg)}%`, formula: 'Σ Coupon Rate ÷ Count' })
+      details.push({ label: 'Answer (Average Coupon Rate)', value: fmtPct(avg), formula: 'Simple average' })
+    } else {
+      const val = parseFloat(agg.avgCouponRate) || 0
+      details.push({ label: 'Average Coupon Rate', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- WEIGHTED AVG COUPON ----------
+  else if (metricKey === 'weightedAvgCoupon') {
+    const result = aggregateRows('Weighted Coupon', ['Coupon Rate', 'coupon_rate'], ['Face Value', 'face_value', 'Principal', 'principal'])
+    if (result.totalWeight > 0) {
+      const weighted = result.weightedSum / result.totalWeight
+      details.push({ label: 'Per-Instrument', value: result.items.map(i => `${i.name}: ${fmtPct(i.rate)} × ${fmtNum(i.weight)}`).join(' | '), formula: 'Rate × Face Value for each row' })
+      details.push({ label: 'Sum of (Rate × Face)', value: fmtNum(result.weightedSum), formula: 'Σ (Rate × Face)' })
+      details.push({ label: 'Total Face', value: fmtNum(result.totalWeight), formula: 'Σ Face' })
+      details.push({ label: 'Calculation', value: `${fmtNum(result.weightedSum)} ÷ ${fmtNum(result.totalWeight)} = ${fmtNum(weighted)}%`, formula: 'Σ (Rate × Face) ÷ Σ Face' })
+      details.push({ label: 'Answer (Weighted Average Coupon)', value: fmtPct(weighted), formula: 'Weighted average' })
+    } else {
+      const val = parseFloat(agg.weightedAvgCoupon) || 0
+      details.push({ label: 'Weighted Average Coupon', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- TOTAL ANNUAL INCOME ----------
+  else if (metricKey === 'totalAnnualIncome') {
+    if (rows.length > 0) {
+      let sum = 0
+      const parts = rows.map((row, idx) => {
+        const face = parseFloat(getRowField(row, 'Face Value') || getRowField(row, 'face_value') || 0) || 0
+        const coupon = parseFloat(getRowField(row, 'Coupon Rate') || getRowField(row, 'coupon_rate') || 0) || 0
+        const income = (face * coupon) / 100
+        sum += income
+        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(face)} × ${fmtPct(coupon)} = ${fmtNum(income)}`
+      })
+      details.push({ label: 'Per-Instrument Income', value: parts.join(' | '), formula: 'Face Value × Coupon Rate for each row' })
+      details.push({ label: 'Total Annual Income', value: fmtNum(sum), formula: 'Σ (Face × Coupon ÷ 100)' })
+      details.push({ label: 'Answer', value: fmtNum(sum), formula: 'Total annual coupon income' })
+    } else {
+      const val = parseFloat(agg.totalAnnualIncome) || 0
+      details.push({ label: 'Total Annual Income', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- ANNUAL COUPON ----------
+  else if (metricKey === 'annualCoupon') {
+    const face = parseFloat(faceValue) || 0
+    const coupon = parseFloat(couponRate) || 0
+    const val = (face * coupon) / 100
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Coupon Rate', value: fmtPct(coupon), formula: 'Field: Coupon Rate' })
+    details.push({ label: 'Calculation', value: `${fmtNum(face)} × ${fmtPct(coupon)} ÷ 100 = ${fmtNum(val)}`, formula: 'Face × Coupon ÷ 100' })
+    details.push({ label: 'Answer (Annual Coupon)', value: fmtNum(val), formula: 'Annual coupon payment' })
+  }
+
+  // ---------- COUPON PER PERIOD ----------
+  else if (metricKey === 'couponPerPeriod') {
+    const face = parseFloat(faceValue) || 0
+    const coupon = parseFloat(couponRate) || 0
+    const freq = parseFloat(frequency) || 2
+    const annual = (face * coupon) / 100
+    const perPeriod = annual / freq
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Coupon Rate', value: fmtPct(coupon), formula: 'Field: Coupon Rate' })
+    details.push({ label: 'Frequency', value: String(freq) + ' / year', formula: 'Field: Coupon Frequency' })
+    details.push({ label: 'Annual Coupon', value: fmtNum(annual), formula: 'Face × Coupon ÷ 100' })
+    details.push({ label: 'Calculation', value: `${fmtNum(annual)} ÷ ${freq} = ${fmtNum(perPeriod)}`, formula: 'Annual Coupon ÷ Frequency' })
+    details.push({ label: 'Answer (Coupon per Period)', value: fmtNum(perPeriod), formula: 'Coupon payment per period' })
+  }
+
+  // ---------- YIELD TO MATURITY ----------
+  else if (metricKey === 'yieldToMaturity' || metricKey === 'avgYTM') {
+    const y = parseFloat(ytm) || parseFloat(getCalcVal('avgYTM')) || 0
+    details.push({ label: 'Yield to Maturity', value: fmtPct(y), formula: 'From data or calculation engine (IRR of cash flows)' })
+    details.push({ label: 'Note', value: 'YTM is the internal rate of return that equates the present value of all future cash flows to the current market price', formula: 'Standard bond pricing' })
+    details.push({ label: 'Answer (YTM)', value: fmtPct(y), formula: 'Yield to maturity' })
+  }
+
+  // ---------- DURATION ----------
+  else if (metricKey === 'duration' || metricKey === 'modifiedDuration') {
+    const mac = parseFloat(getCalcVal('duration')) || 0
+    const y = parseFloat(ytm) || 0
+    const freq = parseFloat(frequency) || 2
+    if (metricKey === 'modifiedDuration') {
+      const mod = mac / (1 + (y / 100) / freq)
+      details.push({ label: 'Macaulay Duration', value: fmtNum(mac) + ' years', formula: 'From calculation engine' })
+      details.push({ label: 'YTM', value: fmtPct(y), formula: 'Field: Yield to Maturity' })
+      details.push({ label: 'Frequency', value: String(freq) + ' / year', formula: 'Field: Coupon Frequency' })
+      details.push({ label: 'Calculation', value: `${fmtNum(mac)} ÷ (1 + ${fmtPct(y)} / ${freq}) = ${fmtNum(mod)} years`, formula: 'Macaulay ÷ (1 + YTM/Freq)' })
+      details.push({ label: 'Answer (Modified Duration)', value: fmtNum(mod) + ' years', formula: 'Price sensitivity to 1% yield change' })
+    } else {
+      details.push({ label: 'Macaulay Duration', value: fmtNum(mac) + ' years', formula: 'Weighted average time to receive cash flows' })
+      details.push({ label: 'Formula', value: 'Σ (t × PV(C_t)) / Price', formula: 'Macaulay formula' })
+      details.push({ label: 'Answer (Duration)', value: fmtNum(mac) + ' years', formula: 'Macaulay duration' })
+    }
+  }
+
+  // ---------- PRICE PER 100 ----------
+  else if (metricKey === 'pricePer100') {
+    const purchase = parseFloat(purchasePrice) || 0
+    const face = parseFloat(faceValue) || 100
+    const pp100 = face ? (purchase / face) * 100 : 0
+    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Calculation', value: `(${fmtNum(purchase)} ÷ ${fmtNum(face)}) × 100 = ${fmtNum(pp100)}`, formula: '(Purchase ÷ Face) × 100' })
+    details.push({ label: 'Answer (Price per 100)', value: fmtNum(pp100), formula: 'Price expressed per 100 face value' })
+  }
+
+  // ---------- TOTAL DISCOUNT ----------
+  else if (metricKey === 'totalDiscount') {
+    if (rows.length > 0) {
+      let sum = 0
+      const parts = rows.map((row, idx) => {
+        const face = parseFloat(getRowField(row, 'Face Value') || getRowField(row, 'face_value') || 0) || 0
+        const purchase = parseFloat(getRowField(row, 'Purchase Price') || getRowField(row, 'purchase_price') || 0) || 0
+        const d = face - purchase
+        sum += d
+        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(d)}`
+      })
+      details.push({ label: 'Per-Instrument Discounts', value: parts.join(' | '), formula: 'Face − Purchase for each row' })
+      details.push({ label: 'Sum', value: fmtNum(sum), formula: 'Σ (Face − Purchase)' })
+      details.push({ label: 'Answer (Total Discount)', value: fmtNum(sum), formula: 'Total discount amount' })
+    } else {
+      const val = parseFloat(agg.totalDiscount) || 0
+      details.push({ label: 'Total Discount', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- AVG DISCOUNT RATE ----------
+  else if (metricKey === 'avgDiscountRate') {
+    const result = aggregateRows('Average Discount', ['Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate'], ['Face Value', 'face_value', 'Principal', 'principal'])
+    if (result.items.length > 0) {
+      const avg = result.count ? result.rateSum / result.count : 0
+      details.push({ label: 'Per-Instrument Rates', value: result.items.map(i => `${i.name}: ${fmtPct(i.rate)}`).join(' | '), formula: 'Discount Rate for each row' })
+      details.push({ label: 'Sum', value: fmtPct(result.rateSum), formula: 'Σ Discount Rate' })
+      details.push({ label: 'Count', value: String(result.count), formula: 'Number of instruments' })
+      details.push({ label: 'Calculation', value: `${fmtPct(result.rateSum)} ÷ ${result.count} = ${fmtNum(avg)}%`, formula: 'Σ Rate ÷ Count' })
+      details.push({ label: 'Answer (Average Discount Rate)', value: fmtPct(avg), formula: 'Simple average' })
+    } else {
+      const val = parseFloat(agg.avgDiscountRate) || 0
+      details.push({ label: 'Average Discount Rate', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- WEIGHTED AVG DISCOUNT ----------
+  else if (metricKey === 'weightedAvgDiscount') {
+    const result = aggregateRows('Weighted Discount', ['Discount Rate', 'discount_rate'], ['Face Value', 'face_value', 'Principal', 'principal'])
+    if (result.totalWeight > 0) {
+      const weighted = result.weightedSum / result.totalWeight
+      details.push({ label: 'Per-Instrument', value: result.items.map(i => `${i.name}: ${fmtPct(i.rate)} × ${fmtNum(i.weight)}`).join(' | '), formula: 'Rate × Face for each row' })
+      details.push({ label: 'Sum of (Rate × Face)', value: fmtNum(result.weightedSum), formula: 'Σ (Rate × Face)' })
+      details.push({ label: 'Total Face', value: fmtNum(result.totalWeight), formula: 'Σ Face' })
+      details.push({ label: 'Calculation', value: `${fmtNum(result.weightedSum)} ÷ ${fmtNum(result.totalWeight)} = ${fmtNum(weighted)}%`, formula: 'Σ (Rate × Face) ÷ Σ Face' })
+      details.push({ label: 'Answer (Weighted Average Discount)', value: fmtPct(weighted), formula: 'Weighted average' })
+    } else {
+      const val = parseFloat(agg.weightedAvgDiscount) || 0
+      details.push({ label: 'Weighted Average Discount', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- MONEY MARKET YIELD ----------
+  else if (metricKey === 'moneyMarketYield') {
+    pushDatesIfAny()
+    const face = parseFloat(faceValue) || 0
+    const purchase = parseFloat(purchasePrice) || 0
+    const days = parseFloat(daysToMat) || 0
+    const discount = face - purchase
+    const mmy = purchase && days ? (discount / purchase) * (360 / days) * 100 : 0
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
+    details.push({ label: 'Discount', value: fmtNum(discount), formula: 'Face − Purchase' })
+    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0), formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({ label: 'Calculation', value: `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (360 ÷ ${fmtNum(days, 0)}) × 100 = ${fmtNum(mmy)}%`, formula: '(Discount ÷ Purchase) × (360 ÷ Days) × 100' })
+    details.push({ label: 'Answer (Money Market Yield)', value: fmtPct(mmy), formula: 'MMY on purchase price, 360-day basis' })
+  }
+
+  // ---------- HOLDING PERIOD YIELD ----------
+  else if (metricKey === 'holdingPeriodYield') {
+    const face = parseFloat(faceValue) || 0
+    const purchase = parseFloat(purchasePrice) || 0
+    const discount = face - purchase
+    const hpy = purchase ? (discount / purchase) * 100 : 0
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
+    details.push({ label: 'Discount', value: fmtNum(discount), formula: 'Face − Purchase' })
+    details.push({ label: 'Calculation', value: `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × 100 = ${fmtNum(hpy)}%`, formula: '(Face − Purchase) ÷ Purchase × 100' })
+    details.push({ label: 'Answer (Holding Period Yield)', value: fmtPct(hpy), formula: 'HPY — total return without annualisation' })
+  }
+
+  // ---------- EFFECTIVE ANNUAL YIELD ----------
+  else if (metricKey === 'effectiveAnnualYield') {
+    pushDatesIfAny()
+    const face = parseFloat(faceValue) || 0
+    const purchase = parseFloat(purchasePrice) || 0
+    const days = parseFloat(daysToMat) || 0
+    const eay = purchase && days ? (Math.pow(face / purchase, 365 / days) - 1) * 100 : 0
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
+    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0), formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({ label: 'Calculation', value: `((${fmtNum(face)} ÷ ${fmtNum(purchase)})^(${365}/${days}) − 1) × 100 = ${fmtNum(eay)}%`, formula: '(Face ÷ Purchase)^(365/Days) − 1) × 100' })
+    details.push({ label: 'Answer (Effective Annual Yield)', value: fmtPct(eay), formula: 'Annualised compound yield' })
+  }
+
+  // ---------- TOTAL PURCHASE PRICE ----------
+  else if (metricKey === 'totalPurchasePrice') {
+    if (rows.length > 0) {
+      let sum = 0
+      const parts = rows.map((row, idx) => {
+        const v = parseFloat(getRowField(row, 'Purchase Price') || getRowField(row, 'purchase_price') || 0) || 0
+        sum += v
+        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(v)}`
+      })
+      details.push({ label: 'Per-Instrument', value: parts.join(' | '), formula: 'Purchase Price for each row' })
+      details.push({ label: 'Sum', value: fmtNum(sum), formula: 'Σ (Purchase Price)' })
+      details.push({ label: 'Answer (Total Purchase Price)', value: fmtNum(sum), formula: 'Total amount invested' })
+    } else {
+      const val = parseFloat(agg.totalPurchasePrice) || 0
+      details.push({ label: 'Total Purchase Price', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- AVG INVESTMENT ----------
+  else if (metricKey === 'avgInvestment') {
+    const purchase = parseFloat(purchasePrice) || 0
+    const count = rows.length || 1
+    const avg = purchase / count
+    if (rows.length > 0) {
+      let sum = 0
+      const parts = rows.map((row, idx) => {
+        const v = parseFloat(getRowField(row, 'Purchase Price') || getRowField(row, 'purchase_price') || 0) || 0
+        sum += v
+        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(v)}`
+      })
+      details.push({ label: 'Per-Instrument', value: parts.join(' | '), formula: 'Purchase Price for each row' })
+      details.push({ label: 'Total', value: fmtNum(sum), formula: 'Σ (Purchase Price)' })
+      details.push({ label: 'Count', value: String(rows.length), formula: 'Number of instruments' })
+      details.push({ label: 'Calculation', value: `${fmtNum(sum)} ÷ ${rows.length} = ${fmtNum(sum / rows.length)}`, formula: 'Total ÷ Count' })
+      details.push({ label: 'Answer (Average Investment)', value: fmtNum(sum / rows.length), formula: 'Average per instrument' })
+    } else {
+      details.push({ label: 'Average Investment', value: fmtNum(avg), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- ANNUALIZED YIELD ----------
+  else if (metricKey === 'annualizedYield') {
+    pushDatesIfAny()
+    const face = parseFloat(faceValue) || 0
+    const purchase = parseFloat(purchasePrice) || 0
+    const days = parseFloat(daysToMat) || 0
+    const discount = face - purchase
+    const ay = purchase && days ? (discount / purchase) * (365 / days) * 100 : 0
+    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
+    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
+    details.push({ label: 'Discount', value: fmtNum(discount), formula: 'Face − Purchase' })
+    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0), formula: daysNarration || 'Field: Days to Maturity' })
+    details.push({ label: 'Calculation', value: `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (365 ÷ ${fmtNum(days, 0)}) × 100 = ${fmtNum(ay)}%`, formula: '(Discount ÷ Purchase) × (365 ÷ Days) × 100' })
+    details.push({ label: 'Answer (Annualized Yield)', value: fmtPct(ay), formula: 'Annualised yield' })
+  }
+
+  // ---------- CURRENT PRICE ----------
+  else if (metricKey === 'currentPrice') {
+    const cp = parseFloat(currentPrice) || 0
+    details.push({ label: 'Source', value: 'Current Price / Price field from data', formula: 'Original input' })
+    details.push({ label: 'Current Price', value: fmtNum(cp), formula: 'Market price of the bond' })
+    details.push({ label: 'Answer', value: fmtNum(cp), formula: 'Current market price' })
+  }
+
+  // ---------- DISCOUNT RATE ----------
+  else if (metricKey === 'discountRate') {
+    const dr = parseFloat(discountRate) || 0
+    details.push({ label: 'Source', value: 'Discount Rate field from data', formula: 'Original input' })
+    details.push({ label: 'Discount Rate', value: fmtPct(dr), formula: 'Annual discount rate' })
+    details.push({ label: 'Answer', value: fmtPct(dr), formula: 'Discount rate' })
+  }
+
+  // ---------- TOTAL MARKET VALUE ----------
+  else if (metricKey === 'totalMarketValue') {
+    if (rows.length > 0) {
+      let sum = 0
+      const parts = rows.map((row, idx) => {
+        const v = parseFloat(getRowField(row, 'Market Value') || getRowField(row, 'market_value') || getRowField(row, 'Total Value') || getRowField(row, 'total_value') || 0) || 0
+        sum += v
+        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(v)}`
+      })
+      details.push({ label: 'Per-Instrument', value: parts.join(' | '), formula: 'Market Value for each row' })
+      details.push({ label: 'Sum', value: fmtNum(sum), formula: 'Σ Market Value' })
+      details.push({ label: 'Answer (Total Market Value)', value: fmtNum(sum), formula: 'Aggregate market value' })
+    } else {
+      const val = parseFloat(agg.totalMarketValue) || parseFloat(agg.totalValue) || 0
+      details.push({ label: 'Total Market Value', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
+    }
+  }
+
+  // ---------- DEFAULT FALLBACK ----------
   else {
-    const value = getValue(metricKey)
-    details.push({ label: metricKey, value: formatValue(value), formula: formulaMap[metricKey] || 'See formula above' })
-    details.push({ label: 'Answer', value: formatValue(value), formula: 'Final calculated value' })
+    const value = getCalcVal(metricKey)
+    const numeric = parseFloat(value)
+    if (!isNaN(numeric)) {
+      details.push({ label: 'Raw Value', value: fmtNum(numeric), formula: 'From calculation engine' })
+    } else {
+      details.push({ label: 'Raw Value', value: value !== null && value !== undefined ? String(value) : 'N/A', formula: 'From calculation engine' })
+    }
+    details.push({ label: 'Answer', value: value !== null && value !== undefined ? String(value) : 'N/A', formula: 'Final calculated value' })
   }
-  
+
   formulaCalculationDetails.value = details.length > 0 ? details : null
   showCalculationDetails.value = true
   showIndividualBreakdown.value = false
@@ -8134,7 +7630,6 @@ function deselectAllInstruments() { selectedInstruments.value = { 'money-market'
 
 function getInstrumentData(instrumentId) {
   if (!activeSession.value) return null
-  const sid = activeSession.value.id
   if (instrumentSummary.value.rows.length > 0) {
     const rows = instrumentSummary.value.rows.filter(r => r['Instrument Type'] === instrumentId)
     if (rows.length > 0) {
@@ -8230,23 +7725,22 @@ async function captureChartImage() {
         try {
           resolve(canvas.toDataURL('image/png', 1.0))
           return
-        } catch (e) { console.warn('Canvas capture failed', e) }
+        } catch (e) { /* fallthrough */ }
       }
       const canvasEl = document.querySelector('.chart-container--fred canvas')
       if (canvasEl && canvasEl.toDataURL) {
         try {
           resolve(canvasEl.toDataURL('image/png', 1.0))
           return
-        } catch (e) { console.warn('DOM canvas capture failed', e) }
+        } catch (e) { /* fallthrough */ }
       }
       const anyCanvas = document.querySelector('canvas')
       if (anyCanvas && anyCanvas.toDataURL) {
         try {
           resolve(anyCanvas.toDataURL('image/png', 1.0))
           return
-        } catch (e) { console.warn('Any canvas capture failed', e) }
+        } catch (e) { /* fallthrough */ }
       }
-      console.warn('No canvas found for chart capture')
       resolve('')
     }, 1000)
   })
@@ -8264,7 +7758,7 @@ const backgroundCoverUrl = '/reportbackground.png'
 
 async function generateReportHtml() {
   await loadSavedData()
-  
+
   const session = activeSession.value
   if (session && session.id) {
     try {
@@ -8278,10 +7772,10 @@ async function generateReportHtml() {
         }
       }
     } catch (e) {
-      console.warn('Failed to load yield curve data from session workflow:', e)
+      // non-fatal
     }
   }
-  
+
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
     return null
@@ -8294,16 +7788,16 @@ async function generateReportHtml() {
       activeTab.value = 'visualizations'
       await nextTick()
       await new Promise(resolve => setTimeout(resolve, 1500))
-      
+
       if (yieldCurveChart.value) {
         imageData = yieldCurveChart.value.toDataURL('image/png', 1.0)
         chartImageData.value = imageData
       }
-      
+
       activeTab.value = previousTab
       await nextTick()
     } catch (e) {
-      console.warn('Chart capture failed:', e)
+      // non-fatal
     }
   }
 
@@ -8312,7 +7806,7 @@ async function generateReportHtml() {
   const totalInstrumentCount = report.instruments.reduce((sum, inst) => sum + (parseInt(inst.calculations.instrumentCount) || 0), 0)
 
   const yieldPoints = yieldCurveData.value || []
-  
+
   let appendixRows = ''
   if (yieldPoints.length) {
     appendixRows = yieldPoints.map(point => `
@@ -8684,14 +8178,12 @@ async function downloadCombinedReport(format) {
     try {
       const session = sessionManager.getActiveSession()
       const sessionId = session?.id || sessionManager.getActiveSessionId() || localStorage.getItem('dura_active_session_id')
-      
+
       if (!sessionId) {
         alert('No active session found')
         return
       }
-      
-      console.log('Downloading Word report for session:', sessionId)
-      
+
       const response = await fetch('http://localhost:5000/api/report/generate-word', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -8702,21 +8194,21 @@ async function downloadCombinedReport(format) {
           file_name: `Dura-Capital-Combined-Report-${Date.now()}.docx`
         })
       })
-      
+
       const result = await response.json()
-      
+
       if (!result.success) {
         alert('Failed to generate Word report: ' + (result.message || 'Unknown error'))
         return
       }
-      
+
       const downloadPath = `http://localhost:5000/api/report/download-word/${sessionId}`
       const downloadResponse = await fetch(downloadPath)
       if (!downloadResponse.ok) {
         alert('Failed to download the generated report')
         return
       }
-      
+
       const blob = await downloadResponse.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -8725,7 +8217,6 @@ async function downloadCombinedReport(format) {
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
-      console.error('Error downloading Word report:', err)
       alert('Error downloading Word report: ' + err.message)
     }
   }
@@ -8742,7 +8233,6 @@ function downloadBlob(content, filename, mimeType) {
 }
 
 const autoSaveEnabled = ref(false)
-let isSavingVersion = false
 
 watch([rawData, cleanedData], () => {
   if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion) {
@@ -8750,8 +8240,6 @@ watch([rawData, cleanedData], () => {
   }
   debouncedSave()
 }, { deep: true })
-
-
 
 watch(() => activeTab.value, async (newTab) => {
   if (newTab === 'calculations' && hasCleanedData.value) {
@@ -8827,10 +8315,9 @@ onMounted(async () => {
         const versionsRes = await api.versionAPI.getVersions(s.id)
         if (versionsRes && versionsRes.success) {
           s.version_count = versionsRes.total || 0
-          console.log(`Loaded session ${s.id} with actual version count: ${s.version_count}`)
         }
       } catch (e) {
-        console.warn('Failed to fetch version count on mount:', e)
+        // non-fatal
       }
       activeSession.value = s
       sessionManager.setActiveSession(s)
@@ -8847,7 +8334,7 @@ onMounted(async () => {
             refreshed.version_count = versionsRes.total || 0
           }
         } catch (e) {
-          console.warn('Failed to fetch version count on mount:', e)
+          // non-fatal
         }
         activeSession.value = refreshed
         sessionManager.setActiveSession(refreshed)
@@ -8867,11 +8354,10 @@ onMounted(async () => {
               s.version_count = versionsRes.total || 0
             }
           } catch (e) {
-            console.warn('Failed to fetch version count on mount:', e)
+            // non-fatal
           }
           activeSession.value = s
           sessionManager.setActiveSession(s)
-          console.log('Most recent session loaded and set as active:', s.id)
         }
       }
     }
@@ -8884,7 +8370,7 @@ onMounted(async () => {
         activeSession.value = parsed
         sessionManager.setActiveSession(parsed)
       } catch (e) {
-        console.error('Failed to parse stored session:', e)
+        // non-fatal
       }
     }
   }
@@ -9138,8 +8624,6 @@ onBeforeUnmount(() => {
 .btn-add-field { padding: 8px 16px; background: #2196F3; color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
 .btn-add-field:hover { background: #1976D2; }
 .calculating-animation { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 20px; color: #666; font-size: 14px; }
-.spin-animation { animation: spin 1s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .value-input.placeholder { color: #999; font-style: italic; }
 .btn-clear-value { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: #f44336; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; opacity: 0.7; transition: opacity 0.2s; }
 .btn-clear-value:hover { opacity: 1; }
@@ -9269,7 +8753,6 @@ onBeforeUnmount(() => {
 .chart-container--fred canvas { width: 100% !important; height: 100% !important; }
 .loading-container, .error-container { text-align: center; padding: 40px; }
 .spin { animation: spin 1s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .visualization-placeholder { text-align: center; padding: 60px; background: #f8f9ff; border-radius: 12px; }
 .visualization-placeholder h3 { color: #0B2044; margin: 20px 0 10px; }
 .visualization-placeholder p { color: #666; margin-bottom: 20px; }
