@@ -659,6 +659,55 @@ function getCellStyle(row, col) {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────
+  // NEW — apply original workbook styles (fonts, fills, borders, alignment)
+  // from the styleMap captured during parsing. cell.w (number formats) is
+  // already rendered through the cell value; this only affects appearance.
+  // ─────────────────────────────────────────────────────────────────────
+  const styleKey = `${row}:${col}`
+  const s = activeSheet.value?.cellStyles?.get?.(styleKey)
+  if (s) {
+    if (s.font) {
+      if (s.font.bold) styles.fontWeight = '700'
+      if (s.font.italic) styles.fontStyle = 'italic'
+      if (s.font.underline) styles.textDecoration = 'underline'
+      if (s.font.sz) styles.fontSize = `${s.font.sz}px`
+      if (s.font.color?.rgb) styles.color = '#' + String(s.font.color.rgb).slice(-6)
+    }
+    if (s.fill?.fgColor?.rgb) {
+      styles.backgroundColor = '#' + String(s.fill.fgColor.rgb).slice(-6)
+    }
+    if (s.alignment) {
+      const a = s.alignment
+      if (a.horizontal) styles.textAlign = a.horizontal
+      if (a.vertical === 'top') styles.alignItems = 'flex-start'
+      else if (a.vertical === 'center') styles.alignItems = 'center'
+      else if (a.vertical === 'bottom') styles.alignItems = 'flex-end'
+      if (a.wrapText) {
+        styles.whiteSpace = 'normal'
+        styles.overflow = 'hidden'
+        styles.textOverflow = 'clip'
+      }
+    }
+    if (s.border) {
+      const borderCss = (edge) => {
+        if (!edge || !edge.style) return null
+        const widths = { thin: '1px', medium: '2px', thick: '3px',
+                         dashed: '1px', dotted: '1px', double: '3px', hair: '1px' }
+        const kind = edge.style === 'dashed' ? 'dashed'
+                   : edge.style === 'dotted' ? 'dotted'
+                   : edge.style === 'double' ? 'double'
+                   : 'solid'
+        const color = edge.color?.rgb ? '#' + String(edge.color.rgb).slice(-6) : '#999'
+        return `${widths[edge.style] || '1px'} ${kind} ${color}`
+      }
+      const t = borderCss(s.border.top);    if (t) styles.borderTop = t
+      const r = borderCss(s.border.right);  if (r) styles.borderRight = r
+      const b = borderCss(s.border.bottom); if (b) styles.borderBottom = b
+      const l = borderCss(s.border.left);   if (l) styles.borderLeft = l
+    }
+  }
+
   const cellValue = activeSheet.value?.fullData?.[row]?.[col]
   if (typeof cellValue === 'number') {
     styles.textAlign = 'right'
@@ -1485,11 +1534,15 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
   }, 20000)
 
   try {
+    // ───────────────────────────────────────────────────────────────
+    // CHANGED: cellStyles / cellNF now true so formatting & number
+    // formats (currency, %, dates) survive the parse.
+    // ───────────────────────────────────────────────────────────────
     const workbook = XLSX.read(fileBuffer, {
       type: 'array',
       cellDates: true,
-      cellStyles: false,
-      cellNF: false,
+      cellStyles: true,
+      cellNF: true,
       cellFormula: true,
       bookVBA: false,
       bookProps: false
@@ -1506,6 +1559,11 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
       let totalRows = 0
       let totalColumns = 0
       
+      // ───────────────────────────────────────────────────────────────
+      // CHANGED: capture cell.s (styles) into styleMap while we iterate.
+      // ───────────────────────────────────────────────────────────────
+      let styleMap = new Map()
+
       if (trueRange) {
         totalRows = trueRange.e.r - trueRange.s.r + 1
         totalColumns = trueRange.e.c - trueRange.s.c + 1
@@ -1525,6 +1583,9 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
             cellMap.set(rowKey, new Map())
           }
           cellMap.get(rowKey).set(colKey, cell.w ?? cell.v ?? '')
+          if (cell.s && typeof cell.s === 'object') {
+            styleMap.set(`${rowKey}:${colKey}`, cell.s)
+          }
         }
 
         fullData = []
@@ -1576,7 +1637,8 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
         data: jsonData,
         total_rows: totalRows,
         total_columns: totalColumns,
-        merged_ranges: mergedRanges
+        merged_ranges: mergedRanges,
+        cellStyles: styleMap
       })
       
       console.log(`ExcelWorkbookViewer: Sheet "${sheetName}" loaded with ${fullData.length} rows × ${totalColumns} columns`)

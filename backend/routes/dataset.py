@@ -1,10 +1,11 @@
 import json
+import mimetypes
 import os
 import uuid
 import traceback
 from contextlib import contextmanager
 from datetime import datetime
-from flask import request, jsonify
+from flask import request, jsonify, send_file
 from utils.db import get_db
 from utils.excel_parser import parse_full_workbook
 
@@ -160,6 +161,28 @@ def _parse_workbook_safely(file_path, instrument_type):
             'sheet_names': [],
             'warnings': [f"Parse failed: {err_msg}"]
         }
+
+
+def _resolve_file_row(dataset_id):
+    """Return (file_path, original_file_name) or (None, None) if not found."""
+    with _db() as (conn, cursor):
+        if not conn:
+            return None, None
+        try:
+            cursor.execute(
+                "SELECT file_path, original_file_name FROM datasets WHERE id = %s",
+                (dataset_id,)
+            )
+            row = cursor.fetchone()
+        except Exception:
+            traceback.print_exc()
+            return None, None
+
+    if not row:
+        return None, None
+    if isinstance(row, dict):
+        return row.get('file_path'), row.get('original_file_name')
+    return row[0], row[1]
 
 
 def dataset_routes(app):
@@ -552,3 +575,47 @@ def dataset_routes(app):
         except Exception as e:
             traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500
+
+    # ─────────────────────────────────────────────────────────────────────
+    # NEW — Serve the ORIGINAL uploaded file unchanged.
+    #   /file     → inline stream (for the in-app viewer)
+    #   /download → attachment (for "Download Original Workbook" button)
+    # Both read the stored uploads/<uuid>.<ext> byte-for-byte. Read-only.
+    # ─────────────────────────────────────────────────────────────────────
+    @app.route('/api/dataset/<int:dataset_id>/file', methods=['GET', 'OPTIONS'])
+    def view_dataset_file(dataset_id):
+        if request.method == 'OPTIONS':
+            return '', 200
+
+        file_path, original_name = _resolve_file_row(dataset_id)
+        if file_path is None:
+            return jsonify({'success': False, 'message': 'Dataset not found'}), 404
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'success': False, 'message': 'Original file missing on server'}), 404
+
+        mime, _ = mimetypes.guess_type(original_name or file_path)
+        return send_file(
+            file_path,
+            mimetype=mime or 'application/octet-stream',
+            as_attachment=False,
+            download_name=original_name or os.path.basename(file_path),
+        )
+
+    @app.route('/api/dataset/<int:dataset_id>/download', methods=['GET', 'OPTIONS'])
+    def download_dataset_file(dataset_id):
+        if request.method == 'OPTIONS':
+            return '', 200
+
+        file_path, original_name = _resolve_file_row(dataset_id)
+        if file_path is None:
+            return jsonify({'success': False, 'message': 'Dataset not found'}), 404
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'success': False, 'message': 'Original file missing on server'}), 404
+
+        mime, _ = mimetypes.guess_type(original_name or file_path)
+        return send_file(
+            file_path,
+            mimetype=mime or 'application/octet-stream',
+            as_attachment=True,
+            download_name=original_name or os.path.basename(file_path),
+        )

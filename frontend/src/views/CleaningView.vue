@@ -552,9 +552,28 @@ async function completeProcess() {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// ADDED — normalize raw instrument_type strings (from the dataset
+// row) to the workflow's canonical keys used everywhere else.
+// ─────────────────────────────────────────────────────────────
+function normalizeInstrumentType(raw) {
+  if (!raw) return 'money-market'
+  const s = String(raw).toLowerCase().trim().replace(/[_\s]+/g, '-')
+  if (s.includes('bond')) return 'bonds'
+  if (s.includes('t-bill') || s.includes('tbill') || s.includes('treasury') || s.includes('tbo')) return 'tbills'
+  if (s.includes('money') || s === 'mm') return 'money-market'
+  return 'money-market'
+}
+
 // Go to calculations
-// FIXED: 'calculations' route does not exist in router/index.ts — calculations
-// live on /instrument/:type?tab=calculations. Navigation was silently failing.
+// FIXED (Prompt 5): the previous version only marked the step complete
+// and navigated — it never wrote the cleaned data anywhere the
+// Calculations page (InstrumentView) reads from. InstrumentView reads
+// ui_sessions.instrument_workflows[type].cleanedData, so we now
+// persist the cleaned snapshot there before navigating. Stale
+// calculation results are cleared because they were computed against
+// the previous cleaned data. Archived snapshots (completedInstrumentSummary,
+// completedPortfolioSummary) are preserved so past reports still work.
 async function goToCalculations() {
   if (!results.value) return alert('Please clean data first')
   const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
@@ -562,12 +581,43 @@ async function goToCalculations() {
     alert('No active session. Open Dashboard first.')
     return
   }
+
+  // Resolve the correct instrument type from the dataset record —
+  // not from localStorage, which may point at a different instrument.
+  const rawType = dataset.value?.instrumentType
+  const normalizedType = normalizeInstrumentType(rawType)
+
   try {
     await markStepCompleted(String(sid), 'cleaning')
-  } catch (e) { console.warn(e) }
-  const lastInstrument = localStorage.getItem('dura_last_instrument') || 'money-market'
+
+    const wf = await sessionManager.getInstrumentWorkflow(sid, normalizedType) || {}
+    await sessionManager.saveInstrumentWorkflow(sid, normalizedType, {
+      ...wf,
+      cleanedData: results.value.cleanedData,
+      rawData: dataset.value.data,
+      instrumentType: normalizedType,
+      sheetType: 'multi',
+      // Stale results — computed against previous cleaned data.
+      calculations: {},
+      allCalculations: {},
+      selectedCalculations: {},
+      instrumentSummary: { columns: [], rows: [] },
+      portfolioSummary: { columns: [], rows: [] },
+      // Archived snapshots preserved.
+      completedInstrumentSummary: wf.completedInstrumentSummary || { columns: [], rows: [] },
+      completedPortfolioSummary: wf.completedPortfolioSummary || { columns: [], rows: [] },
+      last_tab: 'calculations',
+      sessionSavedAt: new Date().toISOString()
+    })
+  } catch (e) {
+    console.warn('Failed to persist cleaned data to session workflow:', e)
+    alert('Could not save cleaned data to session. Check the browser console.')
+    return
+  }
+
+  try { localStorage.setItem('dura_last_instrument', normalizedType) } catch (e) { /* ignore */ }
   router.push({
-    path: `/instrument/${lastInstrument}`,
+    path: `/instrument/${normalizedType}`,
     query: { session: sid, tab: 'calculations' }
   })
 }

@@ -220,7 +220,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     }
   }
 
-  async function handleFileUpload(file) {
+  async function handleFileUpload(file, sessionId = null) {
     if (!file) {
       error.value = 'No file provided'
       return { success: false, error: 'No file provided' }
@@ -365,18 +365,22 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       console.log('originalFileBuffer.value set, byteLength:', originalFileBuffer.value.byteLength)
       
       console.log('Uploading full file to backend for preservation...')
-      const uploadResult = await uploadFullFileToBackend(file, null, currentInstrumentType.value)
+      const uploadResult = await uploadFullFileToBackend(file, sessionId, currentInstrumentType.value)
+      let datasetId = null
+      let metadata = null
       if (uploadResult.success) {
-        console.log('Full file uploaded successfully, dataset_id:', uploadResult.data.dataset_id)
+        datasetId = uploadResult.data.dataset_id
+        metadata = uploadResult.data.metadata
+        console.log('Full file uploaded successfully, dataset_id:', datasetId)
         sheets.forEach(sheet => {
-          sheet.datasetId = uploadResult.data.dataset_id
-          sheet.metadata = uploadResult.data.metadata
+          sheet.datasetId = datasetId
+          sheet.metadata = metadata
         })
       } else {
         console.warn('Failed to upload full file to backend:', uploadResult.error)
       }
       
-      return { success: true, sheets }
+      return { success: true, sheets, datasetId, metadata }
     } catch (err) {
       error.value = `Failed to parse workbook: ${err.message}`
       console.error('Upload error:', err)

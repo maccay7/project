@@ -95,6 +95,9 @@
                   {{ getDetectionButtonText() }}
                 </button>
                 <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
+                <button v-if="originalDatasetId" class="btn-download-workbook" @click="downloadOriginalWorkbook">
+                  <v-icon size="16">mdi-download</v-icon> Download Original
+                </button>
                 <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
                 <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!worksheetSelected">Review Excel</button>
                 <button v-if="sheetType === 'multi'" class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
@@ -671,7 +674,7 @@
                     <div class="card-label">Total Portfolio Value</div>
                     <div class="card-value">{{ formatNumber(allCalculations.totalValue) }}</div>
                   </div>
-                  <div class="summary-card rate" @click="showFormula('Average Rate')">
+                  <div class="summary-card rate" @click="showFormula(config.primaryRateKey)">
                     <div class="card-label">{{ rateLabel }}</div>
                     <div class="card-value">{{ allCalculations.avgRate != null ? formatNumber(allCalculations.avgRate) + '%' : '—' }}</div>
                   </div>
@@ -2028,6 +2031,7 @@ const showCumulativeHistory = ref(false)
 const originalRawData = ref([])
 const originalFileColumns = ref([])
 const originalFileBuffer = ref(null)
+const originalDatasetId = ref(null)   // NEW — server-side dataset id for the original upload
 const sheetTotalRows = ref(0)
 const sessionSavedAt = ref(null)
 const showPreview = ref(false)
@@ -2624,8 +2628,12 @@ function switchTab(tab) {
 
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToCalculations() { activeTab.value = 'calculations'; forceUpdate.value++ }
-function goToPortfolioSummary() {
-  saveSessionData();
+async function goToPortfolioSummary() {
+  try {
+    await saveSessionData(true)
+  } catch (e) {
+    console.warn('Save before portfolio summary failed:', e)
+  }
   const sessionId = activeSession.value?.id || sessionManager.getActiveSessionId() || localStorage.getItem('dura_active_session_id')
   if (sessionId) {
     sessionManager.setActiveSession({ id: sessionId })
@@ -3001,11 +3009,27 @@ async function loadHistoryFile(item) {
     uploadedFile.value = { name: item.name, size: arrayBuffer.byteLength }
 
     try {
-      const result = await worksheetWorkflow.handleFileUpload(new File([arrayBuffer], item.name))
+      const sid = activeSession.value?.id || sessionManager.getActiveSessionId() || null
+      const result = await worksheetWorkflow.handleFileUpload(new File([arrayBuffer], item.name), sid)
       if (result.success) {
         workbookSheets.value = worksheetWorkflow.workbookSheets.value
         worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
         originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
+        if (result.datasetId) {
+          originalDatasetId.value = result.datasetId
+          if (sid) {
+            try {
+              const wf = await sessionManager.getInstrumentWorkflow(sid, instrumentType.value) || {}
+              await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, {
+                ...wf,
+                originalDatasetId: result.datasetId,
+                originalFileName: item.name
+              })
+            } catch (e) {
+              console.warn('Failed to persist originalDatasetId (history):', e)
+            }
+          }
+        }
         showSnackbar(`Loaded ${item.name} from history`, 'success')
 
         clearActiveCache(true)
@@ -3066,13 +3090,32 @@ async function readFileData(file) {
     })
     await base64Promise
 
-    const result = await worksheetWorkflow.handleFileUpload(file)
+    const sid = activeSession.value?.id || sessionManager.getActiveSessionId() || null
+    const result = await worksheetWorkflow.handleFileUpload(file, sid)
 
     if (result.success) {
       workbookSheets.value = worksheetWorkflow.workbookSheets.value
       worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
       originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
       worksheetStatuses.value = {}
+
+      // NEW — remember the server-side dataset id so the viewer / download
+      // endpoints work even after a page reload or session reopen.
+      if (result.datasetId) {
+        originalDatasetId.value = result.datasetId
+        if (sid) {
+          try {
+            const wf = await sessionManager.getInstrumentWorkflow(sid, instrumentType.value) || {}
+            await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, {
+              ...wf,
+              originalDatasetId: result.datasetId,
+              originalFileName: file.name
+            })
+          } catch (e) {
+            console.warn('Failed to persist originalDatasetId:', e)
+          }
+        }
+      }
 
       clearActiveCache(false)
 
@@ -3117,6 +3160,7 @@ function removeFile() {
   worksheetSelected.value = false
   uploadError.value = ''
   sheetTotalRows.value = 0
+  originalDatasetId.value = null   // NEW
   worksheetWorkflow.reset()
   debouncedSave()
   forceUpdate.value++
@@ -3549,13 +3593,38 @@ function resetMapping() {
   applyCurrentMapping()
 }
 
+// ⭐ FIXED — original workbook is now fetched from the server when the
+// in-memory buffer is gone (page reload, reopened session).
 async function openWorkbookViewer() {
-  if (!originalFileBuffer.value) {
-    alert('File buffer not available. Please upload a file first.')
-    return
+  let buffer = originalFileBuffer.value
+
+  // If we don't have the file in memory, fetch the original from the server
+  // by its stored dataset id.
+  if ((!buffer || buffer.byteLength === 0) && originalDatasetId.value) {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/dataset/${originalDatasetId.value}/file`)
+      if (!res.ok) {
+        showSnackbar(
+          res.status === 404
+            ? 'The original workbook is no longer stored on the server. Please re-upload the file.'
+            : `Could not load the original workbook (HTTP ${res.status}).`,
+          'error'
+        )
+        return
+      }
+      buffer = await res.arrayBuffer()
+      originalFileBuffer.value = buffer
+    } catch (e) {
+      showSnackbar('Network error loading workbook: ' + (e.message || e), 'error')
+      return
+    }
   }
-  if (originalFileBuffer.value.byteLength === 0) {
-    alert('File buffer is empty. Please re-upload the file.')
+
+  if (!buffer || buffer.byteLength === 0) {
+    showSnackbar(
+      'No original workbook is available for this session. Please re-upload the file.',
+      'error'
+    )
     return
   }
 
@@ -3573,7 +3642,37 @@ async function openWorkbookViewer() {
     showWorkbookViewer.value = true
     await nextTick()
   } catch (error) {
-    alert('Failed to open workbook viewer: ' + error.message)
+    showSnackbar('Failed to open workbook viewer: ' + (error.message || error), 'error')
+  }
+}
+
+// NEW — download the original uploaded workbook byte-for-byte.
+async function downloadOriginalWorkbook() {
+  if (!originalDatasetId.value) {
+    showSnackbar('No original workbook is stored for this session.', 'error')
+    return
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/dataset/${originalDatasetId.value}/download`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+
+    let filename = `workbook_${originalDatasetId.value}.xlsx`
+    const cd = res.headers.get('Content-Disposition') || ''
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd)
+    if (match) filename = decodeURIComponent(match[1])
+
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    showSnackbar('Original workbook downloaded.', 'success')
+  } catch (e) {
+    showSnackbar('Download failed: ' + (e.message || e), 'error')
   }
 }
 
@@ -5201,7 +5300,6 @@ async function calculateMetrics() {
 
   isCalculating.value = true
 
-  // ⭐ FIXED — merge exclusions coming from standalone CleaningView (sessionStorage)
   try {
     const stored = sessionStorage.getItem('excluded_fields')
     if (stored) {
@@ -5305,6 +5403,30 @@ async function calculateMetrics() {
           portfolioSummary.value = response.portfolio_summary
         }
 
+        // Persist details to the backend so Summary.vue can read them
+        // without depending on the workflow cache. Uses the DETAIL rows
+        // from instrumentSummary, not the aggregate portfolio row.
+        if (activeSession.value?.id && instrumentSummary.value?.rows?.length) {
+          try {
+            const firstAgg = response?.aggregate || {}
+            await api.portfolioAPI.saveSummary({
+              session_id: activeSession.value.id,
+              instrument_type: instrumentType.value,
+              instrument_name: currentSheetName.value || instrumentType.value,
+              total_value: firstAgg.total_value ?? firstAgg.totalValue ?? 0,
+              face_value: firstAgg.total_face_value ?? firstAgg.face_value ?? 0,
+              count: firstAgg.instrument_count ?? firstAgg.instrumentCount ?? instrumentSummary.value.rows.length,
+              avg_rate: firstAgg.avg_rate ?? firstAgg.avgRate ?? 0,
+              details: instrumentSummary.value.rows,
+              detail_headers: instrumentSummary.value.columns || [],
+              aggregate: firstAgg,
+              valuation_date: activeValuationDate.value || new Date().toISOString().split('T')[0]
+            })
+          } catch (saveError) {
+            console.warn('Multi-instrument saveSummary failed:', saveError)
+          }
+        }
+
         const results = response?.results || {}
         const firstInstType = Object.keys(results)[0]
         if (firstInstType && results[firstInstType]) {
@@ -5401,9 +5523,9 @@ async function calculateMetrics() {
           const failedStatuses = ['cannot_calculate', 'error']
           const isFailed = failedStatuses.includes(singleCalc.status) || (!displayable && singleCalc.status !== 'success')
 
-          if (singleCalc.status === 'partial' && (singleCalc.error || singleCalc.missing_fields?.length)) {
-            const warningMsg = formatCalculationFailureMessage(singleCalc, 'Partial calculation')
-            showSnackbar(`Partial calculation: ${warningMsg}`, 'warning')
+          if (singleCalc.status === 'partial' && (singleCalc.error || singleCalc.warning || singleCalc.missing_fields?.length)) {
+            const warningMsg = singleCalc.warning || formatCalculationFailureMessage(singleCalc, 'Partial calculation')
+            showSnackbar(`Partial calculation: ${warningMsg}`, 'warning', 6000)
             agg.status = 'partial'
           } else if (isFailed && !displayable) {
             const fullErrorMsg = formatCalculationFailureMessage(singleCalc)
@@ -5442,7 +5564,6 @@ async function calculateMetrics() {
           Object.keys(filteredRowWithWorkbook).forEach(k => currentCols.add(k))
           instrumentSummary.value = { columns: Array.from(currentCols), rows: [filteredRowWithWorkbook] }
         } else if (calcArray.length === 0 && cleanedData.value.length > 0) {
-          // ⭐ FIXED — backend success with zero rows → fall back to frontend compute
           console.warn('Backend returned empty calculations — running local fallback')
           const rows = cleanedData.value.map((row, idx) => {
             const enriched = { ...row, 'Instrument Name': row.InstrumentName || row['Instrument Name'] || currentSheetName.value || `Instrument ${idx + 1}` }
@@ -5724,6 +5845,8 @@ async function calculateMetrics() {
             yieldCurveData: yieldCurveData.value,
             fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
             uploadedFile: uploadedFile.value?.name || null,
+            originalDatasetId: originalDatasetId.value,   // NEW
+            originalFileName: uploadedFile.value?.name || null,   // NEW
             cleaningStats: cleaningStats.value,
             sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
             manualInputs: manualInputs.value,
@@ -5733,10 +5856,11 @@ async function calculateMetrics() {
             autoDetectedAdditionalFields: autoDetectedAdditionalFields.value,
             detectedCurrencies: detectedCurrencies.value,
             excludedDetectedFields: Array.from(excludedDetectedFields.value),
-            // ⭐ FIXED — persist these so reload preserves the workflow
             sheetType: sheetType.value,
             currentSheetName: currentSheetName.value,
-            extractedValues: extractedValues.value
+            extractedValues: extractedValues.value,
+            selectedCurrency: selectedCurrency.value,
+            customCurrency: customCurrency.value
           })
         }
 
@@ -5754,7 +5878,9 @@ async function calculateMetrics() {
         // non-fatal
       }
 
-      debouncedSave()
+      // Save synchronously so callers that navigate immediately
+      // (goToPortfolioSummary, goToReportTab) get fresh records.
+      try { await saveSessionData(true) } catch (e) { console.warn('Post-calc save failed:', e) }
       forceUpdate.value++
     }
   } catch (err) {
@@ -5783,7 +5909,6 @@ async function continueToVisualizations() {
   }
 }
 
-// ⭐ FIXED — direct workflow save now includes sheetType/currentSheetName/extractedValues
 async function continueFromVisualizations() {
   if (!hasCleanedData.value) { return }
   saveSessionData()
@@ -5810,13 +5935,17 @@ async function continueFromVisualizations() {
       yieldCurveData: yieldCurveData.value,
       fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
       uploadedFile: uploadedFile.value?.name || null,
+      originalDatasetId: originalDatasetId.value,   // NEW
+      originalFileName: uploadedFile.value?.name || null,   // NEW
       cleaningStats: cleaningStats.value,
       sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
       manualInputs: manualInputs.value,
       formulas: formulas.value,
       sheetType: sheetType.value,
       currentSheetName: currentSheetName.value,
-      extractedValues: extractedValues.value
+      extractedValues: extractedValues.value,
+      selectedCurrency: selectedCurrency.value,
+      customCurrency: customCurrency.value
     })
     saveSessionData()
   }
@@ -6494,7 +6623,6 @@ async function saveToSession() {
       }
     }
 
-    // ⭐ FIXED — sheetType/currentSheetName/extractedValues are now persisted
     const datasetSnapshot = {
       rawData: rawData.value,
       cleanedData: cleanedData.value,
@@ -6511,12 +6639,16 @@ async function saveToSession() {
       manualInputs: manualInputs.value,
       formulas: formulas.value,
       uploadedFile: uploadedFile.value?.name || null,
+      originalDatasetId: originalDatasetId.value,   // NEW
+      originalFileName: uploadedFile.value?.name || null,   // NEW
       cleaningStats: cleaningStats.value,
       sessionSavedAt: new Date().toISOString(),
       instrumentType: instrumentType.value,
       sheetType: sheetType.value,
       currentSheetName: currentSheetName.value,
-      extractedValues: extractedValues.value
+      extractedValues: extractedValues.value,
+      selectedCurrency: selectedCurrency.value,
+      customCurrency: customCurrency.value
     }
 
     const worksheetData = {
@@ -6629,9 +6761,8 @@ async function refreshSessionVersionCount(sid) {
   }
 }
 
-// ⭐ FIXED — persists sheetType/currentSheetName/extractedValues; surfaces errors instead of silent loss
 function saveSessionData(explicitSave = false) {
-  if (!activeSession.value) return
+  if (!activeSession.value) return Promise.resolve()
   const sid = activeSession.value.id
   const datasetSnapshot = {
     rawData: rawData.value,
@@ -6649,6 +6780,8 @@ function saveSessionData(explicitSave = false) {
     yieldCurveData: yieldCurveData.value,
     fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
     uploadedFile: uploadedFile.value?.name || null,
+    originalDatasetId: originalDatasetId.value,   // NEW
+    originalFileName: uploadedFile.value?.name || null,   // NEW
     cleaningStats: cleaningStats.value,
     sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
     manualInputs: manualInputs.value,
@@ -6662,12 +6795,14 @@ function saveSessionData(explicitSave = false) {
     sheetType: sheetType.value,
     currentSheetName: currentSheetName.value,
     extractedValues: extractedValues.value,
+    selectedCurrency: selectedCurrency.value,
+    customCurrency: customCurrency.value,
     last_tab: activeTab.value
   }
 
   sessionManager.setActiveSession(activeSession.value)
 
-  sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
+  return sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
     .then(() => {
       if (explicitSave) {
         const count = sessionManager.countSessionInstruments(sid)
@@ -6680,7 +6815,6 @@ function saveSessionData(explicitSave = false) {
     })
 }
 
-// ⭐ FIXED — restores sheetType/currentSheetName/extractedValues after reload
 async function loadSavedData() {
   if (!activeSession.value) return false
   const sid = activeSession.value.id
@@ -6705,7 +6839,6 @@ async function loadSavedData() {
       formulas.value = wf.formulas || {}
       isCalculating.value = wf.isCalculating || false
 
-      // ⭐ FIXED — restore sheetType / currentSheetName / extractedValues
       if (wf.sheetType) sheetType.value = wf.sheetType
       if (wf.currentSheetName) currentSheetName.value = wf.currentSheetName
       if (wf.extractedValues && Object.keys(wf.extractedValues).length) {
@@ -6719,6 +6852,11 @@ async function loadSavedData() {
       }
       if (wf.uploadedFile) {
         uploadedFile.value = { name: wf.uploadedFile, size: 0 }
+      }
+      // NEW — restore the server-side dataset id so "View Excel Workbook"
+      // and "Download Original" work after a reload / reopened session.
+      if (wf.originalDatasetId) {
+        originalDatasetId.value = wf.originalDatasetId
       }
       if (wf.cleaningStats) cleaningStats.value = wf.cleaningStats
       if (wf.sessionSavedAt) sessionSavedAt.value = wf.sessionSavedAt
@@ -6737,6 +6875,12 @@ async function loadSavedData() {
       }
       if (wf.excludedDetectedFields && Array.isArray(wf.excludedDetectedFields)) {
         excludedDetectedFields.value = new Set(wf.excludedDetectedFields)
+      }
+      if (typeof wf.selectedCurrency === 'string') {
+        selectedCurrency.value = wf.selectedCurrency
+      }
+      if (typeof wf.customCurrency === 'string') {
+        customCurrency.value = wf.customCurrency
       }
 
       loaded = true
@@ -6993,21 +7137,36 @@ function showFormula(metricKey) {
     if (isNaN(n)) return String(v)
     return n.toFixed(d) + '%'
   }
-  const getVal = (key) => {
-    const variants = [key, toSnake(key)]
+  const _variants = (key) => {
+    const set = new Set([key])
+    try { set.add(toSnake(key)) } catch (e) { /* ignore */ }
+    try { set.add(formatColumnHeader(key)) } catch (e) { /* ignore */ }
+    set.add(String(key).replace(/_/g, ' '))
+    return [...set]
+  }
+  const _pickFrom = (source, variants) => {
+    if (!source || typeof source !== 'object') return null
     for (const v of variants) {
-      if (calc[v] !== undefined && calc[v] !== null && calc[v] !== '') return calc[v]
-      if (agg[v] !== undefined && agg[v] !== null && agg[v] !== '') return agg[v]
+      const val = source[v]
+      if (val !== undefined && val !== null && val !== '') return val
     }
     return null
   }
+  const getVal = (key) => {
+    const v = _variants(key)
+    return (
+      _pickFrom(selectedCalculations.value, v) ??
+      _pickFrom(allCalculations.value, v) ??
+      _pickFrom(calculations.value, v) ??
+      _pickFrom(instrumentSummary.value?.rows?.[0], v)
+    )
+  }
   const getRowVal = (key) => {
-    if (!firstRow) return null
-    const variants = [key, toSnake(key), key.replace(/_/g, ' ')]
-    for (const v of variants) {
-      if (firstRow[v] !== undefined && firstRow[v] !== null && firstRow[v] !== '') return firstRow[v]
-    }
-    return null
+    const v = _variants(key)
+    return (
+      _pickFrom(firstRow, v) ??
+      _pickFrom(instrumentSummary.value?.rows?.[0], v)
+    )
   }
   const pushInput = (label, value) => details.push({ label, value, formula: 'Input' })
   const pushStep = (label, value, formula) => details.push({ label, value, formula })
@@ -7075,9 +7234,11 @@ function showFormula(metricKey) {
         pushStep('Formula', `${fmtNum(mac)} ÷ (1 + ${(y / 100).toFixed(6)} ÷ ${freq}) = ${fmtNum(mod)} years`, 'Mac ÷ (1 + YTM ÷ Freq)')
         pushAnswer('Modified Duration', fmtNum(mod) + ' years', 'Price sensitivity')
       } else {
-        pushInput('Macaulay Duration', fmtNum(mac) + ' years')
-        pushStep('Definition', 'Σ (t × PV(C_t)) ÷ Price', 'Macaulay formula')
-        pushAnswer('Duration', fmtNum(mac) + ' years', 'Macaulay Duration')
+        pushInput('Macaulay Duration (from backend)', fmtNum(mac) + ' years')
+        pushStep('Raw sum', 'Σ (t × PV(C_t)) ÷ Price  →  result in coupon periods', 'Period-unit Macaulay')
+        pushInput('Coupon Frequency', String(freq))
+        pushStep('Convert to years', `${fmtNum(mac * freq)} ÷ ${freq} = ${fmtNum(mac)} years`, '(Periods ÷ Frequency = Years)')
+        pushAnswer('Duration', fmtNum(mac) + ' years', 'Macaulay Duration (years)')
       }
       break
     }
@@ -7190,28 +7351,47 @@ function showFormula(metricKey) {
       break
     }
     case 'effectiveAnnualRate': {
+      // Backend: effective_annual_rate == effective_yield == (interest/principal)*(365/days)*100
+      const p = parseFloat(principal) || 0
       const r = parseFloat(interestRate || couponRate) || 0
-      const d = parseFloat(computedDays) || 365
-      const ear = (Math.pow(1 + (r / 100) * (d / dayBasis), dayBasis / d) - 1) * 100
-      pushInput('Nominal Rate', fmtPct(r))
-      pushInput('Days', fmtNum(d, 0))
-      pushInput('Basis', String(dayBasis))
-      pushStep('Formula', `((1 + (${fmtNum(r)} ÷ 100) × (${fmtNum(d, 0)} ÷ ${dayBasis}))^(${dayBasis} ÷ ${fmtNum(d, 0)}) − 1) × 100 = ${fmtNum(ear)}%`, 'Compound-equivalent annual rate')
-      pushAnswer('Effective Annual Rate', fmtPct(ear), 'Compounded equivalent')
+      const d = parseFloat(computedDays) || 0
+      const i = parseFloat(getVal('interestEarned')) || (p * (r / 100) * (d / dayBasis))
+      if (p > 0 && d > 0) {
+        const ear = (i / p) * (365.0 / d) * 100.0
+        pushInput('Principal', fmtNum(p))
+        pushInput('Interest Earned', fmtNum(i))
+        pushInput('Days to Maturity', fmtNum(d, 0))
+        pushStep('Effective Annual Rate', `(${fmtNum(i)} ÷ ${fmtNum(p)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(ear)}%`, '(Interest ÷ Principal) × (365 ÷ Days) × 100')
+        pushAnswer('Effective Annual Rate', fmtPct(ear), 'Annualised simple yield (same as effective_yield in backend)')
+      } else {
+        pushInput('Nominal Rate', fmtPct(r))
+        pushStep('Note', 'Backend sets effective_annual_rate to effective_yield. With no principal/days available, both default to the nominal rate.', 'Backend convention')
+        pushAnswer('Effective Annual Rate', fmtPct(r), 'Equals nominal rate')
+      }
       break
     }
     case 'discountYield': {
-      const face = parseFloat(faceValue) || 0
-      const purchase = parseFloat(purchasePrice) || 0
+      // Backend: disc_yield = (interest / total_value) * (basis / days) * 100
+      // where total_value = principal + interest, basis = 360 or 365 from day_count.
+      const p = parseFloat(principal) || 0
+      const r = parseFloat(interestRate) || 0
       const d = parseFloat(computedDays) || 0
-      const discount = face - purchase
-      const dy = face && d ? (discount / face) * (360 / d) * 100 : 0
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Purchase Price', fmtNum(purchase))
-      pushInput('Days to Maturity', fmtNum(d, 0))
-      pushStep('Discount Amount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
-      pushStep('Discount Yield', `(${fmtNum(discount)} ÷ ${fmtNum(face)}) × (360 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(dy)}%`, '(Discount ÷ Face) × (360 ÷ Days) × 100')
-      pushAnswer('Discount Yield', fmtPct(dy), 'Bank discount yield')
+      const i = parseFloat(getVal('interestEarned')) || (p * (r / 100) * (d / dayBasis))
+      const tv = p + i
+      if (tv > 0 && d > 0) {
+        const dy = (i / tv) * (dayBasis / d) * 100
+        pushInput('Principal', fmtNum(p))
+        pushInput('Interest Earned', fmtNum(i))
+        pushInput('Total Value (Principal + Interest)', fmtNum(tv))
+        pushInput('Days to Maturity', fmtNum(d, 0))
+        pushInput('Day Count Basis', String(dayBasis))
+        pushStep('Discount Yield', `(${fmtNum(i)} ÷ ${fmtNum(tv)}) × (${dayBasis} ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(dy)}%`, '(Interest ÷ Total Value) × (Basis ÷ Days) × 100')
+        pushAnswer('Discount Yield', fmtPct(dy), 'Money-market discount yield')
+      } else {
+        pushInput('Discount Yield', 'N/A')
+        pushStep('Note', 'Principal, interest, and days are required to reproduce this calculation.', 'Backend requires principal + interest + days')
+        pushAnswer('Discount Yield', '—', 'Cannot compute')
+      }
       break
     }
     case 'bondEquivalentYield': {
@@ -7229,16 +7409,20 @@ function showFormula(metricKey) {
       break
     }
     case 'moneyMarketYield': {
+      // Backend: mm_yield = (discount / purchase) * (basis / days) * 100
+      // where basis comes from day_count_convention (360 default, 365 for ACT/365).
       const face = parseFloat(faceValue) || 0
       const purchase = parseFloat(purchasePrice) || 0
       const d = parseFloat(computedDays) || 0
       const discount = face - purchase
-      const mmy = purchase && d ? (discount / purchase) * (360 / d) * 100 : 0
+      const basis = dayBasis   // 360 or 365 from day_count_convention
+      const mmy = purchase && d ? (discount / purchase) * (basis / d) * 100 : 0
       pushInput('Face Value', fmtNum(face))
       pushInput('Purchase Price', fmtNum(purchase))
       pushInput('Days to Maturity', fmtNum(d, 0))
+      pushInput('Day Count Basis', String(basis))
       pushStep('Discount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
-      pushStep('MMY', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (360 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(mmy)}%`, '(Discount ÷ Purchase) × (360 ÷ Days) × 100')
+      pushStep('MMY', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (${basis} ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(mmy)}%`, '(Discount ÷ Purchase) × (Basis ÷ Days) × 100')
       pushAnswer('Money Market Yield', fmtPct(mmy), 'Money market yield')
       break
     }
@@ -7314,6 +7498,44 @@ function showFormula(metricKey) {
       }
       break
     }
+    case 'effectiveYield': {
+      const face = parseFloat(faceValue) || 0
+      const purchase = parseFloat(purchasePrice) || parseFloat(principal) || 0
+      const d = parseFloat(computedDays) || 0
+      const interest = parseFloat(getVal('interestEarned')) || 0
+      if (purchase > 0 && d > 0) {
+        const ey = (Math.pow(face / purchase, 365 / d) - 1) * 100
+        pushInput('Face Value / Principal', fmtNum(face))
+        pushInput('Purchase Price', fmtNum(purchase))
+        pushInput('Days to Maturity', fmtNum(d, 0))
+        pushStep('Interest Earned', fmtNum(interest), 'Face − Purchase')
+        pushStep(
+          'Effective Yield',
+          `(( ${fmtNum(face)} ÷ ${fmtNum(purchase)} )^(365 ÷ ${fmtNum(d, 0)}) − 1) × 100 = ${fmtNum(ey)}%`,
+          '(Face ÷ Purchase)^(365/Days) − 1) × 100'
+        )
+        pushAnswer('Effective Yield', fmtPct(ey), 'Annualised compound yield')
+      } else {
+        // Backend calculates: eff_yield = (interest / principal) * (365 / days) * 100
+        const p = parseFloat(principal) || 0
+        const r = parseFloat(interestRate) || 0
+        const d = parseFloat(computedDays) || 0
+        const i = parseFloat(getVal('interestEarned')) || (p * (r / 100) * (d / dayBasis))
+        if (p > 0 && d > 0) {
+          const ey = (i / p) * (365.0 / d) * 100.0
+          pushInput('Principal', fmtNum(p))
+          pushInput('Interest Earned', fmtNum(i))
+          pushInput('Days to Maturity', fmtNum(d, 0))
+          pushStep('Effective Yield', `(${fmtNum(i)} ÷ ${fmtNum(p)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(ey)}%`, '(Interest ÷ Principal) × (365 ÷ Days) × 100  — simple annualised')
+          pushAnswer('Effective Yield', fmtPct(ey), 'Simple annualised yield')
+        } else {
+          pushInput('Nominal Interest Rate (from cleaned data)', fmtPct(r))
+          pushStep('Interpretation', 'For a money-market instrument without a purchase price on file, effective yield is reported as equal to the stated interest rate.', '365-day simple-interest convention')
+          pushAnswer('Effective Yield', fmtPct(r), 'Equals stated rate (no discount basis)')
+        }
+      }
+      break
+    }
     case 'yieldCurveRate': {
       const bench = parseFloat(agg.fred?.benchmark_rate) || 0
       pushInput('Source', 'FRED Federal Reserve Economic Data')
@@ -7322,6 +7544,23 @@ function showFormula(metricKey) {
       if (agg.fred?.maturity) pushInput('Maturity', agg.fred.maturity)
       pushStep('Matched benchmark rate', fmtPct(bench), 'FRED series matched to maturity')
       pushAnswer('Benchmark Rate', fmtPct(bench), 'FRED reference rate')
+      break
+    }
+    case 'daysAccrued': {
+      const lastCoupon = getRowVal('Last Coupon Date') || getRowVal('Issue Date')
+      const settle = valuationDate || getRowVal('Settlement Date')
+      if (lastCoupon && settle) {
+        const d = daysBetween(lastCoupon, settle)
+        pushInput('Last Coupon Date / Issue Date', String(lastCoupon))
+        pushInput('Settlement / Valuation Date', String(settle))
+        pushStep('Days Accrued', `${settle} − ${lastCoupon} = ${d} days`, 'Settlement − Last Coupon')
+        pushAnswer('Days Accrued', `${d} days`, 'Days since last coupon')
+      } else {
+        const v = parseFloat(getVal('daysAccrued')) || 0
+        pushInput('Days Accrued (from backend)', fmtNum(v, 0))
+        pushStep('Note', 'Last coupon date or settlement date not available in cleaned data — value shown is what the backend returned.', 'Backend derivations')
+        pushAnswer('Days Accrued', `${fmtNum(v, 0)} days`, 'Backend')
+      }
       break
     }
     case 'termDays':
@@ -7474,13 +7713,20 @@ function showFormula(metricKey) {
 
   if (!handled) {
     const value = getVal(metricKey)
+    const label = (config.value.calculationFields.find(f => f.key === metricKey) || {}).label || metricKey
     if (value !== null && value !== undefined) {
       const numeric = parseFloat(value)
-      pushInput('Raw value from backend', !isNaN(numeric) ? fmtNum(numeric) : String(value))
-      pushAnswer('Value', !isNaN(numeric) ? fmtNum(numeric) : String(value), `Metric: ${metricKey}`)
+      pushInput('Reported value', !isNaN(numeric) ? fmtNum(numeric) : String(value))
+      pushInput('Source', 'Calculation engine (aggregate)')
+      pushStep('Note', `No dedicated step-by-step breakdown is implemented for "${label}" — the raw aggregate value returned by the backend is shown above.`, 'Generic fallback')
     } else {
+      pushInput('Metric key', metricKey)
       pushInput('Inputs detected', Object.keys(firstRow).join(', ') || 'none')
-      details.push({ label: '⚠ Diagnostic', value: `The backend did not return a value for "${metricKey}". Check that the required input fields were detected in the worksheet and that the calculation ran successfully.`, formula: 'Diagnostic' })
+      details.push({
+        label: '⚠ Not calculated',
+        value: `The backend did not return a value for "${label}". Likely causes: (1) a required input field was missing or excluded during cleaning, (2) validation rejected the row, or (3) this metric is not calculated for the current instrument type.`,
+        formula: 'Diagnostic'
+      })
     }
   }
 
@@ -8248,7 +8494,6 @@ const handleSessionRestored = async (event) => {
   }
 }
 
-// ⭐ FIXED — surface save errors on unmount instead of silent loss
 onBeforeUnmount(() => {
   window.removeEventListener('storage', () => checkAndReset())
   window.removeEventListener('session-restored', handleSessionRestored)
@@ -8301,7 +8546,7 @@ onBeforeUnmount(() => {
 .file-info { margin-top: 20px; padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .file-size { font-size: 11px; color: #999; margin-left: auto; }
 .remove-btn { margin-left: auto; background: none; border: none; font-size: 20px; cursor: pointer; color: #f44336; }
-.btn-preview, .btn-review-excel, .btn-mapping, .btn-view-workbook { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; border: none; margin-left: 10px; transition: all 0.2s; }
+.btn-preview, .btn-review-excel, .btn-mapping, .btn-view-workbook, .btn-download-workbook { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; border: none; margin-left: 10px; transition: all 0.2s; }
 .btn-preview { background: #2196F3; color: white; }
 .btn-preview:hover:not(:disabled) { background: #0b7dda; transform: translateY(-1px); }
 .btn-preview:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -8314,6 +8559,8 @@ onBeforeUnmount(() => {
 .btn-view-workbook { background: #9C27B0; color: white; }
 .btn-view-workbook:hover:not(:disabled) { background: #7B1FA2; transform: translateY(-1px); }
 .btn-view-workbook:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-download-workbook { background: #607D8B; color: white; }
+.btn-download-workbook:hover { background: #455A64; transform: translateY(-1px); }
 .cleaning-operations-summary { margin-top: 20px; padding: 16px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #4CAF50; }
 .operations-title { font-size: 14px; font-weight: 600; color: #0B2044; margin: 0 0 12px 0; }
 .operations-list { list-style: none; padding: 0; margin: 0; }

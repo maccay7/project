@@ -713,10 +713,23 @@ async function loadSummary() {
   try {
     // --- 1. Resolve session robustly ---
     let session = sessionManager.getActiveSession()
+    if (session) {
+      // Force-refresh so we pick up the latest instrumentWorkflow saved
+      // by InstrumentView just before navigation.
+      try {
+        const fresh = await sessionManager.getSession(session.id, true)
+        if (fresh) {
+          session = fresh
+          sessionManager.setActiveSession(fresh)
+        }
+      } catch (e) {
+        console.warn('Force refresh before summary failed:', e)
+      }
+    }
     if (!session) {
       const sid = sessionManager.getActiveSessionId()
       if (sid) {
-        await sessionManager.getSession(sid)
+        await sessionManager.getSession(sid, true)
         session = sessionManager.getActiveSession()
       }
     }
