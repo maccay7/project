@@ -1,3 +1,4 @@
+// [MODIFIED] main.ts
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
@@ -11,8 +12,8 @@ import '@mdi/font/css/materialdesignicons.css'
 // Import jQuery and make it globally available for Vuetify components
 import jQuery from 'jquery'
 if (typeof window !== 'undefined') {
-  window.$ = jQuery
-  window.jQuery = jQuery
+  (window as any).$ = jQuery;
+  (window as any).jQuery = jQuery;
 }
 
 const vuetify = createVuetify({

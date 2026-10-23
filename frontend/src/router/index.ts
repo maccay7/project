@@ -77,6 +77,10 @@ const routes = [
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/'
   }
 ]
 
@@ -87,29 +91,25 @@ const router = createRouter({
 
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
-  
-  // For routes requiring authentication
+
   if (to.meta.requiresAuth) {
     if (!authStore.isAuthenticated) {
       next('/login')
       return
     }
-    
-    // Validate session with backend for protected routes
+
     const isValid = await authStore.checkSession()
     if (!isValid) {
-      authStore.logout()
       next('/login')
       return
     }
   }
-  
-  // Redirect authenticated users away from login/signup
+
   if ((to.path === '/login' || to.path === '/signup') && authStore.isAuthenticated) {
     next('/dashboard')
     return
   }
-  
+
   next()
 })
 

@@ -1,6 +1,6 @@
 <template>
   <div class="redirect-message">
-    <h2>Redirecting to Reports...</h2>
+    <h2>Opening Report...</h2>
   </div>
 </template>
 
@@ -12,12 +12,9 @@ const router = useRouter()
 const route = useRoute()
 
 onMounted(() => {
-  const sessionId = route.query.session
-  if (sessionId) {
-    router.replace({ path: '/instrument/money-market', query: { session: sessionId, tab: 'reports' } })
-  } else {
-    router.replace({ path: '/instrument/money-market', query: { tab: 'reports' } })
-  }
+  const sessionId = route.query.session || localStorage.getItem('dura_active_session_id') || null
+  const lastInstrument = localStorage.getItem('dura_last_instrument') || 'money-market'
+  router.replace({ path: `/instrument/${lastInstrument}`, query: { session: sessionId, tab: 'reports' } })
 })
 </script>
 

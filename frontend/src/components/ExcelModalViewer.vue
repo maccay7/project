@@ -1,7 +1,7 @@
+<!-- [MODIFIED] ExcelModalViewer.vue -->
 <template>
   <div class="excel-viewer-overlay" v-if="visible">
     <div class="excel-viewer-modal">
-      <!-- Header with Logo -->
       <div class="viewer-header">
         <div class="header-left">
           <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
@@ -10,7 +10,6 @@
         <button class="close-btn" @click="closeViewer">✕</button>
       </div>
 
-      <!-- Sheet Tabs -->
       <div class="sheet-tabs" v-if="sheetNames.length > 0">
         <div
           v-for="sheet in sheetNames"
@@ -23,7 +22,6 @@
         </div>
       </div>
 
-      <!-- Data Grid -->
       <div class="table-wrapper" v-if="displayedData.length > 0">
         <table class="data-grid">
           <thead>
@@ -43,7 +41,6 @@
         </table>
       </div>
 
-      <!-- Pagination -->
       <div class="pagination-wrapper" v-if="fullData.length > pageSize">
         <button class="page-btn" :disabled="currentPage === 0" @click="prevPage">◀ Prev</button>
         <span class="page-info">Page {{ currentPage + 1 }} of {{ totalPages }}</span>
@@ -51,7 +48,7 @@
         <button class="load-all-btn" @click="loadAllRows">Load All ({{ fullData.length }} rows)</button>
       </div>
 
-      <div v-else class="empty-state">
+      <div v-else-if="displayedData.length === 0" class="empty-state">
         <p>No data found in this sheet.</p>
       </div>
     </div>
@@ -165,7 +162,6 @@ export default {
 
     afterLoad() {
       if (this.workbook) {
-        // Handle both XLSX workbook and our custom sheets format
         if (this.workbook.SheetNames) {
           this.sheetNames = this.workbook.SheetNames || [];
         } else if (this.workbook.sheets && Array.isArray(this.workbook.sheets)) {
@@ -188,33 +184,42 @@ export default {
 
     loadSheetData(sheetName) {
       let data = [];
-      
-      // --- NEW: Try to use fullData from pre-parsed sheets ---
+
       if (this.workbook.sheets && Array.isArray(this.workbook.sheets)) {
         const sheet = this.workbook.sheets.find(s => s.name === sheetName);
+
+        // Prefer pre-parsed 2D array: use first row as headers, convert to objects
         if (sheet && sheet.fullData && sheet.fullData.length > 0) {
-          // Use fullData as the primary source
-          this.fullData = sheet.fullData;
-          if (this.fullData.length > 0) {
-            // Determine columns from the first row
-            const firstRow = this.fullData[0] || [];
-            this.columns = firstRow.map((_, idx) => `Column ${idx + 1}`);
-          } else {
-            this.columns = [];
-          }
+          const raw = sheet.fullData;
+          const headerRow = raw[0] || [];
+          const seen = new Set();
+          const cols = headerRow.map((h, i) => {
+            const baseName = (h !== null && h !== undefined && String(h).trim() !== '')
+              ? String(h).trim()
+              : `Column ${i + 1}`;
+            let name = baseName;
+            let n = 2;
+            while (seen.has(name)) { name = `${baseName} (${n++})`; }
+            seen.add(name);
+            return name;
+          });
+          this.columns = cols;
+          this.fullData = raw.slice(1).map(row => {
+            const obj = {};
+            cols.forEach((key, i) => {
+              obj[key] = row[i] !== undefined ? row[i] : '';
+            });
+            return obj;
+          });
           this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
           this.currentPage = 0;
           this.updateDisplayGrid();
           return;
         }
-        // If no fullData, fallback to data (list of dict)
+
         if (sheet && sheet.data && sheet.data.length > 0) {
           this.fullData = sheet.data;
-          if (this.fullData.length > 0) {
-            this.columns = Object.keys(this.fullData[0]);
-          } else {
-            this.columns = [];
-          }
+          this.columns = this.fullData.length > 0 ? Object.keys(this.fullData[0]) : [];
           this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
           this.currentPage = 0;
           this.updateDisplayGrid();
@@ -222,22 +227,15 @@ export default {
         }
       }
 
-      // Fallback: Use XLSX parsing
       if (this.workbook.Sheets && this.workbook.Sheets[sheetName]) {
         const worksheet = this.workbook.Sheets[sheetName];
-        // Use sheet_to_json with raw: false to preserve formatting
         data = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false });
         this.fullData = data;
-        if (this.fullData.length > 0) {
-          this.columns = Object.keys(this.fullData[0]);
-        } else {
-          this.columns = [];
-        }
+        this.columns = this.fullData.length > 0 ? Object.keys(this.fullData[0]) : [];
         this.totalPages = Math.ceil(this.fullData.length / this.pageSize);
         this.currentPage = 0;
         this.updateDisplayGrid();
       } else {
-        // No data
         this.fullData = [];
         this.columns = [];
         this.totalPages = 0;
@@ -297,7 +295,6 @@ export default {
 </script>
 
 <style scoped>
-/* (Styles unchanged – they are already in the original file) */
 .excel-viewer-overlay {
   position: fixed;
   top: 0;

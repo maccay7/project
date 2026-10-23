@@ -553,16 +553,23 @@ async function completeProcess() {
 }
 
 // Go to calculations
+// FIXED: 'calculations' route does not exist in router/index.ts — calculations
+// live on /instrument/:type?tab=calculations. Navigation was silently failing.
 async function goToCalculations() {
   if (!results.value) return alert('Please clean data first')
-  const datasetId = route.query.dataset_id
-  if (!datasetId) return alert('Cannot proceed without dataset reference')
+  const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
+  if (!sid) {
+    alert('No active session. Open Dashboard first.')
+    return
+  }
   try {
-    const session = sessionManager.getActiveSession()
-    const sid = session?.id || sessionManager.getActiveSessionId()
-    if (sid) await markStepCompleted(String(sid), 'cleaning')
+    await markStepCompleted(String(sid), 'cleaning')
   } catch (e) { console.warn(e) }
-  router.push({ name: 'calculations', query: { dataset_id: datasetId } })
+  const lastInstrument = localStorage.getItem('dura_last_instrument') || 'money-market'
+  router.push({
+    path: `/instrument/${lastInstrument}`,
+    query: { session: sid, tab: 'calculations' }
+  })
 }
 
 onMounted(() => {

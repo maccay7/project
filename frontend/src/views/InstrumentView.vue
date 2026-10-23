@@ -3,8 +3,8 @@
     <div class="instrument-page">
       <div class="page-header">
         <div class="header-left">
-          <h1>{{ instrumentLabel }}</h1>
-          <p>{{ instrumentDescription }}</p>
+          <h1>{{ pageTitle }}</h1>
+          <p>{{ pageSubtitle }}</p>
           <div v-if="activeSession" class="session-badge">
             <v-icon small>mdi-folder-outline</v-icon>
             Session: <strong>{{ activeSession.name }}</strong>
@@ -86,7 +86,10 @@
                 <span>{{ uploadedFile.name }}</span>
                 <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
-                <button class="btn-auto-detect-green" @click="() => autoDetectSingleInstrument()" :disabled="isDetecting || !currentSheetName" v-if="currentSheetName">
+                <button class="btn-auto-detect-green"
+        @click="autoDetectSingleInstrument"
+        :disabled="isDetecting || (!currentSheetName && !workbookSheets.length)"
+        v-if="worksheetSelected || currentSheetName || workbookSheets.length">
                   <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
                   <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
                   {{ getDetectionButtonText() }}
@@ -532,13 +535,16 @@
                 </div>
 
                 <div v-if="sheetType === 'single'" class="detected-values-section">
-                  <h3>Detected Values (Single Instrument)</h3>
-                  <p class="section-hint">Review the values detected by Auto Detection. Exclude values you don't want to use for calculations.</p>
+                  <h3>Detected Values — Final Inputs for Valuation</h3>
+                  <p class="section-hint">
+                    These are the field values taken from the worksheet. Excluded fields will NOT be sent to the valuation engine.
+                    The same values are shown in the Excel preview below — edit any cell there and it updates here.
+                  </p>
 
                   <div v-if="Object.keys(autoDetectedFields).length > 0" class="detected-values-table">
                     <div class="table-header">
                       <span class="header-field">Field</span>
-                      <span class="header-value">Extracted Value</span>
+                      <span class="header-value">Cleaned Value</span>
                       <span class="header-status">Status</span>
                       <span class="header-action">Action</span>
                     </div>
@@ -551,58 +557,41 @@
                         {{ excludedDetectedFields.has(key) ? 'Excluded' : 'Included' }}
                       </span>
                       <div class="row-action">
-                        <button 
-                          class="btn-toggle-exclude" 
-                          @click="toggleExcludeField(key)"
-                          :class="{ 'btn-exclude': !excludedDetectedFields.has(key), 'btn-include': excludedDetectedFields.has(key) }"
-                        >
+                        <button class="btn-toggle-exclude" @click="toggleExcludeField(key)"
+                          :class="{ 'btn-exclude': !excludedDetectedFields.has(key), 'btn-include': excludedDetectedFields.has(key) }">
                           {{ excludedDetectedFields.has(key) ? 'Include' : 'Exclude' }}
                         </button>
-                      </div>
-                    </div>
-                    <div v-if="selectedCurrency && !autoDetectedFields['Currency']" class="table-row">
-                      <span class="row-field">Currency</span>
-                      <div class="row-value">
-                        <span class="value-display">{{ selectedCurrency === 'custom' ? customCurrency?.toUpperCase() : selectedCurrency }}</span>
-                      </div>
-                      <span class="row-status status-included">Included</span>
-                      <div class="row-action">
-                        <button class="btn-toggle-exclude btn-include" disabled>Included</button>
                       </div>
                     </div>
 
                     <div class="detected-values-summary">
                       <span class="summary-text">
-                        {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) - excludedDetectedFields.size }} of {{ Object.keys(autoDetectedFields).length + (selectedCurrency && !autoDetectedFields['Currency'] ? 1 : 0) }} values included for calculations
+                        {{ Object.keys(autoDetectedFields).length - excludedDetectedFields.size }} of {{ Object.keys(autoDetectedFields).length }} values will be used in calculation
                       </span>
                     </div>
 
                     <div class="add-field-section">
                       <h4>Add Field</h4>
-                      <p class="section-hint">Add a custom field that will be included in calculations.</p>
                       <div class="add-field-form">
-                        <input
-                          v-model="newFieldName"
-                          type="text"
-                          placeholder="Field name (e.g., CustomRate)"
-                          class="add-field-input"
-                        />
-                        <input
-                          v-model="newFieldValue"
-                          type="text"
-                          placeholder="Value (e.g., 0.05)"
-                          class="add-field-input"
-                        />
+                        <input v-model="newFieldName" type="text" placeholder="Field name" class="add-field-input" />
+                        <input v-model="newFieldValue" type="text" placeholder="Value" class="add-field-input" />
                         <button class="btn-add-field" @click="addCustomField">Add Field</button>
                       </div>
                     </div>
                   </div>
-                  
-                  <div v-else class="no-detection-message-cleaning">
-                    <p>No fields detected. Please run Auto Detection to detect values from your worksheet.</p>
+
+                  <div v-if="cleanedData.length" class="preview-section" style="margin-top: 20px;">
+                    <h4>Cleaned Data Preview — {{ cleanedData.length }} row(s)</h4>
+                    <p class="section-hint">
+                      These are the cleaned input values that will be sent to the valuation engine. Excluded fields have already been removed.
+                    </p>
+                    <div class="excel-scroll-wrapper">
+                      <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
+                    </div>
                   </div>
                 </div>
-                <div v-if="cleanedData.length" class="preview-section">
+
+                <div v-if="sheetType !== 'single' && cleanedData.length" class="preview-section">
                   <h4>Cleaned Data ({{ cleanedData.length }} rows)</h4>
                   <div class="excel-scroll-wrapper">
                     <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
@@ -1393,6 +1382,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
+import { API_BASE_URL } from '@/config.js'
 import * as XLSX from 'xlsx'
 import api from '@/services/api.js'
 import sessionManager from '@/services/sessionManager.js'
@@ -1907,6 +1897,20 @@ const instrumentDescription = computed(() => config.value.description)
 const maturityOptions = computed(() => config.value.maturityOptions)
 const rateLabel = computed(() => config.value.rateLabel)
 
+const pageTitle = computed(() => {
+  if (activeTab.value === 'reports') return 'Generate Report'
+  if (activeTab.value === 'summary') return `${instrumentLabel.value} – Executive Summary`
+  if (activeTab.value === 'visualizations') return `${instrumentLabel.value} – Yield Curve`
+  return instrumentLabel.value
+})
+
+const pageSubtitle = computed(() => {
+  if (activeTab.value === 'reports') return 'Select the instruments to include and generate the combined valuation report.'
+  if (activeTab.value === 'summary') return 'Executive summary of the current portfolio valuations.'
+  if (activeTab.value === 'visualizations') return `Market yield curve for ${instrumentLabel.value}.`
+  return instrumentDescription.value
+})
+
 const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInstrumentConfig(instrumentType.value)
 const { fredFilters, loadFilterOptions, fetchBenchmark } = useFredMarket(() => config.value.defaultMaturity)
 const worksheetWorkflow = useWorksheetWorkflow(instrumentType.value)
@@ -1919,6 +1923,12 @@ watch(() => route.params.type, (newType) => {
       console.error('Failed to load config:', e)
     })
     if (worksheetWorkflow.reset) worksheetWorkflow.reset()
+  }
+}, { immediate: true })
+
+watch(instrumentType, (val) => {
+  if (val) {
+    try { localStorage.setItem('dura_last_instrument', val) } catch (e) { /* ignore */ }
   }
 }, { immediate: true })
 
@@ -2328,30 +2338,51 @@ const benchmarkYield = computed(() => {
   return getRateForMaturity(effectiveMaturity.value)
 })
 
-function getDisplayColumns() {
-  const exclude = [
-    '_raw', '_source', 'index', '__v',
-    'instrument_name', 'instrument_type',
-    'discount_yield', 'effective_yield', 'interest_earned',
-    '_row_index', 'term_days', 'total_value',
-    'total_interest', 'avg_rate', 'weighted_avg_rate',
-    'avg_days_to_maturity', 'total_principal', 'annual_yield',
-    'effective_annual_rate', 'instrument_count', 'fred_benchmark',
-    'coupon_rate', 'coupon_payment', 'accrued_interest',
-    'clean_price', 'dirty_price', 'yield_to_maturity',
-    'discount_rate', 'investment_yield', 'maturity_value',
-    'present_value', 'purchase_price', 'issue_price',
-    'days_to_maturity', 'face_value', 'principal',
-    'bond_equivalent_yield', 'currency',
-    'Valuation Type', 'Workbook', 'Worksheet'
-  ]
+const EXCLUDED_COLUMNS = new Set([
+  '_raw', '_source', 'index', '__v',
+  'instrument_name', 'instrument_type',
+  'discount_yield', 'effective_yield', 'interest_earned',
+  '_row_index', 'term_days', 'total_value',
+  'total_interest', 'avg_rate', 'weighted_avg_rate',
+  'avg_days_to_maturity', 'total_principal', 'annual_yield',
+  'effective_annual_rate', 'instrument_count', 'fred_benchmark',
+  'coupon_rate', 'coupon_payment', 'accrued_interest',
+  'clean_price', 'dirty_price', 'yield_to_maturity',
+  'discount_rate', 'investment_yield', 'maturity_value',
+  'present_value', 'purchase_price', 'issue_price',
+  'days_to_maturity', 'face_value', 'principal',
+  'bond_equivalent_yield', 'currency',
+  'valuationtype', 'workbook', 'worksheet',
+  'carryingvalue', 'daycountconvention', 'derivations',
+  'discountamount', 'yieldcurverate', 'moneymarketyield',
+  'holdingperiodyield'
+].map(s => s.toLowerCase().replace(/[_\s\-]+/g, '')))
 
+function isExcludedColumn(col) {
+  if (!col) return false
+  const normalized = String(col).toLowerCase().replace(/[_\s\-]+/g, '')
+  if (EXCLUDED_COLUMNS.has(normalized)) return true
+  if (normalized.startsWith('derivation')) return true
+  return false
+}
+
+function formatColumnHeader(col) {
+  if (!col) return col
+  return String(col)
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function getDisplayColumns() {
   let allColumns = [...(instrumentSummary.value.columns || [])]
   if (completedInstrumentSummary.value.columns) {
     allColumns = [...allColumns, ...completedInstrumentSummary.value.columns]
   }
 
-  const cols = allColumns.filter(c => !exclude.includes(c))
+  const cols = allColumns.filter(c => c && !isExcludedColumn(c))
   const seen = new Set()
   return cols.filter(c => {
     const base = c.replace(/_\d+$/, '').trim()
@@ -2481,35 +2512,50 @@ function toSnakeCase(str) {
   }
 }
 
+// ⭐ FIXED — snake-case FIRST so lookup is case-insensitive
 function normalizeFieldName(fieldName) {
-  if (!fieldName) return fieldName
-  if (typeof fieldName !== 'string') return fieldName
+  if (!fieldName || typeof fieldName !== 'string') return fieldName
+  const snake = fieldName
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/[\s\-]+/g, '_')
+    .toLowerCase()
+
   const fieldMap = {
-    'CouponRate': 'coupon_rate',
-    'CouponFrequency': 'coupon_frequency',
-    'MaturityDate': 'maturity_date',
-    'BondName': 'instrument_name',
-    'settlement_date': 'issue_date',
-    'next_coupon_date': 'next_coupon_date',
-    'valuation_date': 'valuation_date',
-    'present_value': 'present_value',
-    'accrued_interest': 'accrued_interest',
-    'carrying_value': 'carrying_value',
-    'discount_rate': 'discount_rate',
-    'price': 'price',
-    'interest_rate': 'interest_rate',
-    'yield_to_maturity': 'yield_to_maturity',
-    'spread': 'spread',
-    'principal': 'face_value',
-    'fair_value': 'fair_value',
-    'tenor': 'tenor',
-    'country_risk_premium': 'country_risk_premium'
+    coupon_rate: 'coupon_rate',
+    coupon_frequency: 'coupon_frequency',
+    maturity_date: 'maturity_date',
+    bond_name: 'instrument_name',
+    t_bill_name: 'instrument_name',
+    tbills_name: 'instrument_name',
+    tb_bill_name: 'instrument_name',
+    instrument_name: 'instrument_name',
+    settlement_date: 'issue_date',
+    next_coupon_date: 'next_coupon_date',
+    valuation_date: 'valuation_date',
+    present_value: 'present_value',
+    accrued_interest: 'accrued_interest',
+    carrying_value: 'carrying_value',
+    discount_rate: 'discount_rate',
+    price: 'price',
+    interest_rate: 'interest_rate',
+    yield_to_maturity: 'yield_to_maturity',
+    spread: 'spread',
+    principal: 'face_value',
+    face_value: 'face_value',
+    par_value: 'face_value',
+    notional: 'face_value',
+    fair_value: 'fair_value',
+    tenor: 'tenor',
+    country_risk_premium: 'country_risk_premium',
+    days_to_maturity: 'days_to_maturity',
+    term_days: 'days_to_maturity',
+    term: 'days_to_maturity',
+    purchase_price: 'purchase_price',
+    issue_date: 'issue_date',
+    coupon_payment: 'coupon_payment',
+    instrument: 'instrument_name'
   }
-  try {
-    return fieldMap[fieldName] || toSnakeCase(fieldName)
-  } catch (e) {
-    return fieldName
-  }
+  return fieldMap[snake] || snake
 }
 
 function formatCalcValue(key, value) {
@@ -2706,31 +2752,13 @@ function computeAnalytics(rows) {
 
 function computeAggregate(rows) {
   const agg = {
-    totalValue: 0,
-    instrumentCount: 0,
-    avgRate: 0,
-    weightedAvgRate: 0,
-    totalInterest: null,
-    interestEarned: null,
-    annualYield: null,
-    effectiveAnnualRate: null,
-    avgDaysToMaturity: null,
-    totalPrincipal: 0,
-    avgCouponRate: 0,
-    weightedAvgCoupon: 0,
-    totalAnnualIncome: null,
-    avgYTM: null,
-    duration: null,
-    avgDiscountRate: 0,
-    weightedAvgDiscount: 0,
-    totalDiscount: null,
-    effectiveYield: null,
-    bondEquivalentYield: null,
-    totalPurchasePrice: null,
-    avgInvestment: null,
-    holdingPeriodYield: null,
-    annualizedYield: null,
-    pricePer100: null
+    totalValue: 0, instrumentCount: 0, avgRate: 0, weightedAvgRate: 0,
+    totalInterest: null, interestEarned: null, annualYield: null,
+    effectiveAnnualRate: null, avgDaysToMaturity: null, totalPrincipal: 0,
+    avgCouponRate: 0, weightedAvgCoupon: 0, totalAnnualIncome: null, avgYTM: null, duration: null,
+    avgDiscountRate: 0, weightedAvgDiscount: 0, totalDiscount: null, effectiveYield: null,
+    bondEquivalentYield: null, totalPurchasePrice: null, avgInvestment: null,
+    holdingPeriodYield: null, annualizedYield: null, pricePer100: null
   }
 
   if (!rows || !rows.length) return agg
@@ -3071,6 +3099,10 @@ function removeFile() {
   debouncedSave()
   forceUpdate.value++
   if (fileInput.value) fileInput.value.value = ''
+}
+
+function togglePreview() {
+  showPreview.value = !showPreview.value
 }
 
 function handleWorksheetSelect(sheetName) {
@@ -3538,10 +3570,12 @@ function workOnSelectedSheet() {
 }
 
 async function autoDetectSingleInstrument() {
-  if (!currentSheetName.value || !originalFileBuffer.value) {
+  const sheetName = currentSheetName.value || workbookSheets.value?.[0]?.name
+  if (!sheetName || !originalFileBuffer.value) {
     alert('Please select a sheet first')
     return
   }
+  currentSheetName.value = sheetName
 
   if (isDetecting.value) {
     return
@@ -4409,40 +4443,36 @@ function exportSummary() {
   const wb = XLSX.utils.book_new()
 
   if (currentData.length) {
-    const currentSheetData = currentData.map(row => {
-      const obj = {}
-      displayCols.forEach(col => {
-        const value = row[col]
-        if (typeof value === 'number' && !isNaN(value)) {
-          const rounded = Math.round(value * 100) / 100
-          obj[col] = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        } else {
-          obj[col] = value
-        }
-      })
-      return obj
-    })
+    const filteredCols = displayCols.filter(c => !isExcludedColumn(c))
+    const headerRow = filteredCols.map(formatColumnHeader)
 
-    const wsCurrent = XLSX.utils.json_to_sheet(currentSheetData)
+    const currentBody = currentData.map(row => filteredCols.map(col => {
+      const value = row[col]
+      if (typeof value === 'number' && !isNaN(value)) {
+        const rounded = Math.round(value * 100) / 100
+        return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      }
+      return value !== undefined ? value : ''
+    }))
+
+    const wsCurrent = XLSX.utils.aoa_to_sheet([headerRow, ...currentBody])
     XLSX.utils.book_append_sheet(wb, wsCurrent, 'Current Selection')
   }
 
   if (completedData.length) {
-    const completedSheetData = completedData.map(row => {
-      const obj = {}
-      displayCols.forEach(col => {
-        const value = row[col]
-        if (typeof value === 'number' && !isNaN(value)) {
-          const rounded = Math.round(value * 100) / 100
-          obj[col] = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        } else {
-          obj[col] = value
-        }
-      })
-      return obj
-    })
+    const filteredCols = displayCols.filter(c => !isExcludedColumn(c))
+    const headerRow = filteredCols.map(formatColumnHeader)
 
-    const wsCompleted = XLSX.utils.json_to_sheet(completedSheetData)
+    const completedBody = completedData.map(row => filteredCols.map(col => {
+      const value = row[col]
+      if (typeof value === 'number' && !isNaN(value)) {
+        const rounded = Math.round(value * 100) / 100
+        return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      }
+      return value !== undefined ? value : ''
+    }))
+
+    const wsCompleted = XLSX.utils.aoa_to_sheet([headerRow, ...completedBody])
     XLSX.utils.book_append_sheet(wb, wsCompleted, 'All Completed History')
   }
 
@@ -4580,22 +4610,14 @@ function exportInstrumentSummaryExcel() {
           }
         }
 
-        const data = allRows.map(row => {
-          const obj = {}
-          displayCols.forEach(col => {
-            let val = row[col] !== undefined ? row[col] : ''
-            if (isPercentageField(col)) {
-              val = formatForExcel(val, 'percentage', col)
-            } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
-              val = formatForExcel(val, 'money', col)
-            } else {
-              val = formatForExcel(val, 'number', col)
-            }
-            obj[col] = val
-          })
-          return obj
-        })
-        const ws1 = XLSX.utils.json_to_sheet(data)
+        const headerRow = displayCols.map(formatColumnHeader)
+        const bodyRows = allRows.map(row => displayCols.map(col => {
+          const val = row[col] !== undefined ? row[col] : ''
+          if (isPercentageField(col)) return formatForExcel(val, 'percentage', col)
+          if (/value|price|amount|principal|interest/i.test(col)) return formatForExcel(val, 'money', col)
+          return formatForExcel(val, 'number', col)
+        }))
+        const ws1 = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows])
         XLSX.utils.book_append_sheet(wb, ws1, 'Instruments')
 
         const analytics = computeAnalytics(allRows)
@@ -4626,22 +4648,15 @@ function exportInstrumentSummaryExcel() {
 }
 
 function exportCurrentRowsOnly(wb, displayCols, rows) {
-  const data = rows.map(row => {
-    const obj = {}
-    displayCols.forEach(col => {
-      let val = row[col] !== undefined ? row[col] : ''
-      if (isPercentageField(col)) {
-        val = formatForExcel(val, 'percentage', col)
-      } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
-        val = formatForExcel(val, 'money', col)
-      } else {
-        val = formatForExcel(val, 'number', col)
-      }
-      obj[col] = val
-    })
-    return obj
-  })
-  const ws1 = XLSX.utils.json_to_sheet(data)
+  const filteredCols = displayCols.filter(c => !isExcludedColumn(c))
+  const headerRow = filteredCols.map(formatColumnHeader)
+  const bodyRows = rows.map(row => filteredCols.map(col => {
+    const val = row[col] !== undefined ? row[col] : ''
+    if (isPercentageField(col)) return formatForExcel(val, 'percentage', col)
+    if (/value|price|amount|principal|interest/i.test(col)) return formatForExcel(val, 'money', col)
+    return formatForExcel(val, 'number', col)
+  }))
+  const ws1 = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows])
   XLSX.utils.book_append_sheet(wb, ws1, 'Instruments')
 
   const analytics = computeAnalytics(rows)
@@ -4801,9 +4816,9 @@ function downloadCalculatedInstrumentsExcel() {
   summaryRows.forEach(row => {
     Object.keys(row).forEach(key => allColumns.add(key))
   })
-  const columns = Array.from(allColumns)
+  const columns = Array.from(allColumns).filter(c => !isExcludedColumn(c))
 
-  const data = [columns]
+  const data = [columns.map(formatColumnHeader)]
 
   summaryRows.forEach(row => {
     const dataRow = columns.map(col => {
@@ -5164,6 +5179,15 @@ async function calculateMetrics() {
 
   isCalculating.value = true
 
+  // ⭐ FIXED — merge exclusions coming from standalone CleaningView (sessionStorage)
+  try {
+    const stored = sessionStorage.getItem('excluded_fields')
+    if (stored) {
+      const arr = JSON.parse(stored)
+      if (Array.isArray(arr)) arr.forEach(k => excludedDetectedFields.value.add(k))
+    }
+  } catch (e) { /* ignore */ }
+
   let dataForCalculation = JSON.parse(JSON.stringify(cleanedData.value))
 
   try {
@@ -5447,6 +5471,29 @@ async function calculateMetrics() {
 
           Object.keys(filteredRowWithWorkbook).forEach(k => currentCols.add(k))
           instrumentSummary.value = { columns: Array.from(currentCols), rows: [filteredRowWithWorkbook] }
+        } else if (calcArray.length === 0 && cleanedData.value.length > 0) {
+          // ⭐ FIXED — backend success with zero rows → fall back to frontend compute
+          console.warn('Backend returned empty calculations — running local fallback')
+          const rows = cleanedData.value.map((row, idx) => {
+            const enriched = { ...row, 'Instrument Name': row.InstrumentName || row['Instrument Name'] || currentSheetName.value || `Instrument ${idx + 1}` }
+            const result = runInstrumentCalculations(enriched, instrumentType.value)
+            return {
+              'Instrument Name': enriched['Instrument Name'],
+              'Instrument Type': instrumentType.value,
+              ...result,
+              'Worksheet': currentSheetName.value || 'Calculated',
+              'Workbook': currentWorkbookName.value || 'Unknown'
+            }
+          })
+          const cols = new Set()
+          rows.forEach(r => Object.keys(r).forEach(k => cols.add(k)))
+          instrumentSummary.value = { columns: Array.from(cols), rows }
+          const agg = computeAggregate(rows)
+          agg.instrumentCount = rows.length
+          allCalculations.value = agg
+          selectedCalculations.value = agg
+          calculations.value = agg
+          showSnackbar('Calculated locally — backend returned empty result. Verify the /calculations/execute-by-type endpoint.', 'warning', 6000)
         } else if (calcArray.length > 1) {
           const aggregates = response.data.aggregates || {}
 
@@ -5754,7 +5801,11 @@ async function calculateMetrics() {
             autoDetectedFieldsWithMetadata: autoDetectedFieldsWithMetadata.value,
             autoDetectedAdditionalFields: autoDetectedAdditionalFields.value,
             detectedCurrencies: detectedCurrencies.value,
-            excludedDetectedFields: Array.from(excludedDetectedFields.value)
+            excludedDetectedFields: Array.from(excludedDetectedFields.value),
+            // ⭐ FIXED — persist these so reload preserves the workflow
+            sheetType: sheetType.value,
+            currentSheetName: currentSheetName.value,
+            extractedValues: extractedValues.value
           })
         }
 
@@ -5801,6 +5852,7 @@ async function continueToVisualizations() {
   }
 }
 
+// ⭐ FIXED — direct workflow save now includes sheetType/currentSheetName/extractedValues
 async function continueFromVisualizations() {
   if (!hasCleanedData.value) { return }
   saveSessionData()
@@ -5830,7 +5882,10 @@ async function continueFromVisualizations() {
       cleaningStats: cleaningStats.value,
       sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
       manualInputs: manualInputs.value,
-      formulas: formulas.value
+      formulas: formulas.value,
+      sheetType: sheetType.value,
+      currentSheetName: currentSheetName.value,
+      extractedValues: extractedValues.value
     })
     saveSessionData()
   }
@@ -6036,7 +6091,6 @@ async function renderYieldCurveChart() {
   } else {
     const period = effectiveMaturity.value
     let unitLabel = 'Years'
-    let stepSize = 1
     let maxX = 0
 
     const match = period.match(/^(\d+)([YMW])$/)
@@ -6045,21 +6099,17 @@ async function renderYieldCurveChart() {
       const unit = match[2]
       if (unit === 'Y') {
         unitLabel = 'Years'
-        stepSize = num > 5 ? 5 : 1
         maxX = num + 0.5
       } else if (unit === 'M') {
         unitLabel = 'Months'
-        stepSize = num > 6 ? 6 : 1
         maxX = num + 0.5
       } else if (unit === 'W') {
         unitLabel = 'Weeks'
-        stepSize = num > 4 ? 2 : 1
         maxX = num + 0.5
       }
     } else {
       const num = parseFloat(period) || 10
       unitLabel = 'Years'
-      stepSize = num > 5 ? 5 : 1
       maxX = num + 0.5
     }
 
@@ -6089,17 +6139,17 @@ async function renderYieldCurveChart() {
       min: 0,
       max: maxX,
       ticks: {
-        callback: function(value) {
+        autoSkip: false,
+        stepSize: 1,
+        maxRotation: 0,
+        minRotation: 0,
+        callback: function (value) {
+          if (!Number.isInteger(value) || value < 0) return null
+          if (value > maxX) return null
           const closest = filteredData.find(p => Math.abs(p.maturity - value) < 0.01)
-          if (closest && closest.maturityLabel) {
-            return closest.maturityLabel
-          }
-          if (Number.isInteger(value) && value >= 0) {
-            return value.toString()
-          }
-          return null
-        },
-        stepSize: stepSize
+          if (closest && closest.maturityLabel) return closest.maturityLabel
+          return value.toString()
+        }
       }
     }
   }
@@ -6513,6 +6563,7 @@ async function saveToSession() {
       }
     }
 
+    // ⭐ FIXED — sheetType/currentSheetName/extractedValues are now persisted
     const datasetSnapshot = {
       rawData: rawData.value,
       cleanedData: cleanedData.value,
@@ -6532,7 +6583,9 @@ async function saveToSession() {
       cleaningStats: cleaningStats.value,
       sessionSavedAt: new Date().toISOString(),
       instrumentType: instrumentType.value,
-      sheetType: sheetType.value
+      sheetType: sheetType.value,
+      currentSheetName: currentSheetName.value,
+      extractedValues: extractedValues.value
     }
 
     const worksheetData = {
@@ -6645,6 +6698,7 @@ async function refreshSessionVersionCount(sid) {
   }
 }
 
+// ⭐ FIXED — persists sheetType/currentSheetName/extractedValues; surfaces errors instead of silent loss
 function saveSessionData(explicitSave = false) {
   if (!activeSession.value) return
   const sid = activeSession.value.id
@@ -6673,7 +6727,11 @@ function saveSessionData(explicitSave = false) {
     autoDetectedFieldsWithMetadata: autoDetectedFieldsWithMetadata.value,
     autoDetectedAdditionalFields: autoDetectedAdditionalFields.value,
     detectedCurrencies: detectedCurrencies.value,
-    excludedDetectedFields: Array.from(excludedDetectedFields.value)
+    excludedDetectedFields: Array.from(excludedDetectedFields.value),
+    sheetType: sheetType.value,
+    currentSheetName: currentSheetName.value,
+    extractedValues: extractedValues.value,
+    last_tab: activeTab.value
   }
 
   sessionManager.setActiveSession(activeSession.value)
@@ -6685,9 +6743,13 @@ function saveSessionData(explicitSave = false) {
         sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
       }
     })
-    .catch(err => console.error('Failed to save workflow:', err))
+    .catch(err => {
+      console.error('Failed to save workflow:', err)
+      showSnackbar('Warning: session could not be saved — ' + (err?.message || err), 'warning', 6000)
+    })
 }
 
+// ⭐ FIXED — restores sheetType/currentSheetName/extractedValues after reload
 async function loadSavedData() {
   if (!activeSession.value) return false
   const sid = activeSession.value.id
@@ -6711,6 +6773,14 @@ async function loadSavedData() {
       manualInputs.value = wf.manualInputs || {}
       formulas.value = wf.formulas || {}
       isCalculating.value = wf.isCalculating || false
+
+      // ⭐ FIXED — restore sheetType / currentSheetName / extractedValues
+      if (wf.sheetType) sheetType.value = wf.sheetType
+      if (wf.currentSheetName) currentSheetName.value = wf.currentSheetName
+      if (wf.extractedValues && Object.keys(wf.extractedValues).length) {
+        extractedValues.value = wf.extractedValues
+      }
+
       if (wf.fredFilters) {
         selectedCountryOption.value = wf.fredFilters.country || ''
         selectedCurrencyOption.value = wf.fredFilters.currency || ''
@@ -6741,15 +6811,183 @@ async function loadSavedData() {
       loaded = true
     }
   } catch (err) {
-    // non-fatal
+    console.warn('loadSavedData failed:', err)
   }
   return loaded
 }
 
-// ============================================================
-// ENHANCED showFormula — shows every input, every step, and
-// explicitly narrates date calculations.
-// ============================================================
+async function loadAllSelectedInstrumentCurves() {
+  const session = activeSession.value
+  if (!session?.id) return []
+
+  const meta = [
+    { key: 'money-market', label: 'Money Market', color: '#1E88E5', apiType: 'money-market' },
+    { key: 'bonds',        label: 'Bonds',        color: '#4CAF50', apiType: 'bonds' },
+    { key: 'tbills',       label: 'T-Bills',      color: '#FF9800', apiType: 'tbills' }
+  ]
+
+  const result = []
+
+  for (const m of meta) {
+    if (!selectedInstruments.value[m.key]) continue
+
+    let wf = null
+    try {
+      wf = await sessionManager.getInstrumentWorkflow(session.id, m.key)
+    } catch (e) {
+      // ignore
+    }
+
+    const isCurrent = m.key === instrumentType.value
+
+    const localPoints = isCurrent ? yieldCurveData.value : null
+    const localFilters = isCurrent ? {
+      country: effectiveCountry.value,
+      currency: effectiveCurrency.value,
+      maturity: effectiveMaturity.value,
+      maturityMode: maturityMode.value,
+      fromDate: yieldCurveStartDate.value,
+      toDate: yieldCurveEndDate.value
+    } : null
+
+    let yc = Array.isArray(localPoints) && localPoints.length ? localPoints : (wf?.yieldCurveData || [])
+    let filters = (localFilters && localFilters.country) ? localFilters : (wf?.fredFilters || {})
+    let validPoints = yc.filter(p => p && p.maturity != null && p.rate != null)
+
+    if (isCurrent && validPoints.length >= 2 && (!wf?.yieldCurveData || wf.yieldCurveData.length < 2)) {
+      try {
+        await sessionManager.saveInstrumentWorkflow(session.id, m.key, {
+          ...(wf || {}),
+          yieldCurveData: validPoints,
+          fredFilters: filters
+        })
+      } catch (e) {
+        console.warn('Failed to persist current yield curve:', e)
+      }
+    }
+
+    if (validPoints.length < 2 && filters?.country) {
+      try {
+        const payload = {
+          instrument_type: m.apiType || m.key,
+          country: filters.country,
+          currency: filters.currency || 'USD'
+        }
+        if (filters.maturityMode === 'date' && filters.fromDate && filters.toDate) {
+          payload.from_date = filters.fromDate
+          payload.to_date = filters.toDate
+        } else if (filters.maturity) {
+          payload.maturity = filters.maturity
+        }
+        const res = await api.fredAPI.getYieldCurve(payload)
+        if (res?.success && res.data?.maturities?.length) {
+          const fetched = res.data.maturities.map((mat, idx) => ({
+            maturity: parseFloat(mat),
+            maturityLabel: res.data.labels?.[idx] || String(mat),
+            rate: res.data.rates?.[idx] || 0,
+            date: res.data.dates?.[idx] || null
+          })).filter(p => !isNaN(p.maturity) && !isNaN(p.rate))
+          if (fetched.length >= 2) {
+            validPoints = fetched
+            yc = fetched
+          }
+        }
+      } catch (e) {
+        console.warn('Live FRED fetch for report failed:', m.key, e)
+      }
+    }
+
+    if (validPoints.length >= 2) {
+      result.push({
+        key: m.key,
+        label: m.label,
+        color: m.color,
+        points: validPoints,
+        filters,
+        svg: buildInstrumentCurveSvg(validPoints, m.label, m.color),
+        status: 'ok'
+      })
+    } else if (validPoints.length === 1) {
+      result.push({
+        key: m.key,
+        label: m.label,
+        color: m.color,
+        points: [],
+        filters,
+        svg: '',
+        status: 'insufficient',
+        message: `Only one valid yield observation was saved for ${m.label}. A yield curve requires at least 2 points across different maturities — no curve will be drawn.`
+      })
+    } else {
+      result.push({
+        key: m.key,
+        label: m.label,
+        color: m.color,
+        points: [],
+        filters,
+        svg: '',
+        status: 'missing',
+        message: `No saved yield curve data for ${m.label}. Open the Visualizations tab for ${m.label}, refresh the FRED curve and press Save to Session, then regenerate this report.`
+      })
+    }
+  }
+
+  return result
+}
+
+function buildInstrumentCurveSvg(points, title, color) {
+  const valid = points
+    .map(p => ({ x: parseFloat(p.maturity), y: parseFloat(p.rate) }))
+    .filter(p => !isNaN(p.x) && !isNaN(p.y) && p.x >= 0)
+
+  if (valid.length < 2) return ''
+
+  const width = 720
+  const height = 280
+  const pad = { l: 56, r: 24, t: 36, b: 56 }
+  const plotW = width - pad.l - pad.r
+  const plotH = height - pad.t - pad.b
+
+  const dataMaxX = Math.max(...valid.map(p => p.x))
+  const plotMinX = 0
+  const plotMaxX = Math.ceil(dataMaxX)
+
+  const ys = valid.map(p => p.y)
+  const minY = Math.min(...ys)
+  const maxY = Math.max(...ys)
+  const yPad = (maxY - minY) * 0.08 || 0.5
+  const yMin = minY - yPad
+  const yMax = maxY + yPad
+
+  const sx = x => pad.l + ((x - plotMinX) / (plotMaxX - plotMinX || 1)) * plotW
+  const sy = y => pad.t + plotH - ((y - yMin) / (yMax - yMin || 1)) * plotH
+
+  const poly = valid.map(p => `${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join(' ')
+
+  let xLabels = ''
+  const labelCount = plotMaxX - plotMinX + 1
+  const rotate = labelCount > 12
+  for (let yr = plotMinX; yr <= plotMaxX; yr++) {
+    const xPos = sx(yr).toFixed(1)
+    const transform = rotate
+      ? ` transform="rotate(-45 ${xPos} ${height - 14})" text-anchor="end"`
+      : ` text-anchor="middle"`
+    xLabels += `<text x="${xPos}" y="${height - 14}"${transform} font-size="10" fill="#555">${yr}</text>`
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <rect width="100%" height="100%" fill="#fafbff"/>
+    <text x="${pad.l}" y="22" font-size="14" font-weight="600" fill="${color}">${title} — Yield Curve (%)</text>
+    <line x1="${pad.l}" y1="${pad.t + plotH}" x2="${pad.l + plotW}" y2="${pad.t + plotH}" stroke="#ccc"/>
+    <line x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${pad.t + plotH}" stroke="#ccc"/>
+    <text x="12" y="${pad.t + plotH / 2}" font-size="10" fill="#666" transform="rotate(-90 12 ${pad.t + plotH / 2})">Rate (%)</text>
+    <text x="${pad.l + plotW / 2}" y="${height - 2}" text-anchor="middle" font-size="10" fill="#666">Maturity (years)</text>
+    <polyline fill="none" stroke="${color}" stroke-width="2.5" points="${poly}"/>
+    ${valid.map(p => `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="3.5" fill="${color}"/>`).join('')}
+    ${xLabels}
+  </svg>`
+}
+
 function showFormula(metricKey) {
   const formulaMap = {
     'Total Portfolio Value': 'Σ (Total Value of each instrument)',
@@ -6757,49 +6995,50 @@ function showFormula(metricKey) {
     'Number of Instruments': 'Count of all instrument rows',
     'totalValue': 'Σ (Total Value of each instrument)',
     'avgRate': 'Σ (Rate × Principal) / Σ Principal',
-    'weightedAvgRate': 'Σ (Interest Rate × Principal) / Σ Principal',
-    'totalInterest': 'Σ (Principal × Interest Rate × Days / DayCountBasis)',
-    'interestEarned': 'Σ (Principal × Interest Rate × Days / DayCountBasis)',
-    'annualYield': '(Interest / Principal) × (365 / Days) × 100',
-    'effectiveAnnualRate': '((1 + Interest / Principal)^(365 / Days) - 1) × 100',
-    'effectiveYield': '((Face Value / Purchase Price)^(365/Days) - 1) × 100',
-    'bondEquivalentYield': '((Face Value - Purchase Price) / Purchase Price) × (365 / Days) × 100',
-    'discountYield': '((Face Value - Purchase Price) / Face Value) × (360 / Days) × 100',
-    'moneyMarketYield': '((Face Value - Purchase Price) / Purchase Price) × (360 / Days) × 100',
-    'holdingPeriodYield': '((Face Value - Purchase Price) / Purchase Price) × 100',
-    'annualizedYield': '((Face Value - Purchase Price) / Purchase Price) × (365 / Days) × 100',
-    'effectiveAnnualYield': '((Face Value / Purchase Price)^(365/Days) - 1) × 100',
+    'weightedAvgRate': 'Σ (Rate × Weight) / Σ Weight',
+    'totalInterest': 'Σ (Principal × Interest Rate × Days ÷ DayCountBasis)',
+    'interestEarned': 'Σ (Principal × Interest Rate × Days ÷ DayCountBasis)',
+    'annualYield': '(Interest ÷ Principal) × (365 ÷ Days) × 100',
+    'effectiveAnnualRate': '((1 + (Rate ÷ 100) × (Days ÷ Basis))^(Basis ÷ Days) − 1) × 100',
+    'effectiveYield': '((Face Value ÷ Purchase Price)^(365 ÷ Days) − 1) × 100',
+    'bondEquivalentYield': '((Face Value − Purchase Price) ÷ Purchase Price) × (365 ÷ Days) × 100',
+    'discountYield': '((Face Value − Purchase Price) ÷ Face Value) × (360 ÷ Days) × 100',
+    'moneyMarketYield': '((Face Value − Purchase Price) ÷ Purchase Price) × (360 ÷ Days) × 100',
+    'holdingPeriodYield': '((Face Value − Purchase Price) ÷ Purchase Price) × 100',
+    'annualizedYield': '((Face Value − Purchase Price) ÷ Purchase Price) × (365 ÷ Days) × 100',
+    'effectiveAnnualYield': '((Face Value ÷ Purchase Price)^(365 ÷ Days) − 1) × 100',
     'avgDaysToMaturity': 'Σ Days to Maturity / Number of Instruments',
     'totalPrincipal': 'Σ Principal',
-    'maturityValue': 'Principal × (1 + Rate × Days / DayCountBasis)',
-    'presentValue': 'Future Value / (1 + Rate × Days / DayCountBasis)',
-    'fairValue': 'Present Value - Purchase Price',
-    'yieldCurveRate': 'Benchmark rate from FRED (matched to maturity)',
-    'couponRate': 'Annual coupon rate (%)',
-    'avgCouponRate': 'Σ Coupon Rate / Number of Instruments',
-    'weightedAvgCoupon': 'Σ (Coupon Rate × Face Value) / Σ Face Value',
-    'totalAnnualIncome': 'Σ (Coupon Rate × Face Value / 100)',
-    'annualCoupon': 'Face Value × Coupon Rate / 100',
-    'couponPerPeriod': 'Annual Coupon / Coupon Frequency',
-    'yieldToMaturity': 'IRR of bond cash flows',
-    'avgYTM': 'Σ Yield to Maturity / Number of Instruments',
-    'currentYield': '(Annual Coupon / Current Price) × 100',
-    'duration': 'Macaulay Duration = Σ (t × PV(C_t)) / Price',
-    'modifiedDuration': 'Macaulay Duration / (1 + YTM / Frequency)',
-    'accruedInterest': 'Coupon per Period × (Days Accrued / Days in Period)',
-    'yearsToMaturity': '(Maturity Date - Valuation Date) / 365',
-    'termDays': 'Days from Valuation Date to Maturity Date',
-    'daysToMaturity': 'Days from Valuation Date to Maturity Date',
-    'pricePer100': '(Purchase Price / Face Value) × 100',
-    'currentPrice': 'Market price of the bond',
-    'totalDiscount': 'Σ (Face Value - Purchase Price)',
-    'avgDiscountRate': 'Σ Discount Rate / Number of Instruments',
-    'weightedAvgDiscount': 'Σ (Discount Rate × Face Value) / Σ Face Value',
     'totalFaceValue': 'Σ Face Value',
+    'maturityValue': 'Principal × (1 + (Rate ÷ 100) × (Days ÷ Basis))',
+    'presentValue': 'Future Value ÷ (1 + Rate × Days ÷ Basis)',
+    'fairValue': 'Present Value − Purchase Price',
+    'yieldCurveRate': 'FRED benchmark rate matched to maturity',
+    'couponRate': 'Annual coupon rate (%)',
+    'avgCouponRate': 'Σ Coupon Rate ÷ Number of Instruments',
+    'weightedAvgCoupon': 'Σ (Coupon Rate × Face Value) ÷ Σ Face Value',
+    'totalAnnualIncome': 'Σ (Coupon Rate × Face Value ÷ 100)',
+    'annualCoupon': 'Face Value × Coupon Rate ÷ 100',
+    'couponPerPeriod': 'Annual Coupon ÷ Coupon Frequency',
+    'yieldToMaturity': 'IRR of bond cash flows',
+    'avgYTM': 'Σ Yield to Maturity ÷ Number of Instruments',
+    'currentYield': '(Annual Coupon ÷ Current Price) × 100',
+    'duration': 'Macaulay Duration = Σ (t × PV(C_t)) ÷ Price',
+    'modifiedDuration': 'Macaulay Duration ÷ (1 + (YTM ÷ 100) ÷ Frequency)',
+    'accruedInterest': 'Coupon per Period × (Days Accrued ÷ Days in Period)',
+    'yearsToMaturity': 'Days to Maturity ÷ 365',
+    'termDays': 'Maturity Date − Valuation Date (in days)',
+    'daysToMaturity': 'Maturity Date − Valuation Date (in days)',
+    'pricePer100': '(Current Price ÷ Face Value) × 100',
+    'currentPrice': 'Current market price',
+    'totalDiscount': 'Σ (Face Value − Purchase Price)',
+    'avgDiscountRate': 'Σ Discount Rate ÷ Number of Instruments',
+    'weightedAvgDiscount': 'Σ (Discount Rate × Face Value) ÷ Σ Face Value',
     'totalPurchasePrice': 'Σ Purchase Price',
-    'avgInvestment': 'Total Purchase Price / Number of Instruments',
+    'avgInvestment': 'Total Purchase Price ÷ Number of Instruments',
     'discountRate': 'Annual discount rate (%)',
-    'totalMarketValue': 'Σ (Market Value of each bond)'
+    'totalMarketValue': 'Σ Market Value',
+    'frequency': 'Coupon payments per year'
   }
   formulaText.value = formulaMap[metricKey] || 'No formula available for this metric.'
 
@@ -6810,816 +7049,511 @@ function showFormula(metricKey) {
 
   const details = []
 
-  // ---------- helpers ----------
-  const toCamelCase = (str) => {
-    if (!str) return str
-    return String(str).replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
-  }
-
-  const fmtNum = (v, decimals = 2) => {
+  const toSnake = (s) => String(s).replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[\s\-]+/g, '_').toLowerCase()
+  const fmtNum = (v, d = 2) => {
     if (v === null || v === undefined || v === '') return 'N/A'
     const n = typeof v === 'number' ? v : parseFloat(v)
     if (isNaN(n)) return String(v)
-    if (Number.isInteger(n)) return n.toLocaleString()
-    return n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+    return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })
   }
-
-  const fmtPct = (v, decimals = 2) => {
+  const fmtPct = (v, d = 2) => {
     if (v === null || v === undefined || v === '') return 'N/A'
     const n = typeof v === 'number' ? v : parseFloat(v)
     if (isNaN(n)) return String(v)
-    return n.toFixed(decimals) + '%'
+    return n.toFixed(d) + '%'
   }
-
-  const fmtDate = (v) => {
-    if (!v) return 'N/A'
-    try {
-      const d = new Date(v)
-      if (isNaN(d.getTime())) return String(v)
-      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-    } catch { return String(v) }
-  }
-
-  const daysBetween = (a, b) => {
-    if (!a || !b) return null
-    const d1 = new Date(a), d2 = new Date(b)
-    if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return null
-    return Math.ceil((d2.getTime() - d1.getTime()) / 86400000)
-  }
-
-  const getCalcVal = (key) => {
-    const variants = [key, toSnakeCase(key), toCamelCase(key)]
+  const getVal = (key) => {
+    const variants = [key, toSnake(key)]
     for (const v of variants) {
       if (calc[v] !== undefined && calc[v] !== null && calc[v] !== '') return calc[v]
       if (agg[v] !== undefined && agg[v] !== null && agg[v] !== '') return agg[v]
     }
     return null
   }
-
   const getRowVal = (key) => {
-    const variants = [key, toSnakeCase(key), toCamelCase(key)]
+    if (!firstRow) return null
+    const variants = [key, toSnake(key), key.replace(/_/g, ' ')]
     for (const v of variants) {
       if (firstRow[v] !== undefined && firstRow[v] !== null && firstRow[v] !== '') return firstRow[v]
     }
     return null
   }
+  const pushInput = (label, value) => details.push({ label, value, formula: 'Input' })
+  const pushStep = (label, value, formula) => details.push({ label, value, formula })
+  const pushAnswer = (label, value, formula) => details.push({ label: '✓ ' + label, value, formula })
 
-  const getRowField = (row, key) => {
-    if (!row) return null
-    const variants = [key, toSnakeCase(key), toCamelCase(key)]
-    for (const v of variants) {
-      if (row[v] !== undefined && row[v] !== null && row[v] !== '') return row[v]
-    }
-    return null
+  const faceValue     = getRowVal('Face Value') || getRowVal('Principal') || getVal('faceValue') || getVal('principal')
+  const principal     = getRowVal('Principal') || getVal('principal') || faceValue
+  const purchasePrice = getRowVal('Purchase Price') || getVal('purchasePrice')
+  const currentPrice  = getRowVal('Current Price') || getRowVal('Price') || getVal('currentPrice')
+  const couponRate    = getRowVal('Coupon Rate') || getVal('couponRate')
+  const interestRate  = getRowVal('Interest Rate') || getVal('interestRate')
+  const discountRate  = getRowVal('Discount Rate') || getVal('discountRate')
+  const ytm           = getRowVal('Yield to Maturity') || getVal('yieldToMaturity')
+  const frequency     = getVal('frequency') || getRowVal('Coupon Frequency') || getRowVal('Frequency') || 2
+  const days          = getVal('daysToMaturity') || getVal('termDays') || getRowVal('Days to Maturity') || getRowVal('Term')
+  const dayBasis      = String(getRowVal('Day Count Convention') || 'ACT/360').includes('360') ? 360 : 365
+  const maturityDate  = getRowVal('Maturity Date')
+  const issueDate     = getRowVal('Issue Date')
+  const valuationDate = getRowVal('Valuation Date') || getRowVal('Settlement Date')
+
+  const daysBetween = (a, b) => {
+    if (!a || !b) return null
+    const d1 = new Date(a), d2 = new Date(b)
+    if (isNaN(d1) || isNaN(d2)) return null
+    return Math.ceil((d2 - d1) / 86400000)
   }
+  const computedDays = days || daysBetween(valuationDate || issueDate, maturityDate)
 
-  // ---------- common values ----------
-  const issueDate    = getRowVal('Issue Date')
-  const maturityDate = getRowVal('Maturity Date')
-  const valuationDateRow = getRowVal('Valuation Date') || getRowVal('Settlement Date')
-  const faceValue       = getCalcVal('faceValue')    || getRowVal('Face Value')
-  const principal       = getCalcVal('principal')    || getRowVal('Principal') || faceValue
-  const purchasePrice   = getCalcVal('purchasePrice')|| getRowVal('Purchase Price')
-  const couponRate      = getCalcVal('couponRate')   || getRowVal('Coupon Rate')
-  const interestRate    = getCalcVal('interestRate') || getRowVal('Interest Rate')
-  const discountRate    = getCalcVal('discountRate') || getRowVal('Discount Rate')
-  const ytm             = getCalcVal('yieldToMaturity') || getRowVal('Yield to Maturity')
-  const currentPrice    = getCalcVal('currentPrice') || getRowVal('Current Price') || getRowVal('Price')
-  const frequency       = getCalcVal('frequency')    || getRowVal('Coupon Frequency') || getRowVal('Frequency')
-  const dayCountConv    = getCalcVal('dayCount') || getRowVal('Day Count Convention') || 'ACT/360'
-  const divisor         = String(dayCountConv).includes('360') ? 360 : 365
+  let handled = true
 
-  let daysToMat = getCalcVal('daysToMaturity') || getCalcVal('termDays')
-  let daysNarration = ''
-  if (valuationDateRow && maturityDate) {
-    const d = daysBetween(valuationDateRow, maturityDate)
-    if (d !== null) {
-      daysNarration = `From ${fmtDate(valuationDateRow)} to ${fmtDate(maturityDate)} = ${d} days`
-      if (!daysToMat) daysToMat = d
+  switch (metricKey) {
+    case 'currentYield': {
+      const face = parseFloat(faceValue) || 100
+      const coupon = parseFloat(couponRate) || 0
+      const price = parseFloat(currentPrice) || parseFloat(purchasePrice) || 0
+      const annualCoupon = (face * coupon) / 100
+      const cy = price ? (annualCoupon / price) * 100 : 0
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Coupon Rate', fmtPct(coupon))
+      pushInput('Current Price', fmtNum(price))
+      pushStep('Annual Coupon', `${fmtNum(face)} × (${fmtNum(coupon)} ÷ 100) = ${fmtNum(annualCoupon)}`, 'Face Value × (Coupon Rate ÷ 100)')
+      pushStep('Current Yield', `(${fmtNum(annualCoupon)} ÷ ${fmtNum(price)}) × 100 = ${fmtNum(cy)}%`, '(Annual Coupon ÷ Current Price) × 100')
+      pushAnswer('Current Yield', fmtPct(cy), 'Annual Coupon ÷ Current Price × 100')
+      break
     }
-  } else if (issueDate && maturityDate) {
-    const d = daysBetween(issueDate, maturityDate)
-    if (d !== null) {
-      daysNarration = `From ${fmtDate(issueDate)} to ${fmtDate(maturityDate)} = ${d} days`
-      if (!daysToMat) daysToMat = d
+    case 'yieldToMaturity':
+    case 'avgYTM': {
+      const y = parseFloat(ytm) || 0
+      pushInput('Yield to Maturity (from backend IRR)', fmtPct(y))
+      if (currentPrice || purchasePrice) pushInput('Current / Purchase Price', fmtNum(currentPrice || purchasePrice))
+      pushStep('Definition', 'YTM is the internal rate of return that equates the present value of all remaining cash flows to the market price.', 'Standard bond pricing identity')
+      pushAnswer('Yield to Maturity', fmtPct(y), 'Backend IRR')
+      break
     }
-  }
-
-  const pushDatesIfAny = () => {
-    if (valuationDateRow) details.push({ label: 'Valuation Date', value: fmtDate(valuationDateRow), formula: 'From data (Valuation Date / Settlement Date)' })
-    if (issueDate) details.push({ label: 'Issue Date', value: fmtDate(issueDate), formula: 'From data (Issue Date)' })
-    if (maturityDate) details.push({ label: 'Maturity Date', value: fmtDate(maturityDate), formula: 'From data (Maturity Date)' })
-    if (daysNarration) details.push({ label: 'Days to Maturity (from dates)', value: daysNarration, formula: 'Maturity Date − Valuation/Issue Date' })
-  }
-
-  // Row-by-row multi aggregation helper
-  const aggregateRows = (label, rateKeys, weightKeys, dayKeys) => {
-    const items = []
-    let totalWeight = 0
-    let weightedSum = 0
-    let rateSum = 0
-    let count = 0
-    let daysSum = 0
-    let daysCount = 0
-
-    rows.forEach((row, idx) => {
-      const rate = rateKeys.map(k => getRowField(row, k)).find(v => v !== null && v !== undefined && v !== '')
-      const weight = weightKeys.map(k => getRowField(row, k)).find(v => v !== null && v !== undefined && v !== '')
-      const days = dayKeys ? dayKeys.map(k => getRowField(row, k)).find(v => v !== null && v !== undefined && v !== '') : null
-      const name = row['Instrument Name'] || row['instrument_name'] || row['Name'] || `Row ${idx + 1}`
-
-      if (rate !== null && rate !== undefined && rate !== '') {
-        const rNum = parseFloat(rate) || 0
-        const wNum = parseFloat(weight) || 0
-        rateSum += rNum
-        weightedSum += rNum * wNum
-        totalWeight += wNum
-        count++
-        if (days !== null && days !== undefined && days !== '') {
-          daysSum += parseFloat(days) || 0
-          daysCount++
-        }
-        items.push({
-          name,
-          rate: rNum,
-          weight: wNum,
-          contribution: rNum * wNum,
-          days: days !== null && days !== undefined && days !== '' ? parseFloat(days) : null
-        })
+    case 'duration':
+    case 'modifiedDuration': {
+      const mac = parseFloat(getVal('duration')) || 0
+      const y = parseFloat(ytm) || 0
+      const freq = parseFloat(frequency) || 2
+      if (metricKey === 'modifiedDuration') {
+        const mod = mac / (1 + (y / 100) / freq)
+        pushInput('Macaulay Duration', fmtNum(mac) + ' years')
+        pushInput('Yield to Maturity', fmtPct(y))
+        pushInput('Coupon Frequency', String(freq) + ' per year')
+        pushStep('Formula', `${fmtNum(mac)} ÷ (1 + ${(y / 100).toFixed(6)} ÷ ${freq}) = ${fmtNum(mod)} years`, 'Mac ÷ (1 + YTM ÷ Freq)')
+        pushAnswer('Modified Duration', fmtNum(mod) + ' years', 'Price sensitivity')
+      } else {
+        pushInput('Macaulay Duration', fmtNum(mac) + ' years')
+        pushStep('Definition', 'Σ (t × PV(C_t)) ÷ Price', 'Macaulay formula')
+        pushAnswer('Duration', fmtNum(mac) + ' years', 'Macaulay Duration')
       }
-    })
-
-    return { items, totalWeight, weightedSum, rateSum, count, daysSum, daysCount }
-  }
-
-  // ---------- INTEREST EARNED / TOTAL INTEREST ----------
-  if (metricKey === 'interestEarned' || metricKey === 'totalInterest') {
-    const rate = interestRate || couponRate || discountRate
-    pushDatesIfAny()
-    details.push({ label: 'Principal (amount invested)', value: fmtNum(principal), formula: 'Field: Principal / Face Value' })
-    details.push({ label: 'Annual Interest Rate', value: fmtPct(rate), formula: 'Field: Interest Rate / Coupon Rate / Discount Rate' })
-    details.push({ label: 'Days to Maturity', value: fmtNum(daysToMat, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({ label: 'Day Count Basis', value: String(divisor) + ' days', formula: dayCountConv })
-    const interest = (parseFloat(principal) || 0) * ((parseFloat(rate) || 0) / 100) * ((parseFloat(daysToMat) || 0) / divisor)
-    details.push({
-      label: 'Calculation',
-      value: `${fmtNum(principal)} × (${fmtNum(rate)} / 100) × (${fmtNum(daysToMat, 0)} / ${divisor}) = ${fmtNum(interest)}`,
-      formula: 'Principal × Rate ÷ 100 × Days ÷ DayCountBasis'
-    })
-    details.push({ label: 'Answer (Interest Earned)', value: fmtNum(interest), formula: 'Simple interest' })
-    details.breakdown = {
-      title: 'Formula Component Breakdown',
-      components: [
-        { componentName: 'Rate as Decimal', calculation: `${fmtNum(rate)}% ÷ 100 = ${(parseFloat(rate) / 100).toFixed(6)}`, formula: 'Rate ÷ 100' },
-        { componentName: 'Time Fraction', calculation: `${fmtNum(daysToMat, 0)} ÷ ${divisor} = ${((parseFloat(daysToMat) || 0) / divisor).toFixed(6)}`, formula: 'Days ÷ DayCountBasis' },
-        { componentName: 'Full Calculation', calculation: `${fmtNum(principal)} × ${(parseFloat(rate) / 100).toFixed(6)} × ${((parseFloat(daysToMat) || 0) / divisor).toFixed(6)} = ${fmtNum(interest)}`, formula: 'Principal × Rate × Time' }
-      ]
+      break
     }
-  }
-
-  // ---------- DISCOUNT YIELD ----------
-  else if (metricKey === 'discountYield') {
-    pushDatesIfAny()
-    const face = parseFloat(faceValue) || parseFloat(principal) || 0
-    const purchase = parseFloat(purchasePrice) || (face - (parseFloat(getCalcVal('totalDiscount')) || 0))
-    const discount = face - purchase
-    const dYield = daysToMat ? (discount / face) * (360 / daysToMat) * 100 : 0
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
-    details.push({ label: 'Discount Amount', value: fmtNum(discount), formula: 'Face Value − Purchase Price' })
-    details.push({ label: 'Days to Maturity', value: fmtNum(daysToMat, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({
-      label: 'Calculation',
-      value: `(${fmtNum(discount)} ÷ ${fmtNum(face)}) × (360 ÷ ${fmtNum(daysToMat, 0)}) × 100 = ${fmtNum(dYield)}%`,
-      formula: '(Discount ÷ Face) × (360 ÷ Days) × 100'
-    })
-    details.push({ label: 'Answer (Discount Yield)', value: fmtPct(dYield), formula: 'Bank discount yield' })
-  }
-
-  // ---------- BOND EQUIVALENT YIELD ----------
-  else if (metricKey === 'bondEquivalentYield') {
-    pushDatesIfAny()
-    const face = parseFloat(faceValue) || parseFloat(principal) || 0
-    const purchase = parseFloat(purchasePrice) || 0
-    const discount = face - purchase
-    const bey = purchase && daysToMat ? (discount / purchase) * (365 / daysToMat) * 100 : 0
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
-    details.push({ label: 'Discount Amount', value: fmtNum(discount), formula: 'Face Value − Purchase Price' })
-    details.push({ label: 'Days to Maturity', value: fmtNum(daysToMat, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({
-      label: 'Calculation',
-      value: `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (365 ÷ ${fmtNum(daysToMat, 0)}) × 100 = ${fmtNum(bey)}%`,
-      formula: '(Discount ÷ Purchase) × (365 ÷ Days) × 100'
-    })
-    details.push({ label: 'Answer (Bond Equivalent Yield)', value: fmtPct(bey), formula: 'BEY on purchase price, 365-day basis' })
-  }
-
-  // ---------- CURRENT YIELD ----------
-  else if (metricKey === 'currentYield') {
-    const coupon = parseFloat(couponRate) || 0
-    const price = parseFloat(currentPrice) || parseFloat(purchasePrice) || parseFloat(faceValue) || 0
-    const face = parseFloat(faceValue) || 100
-    const annualCoupon = (face * coupon) / 100
-    const cy = price ? (annualCoupon / price) * 100 : 0
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Coupon Rate', value: fmtPct(coupon), formula: 'Field: Coupon Rate' })
-    details.push({ label: 'Annual Coupon', value: fmtNum(annualCoupon), formula: 'Face × Coupon ÷ 100' })
-    details.push({ label: 'Current Price', value: fmtNum(price), formula: 'Field: Current Price / Purchase Price' })
-    details.push({
-      label: 'Calculation',
-      value: `(${fmtNum(annualCoupon)} ÷ ${fmtNum(price)}) × 100 = ${fmtNum(cy)}%`,
-      formula: '(Annual Coupon ÷ Current Price) × 100'
-    })
-    details.push({ label: 'Answer (Current Yield)', value: fmtPct(cy), formula: 'Current yield' })
-  }
-
-  // ---------- ACCRUED INTEREST ----------
-  else if (metricKey === 'accruedInterest') {
-    pushDatesIfAny()
-    const coupon = parseFloat(couponRate) || 0
-    const freq = parseFloat(frequency) || 2
-    const face = parseFloat(faceValue) || 100
-    const daysAccrued = parseFloat(getCalcVal('daysAccrued')) || 0
-    const couponPerPeriod = (face * coupon) / 100 / freq
-    const daysInPeriod = divisor / freq
-    const accrued = daysInPeriod ? couponPerPeriod * (daysAccrued / daysInPeriod) : 0
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Coupon Rate', value: fmtPct(coupon), formula: 'Field: Coupon Rate' })
-    details.push({ label: 'Coupon Frequency', value: String(freq) + ' / year', formula: 'Field: Coupon Frequency' })
-    details.push({ label: 'Days Accrued', value: fmtNum(daysAccrued, 0) + ' days', formula: 'Field: Days Accrued' })
-    details.push({ label: 'Coupon per Period', value: fmtNum(couponPerPeriod), formula: 'Face × Coupon ÷ 100 ÷ Frequency' })
-    details.push({ label: 'Days in Coupon Period', value: fmtNum(daysInPeriod, 0), formula: `${divisor} ÷ ${freq}` })
-    details.push({
-      label: 'Calculation',
-      value: `${fmtNum(couponPerPeriod)} × (${fmtNum(daysAccrued, 0)} ÷ ${fmtNum(daysInPeriod, 0)}) = ${fmtNum(accrued)}`,
-      formula: 'Coupon per Period × (Days Accrued ÷ Days in Period)'
-    })
-    details.push({ label: 'Answer (Accrued Interest)', value: fmtNum(accrued), formula: 'Accrued interest' })
-  }
-
-  // ---------- TOTAL PORTFOLIO VALUE / TOTAL VALUE ----------
-  else if (metricKey === 'Total Portfolio Value' || metricKey === 'totalValue') {
-    if (rows.length > 0) {
-      let sum = 0
-      const parts = []
-      rows.forEach((row, idx) => {
-        const v = parseFloat(getRowField(row, 'Total Value') || getRowField(row, 'total_value') || getRowField(row, 'Calculated Value') || 0) || 0
-        const name = row['Instrument Name'] || `Row ${idx + 1}`
-        sum += v
-        parts.push(`${name}: ${fmtNum(v)}`)
-      })
-      details.push({ label: 'Per-Instrument Values', value: parts.join(' | '), formula: 'Total Value field for each row' })
-      details.push({ label: 'Sum of Values', value: fmtNum(sum), formula: 'Σ (Total Value)' })
-      details.push({ label: 'Answer (Total Portfolio Value)', value: fmtNum(sum), formula: 'Sum of all instrument values' })
-      details.breakdown = {
-        title: 'Formula Component Breakdown',
-        components: rows.map((row, idx) => {
-          const v = parseFloat(getRowField(row, 'Total Value') || getRowField(row, 'total_value') || getRowField(row, 'Calculated Value') || 0) || 0
-          return {
-            componentName: row['Instrument Name'] || `Row ${idx + 1}`,
-            calculation: fmtNum(v),
-            formula: 'Total Value for this instrument'
+    case 'accruedInterest': {
+      const face = parseFloat(faceValue) || 100
+      const coupon = parseFloat(couponRate) || 0
+      const freq = parseFloat(frequency) || 2
+      const daysAccrued = parseFloat(getVal('daysAccrued')) || 0
+      const couponPerPeriod = (face * coupon) / 100 / freq
+      const daysInPeriod = dayBasis / freq
+      const accrued = daysInPeriod ? couponPerPeriod * (daysAccrued / daysInPeriod) : 0
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Coupon Rate', fmtPct(coupon))
+      pushInput('Frequency', String(freq))
+      pushInput('Days Accrued', fmtNum(daysAccrued, 0))
+      pushStep('Coupon per Period', `${fmtNum(face)} × (${fmtNum(coupon)} ÷ 100) ÷ ${freq} = ${fmtNum(couponPerPeriod)}`, 'Face × Coupon ÷ 100 ÷ Freq')
+      pushStep('Days in Period', `${dayBasis} ÷ ${freq} = ${fmtNum(daysInPeriod, 0)}`, 'Basis ÷ Freq')
+      pushStep('Accrued', `${fmtNum(couponPerPeriod)} × (${fmtNum(daysAccrued, 0)} ÷ ${fmtNum(daysInPeriod, 0)}) = ${fmtNum(accrued)}`, 'Coupon per Period × (Days Accrued ÷ Days in Period)')
+      pushAnswer('Accrued Interest', fmtNum(accrued), 'Accrued coupon')
+      break
+    }
+    case 'pricePer100': {
+      const price = parseFloat(currentPrice) || parseFloat(purchasePrice) || 0
+      const face = parseFloat(faceValue) || 100
+      const p100 = face ? (price / face) * 100 : 0
+      pushInput('Current Price', fmtNum(price))
+      pushInput('Face Value', fmtNum(face))
+      pushStep('Formula', `(${fmtNum(price)} ÷ ${fmtNum(face)}) × 100 = ${fmtNum(p100)}`, '(Price ÷ Face) × 100')
+      pushAnswer('Price per 100', fmtNum(p100), 'Price per 100 face value')
+      break
+    }
+    case 'couponRate': {
+      const c = parseFloat(couponRate) || 0
+      pushInput('Coupon Rate (from cleaned data)', fmtPct(c))
+      pushAnswer('Coupon Rate', fmtPct(c), 'Annual coupon rate')
+      break
+    }
+    case 'discountRate': {
+      const d = parseFloat(discountRate) || 0
+      pushInput('Discount Rate (from cleaned data)', fmtPct(d))
+      pushAnswer('Discount Rate', fmtPct(d), 'Annual discount rate')
+      break
+    }
+    case 'interestRate': {
+      const r = parseFloat(interestRate) || 0
+      pushInput('Interest Rate (from cleaned data)', fmtPct(r))
+      pushAnswer('Interest Rate', fmtPct(r), 'Annual interest rate')
+      break
+    }
+    case 'currentPrice': {
+      const p = parseFloat(currentPrice) || 0
+      pushInput('Current Price (from cleaned data)', fmtNum(p))
+      pushAnswer('Current Price', fmtNum(p), 'Market price')
+      break
+    }
+    case 'frequency': {
+      const f = parseFloat(frequency) || 0
+      pushInput('Coupon Frequency', String(f))
+      pushAnswer('Frequency', String(f), 'Payments per year')
+      break
+    }
+    case 'annualCoupon': {
+      const face = parseFloat(faceValue) || 0
+      const coupon = parseFloat(couponRate) || 0
+      const annual = (face * coupon) / 100
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Coupon Rate', fmtPct(coupon))
+      pushStep('Formula', `${fmtNum(face)} × (${fmtNum(coupon)} ÷ 100) = ${fmtNum(annual)}`, 'Face × Coupon ÷ 100')
+      pushAnswer('Annual Coupon', fmtNum(annual), 'Annual coupon amount')
+      break
+    }
+    case 'couponPerPeriod': {
+      const face = parseFloat(faceValue) || 0
+      const coupon = parseFloat(couponRate) || 0
+      const freq = parseFloat(frequency) || 2
+      const annual = (face * coupon) / 100
+      const perPeriod = annual / freq
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Coupon Rate', fmtPct(coupon))
+      pushInput('Frequency', String(freq))
+      pushStep('Annual Coupon', `${fmtNum(face)} × (${fmtNum(coupon)} ÷ 100) = ${fmtNum(annual)}`, 'Face × Coupon ÷ 100')
+      pushStep('Per Period', `${fmtNum(annual)} ÷ ${freq} = ${fmtNum(perPeriod)}`, 'Annual ÷ Freq')
+      pushAnswer('Coupon per Period', fmtNum(perPeriod), 'Coupon payment per period')
+      break
+    }
+    case 'interestEarned':
+    case 'totalInterest': {
+      const p = parseFloat(principal) || 0
+      const r = parseFloat(interestRate || couponRate || discountRate) || 0
+      const d = parseFloat(computedDays) || 0
+      const interest = p * (r / 100) * (d / dayBasis)
+      pushInput('Principal', fmtNum(p))
+      pushInput('Rate', fmtPct(r))
+      pushInput('Days to Maturity', fmtNum(d, 0))
+      pushInput('Day Count Basis', String(dayBasis))
+      pushStep('Formula', `${fmtNum(p)} × (${fmtNum(r)} ÷ 100) × (${fmtNum(d, 0)} ÷ ${dayBasis}) = ${fmtNum(interest)}`, 'Principal × Rate ÷ 100 × Days ÷ Basis')
+      pushAnswer('Interest Earned', fmtNum(interest), 'Simple interest')
+      break
+    }
+    case 'annualYield': {
+      const p = parseFloat(principal) || 0
+      const i = parseFloat(getVal('interestEarned')) || 0
+      const d = parseFloat(computedDays) || 365
+      const y = p && d ? (i / p) * (365 / d) * 100 : 0
+      pushInput('Principal', fmtNum(p))
+      pushInput('Interest Earned', fmtNum(i))
+      pushInput('Days to Maturity', fmtNum(d, 0))
+      pushStep('Formula', `(${fmtNum(i)} ÷ ${fmtNum(p)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(y)}%`, '(Interest ÷ Principal) × (365 ÷ Days) × 100')
+      pushAnswer('Annual Yield', fmtPct(y), 'Annualised simple yield')
+      break
+    }
+    case 'effectiveAnnualRate': {
+      const r = parseFloat(interestRate || couponRate) || 0
+      const d = parseFloat(computedDays) || 365
+      const ear = (Math.pow(1 + (r / 100) * (d / dayBasis), dayBasis / d) - 1) * 100
+      pushInput('Nominal Rate', fmtPct(r))
+      pushInput('Days', fmtNum(d, 0))
+      pushInput('Basis', String(dayBasis))
+      pushStep('Formula', `((1 + (${fmtNum(r)} ÷ 100) × (${fmtNum(d, 0)} ÷ ${dayBasis}))^(${dayBasis} ÷ ${fmtNum(d, 0)}) − 1) × 100 = ${fmtNum(ear)}%`, 'Compound-equivalent annual rate')
+      pushAnswer('Effective Annual Rate', fmtPct(ear), 'Compounded equivalent')
+      break
+    }
+    case 'discountYield': {
+      const face = parseFloat(faceValue) || 0
+      const purchase = parseFloat(purchasePrice) || 0
+      const d = parseFloat(computedDays) || 0
+      const discount = face - purchase
+      const dy = face && d ? (discount / face) * (360 / d) * 100 : 0
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Purchase Price', fmtNum(purchase))
+      pushInput('Days to Maturity', fmtNum(d, 0))
+      pushStep('Discount Amount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
+      pushStep('Discount Yield', `(${fmtNum(discount)} ÷ ${fmtNum(face)}) × (360 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(dy)}%`, '(Discount ÷ Face) × (360 ÷ Days) × 100')
+      pushAnswer('Discount Yield', fmtPct(dy), 'Bank discount yield')
+      break
+    }
+    case 'bondEquivalentYield': {
+      const face = parseFloat(faceValue) || 0
+      const purchase = parseFloat(purchasePrice) || 0
+      const d = parseFloat(computedDays) || 0
+      const discount = face - purchase
+      const bey = purchase && d ? (discount / purchase) * (365 / d) * 100 : 0
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Purchase Price', fmtNum(purchase))
+      pushInput('Days to Maturity', fmtNum(d, 0))
+      pushStep('Discount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
+      pushStep('BEY', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(bey)}%`, '(Discount ÷ Purchase) × (365 ÷ Days) × 100')
+      pushAnswer('Bond Equivalent Yield', fmtPct(bey), 'BEY on purchase price')
+      break
+    }
+    case 'moneyMarketYield': {
+      const face = parseFloat(faceValue) || 0
+      const purchase = parseFloat(purchasePrice) || 0
+      const d = parseFloat(computedDays) || 0
+      const discount = face - purchase
+      const mmy = purchase && d ? (discount / purchase) * (360 / d) * 100 : 0
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Purchase Price', fmtNum(purchase))
+      pushInput('Days to Maturity', fmtNum(d, 0))
+      pushStep('Discount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
+      pushStep('MMY', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (360 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(mmy)}%`, '(Discount ÷ Purchase) × (360 ÷ Days) × 100')
+      pushAnswer('Money Market Yield', fmtPct(mmy), 'Money market yield')
+      break
+    }
+    case 'holdingPeriodYield': {
+      const face = parseFloat(faceValue) || 0
+      const purchase = parseFloat(purchasePrice) || 0
+      const discount = face - purchase
+      const hpy = purchase ? (discount / purchase) * 100 : 0
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Purchase Price', fmtNum(purchase))
+      pushStep('Discount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
+      pushStep('HPY', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × 100 = ${fmtNum(hpy)}%`, '(Face − Purchase) ÷ Purchase × 100')
+      pushAnswer('Holding Period Yield', fmtPct(hpy), 'Total return (unannualised)')
+      break
+    }
+    case 'effectiveAnnualYield': {
+      const face = parseFloat(faceValue) || 0
+      const purchase = parseFloat(purchasePrice) || 0
+      const d = parseFloat(computedDays) || 0
+      const eay = purchase && d ? (Math.pow(face / purchase, 365 / d) - 1) * 100 : 0
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Purchase Price', fmtNum(purchase))
+      pushInput('Days to Maturity', fmtNum(d, 0))
+      pushStep('EA Yield', `((${fmtNum(face)} ÷ ${fmtNum(purchase)})^(${365} ÷ ${fmtNum(d, 0)}) − 1) × 100 = ${fmtNum(eay)}%`, '(Face ÷ Purchase)^(365/Days) − 1) × 100')
+      pushAnswer('Effective Annual Yield', fmtPct(eay), 'Annualised compound yield')
+      break
+    }
+    case 'annualizedYield': {
+      const face = parseFloat(faceValue) || 0
+      const purchase = parseFloat(purchasePrice) || 0
+      const d = parseFloat(computedDays) || 0
+      const discount = face - purchase
+      const ay = purchase && d ? (discount / purchase) * (365 / d) * 100 : 0
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Purchase Price', fmtNum(purchase))
+      pushInput('Days to Maturity', fmtNum(d, 0))
+      pushStep('Discount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
+      pushStep('Annualised', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(ay)}%`, '(Discount ÷ Purchase) × (365 ÷ Days) × 100')
+      pushAnswer('Annualized Yield', fmtPct(ay), 'Annualised yield')
+      break
+    }
+    case 'maturityValue': {
+      const p = parseFloat(principal) || parseFloat(faceValue) || 0
+      const r = parseFloat(interestRate || couponRate || discountRate) || 0
+      const d = parseFloat(computedDays) || 0
+      const interest = p * (r / 100) * (d / dayBasis)
+      const mv = p + interest
+      pushInput('Principal', fmtNum(p))
+      pushInput('Rate', fmtPct(r))
+      pushInput('Days', fmtNum(d, 0))
+      pushStep('Interest', `${fmtNum(p)} × (${fmtNum(r)} ÷ 100) × (${fmtNum(d, 0)} ÷ ${dayBasis}) = ${fmtNum(interest)}`, 'Principal × Rate × Days ÷ Basis')
+      pushStep('Total', `${fmtNum(p)} + ${fmtNum(interest)} = ${fmtNum(mv)}`, 'Principal + Interest')
+      pushAnswer('Maturity Value', fmtNum(mv), 'Value at maturity')
+      break
+    }
+    case 'presentValue':
+    case 'fairValue': {
+      const face = parseFloat(faceValue) || parseFloat(principal) || 0
+      const r = parseFloat(interestRate || discountRate) || 0
+      const d = parseFloat(computedDays) || 0
+      const pv = face / (1 + (r / 100) * (d / dayBasis))
+      pushInput('Face Value', fmtNum(face))
+      pushInput('Rate', fmtPct(r))
+      pushInput('Days', fmtNum(d, 0))
+      pushStep('PV', `${fmtNum(face)} ÷ (1 + (${fmtNum(r)} ÷ 100) × (${fmtNum(d, 0)} ÷ ${dayBasis})) = ${fmtNum(pv)}`, 'FV ÷ (1 + r × t)')
+      if (metricKey === 'fairValue') {
+        const purchase = parseFloat(purchasePrice) || 0
+        const fv = pv - purchase
+        pushStep('Fair Value', `${fmtNum(pv)} − ${fmtNum(purchase)} = ${fmtNum(fv)}`, 'PV − Purchase Price')
+        pushAnswer('Fair Value', fmtNum(fv), 'Fair value adjustment')
+      } else {
+        pushAnswer('Present Value', fmtNum(pv), 'Discounted value')
+      }
+      break
+    }
+    case 'yieldCurveRate': {
+      const bench = parseFloat(agg.fred?.benchmark_rate) || 0
+      pushInput('Source', 'FRED Federal Reserve Economic Data')
+      if (agg.fred?.country) pushInput('Country', agg.fred.country)
+      if (agg.fred?.currency) pushInput('Currency', agg.fred.currency)
+      if (agg.fred?.maturity) pushInput('Maturity', agg.fred.maturity)
+      pushStep('Matched benchmark rate', fmtPct(bench), 'FRED series matched to maturity')
+      pushAnswer('Benchmark Rate', fmtPct(bench), 'FRED reference rate')
+      break
+    }
+    case 'termDays':
+    case 'daysToMaturity': {
+      if (maturityDate && (valuationDate || issueDate)) {
+        const start = valuationDate || issueDate
+        const d = daysBetween(start, maturityDate)
+        pushInput('Start Date', String(start))
+        pushInput('Maturity Date', String(maturityDate))
+        pushStep('Days', `${maturityDate} − ${start} = ${d} days`, 'Maturity − Start')
+        pushAnswer('Days to Maturity', String(d) + ' days', 'Date difference')
+      } else {
+        pushInput('Days to Maturity', fmtNum(computedDays, 0))
+        pushAnswer('Days to Maturity', fmtNum(computedDays, 0) + ' days', 'From backend')
+      }
+      break
+    }
+    case 'yearsToMaturity': {
+      const d = parseFloat(computedDays) || 0
+      const years = d / 365
+      pushInput('Days to Maturity', fmtNum(d, 0))
+      pushStep('Years', `${fmtNum(d, 0)} ÷ 365 = ${years.toFixed(4)}`, 'Days ÷ 365')
+      pushAnswer('Years to Maturity', years.toFixed(4) + ' years', 'Years from valuation')
+      break
+    }
+    case 'Total Portfolio Value':
+    case 'totalValue':
+    case 'totalPrincipal':
+    case 'totalFaceValue':
+    case 'totalDiscount':
+    case 'totalPurchasePrice':
+    case 'totalAnnualIncome':
+    case 'totalMarketValue': {
+      const columnKey =
+        metricKey === 'totalPrincipal' ? 'Principal' :
+        metricKey === 'totalFaceValue' ? 'Face Value' :
+        metricKey === 'totalDiscount' ? 'Discount' :
+        metricKey === 'totalPurchasePrice' ? 'Purchase Price' :
+        metricKey === 'totalAnnualIncome' ? 'Annual Coupon' :
+        metricKey === 'totalMarketValue' ? 'Market Value' :
+        'Total Value'
+      if (rows.length > 0) {
+        let sum = 0
+        rows.forEach((row, idx) => {
+          const v = parseFloat(row[columnKey] || row[toSnake(columnKey)] || 0) || 0
+          pushInput(row['Instrument Name'] || `Row ${idx + 1}`, fmtNum(v))
+          sum += v
+        })
+        pushStep('Sum', `Σ (${columnKey}) = ${fmtNum(sum)}`, `Add up ${columnKey} across all rows`)
+        pushAnswer(metricKey === 'Total Portfolio Value' || metricKey === 'totalValue' ? 'Total Portfolio Value' : columnKey, fmtNum(sum), 'Sum of all rows')
+      } else {
+        const v = parseFloat(getVal(metricKey)) || 0
+        pushAnswer('Total', fmtNum(v), 'From calculation engine')
+      }
+      break
+    }
+    case 'Average Rate':
+    case 'avgRate':
+    case 'avgCouponRate':
+    case 'avgDiscountRate': {
+      const key = metricKey === 'avgCouponRate' ? 'Coupon Rate' : metricKey === 'avgDiscountRate' ? 'Discount Rate' : 'Rate'
+      if (rows.length > 0) {
+        let sum = 0, count = 0
+        rows.forEach((row, idx) => {
+          const r = parseFloat(row[key] || row[toSnake(key)] || 0) || 0
+          pushInput(row['Instrument Name'] || `Row ${idx + 1}`, fmtPct(r))
+          sum += r
+          count++
+        })
+        pushStep('Sum', `Σ ${key} = ${fmtPct(sum)}`, `Add up ${key}`)
+        pushStep('Average', `${fmtPct(sum)} ÷ ${count} = ${fmtNum(sum / count)}%`, 'Sum ÷ Count')
+        pushAnswer(`Average ${key}`, fmtPct(sum / count), 'Simple average')
+      } else {
+        const v = parseFloat(getVal(metricKey)) || 0
+        pushAnswer(`Average ${key}`, fmtPct(v), 'From calculation engine')
+      }
+      break
+    }
+    case 'weightedAvgRate':
+    case 'weightedAvgCoupon':
+    case 'weightedAvgDiscount': {
+      const key = metricKey === 'weightedAvgCoupon' ? 'Coupon Rate' : metricKey === 'weightedAvgDiscount' ? 'Discount Rate' : 'Rate'
+      if (rows.length > 0) {
+        let weightedSum = 0, totalWeight = 0
+        rows.forEach((row, idx) => {
+          const r = parseFloat(row[key] || 0) || 0
+          const w = parseFloat(row['Total Value'] || 0) || 0
+          pushInput(row['Instrument Name'] || `Row ${idx + 1}`, `${fmtPct(r)} × ${fmtNum(w)} = ${fmtNum(r * w)}`)
+          weightedSum += r * w
+          totalWeight += w
+        })
+        pushStep('Σ (Rate × Weight)', fmtNum(weightedSum), `Σ (${key} × Total Value)`)
+        pushStep('Σ Weight', fmtNum(totalWeight), 'Σ Total Value')
+        pushStep('Weighted Average', `${fmtNum(weightedSum)} ÷ ${fmtNum(totalWeight)} = ${fmtNum(totalWeight ? weightedSum / totalWeight : 0)}%`, 'Σ (Rate × Weight) ÷ Σ Weight')
+        pushAnswer(`Weighted Average ${key}`, fmtPct(totalWeight ? weightedSum / totalWeight : 0), 'Weighted average')
+      } else {
+        const v = parseFloat(getVal(metricKey)) || 0
+        pushAnswer(`Weighted ${key}`, fmtPct(v), 'From calculation engine')
+      }
+      break
+    }
+    case 'avgDaysToMaturity': {
+      if (rows.length > 0) {
+        let sum = 0, count = 0
+        rows.forEach((row, idx) => {
+          const d = parseFloat(row['Days to Maturity'] || row['days_to_maturity'] || row['Term'] || 0) || 0
+          if (d > 0) {
+            pushInput(row['Instrument Name'] || `Row ${idx + 1}`, `${fmtNum(d, 0)} days`)
+            sum += d
+            count++
           }
         })
+        pushStep('Sum', `${fmtNum(sum, 0)} days across ${count} instruments`, 'Σ Days')
+        pushStep('Average', `${fmtNum(sum, 0)} ÷ ${count} = ${fmtNum(sum / count, 1)} days`, 'Sum ÷ Count')
+        pushAnswer('Average Days to Maturity', fmtNum(sum / count, 1) + ' days', 'Simple average')
+      } else {
+        const v = parseFloat(getVal(metricKey)) || 0
+        pushAnswer('Average Days to Maturity', fmtNum(v, 1) + ' days', 'From calculation engine')
       }
-    } else {
-      const total = parseFloat(agg.totalValue) || parseFloat(calc.totalValue) || 0
-      details.push({ label: 'Total Portfolio Value', value: fmtNum(total), formula: 'Aggregate totalValue from calculation engine' })
-      details.push({ label: 'Answer (Total Portfolio Value)', value: fmtNum(total), formula: 'Sum of all instrument values' })
+      break
     }
-  }
-
-  // ---------- AVERAGE RATE / WEIGHTED AVG RATE ----------
-  else if (metricKey === 'Average Rate' || metricKey === 'avgRate' || metricKey === 'weightedAvgRate') {
-    const result = aggregateRows('Average Rate', ['Avg Rate', 'avg_rate', 'Rate', 'rate', 'Interest Rate', 'interest_rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate', 'Yield', 'yield'], ['Total Value', 'total_value', 'Principal', 'principal', 'Face Value', 'face_value'])
-    const isWeighted = metricKey === 'weightedAvgRate'
-    if (result.items.length > 0) {
-      details.push({
-        label: 'Per-Instrument Rates & Weights',
-        value: result.items.map(i => `${i.name}: Rate ${fmtPct(i.rate)} × Weight ${fmtNum(i.weight)}`).join(' | '),
-        formula: 'Each row\'s rate and weight (Total Value / Principal)'
-      })
-      details.push({ label: 'Sum of (Rate × Weight)', value: fmtNum(result.weightedSum), formula: 'Σ (Rate × Weight)' })
-      details.push({ label: 'Sum of Weights', value: fmtNum(result.totalWeight), formula: 'Σ (Weight)' })
-      const finalVal = result.totalWeight ? result.weightedSum / result.totalWeight : 0
-      details.push({
-        label: 'Calculation',
-        value: `${fmtNum(result.weightedSum)} ÷ ${fmtNum(result.totalWeight)} = ${fmtNum(finalVal)}%`,
-        formula: 'Σ (Rate × Weight) ÷ Σ Weight'
-      })
-      details.push({ label: isWeighted ? 'Answer (Weighted Average Rate)' : 'Answer (Average Rate)', value: fmtPct(finalVal), formula: 'Weighted average of rates' })
-      details.breakdown = {
-        title: 'Formula Component Breakdown',
-        components: result.items.map((item) => ({
-          componentName: item.name,
-          calculation: `${fmtPct(item.rate)} × ${fmtNum(item.weight)} = ${fmtNum(item.contribution)}`,
-          formula: 'Rate × Weight'
-        }))
+    case 'avgInvestment': {
+      if (rows.length > 0) {
+        let sum = 0
+        rows.forEach((row, idx) => {
+          const v = parseFloat(row['Purchase Price'] || row['purchase_price'] || 0) || 0
+          pushInput(row['Instrument Name'] || `Row ${idx + 1}`, fmtNum(v))
+          sum += v
+        })
+        pushStep('Total', fmtNum(sum), 'Σ Purchase Price')
+        pushStep('Average', `${fmtNum(sum)} ÷ ${rows.length} = ${fmtNum(sum / rows.length)}`, 'Total ÷ Count')
+        pushAnswer('Average Investment', fmtNum(sum / rows.length), 'Average per instrument')
+      } else {
+        pushAnswer('Average Investment', fmtNum(parseFloat(getVal('avgInvestment')) || 0), 'From calculation engine')
       }
+      break
+    }
+    case 'Number of Instruments':
+    case 'instrumentCount': {
+      const count = rows.length || parseInt(agg.instrumentCount) || 0
+      if (rows.length > 0) {
+        rows.forEach((row, idx) => pushInput(row['Instrument Name'] || `Row ${idx + 1}`, 'counted'))
+      }
+      pushAnswer('Number of Instruments', String(count), 'Count of all rows')
+      break
+    }
+    default:
+      handled = false
+  }
+
+  if (!handled) {
+    const value = getVal(metricKey)
+    if (value !== null && value !== undefined) {
+      const numeric = parseFloat(value)
+      pushInput('Raw value from backend', !isNaN(numeric) ? fmtNum(numeric) : String(value))
+      pushAnswer('Value', !isNaN(numeric) ? fmtNum(numeric) : String(value), `Metric: ${metricKey}`)
     } else {
-      const val = parseFloat(agg.avgRate) || parseFloat(agg.weightedAvgRate) || 0
-      details.push({ label: isWeighted ? 'Weighted Average Rate' : 'Average Rate', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
+      pushInput('Inputs detected', Object.keys(firstRow).join(', ') || 'none')
+      details.push({ label: '⚠ Diagnostic', value: `The backend did not return a value for "${metricKey}". Check that the required input fields were detected in the worksheet and that the calculation ran successfully.`, formula: 'Diagnostic' })
     }
   }
 
-  // ---------- NUMBER OF INSTRUMENTS ----------
-  else if (metricKey === 'Number of Instruments' || metricKey === 'instrumentCount') {
-    const count = rows.length || parseFloat(agg.instrumentCount) || 0
-    if (rows.length > 0) {
-      details.push({ label: 'Instruments Identified', value: rows.map(r => r['Instrument Name'] || 'Unnamed').join(', '), formula: 'Instrument Name column' })
-    }
-    details.push({ label: 'Total Count', value: String(count), formula: 'Count of all rows' })
-    details.push({ label: 'Answer (Number of Instruments)', value: String(count), formula: 'Number of instruments' })
-  }
-
-  // ---------- AVG DAYS TO MATURITY ----------
-  else if (metricKey === 'avgDaysToMaturity') {
-    pushDatesIfAny()
-    const result = aggregateRows('Avg Days', [], [], ['Days to Maturity', 'days_to_maturity', 'Term', 'term', 'Term Days', 'term_days', 'Avg Days to Maturity', 'avg_days_to_maturity'])
-    if (result.daysCount > 0) {
-      details.push({
-        label: 'Per-Instrument Days',
-        value: rows.map((r, idx) => {
-          const d = parseFloat(getRowField(r, 'Days to Maturity') || getRowField(r, 'days_to_maturity') || getRowField(r, 'Term') || getRowField(r, 'term') || 0)
-          return `${r['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(d, 0)} days`
-        }).join(' | '),
-        formula: 'Days to Maturity for each row'
-      })
-      details.push({ label: 'Sum of Days', value: fmtNum(result.daysSum, 0), formula: 'Σ Days' })
-      details.push({ label: 'Count', value: String(result.daysCount), formula: 'Number of rows with Days' })
-      details.push({
-        label: 'Calculation',
-        value: `${fmtNum(result.daysSum, 0)} ÷ ${result.daysCount} = ${fmtNum(result.daysSum / result.daysCount, 1)} days`,
-        formula: 'Σ Days ÷ Count'
-      })
-      details.push({ label: 'Answer (Average Days to Maturity)', value: fmtNum(result.daysSum / result.daysCount, 1) + ' days', formula: 'Average across instruments' })
-    } else {
-      const val = parseFloat(agg.avgDaysToMaturity) || 0
-      details.push({ label: 'Average Days to Maturity', value: fmtNum(val, 1) + ' days', formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- TERM DAYS / DAYS TO MATURITY ----------
-  else if (metricKey === 'termDays' || metricKey === 'daysToMaturity') {
-    if (valuationDateRow && maturityDate) {
-      const d = daysBetween(valuationDateRow, maturityDate)
-      details.push({ label: 'Valuation Date', value: fmtDate(valuationDateRow), formula: 'From data (Valuation Date / Settlement Date)' })
-      details.push({ label: 'Maturity Date', value: fmtDate(maturityDate), formula: 'From data (Maturity Date)' })
-      details.push({
-        label: 'Calculation',
-        value: `${fmtDate(maturityDate)} − ${fmtDate(valuationDateRow)} = ${d} days`,
-        formula: 'Maturity Date − Valuation Date'
-      })
-      details.push({ label: 'Answer (Days to Maturity)', value: d + ' days', formula: 'Day difference' })
-    } else if (issueDate && maturityDate) {
-      const d = daysBetween(issueDate, maturityDate)
-      details.push({ label: 'Issue Date', value: fmtDate(issueDate), formula: 'From data (Issue Date)' })
-      details.push({ label: 'Maturity Date', value: fmtDate(maturityDate), formula: 'From data (Maturity Date)' })
-      details.push({
-        label: 'Calculation',
-        value: `${fmtDate(maturityDate)} − ${fmtDate(issueDate)} = ${d} days`,
-        formula: 'Maturity Date − Issue Date'
-      })
-      details.push({ label: 'Answer (Days to Maturity)', value: d + ' days', formula: 'Day difference' })
-    } else {
-      details.push({ label: 'Days to Maturity', value: fmtNum(daysToMat, 0) + ' days', formula: 'Field: Days to Maturity / Term Days' })
-      details.push({ label: 'Answer', value: fmtNum(daysToMat, 0) + ' days', formula: 'From data' })
-    }
-  }
-
-  // ---------- YEARS TO MATURITY ----------
-  else if (metricKey === 'yearsToMaturity') {
-    const d = daysToMat
-    if (d !== null && d !== undefined) {
-      pushDatesIfAny()
-      const years = parseFloat(d) / 365
-      details.push({ label: 'Days to Maturity', value: fmtNum(d, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
-      details.push({ label: 'Calculation', value: `${fmtNum(d, 0)} ÷ 365 = ${years.toFixed(4)} years`, formula: 'Days ÷ 365' })
-      details.push({ label: 'Answer (Years to Maturity)', value: years.toFixed(4) + ' years', formula: 'Years from valuation to maturity' })
-    } else {
-      details.push({ label: 'Years to Maturity', value: fmtNum(getCalcVal('yearsToMaturity')), formula: 'Field: Years to Maturity' })
-    }
-  }
-
-  // ---------- TOTAL PRINCIPAL ----------
-  else if (metricKey === 'totalPrincipal' || metricKey === 'totalFaceValue') {
-    if (rows.length > 0) {
-      let sum = 0
-      const parts = rows.map((row, idx) => {
-        const v = parseFloat(getRowField(row, 'Principal') || getRowField(row, 'principal') || getRowField(row, 'Face Value') || getRowField(row, 'face_value') || getRowField(row, 'Amount') || 0) || 0
-        sum += v
-        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(v)}`
-      })
-      details.push({ label: 'Per-Instrument Values', value: parts.join(' | '), formula: 'Principal / Face Value from each row' })
-      details.push({ label: 'Sum', value: fmtNum(sum), formula: 'Σ (Principal / Face Value)' })
-      details.push({ label: `Answer (${metricKey === 'totalFaceValue' ? 'Total Face Value' : 'Total Principal'})`, value: fmtNum(sum), formula: 'Sum across instruments' })
-    } else {
-      const val = parseFloat(agg.totalPrincipal) || parseFloat(agg.totalValue) || 0
-      details.push({ label: 'Total', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- EFFECTIVE ANNUAL RATE ----------
-  else if (metricKey === 'effectiveAnnualRate') {
-    pushDatesIfAny()
-    const rate = parseFloat(interestRate) || parseFloat(couponRate) || 0
-    const days = parseFloat(daysToMat) || 365
-    const ear = rate && days ? (Math.pow(1 + (rate / 100) * (days / divisor), divisor / days) - 1) * 100 : 0
-    details.push({ label: 'Nominal Annual Rate', value: fmtPct(rate), formula: 'Field: Interest Rate' })
-    details.push({ label: 'Days', value: fmtNum(days, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({ label: 'Day Count Basis', value: String(divisor), formula: dayCountConv })
-    details.push({ label: 'Calculation', value: `(1 + ${(rate / 100).toFixed(6)} × ${days}/${divisor})^(${divisor}/${days}) − 1) × 100 = ${fmtNum(ear)}%`, formula: 'Effective annual yield conversion' })
-    details.push({ label: 'Answer (Effective Annual Rate)', value: fmtPct(ear), formula: 'Compounded equivalent rate' })
-  }
-
-  // ---------- ANNUAL YIELD ----------
-  else if (metricKey === 'annualYield') {
-    pushDatesIfAny()
-    const interest = parseFloat(getCalcVal('interestEarned')) || parseFloat(getCalcVal('totalInterest')) || 0
-    const p = parseFloat(principal) || 0
-    const days = parseFloat(daysToMat) || 365
-    const yieldVal = p && days ? (interest / p) * (365 / days) * 100 : 0
-    details.push({ label: 'Interest Earned', value: fmtNum(interest), formula: 'Computed from Principal × Rate × Days ÷ Basis' })
-    details.push({ label: 'Principal', value: fmtNum(p), formula: 'Field: Principal' })
-    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0), formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({ label: 'Calculation', value: `(${fmtNum(interest)} ÷ ${fmtNum(p)}) × (365 ÷ ${fmtNum(days, 0)}) × 100 = ${fmtNum(yieldVal)}%`, formula: '(Interest ÷ Principal) × (365 ÷ Days) × 100' })
-    details.push({ label: 'Answer (Annual Yield)', value: fmtPct(yieldVal), formula: 'Annualised yield' })
-  }
-
-  // ---------- MATURITY VALUE ----------
-  else if (metricKey === 'maturityValue') {
-    pushDatesIfAny()
-    const p = parseFloat(principal) || parseFloat(faceValue) || 0
-    const rate = parseFloat(interestRate) || parseFloat(couponRate) || parseFloat(discountRate) || 0
-    const days = parseFloat(daysToMat) || 0
-    const interest = p * (rate / 100) * (days / divisor)
-    const mv = p + interest
-    details.push({ label: 'Principal', value: fmtNum(p), formula: 'Field: Principal' })
-    details.push({ label: 'Rate', value: fmtPct(rate), formula: 'Field: Interest / Coupon / Discount Rate' })
-    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({ label: 'Interest Amount', value: fmtNum(interest), formula: 'Principal × Rate ÷ 100 × Days ÷ Basis' })
-    details.push({ label: 'Calculation', value: `${fmtNum(p)} + ${fmtNum(interest)} = ${fmtNum(mv)}`, formula: 'Principal + Interest' })
-    details.push({ label: 'Answer (Maturity Value)', value: fmtNum(mv), formula: 'Value at maturity' })
-  }
-
-  // ---------- PRESENT VALUE ----------
-  else if (metricKey === 'presentValue' || metricKey === 'fairValue') {
-    pushDatesIfAny()
-    const face = parseFloat(faceValue) || parseFloat(principal) || 0
-    const rate = parseFloat(interestRate) || parseFloat(discountRate) || 0
-    const days = parseFloat(daysToMat) || 0
-    const pv = face / (1 + (rate / 100) * (days / divisor))
-    details.push({ label: 'Face / Maturity Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Discount / Interest Rate', value: fmtPct(rate), formula: 'Field: Interest / Discount Rate' })
-    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0) + ' days', formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({ label: 'Calculation', value: `${fmtNum(face)} ÷ (1 + ${(rate / 100).toFixed(6)} × ${days}/${divisor}) = ${fmtNum(pv)}`, formula: 'FV ÷ (1 + r × t)' })
-    if (metricKey === 'fairValue') {
-      const purchase = parseFloat(purchasePrice) || 0
-      const fv = pv - purchase
-      details.push({ label: 'Present Value', value: fmtNum(pv), formula: 'Computed above' })
-      details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
-      details.push({ label: 'Calculation', value: `${fmtNum(pv)} − ${fmtNum(purchase)} = ${fmtNum(fv)}`, formula: 'PV − Purchase Price' })
-      details.push({ label: 'Answer (Fair Value)', value: fmtNum(fv), formula: 'Fair value adjustment' })
-    } else {
-      details.push({ label: 'Answer (Present Value)', value: fmtNum(pv), formula: 'Discounted value' })
-    }
-  }
-
-  // ---------- YIELD CURVE RATE (FRED) ----------
-  else if (metricKey === 'yieldCurveRate') {
-    const bench = parseFloat(agg.fred?.benchmark_rate) || parseFloat(getCalcVal('yieldCurveRate')) || 0
-    details.push({ label: 'Data Source', value: 'FRED (Federal Reserve Economic Data)', formula: 'Benchmark curve' })
-    details.push({ label: 'Country', value: agg.fred?.country || effectiveCountry.value || 'N/A', formula: 'Selected filter' })
-    details.push({ label: 'Currency', value: agg.fred?.currency || effectiveCurrency.value || 'N/A', formula: 'Selected filter' })
-    details.push({ label: 'Maturity', value: agg.fred?.maturity || effectiveMaturity.value || 'N/A', formula: 'Selected filter' })
-    details.push({ label: 'Series Label', value: agg.fred?.series_label || 'N/A', formula: 'FRED series identifier' })
-    details.push({ label: 'Benchmark Yield', value: fmtPct(bench), formula: 'Matched benchmark rate' })
-    details.push({ label: 'Answer (Yield Curve Rate)', value: fmtPct(bench), formula: 'Market benchmark' })
-  }
-
-  // ---------- COUPON RATE ----------
-  else if (metricKey === 'couponRate') {
-    const cr = parseFloat(couponRate) || 0
-    details.push({ label: 'Source', value: 'Coupon Rate field from data', formula: 'Original input' })
-    details.push({ label: 'Coupon Rate', value: fmtPct(cr), formula: 'Annual coupon as % of face value' })
-    details.push({ label: 'Answer', value: fmtPct(cr), formula: 'Annual coupon rate' })
-  }
-
-  // ---------- AVG COUPON RATE ----------
-  else if (metricKey === 'avgCouponRate') {
-    const result = aggregateRows('Average Coupon', ['Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate'], ['Face Value', 'face_value', 'Principal', 'principal'])
-    if (result.items.length > 0) {
-      const avg = result.count ? result.rateSum / result.count : 0
-      details.push({ label: 'Per-Instrument Coupons', value: result.items.map(i => `${i.name}: ${fmtPct(i.rate)}`).join(' | '), formula: 'Coupon Rate for each row' })
-      details.push({ label: 'Sum of Coupons', value: fmtPct(result.rateSum), formula: 'Σ Coupon Rate' })
-      details.push({ label: 'Count', value: String(result.count), formula: 'Number of instruments' })
-      details.push({ label: 'Calculation', value: `${fmtPct(result.rateSum)} ÷ ${result.count} = ${fmtNum(avg)}%`, formula: 'Σ Coupon Rate ÷ Count' })
-      details.push({ label: 'Answer (Average Coupon Rate)', value: fmtPct(avg), formula: 'Simple average' })
-    } else {
-      const val = parseFloat(agg.avgCouponRate) || 0
-      details.push({ label: 'Average Coupon Rate', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- WEIGHTED AVG COUPON ----------
-  else if (metricKey === 'weightedAvgCoupon') {
-    const result = aggregateRows('Weighted Coupon', ['Coupon Rate', 'coupon_rate'], ['Face Value', 'face_value', 'Principal', 'principal'])
-    if (result.totalWeight > 0) {
-      const weighted = result.weightedSum / result.totalWeight
-      details.push({ label: 'Per-Instrument', value: result.items.map(i => `${i.name}: ${fmtPct(i.rate)} × ${fmtNum(i.weight)}`).join(' | '), formula: 'Rate × Face Value for each row' })
-      details.push({ label: 'Sum of (Rate × Face)', value: fmtNum(result.weightedSum), formula: 'Σ (Rate × Face)' })
-      details.push({ label: 'Total Face', value: fmtNum(result.totalWeight), formula: 'Σ Face' })
-      details.push({ label: 'Calculation', value: `${fmtNum(result.weightedSum)} ÷ ${fmtNum(result.totalWeight)} = ${fmtNum(weighted)}%`, formula: 'Σ (Rate × Face) ÷ Σ Face' })
-      details.push({ label: 'Answer (Weighted Average Coupon)', value: fmtPct(weighted), formula: 'Weighted average' })
-    } else {
-      const val = parseFloat(agg.weightedAvgCoupon) || 0
-      details.push({ label: 'Weighted Average Coupon', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- TOTAL ANNUAL INCOME ----------
-  else if (metricKey === 'totalAnnualIncome') {
-    if (rows.length > 0) {
-      let sum = 0
-      const parts = rows.map((row, idx) => {
-        const face = parseFloat(getRowField(row, 'Face Value') || getRowField(row, 'face_value') || 0) || 0
-        const coupon = parseFloat(getRowField(row, 'Coupon Rate') || getRowField(row, 'coupon_rate') || 0) || 0
-        const income = (face * coupon) / 100
-        sum += income
-        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(face)} × ${fmtPct(coupon)} = ${fmtNum(income)}`
-      })
-      details.push({ label: 'Per-Instrument Income', value: parts.join(' | '), formula: 'Face Value × Coupon Rate for each row' })
-      details.push({ label: 'Total Annual Income', value: fmtNum(sum), formula: 'Σ (Face × Coupon ÷ 100)' })
-      details.push({ label: 'Answer', value: fmtNum(sum), formula: 'Total annual coupon income' })
-    } else {
-      const val = parseFloat(agg.totalAnnualIncome) || 0
-      details.push({ label: 'Total Annual Income', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- ANNUAL COUPON ----------
-  else if (metricKey === 'annualCoupon') {
-    const face = parseFloat(faceValue) || 0
-    const coupon = parseFloat(couponRate) || 0
-    const val = (face * coupon) / 100
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Coupon Rate', value: fmtPct(coupon), formula: 'Field: Coupon Rate' })
-    details.push({ label: 'Calculation', value: `${fmtNum(face)} × ${fmtPct(coupon)} ÷ 100 = ${fmtNum(val)}`, formula: 'Face × Coupon ÷ 100' })
-    details.push({ label: 'Answer (Annual Coupon)', value: fmtNum(val), formula: 'Annual coupon payment' })
-  }
-
-  // ---------- COUPON PER PERIOD ----------
-  else if (metricKey === 'couponPerPeriod') {
-    const face = parseFloat(faceValue) || 0
-    const coupon = parseFloat(couponRate) || 0
-    const freq = parseFloat(frequency) || 2
-    const annual = (face * coupon) / 100
-    const perPeriod = annual / freq
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Coupon Rate', value: fmtPct(coupon), formula: 'Field: Coupon Rate' })
-    details.push({ label: 'Frequency', value: String(freq) + ' / year', formula: 'Field: Coupon Frequency' })
-    details.push({ label: 'Annual Coupon', value: fmtNum(annual), formula: 'Face × Coupon ÷ 100' })
-    details.push({ label: 'Calculation', value: `${fmtNum(annual)} ÷ ${freq} = ${fmtNum(perPeriod)}`, formula: 'Annual Coupon ÷ Frequency' })
-    details.push({ label: 'Answer (Coupon per Period)', value: fmtNum(perPeriod), formula: 'Coupon payment per period' })
-  }
-
-  // ---------- YIELD TO MATURITY ----------
-  else if (metricKey === 'yieldToMaturity' || metricKey === 'avgYTM') {
-    const y = parseFloat(ytm) || parseFloat(getCalcVal('avgYTM')) || 0
-    details.push({ label: 'Yield to Maturity', value: fmtPct(y), formula: 'From data or calculation engine (IRR of cash flows)' })
-    details.push({ label: 'Note', value: 'YTM is the internal rate of return that equates the present value of all future cash flows to the current market price', formula: 'Standard bond pricing' })
-    details.push({ label: 'Answer (YTM)', value: fmtPct(y), formula: 'Yield to maturity' })
-  }
-
-  // ---------- DURATION ----------
-  else if (metricKey === 'duration' || metricKey === 'modifiedDuration') {
-    const mac = parseFloat(getCalcVal('duration')) || 0
-    const y = parseFloat(ytm) || 0
-    const freq = parseFloat(frequency) || 2
-    if (metricKey === 'modifiedDuration') {
-      const mod = mac / (1 + (y / 100) / freq)
-      details.push({ label: 'Macaulay Duration', value: fmtNum(mac) + ' years', formula: 'From calculation engine' })
-      details.push({ label: 'YTM', value: fmtPct(y), formula: 'Field: Yield to Maturity' })
-      details.push({ label: 'Frequency', value: String(freq) + ' / year', formula: 'Field: Coupon Frequency' })
-      details.push({ label: 'Calculation', value: `${fmtNum(mac)} ÷ (1 + ${fmtPct(y)} / ${freq}) = ${fmtNum(mod)} years`, formula: 'Macaulay ÷ (1 + YTM/Freq)' })
-      details.push({ label: 'Answer (Modified Duration)', value: fmtNum(mod) + ' years', formula: 'Price sensitivity to 1% yield change' })
-    } else {
-      details.push({ label: 'Macaulay Duration', value: fmtNum(mac) + ' years', formula: 'Weighted average time to receive cash flows' })
-      details.push({ label: 'Formula', value: 'Σ (t × PV(C_t)) / Price', formula: 'Macaulay formula' })
-      details.push({ label: 'Answer (Duration)', value: fmtNum(mac) + ' years', formula: 'Macaulay duration' })
-    }
-  }
-
-  // ---------- PRICE PER 100 ----------
-  else if (metricKey === 'pricePer100') {
-    const purchase = parseFloat(purchasePrice) || 0
-    const face = parseFloat(faceValue) || 100
-    const pp100 = face ? (purchase / face) * 100 : 0
-    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Calculation', value: `(${fmtNum(purchase)} ÷ ${fmtNum(face)}) × 100 = ${fmtNum(pp100)}`, formula: '(Purchase ÷ Face) × 100' })
-    details.push({ label: 'Answer (Price per 100)', value: fmtNum(pp100), formula: 'Price expressed per 100 face value' })
-  }
-
-  // ---------- TOTAL DISCOUNT ----------
-  else if (metricKey === 'totalDiscount') {
-    if (rows.length > 0) {
-      let sum = 0
-      const parts = rows.map((row, idx) => {
-        const face = parseFloat(getRowField(row, 'Face Value') || getRowField(row, 'face_value') || 0) || 0
-        const purchase = parseFloat(getRowField(row, 'Purchase Price') || getRowField(row, 'purchase_price') || 0) || 0
-        const d = face - purchase
-        sum += d
-        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(d)}`
-      })
-      details.push({ label: 'Per-Instrument Discounts', value: parts.join(' | '), formula: 'Face − Purchase for each row' })
-      details.push({ label: 'Sum', value: fmtNum(sum), formula: 'Σ (Face − Purchase)' })
-      details.push({ label: 'Answer (Total Discount)', value: fmtNum(sum), formula: 'Total discount amount' })
-    } else {
-      const val = parseFloat(agg.totalDiscount) || 0
-      details.push({ label: 'Total Discount', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- AVG DISCOUNT RATE ----------
-  else if (metricKey === 'avgDiscountRate') {
-    const result = aggregateRows('Average Discount', ['Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate'], ['Face Value', 'face_value', 'Principal', 'principal'])
-    if (result.items.length > 0) {
-      const avg = result.count ? result.rateSum / result.count : 0
-      details.push({ label: 'Per-Instrument Rates', value: result.items.map(i => `${i.name}: ${fmtPct(i.rate)}`).join(' | '), formula: 'Discount Rate for each row' })
-      details.push({ label: 'Sum', value: fmtPct(result.rateSum), formula: 'Σ Discount Rate' })
-      details.push({ label: 'Count', value: String(result.count), formula: 'Number of instruments' })
-      details.push({ label: 'Calculation', value: `${fmtPct(result.rateSum)} ÷ ${result.count} = ${fmtNum(avg)}%`, formula: 'Σ Rate ÷ Count' })
-      details.push({ label: 'Answer (Average Discount Rate)', value: fmtPct(avg), formula: 'Simple average' })
-    } else {
-      const val = parseFloat(agg.avgDiscountRate) || 0
-      details.push({ label: 'Average Discount Rate', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- WEIGHTED AVG DISCOUNT ----------
-  else if (metricKey === 'weightedAvgDiscount') {
-    const result = aggregateRows('Weighted Discount', ['Discount Rate', 'discount_rate'], ['Face Value', 'face_value', 'Principal', 'principal'])
-    if (result.totalWeight > 0) {
-      const weighted = result.weightedSum / result.totalWeight
-      details.push({ label: 'Per-Instrument', value: result.items.map(i => `${i.name}: ${fmtPct(i.rate)} × ${fmtNum(i.weight)}`).join(' | '), formula: 'Rate × Face for each row' })
-      details.push({ label: 'Sum of (Rate × Face)', value: fmtNum(result.weightedSum), formula: 'Σ (Rate × Face)' })
-      details.push({ label: 'Total Face', value: fmtNum(result.totalWeight), formula: 'Σ Face' })
-      details.push({ label: 'Calculation', value: `${fmtNum(result.weightedSum)} ÷ ${fmtNum(result.totalWeight)} = ${fmtNum(weighted)}%`, formula: 'Σ (Rate × Face) ÷ Σ Face' })
-      details.push({ label: 'Answer (Weighted Average Discount)', value: fmtPct(weighted), formula: 'Weighted average' })
-    } else {
-      const val = parseFloat(agg.weightedAvgDiscount) || 0
-      details.push({ label: 'Weighted Average Discount', value: fmtPct(val), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- MONEY MARKET YIELD ----------
-  else if (metricKey === 'moneyMarketYield') {
-    pushDatesIfAny()
-    const face = parseFloat(faceValue) || 0
-    const purchase = parseFloat(purchasePrice) || 0
-    const days = parseFloat(daysToMat) || 0
-    const discount = face - purchase
-    const mmy = purchase && days ? (discount / purchase) * (360 / days) * 100 : 0
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
-    details.push({ label: 'Discount', value: fmtNum(discount), formula: 'Face − Purchase' })
-    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0), formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({ label: 'Calculation', value: `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (360 ÷ ${fmtNum(days, 0)}) × 100 = ${fmtNum(mmy)}%`, formula: '(Discount ÷ Purchase) × (360 ÷ Days) × 100' })
-    details.push({ label: 'Answer (Money Market Yield)', value: fmtPct(mmy), formula: 'MMY on purchase price, 360-day basis' })
-  }
-
-  // ---------- HOLDING PERIOD YIELD ----------
-  else if (metricKey === 'holdingPeriodYield') {
-    const face = parseFloat(faceValue) || 0
-    const purchase = parseFloat(purchasePrice) || 0
-    const discount = face - purchase
-    const hpy = purchase ? (discount / purchase) * 100 : 0
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
-    details.push({ label: 'Discount', value: fmtNum(discount), formula: 'Face − Purchase' })
-    details.push({ label: 'Calculation', value: `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × 100 = ${fmtNum(hpy)}%`, formula: '(Face − Purchase) ÷ Purchase × 100' })
-    details.push({ label: 'Answer (Holding Period Yield)', value: fmtPct(hpy), formula: 'HPY — total return without annualisation' })
-  }
-
-  // ---------- EFFECTIVE ANNUAL YIELD ----------
-  else if (metricKey === 'effectiveAnnualYield') {
-    pushDatesIfAny()
-    const face = parseFloat(faceValue) || 0
-    const purchase = parseFloat(purchasePrice) || 0
-    const days = parseFloat(daysToMat) || 0
-    const eay = purchase && days ? (Math.pow(face / purchase, 365 / days) - 1) * 100 : 0
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
-    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0), formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({ label: 'Calculation', value: `((${fmtNum(face)} ÷ ${fmtNum(purchase)})^(${365}/${days}) − 1) × 100 = ${fmtNum(eay)}%`, formula: '(Face ÷ Purchase)^(365/Days) − 1) × 100' })
-    details.push({ label: 'Answer (Effective Annual Yield)', value: fmtPct(eay), formula: 'Annualised compound yield' })
-  }
-
-  // ---------- TOTAL PURCHASE PRICE ----------
-  else if (metricKey === 'totalPurchasePrice') {
-    if (rows.length > 0) {
-      let sum = 0
-      const parts = rows.map((row, idx) => {
-        const v = parseFloat(getRowField(row, 'Purchase Price') || getRowField(row, 'purchase_price') || 0) || 0
-        sum += v
-        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(v)}`
-      })
-      details.push({ label: 'Per-Instrument', value: parts.join(' | '), formula: 'Purchase Price for each row' })
-      details.push({ label: 'Sum', value: fmtNum(sum), formula: 'Σ (Purchase Price)' })
-      details.push({ label: 'Answer (Total Purchase Price)', value: fmtNum(sum), formula: 'Total amount invested' })
-    } else {
-      const val = parseFloat(agg.totalPurchasePrice) || 0
-      details.push({ label: 'Total Purchase Price', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- AVG INVESTMENT ----------
-  else if (metricKey === 'avgInvestment') {
-    const purchase = parseFloat(purchasePrice) || 0
-    const count = rows.length || 1
-    const avg = purchase / count
-    if (rows.length > 0) {
-      let sum = 0
-      const parts = rows.map((row, idx) => {
-        const v = parseFloat(getRowField(row, 'Purchase Price') || getRowField(row, 'purchase_price') || 0) || 0
-        sum += v
-        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(v)}`
-      })
-      details.push({ label: 'Per-Instrument', value: parts.join(' | '), formula: 'Purchase Price for each row' })
-      details.push({ label: 'Total', value: fmtNum(sum), formula: 'Σ (Purchase Price)' })
-      details.push({ label: 'Count', value: String(rows.length), formula: 'Number of instruments' })
-      details.push({ label: 'Calculation', value: `${fmtNum(sum)} ÷ ${rows.length} = ${fmtNum(sum / rows.length)}`, formula: 'Total ÷ Count' })
-      details.push({ label: 'Answer (Average Investment)', value: fmtNum(sum / rows.length), formula: 'Average per instrument' })
-    } else {
-      details.push({ label: 'Average Investment', value: fmtNum(avg), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- ANNUALIZED YIELD ----------
-  else if (metricKey === 'annualizedYield') {
-    pushDatesIfAny()
-    const face = parseFloat(faceValue) || 0
-    const purchase = parseFloat(purchasePrice) || 0
-    const days = parseFloat(daysToMat) || 0
-    const discount = face - purchase
-    const ay = purchase && days ? (discount / purchase) * (365 / days) * 100 : 0
-    details.push({ label: 'Face Value', value: fmtNum(face), formula: 'Field: Face Value' })
-    details.push({ label: 'Purchase Price', value: fmtNum(purchase), formula: 'Field: Purchase Price' })
-    details.push({ label: 'Discount', value: fmtNum(discount), formula: 'Face − Purchase' })
-    details.push({ label: 'Days to Maturity', value: fmtNum(days, 0), formula: daysNarration || 'Field: Days to Maturity' })
-    details.push({ label: 'Calculation', value: `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (365 ÷ ${fmtNum(days, 0)}) × 100 = ${fmtNum(ay)}%`, formula: '(Discount ÷ Purchase) × (365 ÷ Days) × 100' })
-    details.push({ label: 'Answer (Annualized Yield)', value: fmtPct(ay), formula: 'Annualised yield' })
-  }
-
-  // ---------- CURRENT PRICE ----------
-  else if (metricKey === 'currentPrice') {
-    const cp = parseFloat(currentPrice) || 0
-    details.push({ label: 'Source', value: 'Current Price / Price field from data', formula: 'Original input' })
-    details.push({ label: 'Current Price', value: fmtNum(cp), formula: 'Market price of the bond' })
-    details.push({ label: 'Answer', value: fmtNum(cp), formula: 'Current market price' })
-  }
-
-  // ---------- DISCOUNT RATE ----------
-  else if (metricKey === 'discountRate') {
-    const dr = parseFloat(discountRate) || 0
-    details.push({ label: 'Source', value: 'Discount Rate field from data', formula: 'Original input' })
-    details.push({ label: 'Discount Rate', value: fmtPct(dr), formula: 'Annual discount rate' })
-    details.push({ label: 'Answer', value: fmtPct(dr), formula: 'Discount rate' })
-  }
-
-  // ---------- TOTAL MARKET VALUE ----------
-  else if (metricKey === 'totalMarketValue') {
-    if (rows.length > 0) {
-      let sum = 0
-      const parts = rows.map((row, idx) => {
-        const v = parseFloat(getRowField(row, 'Market Value') || getRowField(row, 'market_value') || getRowField(row, 'Total Value') || getRowField(row, 'total_value') || 0) || 0
-        sum += v
-        return `${row['Instrument Name'] || `Row ${idx + 1}`}: ${fmtNum(v)}`
-      })
-      details.push({ label: 'Per-Instrument', value: parts.join(' | '), formula: 'Market Value for each row' })
-      details.push({ label: 'Sum', value: fmtNum(sum), formula: 'Σ Market Value' })
-      details.push({ label: 'Answer (Total Market Value)', value: fmtNum(sum), formula: 'Aggregate market value' })
-    } else {
-      const val = parseFloat(agg.totalMarketValue) || parseFloat(agg.totalValue) || 0
-      details.push({ label: 'Total Market Value', value: fmtNum(val), formula: 'Aggregate from calculation engine' })
-    }
-  }
-
-  // ---------- DEFAULT FALLBACK ----------
-  else {
-    const value = getCalcVal(metricKey)
-    const numeric = parseFloat(value)
-    if (!isNaN(numeric)) {
-      details.push({ label: 'Raw Value', value: fmtNum(numeric), formula: 'From calculation engine' })
-    } else {
-      details.push({ label: 'Raw Value', value: value !== null && value !== undefined ? String(value) : 'N/A', formula: 'From calculation engine' })
-    }
-    details.push({ label: 'Answer', value: value !== null && value !== undefined ? String(value) : 'N/A', formula: 'Final calculated value' })
-  }
-
-  formulaCalculationDetails.value = details.length > 0 ? details : null
+  formulaCalculationDetails.value = details
   showCalculationDetails.value = true
   showIndividualBreakdown.value = false
   formulaDialog.value = true
@@ -7759,82 +7693,68 @@ const backgroundCoverUrl = '/reportbackground.png'
 async function generateReportHtml() {
   await loadSavedData()
 
-  const session = activeSession.value
-  if (session && session.id) {
-    try {
-      const wf = await sessionManager.getInstrumentWorkflow(session.id, instrumentType.value)
-      if (wf && wf.yieldCurveData && wf.yieldCurveData.length > 0) {
-        yieldCurveData.value = wf.yieldCurveData
-        if (wf.fredFilters) {
-          selectedCountryOption.value = wf.fredFilters.country || ''
-          selectedCurrencyOption.value = wf.fredFilters.currency || ''
-          selectedMaturityOption.value = wf.fredFilters.maturity || ''
-        }
-      }
-    } catch (e) {
-      // non-fatal
-    }
-  }
-
   const report = reportPreviewData.value
   if (report.instruments.length === 0) {
     return null
   }
 
-  let imageData = chartImageData.value
-  if (!imageData && yieldCurveData.value.length > 0) {
-    try {
-      const previousTab = activeTab.value
-      activeTab.value = 'visualizations'
-      await nextTick()
-      await new Promise(resolve => setTimeout(resolve, 1500))
-
-      if (yieldCurveChart.value) {
-        imageData = yieldCurveChart.value.toDataURL('image/png', 1.0)
-        chartImageData.value = imageData
-      }
-
-      activeTab.value = previousTab
-      await nextTick()
-    } catch (e) {
-      // non-fatal
-    }
-  }
+  const instrumentCurves = await loadAllSelectedInstrumentCurves()
 
   const valuationDate = activeValuationDate.value || ''
   const totalPortfolioValue = report.instruments.reduce((sum, inst) => sum + (parseFloat(inst.calculations.totalValue) || 0), 0)
   const totalInstrumentCount = report.instruments.reduce((sum, inst) => sum + (parseInt(inst.calculations.instrumentCount) || 0), 0)
 
-  const yieldPoints = yieldCurveData.value || []
+  const methodologyHtml = buildMethodologySection(report.instruments.map(i => i.name))
 
-  let appendixRows = ''
-  if (yieldPoints.length) {
-    appendixRows = yieldPoints.map(point => `
-      <tr>
-        <td>${point.maturityLabel || ''}</td>
-        <td>${point.maturity || 0}</td>
-        <td>${point.rate || 0}%</td>
-      </tr>
-    `).join('')
+  let chartHtml
+  if (instrumentCurves.length > 0) {
+    const okCount = instrumentCurves.filter(c => c.status === 'ok').length
+    const intro = okCount > 1
+      ? 'The following yield curves were used as benchmarks, one per selected instrument type:'
+      : 'The following yield curve was used as a benchmark for valuation, sourced from FRED.'
+
+    const blocks = instrumentCurves.map(c => {
+      if (c.status === 'ok') {
+        const country = c.filters?.country || '—'
+        const currency = c.filters?.currency || '—'
+        const maturity = c.filters?.maturity || '—'
+        return `<div class="chart-container" style="margin-bottom:28px;">
+          <h3 style="color:#0B2044;font-size:16px;margin-bottom:6px;">${c.label}</h3>
+          <p style="font-size:12px;color:#666;margin-bottom:10px;">FRED — ${country} / ${currency} / ${maturity}</p>
+          ${c.svg}
+        </div>`
+      }
+      return `<div class="chart-container" style="margin-bottom:28px;padding:16px;background:#fff8f0;border-left:4px solid #FF9800;border-radius:8px;">
+        <h3 style="color:#0B2044;font-size:16px;margin-bottom:6px;">${c.label}</h3>
+        <p style="font-size:13px;color:#666;">${c.message}</p>
+      </div>`
+    }).join('')
+
+    chartHtml = `<p>${intro}</p>${blocks}`
+  } else {
+    chartHtml = '<p>No instruments selected for yield curve display.</p>'
   }
 
-  const filterCountry = effectiveCountry.value || '—'
-  const filterCurrency = effectiveCurrency.value || '—'
-  const filterMaturity = effectiveMaturity.value || '—'
-
-  const methodologyHtml = buildMethodologySection(report.instruments.map(i => i.name))
-  const chartHtml = imageData ? `
-    <div class="chart-container">
-      <img src="${imageData}" alt="Yield Curve" style="max-width:100%; height:auto; border-radius:8px; border:1px solid #e0e0e0;" />
-      <p class="chart-caption">FRED Yield Curve – ${chartSeriesLabel.value || report.instruments.map(i => i.name).join(', ')} (${filterCountry} / ${filterCurrency})</p>
-    </div>
-  ` : (yieldPoints.length ? `
-    <div class="chart-container">
-      <p><strong>Yield Curve Data:</strong> ${chartSeriesLabel.value || 'FRED Yield Curve'}</p>
-      <p><strong>Country:</strong> ${filterCountry} | <strong>Currency:</strong> ${filterCurrency} | <strong>Maturity:</strong> ${filterMaturity}</p>
-      <p><em>Chart image could not be captured, but yield curve data is included in the appendix.</em></p>
-    </div>
-  ` : '<p>Yield curve chart not available. Please load a yield curve in the visualizations section.</p>')
+  const okCurves = instrumentCurves.filter(c => c.status === 'ok' && c.points.length > 0)
+  let appendixHtml
+  if (okCurves.length > 0) {
+    appendixHtml = okCurves.map(c => {
+      const rows = c.points.map(p => `
+        <tr>
+          <td>${p.maturityLabel || p.maturity || ''}</td>
+          <td>${parseFloat(p.maturity).toFixed(4)}</td>
+          <td>${parseFloat(p.rate).toFixed(4)}%</td>
+        </tr>
+      `).join('')
+      return `<h3 style="font-size:15px;color:#0B2044;margin-top:20px;">${c.label} — FRED Yield Data</h3>
+        <table class="appendix-table">
+          <thead><tr><th>Maturity Label</th><th>Term (Yr)</th><th>Rate (%)</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`
+    }).join('')
+  } else {
+    appendixHtml = '<p>No yield curve data available for the selected instruments.</p>'
+  }
 
   const sessionName = activeSession.value?.name || 'Valuation Report'
 
@@ -7872,9 +7792,8 @@ async function generateReportHtml() {
     .reference-list { list-style: none; padding: 0; }
     .reference-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
     .chart-container { margin: 20px 0; text-align: center; }
-    .chart-container img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid #e0e0e0; }
-    .chart-caption { font-size: 12px; color: #666; margin-top: 5px; }
-    @page { margin: 15mm 12mm; @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 10pt; color: #666; } }
+    .chart-container svg { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid #e0e0e0; }
+    @page { margin: 15mm 12mm; }
     @media print { .page { padding: 30px 40px; width: 210mm; } .cover-page { padding: 40px 50px; width: 210mm; } }
   </style>
 </head>
@@ -7896,7 +7815,7 @@ async function generateReportHtml() {
   <div class="toc-item"><span>Methodology</span><span>3</span></div>
   <div class="toc-item"><span>Market Inputs</span><span>4</span></div>
   <div class="toc-item"><span>Results</span><span>5</span></div>
-  <div class="toc-item"><span>Yield Curve</span><span>6</span></div>
+  <div class="toc-item"><span>Yield Curves</span><span>6</span></div>
   <div class="toc-item"><span>Conclusion</span><span>7</span></div>
   <div class="toc-item"><span>Appendix</span><span>8</span></div>
   <div class="toc-item"><span>Reference</span><span>9</span></div>
@@ -7977,7 +7896,6 @@ async function generateReportHtml() {
 
 <div class="page">
   <h1 class="section-title">Yield Curve</h1>
-  <p>The following yield curve was used as a benchmark for valuation, sourced from FRED.</p>
   ${chartHtml}
 </div>
 
@@ -7999,15 +7917,8 @@ async function generateReportHtml() {
 <div class="page">
   <h1 class="section-title">Appendix: FRED API Yield Curve Data</h1>
   <p><strong>Valuation Date:</strong> ${valuationDate}</p>
-  <p><strong>Country:</strong> ${filterCountry}</p>
-  <p><strong>Instrument Type:</strong> ${instrumentType.value}</p>
   <br>
-  ${yieldPoints.length ? `
-  <table class="appendix-table">
-    <thead><tr><th>BB Ticker (Maturity Label)</th><th>Term (Yr)</th><th>Rate (Actual) %</th></tr></thead>
-    <tbody>${appendixRows}</tbody>
-  </table>
-  ` : '<p>No yield curve data available. FRED API may have failed or returned no data.</p>'}
+  ${appendixHtml}
 </div>
 
 <div class="page">
@@ -8090,63 +8001,71 @@ async function exportToRealExcel() {
     [],
     ['Asset Class', 'Instrument Name', 'BB Ticker', 'Face Value', 'Rate (%)', 'Term (Yrs)', 'Valuation Date']
   ]
+
+  const instrumentSheets = []
+
   for (const inst of report.instruments) {
     const instKey = inst.id || (inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills')
-    let instrumentData = []
     const wf = await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
-    if (wf && wf.cleanedData && wf.cleanedData.length) instrumentData = wf.cleanedData
-    else {
-      const sid = activeSession.value?.id
-      if (sid) {
-        const saved = localStorage.getItem(`${instKey}_session_${sid}_clean`)
-        if (saved) instrumentData = JSON.parse(saved)
-      }
-    }
-    if (instrumentData.length) {
-      instrumentData.forEach((item, idx) => {
-        const name = item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
-        const ticker = item.BBTicker || item.Ticker || item.Security || ''
-        const faceValue = formatForExcel(parseFloat(item.FaceValue || item.Amount || item.Principal || 0), 'money', 'FaceValue')
-        const rate = formatForExcel(parseFloat(item.Rate || item.InterestRate || item.CouponRate || item.DiscountRate || 0), 'percentage', 'Rate')
-        const term = formatForExcel(parseFloat(item.Term || item.YearsToMaturity || 0) || (parseFloat(item.MaturityDate) ? (new Date(item.MaturityDate) - new Date(item.IssueDate || Date.now())) / (365 * 24 * 60 * 60 * 1000) : 0), 'number', 'Term')
-        appendixData.push([inst.name, name, ticker, faceValue, rate, term, valuationDate])
-      })
+
+    const calculatedRows = wf?.instrumentSummary?.rows || []
+    const cleanedRows = wf?.cleanedData || []
+
+    const sourceRows = calculatedRows.length ? calculatedRows : cleanedRows
+
+    sourceRows.forEach((item, idx) => {
+      const name = item['Instrument Name'] || item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
+      const ticker = item['BB Ticker'] || item.BBTicker || item.Ticker || item.Security || ''
+      const faceValue = formatForExcel(parseFloat(item['Face Value'] || item.FaceValue || item.Amount || item.Principal || 0), 'money', 'FaceValue')
+      const rate = formatForExcel(parseFloat(item['Avg Rate'] || item.Rate || item['Interest Rate'] || item['Coupon Rate'] || item['Discount Rate'] || 0), 'percentage', 'Rate')
+      const term = formatForExcel(parseFloat(item['Days to Maturity'] || item.Term || item['Years to Maturity'] || 0), 'number', 'Term')
+      appendixData.push([inst.name, name, ticker, faceValue, rate, term, valuationDate])
+    })
+
+    if (calculatedRows.length) {
+      instrumentSheets.push({ name: inst.name.substring(0, 31), rows: calculatedRows })
+    } else if (cleanedRows.length) {
+      instrumentSheets.push({ name: inst.name.substring(0, 31), rows: cleanedRows })
     }
   }
+
   const appendixSheet = XLSX.utils.aoa_to_sheet(appendixData)
   appendixSheet['!cols'] = [{ wch: 18 }, { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 18 }]
   XLSX.utils.book_append_sheet(workbook, appendixSheet, 'Appendix')
 
-  for (const inst of report.instruments) {
-    const instKey = inst.id || (inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills')
-    let instrumentData = []
-    const wf = await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
-    if (wf && wf.cleanedData && wf.cleanedData.length) instrumentData = wf.cleanedData
-    else {
-      const sid = activeSession.value?.id
-      if (sid) {
-        const saved = localStorage.getItem(`${instKey}_session_${sid}_clean`)
-        if (saved) instrumentData = JSON.parse(saved)
-      }
-    }
-    if (instrumentData.length) {
-      const formattedData = instrumentData.map(row => formatRowForExcel(row))
-      const sheet = XLSX.utils.json_to_sheet(formattedData)
-      XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
-    }
+  for (const sheetData of instrumentSheets) {
+    if (!sheetData.rows.length) continue
+    const allCols = new Set()
+    sheetData.rows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
+    const cols = Array.from(allCols).filter(c => !isExcludedColumn(c))
+    if (!cols.length) continue
+
+    const headerRow = cols.map(formatColumnHeader)
+    const bodyRows = sheetData.rows.map(row => cols.map(col => {
+      const val = row[col] !== undefined ? row[col] : ''
+      if (isPercentageField(col)) return formatForExcel(val, 'percentage', col)
+      if (/value|price|amount|principal|interest/i.test(col)) return formatForExcel(val, 'money', col)
+      return formatForExcel(val, 'number', col)
+    }))
+
+    const sheet = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows])
+    XLSX.utils.book_append_sheet(workbook, sheet, sheetData.name)
   }
+
   XLSX.writeFile(workbook, `portfolio_report_${Date.now()}.xlsx`)
 }
 
 function formatRowForExcel(row) {
   const formatted = {}
   for (const [key, value] of Object.entries(row)) {
+    if (isExcludedColumn(key)) continue
+    const headerKey = formatColumnHeader(key)
     if (isPercentageField(key)) {
-      formatted[key] = formatForExcel(value, 'percentage', key)
+      formatted[headerKey] = formatForExcel(value, 'percentage', key)
     } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('price') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('principal') || key.toLowerCase().includes('interest')) {
-      formatted[key] = formatForExcel(value, 'money', key)
+      formatted[headerKey] = formatForExcel(value, 'money', key)
     } else {
-      formatted[key] = formatForExcel(value, 'number', key)
+      formatted[headerKey] = formatForExcel(value, 'number', key)
     }
   }
   return formatted
@@ -8184,7 +8103,7 @@ async function downloadCombinedReport(format) {
         return
       }
 
-      const response = await fetch('http://localhost:5000/api/report/generate-word', {
+      const response = await fetch(`${API_BASE_URL}/api/report/generate-word`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -8202,7 +8121,7 @@ async function downloadCombinedReport(format) {
         return
       }
 
-      const downloadPath = `http://localhost:5000/api/report/download-word/${sessionId}`
+      const downloadPath = `${API_BASE_URL}/api/report/download-word/${sessionId}`
       const downloadResponse = await fetch(downloadPath)
       if (!downloadResponse.ok) {
         alert('Failed to download the generated report')
@@ -8398,11 +8317,16 @@ const handleSessionRestored = async (event) => {
   }
 }
 
+// ⭐ FIXED — surface save errors on unmount instead of silent loss
 onBeforeUnmount(() => {
   window.removeEventListener('storage', () => checkAndReset())
   window.removeEventListener('session-restored', handleSessionRestored)
   if (saveTimeout) clearTimeout(saveTimeout)
-  saveSessionData()
+  try {
+    saveSessionData()
+  } catch (err) {
+    console.error('onBeforeUnmount save failed:', err)
+  }
 })
 </script>
 

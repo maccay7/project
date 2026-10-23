@@ -6,7 +6,7 @@
           src="/Untitled - July 02, 2026 at 13.19.30.png" 
           alt="Logo" 
           class="signup-logo"
-          @error="e => e.target.style.display = 'none'"
+          @error="(e: Event) => { const t = e.target as HTMLImageElement; if (t) t.style.display = 'none' }"
         />
       </div>
       
@@ -102,7 +102,6 @@
 </template>
 
 <script setup lang="ts">
-// (Your existing script – unchanged)
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'

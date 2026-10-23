@@ -242,7 +242,7 @@ const sendResetLink = async () => {
   resetSuccess.value = ''
   resetLoading.value = true
   try {
-    const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
     console.log('Sending request to:', `${apiUrl}/api/forgot-password`)
     const response = await fetch(`${apiUrl}/api/forgot-password`, {
       method: 'POST',
@@ -292,7 +292,7 @@ const verifyAndResetPassword = async () => {
   verifyError.value = ''
   verifyLoading.value = true
   try {
-    const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
     console.log('Sending reset request to:', `${apiUrl}/api/reset-password`)
     const response = await fetch(`${apiUrl}/api/reset-password`, {
       method: 'POST',

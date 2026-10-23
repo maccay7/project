@@ -1,3 +1,4 @@
+// [MODIFIED] useWorksheetWorkflow.js
 import { ref, computed, toValue } from 'vue'
 import * as XLSX from 'xlsx'
 import {
@@ -8,6 +9,7 @@ import {
   extractInstrumentNames
 } from '@/utils/sheetTypeDetector'
 import { autoMatchColumns, getDisplayColumns } from '@/utils/instrumentMapping'
+import { API_BASE_URL } from '../config.js'
 
 function extractValuesIntelligently(data, instrumentType) {
   const requiredFields = getRequiredFieldMappings(instrumentType)
@@ -197,8 +199,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     }
 
     try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
-      const response = await fetch(`${apiUrl}/api/dataset/upload`, {
+      const response = await fetch(`${API_BASE_URL}/api/dataset/upload`, {
         method: 'POST',
         body: formData
       })
@@ -433,11 +434,16 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       }
       fullData.push(row)
     }
+
+    const previewRange = {
+      s: { r: range.s.r, c: range.s.c },
+      e: { r: range.s.r + previewRows - 1, c: range.e.c }
+    }
     
     const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
       defval: '', 
       raw: false,
-      range: previewRows
+      range: previewRange
     })
     
     const headers = jsonData.length > 0 ? Object.keys(jsonData[0]) : []
@@ -485,7 +491,7 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
       }
     }
     
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false })
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '', raw: false, range })
     
     return { jsonData, fullData, mergedRanges }
   }

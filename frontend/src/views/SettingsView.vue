@@ -322,7 +322,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { userAPI, systemAPI } from '../services/api'
 import FixedLayout from '../components/FixedLayout.vue'
@@ -570,16 +570,13 @@ async function loadLoginHistory() {
   }
 }
 
-// Watch for login history dialog to load data
-import { watch } from 'vue'
+// Watch for login history dialog to load data.
+// Active sessions are loaded by the button's @click → loadActiveSessions()
+// which also sets showActiveSessions = true. Previously there was a second
+// watcher on showActiveSessions that double-fired the fetch. Removed.
 watch(showLoginHistory, (newVal) => {
   if (newVal) {
     loadLoginHistory()
-  }
-})
-watch(showActiveSessions, (newVal) => {
-  if (newVal) {
-    loadActiveSessions()
   }
 })
 

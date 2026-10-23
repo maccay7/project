@@ -325,13 +325,6 @@
 </template>
 
 <script setup>
-// ================================================================
-// ✅ FIXED: Instrument count is now persisted to the session.
-// When a session is loaded, we compute count from versions and
-// update the session's instrument_count in the backend.
-// Switching sessions now shows the correct persisted count.
-// ================================================================
-
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import sessionManager from '@/services/sessionManager.js'
 import { useRouter } from 'vue-router'
@@ -649,6 +642,9 @@ async function openVersionModal(sessionId) {
   }
 }
 
+// FIXED: api.versionAPI.restoreVersion does not exist — the correct method is
+// api.versionAPI.restore(version_id). Previous call threw TypeError on every
+// click, which the catch swallowed into a snackbar. Restore never worked.
 async function restoreVersion(sessionId, index) {
   try {
     const session = selectedSessionForVersions.value
@@ -660,7 +656,7 @@ async function restoreVersion(sessionId, index) {
     if (!confirm(`Restore session to version ${version.versionNumber} from ${new Date(version.timestamp).toLocaleString()}?\n\nThis will replace all current data with the saved version.`)) {
       return
     }
-    const response = await api.versionAPI.restoreVersion(sessionId, version.id)
+    const response = await api.versionAPI.restore(version.id)
     if (response && response.success) {
       versionDialogVisible.value = false
       await refreshSession(sessionId)
@@ -880,7 +876,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* (your existing styles remain unchanged) */
 .dashboard { min-height: 100vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%); padding: 20px 40px; }
 .top-navbar { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: white; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); z-index: 1000; }
 .logo-placeholder { display: flex; align-items: center; }

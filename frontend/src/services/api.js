@@ -1,31 +1,34 @@
 // services/api.js
 import { API_BASE_URL, RATE_LIMIT_MESSAGE } from '../config.js'
 
+// ─────────────────────────────────────────────────────────────
+// JSON API helper — unchanged behavior.
+// ─────────────────────────────────────────────────────────────
 async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = false, fetchOptions = {}) {
   const url = API_BASE_URL + endpoint
   console.log('=== API CALL ===')
   console.log('URL:', url)
   console.log('Method:', method)
   console.log('Body:', body ? (isFileUpload ? '[FormData]' : JSON.stringify(body).substring(0, 200)) : 'null')
-  
+
   const options = { method, ...fetchOptions }
   const token = localStorage.getItem('auth_token')
-  
+
   if (token) {
     options.headers = { ...(options.headers || {}), 'Authorization': `Bearer ${token}` }
   }
-  
+
   if (isFileUpload) {
     options.body = body
   } else if (body) {
     options.headers = { ...(options.headers || {}), 'Content-Type': 'application/json' }
     options.body = JSON.stringify(body)
   }
-  
+
   try {
     const response = await fetch(url, options)
     const data = await response.json()
-    
+
     if (!response.ok) {
       if (response.status === 429) throw new Error(RATE_LIMIT_MESSAGE)
       if (response.status === 401) {
@@ -40,6 +43,63 @@ async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = fal
     return data
   } catch (error) {
     console.error('❌ API Error:', error)
+    throw error
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Binary download helper (PDF / docx / xlsx).
+// Returns { blob, filename } so the caller can trigger a save.
+// Backend download routes return a file stream, not JSON, so
+// response.json() would throw — this helper reads .blob() instead.
+// ─────────────────────────────────────────────────────────────
+async function callAPIDownload(endpoint, method = 'GET', body = null, fetchOptions = {}) {
+  const url = API_BASE_URL + endpoint
+  console.log('=== API DOWNLOAD ===')
+  console.log('URL:', url)
+  console.log('Method:', method)
+
+  const options = { method, ...fetchOptions }
+  const token = localStorage.getItem('auth_token')
+  if (token) {
+    options.headers = { ...(options.headers || {}), 'Authorization': `Bearer ${token}` }
+  }
+  if (body) {
+    options.headers = { ...(options.headers || {}), 'Content-Type': 'application/json' }
+    options.body = JSON.stringify(body)
+  }
+
+  try {
+    const response = await fetch(url, options)
+
+    if (!response.ok) {
+      if (response.status === 429) throw new Error(RATE_LIMIT_MESSAGE)
+      if (response.status === 401) {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('user')
+        window.location.href = '/login'
+        throw new Error('Session expired. Please login again.')
+      }
+      // Try to read the error body as JSON, fall back to status text.
+      let msg = `Download failed (${response.status})`
+      try {
+        const errJson = await response.json()
+        msg = errJson.message || errJson.error || msg
+      } catch { /* body wasn't JSON — keep default */ }
+      throw new Error(msg)
+    }
+
+    const blob = await response.blob()
+
+    // Derive filename from Content-Disposition if present, else null.
+    const cd = response.headers.get('Content-Disposition') || ''
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd)
+    const filename = match ? decodeURIComponent(match[1]) : null
+
+    console.log('✅ Download ready:', filename || '[no filename]', `${blob.size} bytes`)
+    return { blob, filename }
+  } catch (error) {
+    console.error('❌ Download Error:', error)
     throw error
   }
 }
@@ -62,14 +122,28 @@ export const dashboardAPI = {
 // ===== CALCULATIONS API =====
 export const calculationsAPI = {
   execute: (type, data = [], params = {}, datasetId = null, sessionId = null) =>
-    callAPI('/api/calculate', 'POST', { instrument_type: type, data, params, dataset_id: datasetId, session_id: sessionId }),
+    callAPI('/api/calculate', 'POST', {
+      instrument_type: type,
+      data,
+      params,
+      dataset_id: datasetId,
+      session_id: sessionId
+    }),
   executeByType: (type, data = [], params = {}, datasetId = null, sessionId = null) =>
-    callAPI(`/api/calculate/${encodeURIComponent(type)}`, 'POST', { data, dataset_id: datasetId, session_id: sessionId, ...params }),
+    callAPI(`/api/calculate/${encodeURIComponent(type)}`, 'POST', {
+      data,
+      dataset_id: datasetId,
+      session_id: sessionId,
+      ...params
+    }),
   getHistory: () => callAPI('/api/calculations/history'),
   getLatest: (datasetId) => callAPI(`/api/calculations/latest?dataset_id=${encodeURIComponent(datasetId)}`),
   getBySession: (sessionId) => callAPI(`/api/calculations/session/${encodeURIComponent(sessionId)}`),
   getInstrumentSummary: (sessionId, instrumentType = null) =>
-    callAPI('/api/calculations/instrument-summary', 'POST', { session_id: sessionId, instrument_type: instrumentType }),
+    callAPI('/api/calculations/instrument-summary', 'POST', {
+      session_id: sessionId,
+      instrument_type: instrumentType
+    }),
   getPortfolioSummary: (sessionId) =>
     callAPI('/api/calculations/portfolio-summary', 'POST', { session_id: sessionId })
 }
@@ -100,27 +174,35 @@ export const dataAPI = {
     return await callAPI('/api/dataset/upload', 'POST', formData, true)
   },
   clean: (data, options) => callAPI('/api/clean', 'POST', { data, options }),
-  calculate: (data, type, params, datasetId = null) => callAPI('/api/calculate', 'POST', { data, instrument_type: type, params, dataset_id: datasetId }),
-  deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { upload_id: id }),
+  calculate: (data, type, params, datasetId = null) =>
+    callAPI('/api/calculate', 'POST', {
+      data,
+      instrument_type: type,
+      params,
+      dataset_id: datasetId
+    }),
+  // Backend /api/delete-dataset reads `dataset_id`, not `upload_id`.
+  deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { dataset_id: id }),
   parseExcel: (formData) => callAPI('/api/data/parse-excel', 'POST', formData, true)
 }
 
 // ===== DATASET API =====
 export const datasetAPI = {
   save: (name, file_base64, sheet_names, upload_id, data = null, headers = null, instrument_type = null) =>
-    callAPI('/api/save-dataset', 'POST', { name, file_base64, sheet_names, upload_id, data, headers, instrument_type }),
+    callAPI('/api/save-dataset', 'POST', {
+      name, file_base64, sheet_names, upload_id, data, headers, instrument_type
+    }),
   getAll: () => callAPI('/api/get-datasets'),
   load: (id) => callAPI('/api/load-dataset', 'POST', { dataset_id: id }),
   delete: (id) => callAPI('/api/delete-dataset', 'POST', { dataset_id: id }),
   markDone: (id) => callAPI('/api/dataset/done', 'POST', { dataset_id: id, done: true })
 }
 
-// ===== FRED API – NO FALLBACK FOR YIELD CURVE =====
+// ===== FRED API =====
 export const fredAPI = {
   getSeries: (seriesId, limit = 365, sortOrder = 'desc') =>
     callAPI(`/api/fred/series/${seriesId}?limit=${limit}&sort_order=${sortOrder}`),
   getCategories: () => callAPI('/api/fred/categories'),
-  // 🔥 Uses POST to /api/fred/yield-curve with payload – returns only real data
   getYieldCurve: (params) => callAPI('/api/fred/yield-curve', 'POST', params),
   getFilters: () => callAPI('/api/fred/filters'),
   getBenchmark: (instrumentType, maturity = '1Y', country = 'US', currency = 'USD') =>
@@ -130,7 +212,6 @@ export const fredAPI = {
 }
 
 // ===== INSTRUMENT CONFIG API =====
-// Removed - endpoint does not exist in backend
 export const instrumentConfigAPI = {
   getAll: () => Promise.resolve({ success: true, data: {} }),
   get: (instrumentType) => Promise.resolve({ success: true, data: {} })
@@ -142,7 +223,6 @@ export const sessionsAPI = {
   get: (session_id) => callAPI('/api/sessions/get', 'POST', { session_id }),
   list: () => callAPI('/api/sessions/list', 'GET'),
   delete: (session_id) => callAPI('/api/sessions/delete', 'POST', { session_id })
-  // 🔥 REMOVED: incrementVersion - version_count should only be updated by create_version
 }
 
 // ===== PORTFOLIO SUMMARY API =====
@@ -198,10 +278,18 @@ export const mappingTemplatesAPI = {
 }
 
 // ===== REPORT API =====
+// Backend uses singular "/api/report/*", not "/api/reports/*".
+// Download routes return binary — routed through callAPIDownload.
 export const reportAPI = {
-  generate: (params) => callAPI('/api/reports/generate', 'POST', params),
-  getStatus: (reportId) => callAPI(`/api/reports/status/${reportId}`, 'GET'),
-  download: (reportId, format = 'pdf') => callAPI(`/api/reports/download/${reportId}?format=${format}`, 'GET')
+  generate: (params) => callAPI('/api/report/generate', 'POST', params),
+  generateWord: (params) => callAPI('/api/report/generate-word', 'POST', params),
+  download: (reportId) => callAPIDownload(`/api/report/${reportId}/download`, 'GET'),
+  downloadWord: (sessionId, name = null) =>
+    callAPIDownload(
+      `/api/report/download-word/${sessionId}${name ? `?name=${encodeURIComponent(name)}` : ''}`,
+      'GET'
+    ),
+  getBySession: (sessionId) => callAPI(`/api/report/session/${sessionId}`, 'GET')
 }
 
 // ===== EXPORT =====

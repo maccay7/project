@@ -1,3 +1,4 @@
+// [MODIFIED] autoDetectInstrument.js
 import * as XLSX from 'xlsx'
 
 // ============================================================================
@@ -279,7 +280,6 @@ const SPECIFIC_ALIASES = {
 // Semantic Field Definitions - Meaning-based, not name-based
 // ============================================================================
 const SEMANTIC_FIELD_DEFINITIONS = {
-  // ===== AMOUNTS =====
   principal: {
     semanticConcept: 'monetary principal amount',
     valueTypes: ['currency'],
@@ -343,8 +343,6 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     minValue: 0,
     typicalRange: [0, 1000000000]
   },
-
-  // ===== RATES =====
   interest_rate: {
     semanticConcept: 'interest rate for money market',
     valueTypes: ['percentage'],
@@ -391,14 +389,12 @@ const SEMANTIC_FIELD_DEFINITIONS = {
   },
   spread: {
     semanticConcept: 'spread over benchmark',
-    valueTypes: ['percentage', 'bps'],
+    valueTypes: ['percentage', 'number'],
     keywords: ['spread', 'margin', 'over'],
     units: ['%', 'percent', 'bps', 'basis points'],
     contextPatterns: ['spread', 'margin over', 'spread over'],
     typicalRange: [0, 20]
   },
-
-  // ===== DATES =====
   valuation_date: {
     semanticConcept: 'valuation date',
     valueTypes: ['date'],
@@ -441,8 +437,6 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     keywords: SPECIFIC_ALIASES.put_date,
     contextPatterns: ['put date']
   },
-
-  // ===== TERMS/ATTRIBUTES =====
   coupon_frequency: {
     semanticConcept: 'coupon payment frequency',
     valueTypes: ['text'],
@@ -567,14 +561,12 @@ function isCurrency(value) {
   if (!value) return false
   const str = String(value).trim()
   
-  // Check for currency symbols
   for (const symbols of Object.values(CURRENCY_SYMBOLS)) {
     for (const sym of symbols) {
       if (str.includes(sym)) return true
     }
   }
   
-  // Check if it's a large number (typical for currency amounts)
   if (isNumeric(str)) {
     const num = parseFloat(str.replace(/[%,\s$€£¥₹R]/g, ''))
     return num >= 1000
@@ -614,21 +606,18 @@ function calculateSemanticMatchScore(label, value, fieldDef, context) {
   const valueStr = String(value || '').trim()
   const valueType = getValueType(value)
   
-  // 1. Check if value type matches expected type
   if (fieldDef.valueTypes && fieldDef.valueTypes.length > 0) {
     if (fieldDef.valueTypes.includes(valueType)) {
       score += 0.4
     } else {
-      return 0 // Wrong type - immediate rejection
+      return 0
     }
   }
   
-  // 2. Keyword matching in label
   if (fieldDef.keywords) {
     for (const keyword of fieldDef.keywords) {
       if (labelLower.includes(keyword)) {
         score += 0.3
-        // Exact match gets bonus
         if (labelLower === keyword || labelLower === keyword + ' rate' || labelLower === keyword + ' value') {
           score += 0.2
         }
@@ -636,7 +625,6 @@ function calculateSemanticMatchScore(label, value, fieldDef, context) {
     }
   }
   
-  // 3. Exclude keywords (to disambiguate similar fields)
   if (fieldDef.excludeKeywords) {
     for (const exclude of fieldDef.excludeKeywords) {
       if (labelLower.includes(exclude)) {
@@ -645,7 +633,6 @@ function calculateSemanticMatchScore(label, value, fieldDef, context) {
     }
   }
   
-  // 4. Context patterns (surrounding text)
   if (fieldDef.contextPatterns && context) {
     const contextLower = context.toLowerCase()
     for (const pattern of fieldDef.contextPatterns) {
@@ -655,7 +642,6 @@ function calculateSemanticMatchScore(label, value, fieldDef, context) {
     }
   }
   
-  // 5. Value range validation
   if (fieldDef.typicalRange && isNumeric(valueStr)) {
     const num = parseFloat(valueStr.replace(/[%,\s$€£¥₹R]/g, ''))
     const [min, max] = fieldDef.typicalRange
@@ -666,7 +652,6 @@ function calculateSemanticMatchScore(label, value, fieldDef, context) {
     }
   }
   
-  // 6. Unit matching
   if (fieldDef.units) {
     for (const unit of fieldDef.units) {
       if (valueStr.includes(unit) || labelLower.includes(unit.toLowerCase())) {
@@ -681,7 +666,6 @@ function calculateSemanticMatchScore(label, value, fieldDef, context) {
 function getContextualClues(data, row, col, maxDistance = 3) {
   const clues = []
   
-  // Look at surrounding cells for context
   for (let dr = -maxDistance; dr <= maxDistance; dr++) {
     for (let dc = -maxDistance; dc <= maxDistance; dc++) {
       if (dr === 0 && dc === 0) continue
@@ -715,7 +699,6 @@ function detectWorksheetStructure(data) {
   
   if (!data || data.length === 0) return structure
   
-  // Detect horizontal headers (text in first row)
   const firstRow = data[0] || []
   const textInFirstRow = firstRow.filter(cell => 
     cell && !isNumeric(cell) && !isDateLike(cell) && String(cell).trim().length > 0
@@ -725,7 +708,6 @@ function detectWorksheetStructure(data) {
     structure.hasHorizontalHeaders = true
   }
   
-  // Detect vertical headers (text in first column)
   let textInFirstCol = 0
   for (let r = 0; r < data.length; r++) {
     const cell = data[r] && data[r][0]
@@ -738,7 +720,6 @@ function detectWorksheetStructure(data) {
     structure.hasVerticalHeaders = true
   }
   
-  // Detect key-value pairs (label in one cell, value adjacent)
   let kvPairs = 0
   for (let r = 0; r < data.length; r++) {
     for (let c = 0; c < (data[r]?.length || 0) - 1; c++) {
@@ -749,7 +730,6 @@ function detectWorksheetStructure(data) {
         const cellStr = String(cell).trim()
         const nextStr = String(nextCell).trim()
         
-        // Label-like followed by value-like
         if (!isNumeric(cellStr) && !isDateLike(cellStr) && 
             (isNumeric(nextStr) || isDateLike(nextStr) || isCurrency(nextStr) || isPercentage(nextStr))) {
           kvPairs++
@@ -762,7 +742,6 @@ function detectWorksheetStructure(data) {
     structure.hasKeyValuePairs = true
   }
   
-  // Detect sections (rows with single text cell, followed by content)
   for (let r = 0; r < data.length; r++) {
     const row = data[r] || []
     const nonEmpty = row.filter(c => c !== null && c !== undefined && String(c).trim() !== '')
@@ -791,7 +770,6 @@ function detectCurrencies(data) {
       
       const str = String(cell).trim()
       
-      // Check for currency symbols
       for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
         for (const sym of symbols) {
           if (str.includes(sym)) {
@@ -800,7 +778,6 @@ function detectCurrencies(data) {
         }
       }
       
-      // Check for ISO codes
       if (/^[A-Z]{3}$/.test(str.toUpperCase())) {
         const code = str.toUpperCase()
         if (KNOWN_ISO_CODES.has(code) && !NON_CURRENCY_WORDS.has(code)) {
@@ -833,18 +810,13 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
 
   updateStatus('scanning')
 
-  // ========================================================================
-  // STEP 1: Read worksheet data ONCE
-  // ========================================================================
   let data = []
   let actualUsedRange = null
 
   if (tableData && Array.isArray(tableData) && tableData.length > 0) {
-    // Use provided table data (selected section mode)
     data = tableData
     console.log('Using provided table data (selected section mode)')
   } else {
-    // Read from workbook (whole worksheet mode)
     const workbook = XLSX.read(fileBuffer, { 
       type: 'array', 
       cellStyles: true, 
@@ -864,12 +836,10 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       }
     }
 
-    // Get actual used range from worksheet
     let range = worksheet['!ref']
       ? XLSX.utils.decode_range(worksheet['!ref'])
       : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } }
 
-    // Find actual max row and col with data
     let maxRow = 0, maxCol = 0
     for (const cellAddress in worksheet) {
       if (cellAddress.startsWith('!')) continue
@@ -878,13 +848,11 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       if (cellRef.c > maxCol) maxCol = cellRef.c
     }
     
-    // Use actual data bounds, not hardcoded limits
     if (maxRow > range.e.r) range.e.r = maxRow
     if (maxCol > range.e.c) range.e.c = maxCol
     
     actualUsedRange = range
 
-    // Read data only within actual used range
     for (let R = range.s.r; R <= range.e.r; R++) {
       const row = []
       for (let C = range.s.c; C <= range.e.c; C++) {
@@ -900,9 +868,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
 
   updateStatus('analyzing')
 
-  // ========================================================================
-  // STEP 2: Apply currency filter if specified
-  // ========================================================================
   let currencyFilterCode = null
   if (customCurrency) {
     currencyFilterCode = normalizeCurrencyToCode(customCurrency)
@@ -911,12 +876,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     }
   }
 
-  // ========================================================================
-  // STEP 3: Determine scan boundaries
-  // ========================================================================
   let boundaries
   if (tableRange && tableData) {
-    // Selected section mode - use provided data as-is
     boundaries = {
       startRow: 0,
       endRow: data.length - 1,
@@ -925,7 +886,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     }
     console.log('=== MODE: SELECTED SECTION SCAN ===')
   } else if (tableRange) {
-    // Range provided mode
     boundaries = {
       startRow: tableRange.startRow,
       endRow: tableRange.endRow,
@@ -934,7 +894,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     }
     console.log('=== MODE: PROVIDED RANGE SCAN ===')
   } else {
-    // Whole worksheet mode - use actual used range
     boundaries = {
       startRow: 0,
       endRow: data.length - 1,
@@ -944,18 +903,11 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     console.log('=== MODE: WHOLE WORKSHEET SCAN ===')
   }
 
-  // ========================================================================
-  // STEP 4: Analyze worksheet structure
-  // ========================================================================
   const structure = detectWorksheetStructure(data)
   console.log('Worksheet structure:', structure)
 
-  // ========================================================================
-  // STEP 5: Build semantic field map from ALL semantic definitions
-  // ========================================================================
   const semanticFieldMap = new Map()
 
-  // Map ALL semantic definitions for comprehensive scanning
   for (const [semanticKey, def] of Object.entries(SEMANTIC_FIELD_DEFINITIONS)) {
     semanticFieldMap.set(semanticKey, {
       semanticKey,
@@ -964,18 +916,32 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     })
   }
 
-  // Also add any required columns that don't have semantic definitions
+  // FIX: Normalize key names so a required column like 'FaceValue' doesn't
+  // get added again as a naive fallback when 'face_value' already exists in
+  // the semantic map. Previously this produced two competing entries for the
+  // same field: the semantic one (with type validation that correctly rejected
+  // "RBZ" as a face value) and a naive one (with no type validation that
+  // wrongly accepted "RBZ" as a face value). The naive entry won when it scored
+  // higher against short text labels.
+  // Additionally, naive fallbacks now restrict accepted value types to
+  // currency/percentage/number/date so they can't match arbitrary text labels
+  // like a "Yield" column containing the word "Bullet".
+  const normalizedSemanticKeys = new Set(
+    Array.from(semanticFieldMap.keys()).map(k => k.toLowerCase().replace(/[-_\s]/g, ''))
+  )
   for (const col of requiredColumns) {
-    if (!semanticFieldMap.has(col)) {
+    const normalizedCol = col.toLowerCase().replace(/[-_\s]/g, '')
+    if (!normalizedSemanticKeys.has(normalizedCol)) {
       semanticFieldMap.set(col, {
         semanticKey: col,
         definition: {
-          valueTypes: [],
+          valueTypes: ['currency', 'percentage', 'number', 'date'],
           keywords: splitIntoWords(col),
           contextPatterns: []
         },
         isRequired: true
       })
+      normalizedSemanticKeys.add(normalizedCol)
     }
   }
 
@@ -984,21 +950,13 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
 
   updateStatus('detecting')
 
-  // ========================================================================
-  // STEP 6: TWO-PHASE DETECTION - REQUIRED FIRST, THEN ADDITIONAL
-  // ========================================================================
   console.log('=== TWO-PHASE DETECTION START ===')
-  console.log('Phase 1: Scan for REQUIRED fields only')
-  console.log('Phase 2: Scan for ADDITIONAL fields (if capacity allows)')
 
-  // NEW: Support multiple currency variants per field
-  // Structure: detectedFields[fieldName] = { currencyVariants: { USD: value, ZWG: value }, selectedCurrency: 'USD' }
   const detectedFields = {}
   const detectedFieldsWithMetadata = {}
   const usedLabelValuePairs = new Set()
   const processedCells = new Set()
 
-  // Phase 1: Scan ONLY for required fields
   let allRequiredFound = false
   const requiredFieldNames = Array.from(semanticFieldMap.entries())
     .filter(([_, { isRequired }]) => isRequired)
@@ -1017,7 +975,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       const labelStr = String(label).trim()
       const labelLower = labelStr.toLowerCase()
 
-      // Skip if it looks like a pure value, not a label
       const isPureNumeric = isNumeric(labelStr)
       const isPureDate = isDateLike(labelStr)
       const isPureCurrency = isCurrency(labelStr) && labelStr.length < 10
@@ -1032,10 +989,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
         continue
       }
 
-      // Get context
       const context = getContextualClues(data, R, C, 2)
 
-      // Detect currency from context for this specific cell
       let contextCurrency = null
       const contextForCurrency = getContextualClues(data, R, C, 3)
       for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
@@ -1048,7 +1003,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
         if (contextCurrency) break
       }
 
-      // Try horizontal value lookup
       let valueHit = null
       let valueLocation = null
       let direction = null
@@ -1079,17 +1033,16 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
 
       if (!valueHit) continue
 
-      // Check ONLY required fields in Phase 1
       let bestMatch = null
       let bestScore = 0
 
       for (const [colName, { semanticKey, definition, isRequired }] of semanticFieldMap) {
-        if (!isRequired) continue // Skip additional fields in Phase 1
+        if (!isRequired) continue
         if (detectedFields[colName]) continue
 
         const score = calculateSemanticMatchScore(labelStr, valueHit, definition, context)
 
-        if (score > 0.35) { // Higher threshold for required fields
+        if (score > 0.35) {
           console.log(`[Phase 1] Score for "${colName}": ${score.toFixed(2)} (label: "${labelStr}", value: "${valueHit}")`)
         }
 
@@ -1104,7 +1057,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
         if (!usedLabelValuePairs.has(pairKey)) {
           const location = valueLocation ? rowColToCellRef(valueLocation.row, valueLocation.col) : rowColToCellRef(R, C + 1)
 
-          // Detect currency for this value
           let detectedCurrency = null
           const valueStr = String(valueHit)
           if (isCurrency(valueStr)) {
@@ -1126,25 +1078,20 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
           const fieldName = bestMatch.colName
           const currencyKey = detectedCurrency || 'UNKNOWN'
 
-          // Check if this field already exists - if so, add as variant
           if (detectedFields[fieldName]) {
-            // Field already detected - check if this is a different value
             const existingValue = String(detectedFields[fieldName].value)
             const newValue = String(valueHit)
 
             if (existingValue !== newValue) {
-              // Different value - add as currency variant
               if (!detectedFields[fieldName].currencyVariants) {
                 detectedFields[fieldName].currencyVariants = {}
               }
 
-              // Use the detected currency, or generate a key if none
               const variantKey = detectedCurrency || `VARIANT_${Object.keys(detectedFields[fieldName].currencyVariants).length}`
               detectedFields[fieldName].currencyVariants[variantKey] = valueHit
               console.log(`[Phase 1] Added variant for "${fieldName}": ${variantKey} = ${valueHit}`)
             }
           } else {
-            // First detection of this field - initialize with currency variants structure
             detectedFields[fieldName] = {
               currencyVariants: {},
               selectedCurrency: currencyKey,
@@ -1163,7 +1110,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
           usedLabelValuePairs.add(pairKey)
           console.log(`[Phase 1] Detected required field "${fieldName}": "${valueHit}" (${detectedCurrency || 'no currency'}) at ${location}`)
 
-          // Check if all required fields found
           const foundRequired = requiredFieldNames.filter(name => detectedFields[name])
           if (foundRequired.length === requiredFieldNames.length) {
             allRequiredFound = true
@@ -1177,9 +1123,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   console.log('=== Phase 1 Complete ===')
   console.log('Required fields found:', requiredFieldNames.filter(name => detectedFields[name]).length, '/', requiredFieldNames.length)
 
-  // Phase 2: Scan for additional fields (only if not already at capacity)
   console.log('=== Phase 2: Scanning for additional fields ===')
-  const maxAdditionalFields = 50 // Limit to prevent performance issues
+  const maxAdditionalFields = 50
   let additionalFieldsFound = 0
 
   for (let R = boundaries.startRow; R <= boundaries.endRow && additionalFieldsFound < maxAdditionalFields; R++) {
@@ -1209,7 +1154,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
 
       const context = getContextualClues(data, R, C, 2)
 
-      // Detect currency from context for this specific cell
       let contextCurrency = null
       const contextForCurrency = getContextualClues(data, R, C, 3)
       for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
@@ -1222,7 +1166,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
         if (contextCurrency) break
       }
 
-      // Try horizontal value lookup
       let valueHit = null
       let valueLocation = null
       let direction = null
@@ -1253,17 +1196,16 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
 
       if (!valueHit) continue
 
-      // Check ONLY additional fields in Phase 2
       let bestMatch = null
       let bestScore = 0
 
       for (const [colName, { semanticKey, definition, isRequired }] of semanticFieldMap) {
-        if (isRequired) continue // Skip required fields in Phase 2
+        if (isRequired) continue
         if (detectedFields[colName]) continue
 
         const score = calculateSemanticMatchScore(labelStr, valueHit, definition, context)
 
-        if (score > 0.4) { // Higher threshold for additional fields to reduce false positives
+        if (score > 0.4) {
           console.log(`[Phase 2] Score for "${colName}": ${score.toFixed(2)} (label: "${labelStr}", value: "${valueHit}")`)
         }
 
@@ -1278,7 +1220,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
         if (!usedLabelValuePairs.has(pairKey)) {
           const location = valueLocation ? rowColToCellRef(valueLocation.row, valueLocation.col) : rowColToCellRef(R, C + 1)
 
-          // Detect currency for this value
           let detectedCurrency = null
           const valueStr = String(valueHit)
           if (isCurrency(valueStr)) {
@@ -1300,14 +1241,11 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
           const fieldName = bestMatch.colName
           const currencyKey = detectedCurrency || 'UNKNOWN'
 
-          // Check if this field already exists - if so, add as variant
           if (detectedFields[fieldName]) {
-            // Field already detected - check if this is a different value
             const existingValue = String(detectedFields[fieldName].value)
             const newValue = String(valueHit)
 
             if (existingValue !== newValue) {
-              // Different value - add as currency variant
               if (!detectedFields[fieldName].currencyVariants) {
                 detectedFields[fieldName].currencyVariants = {}
               }
@@ -1317,7 +1255,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
               console.log(`[Phase 2] Added variant for "${fieldName}": ${variantKey} = ${valueHit}`)
             }
           } else {
-            // First detection of this field - initialize with currency variants structure
             detectedFields[fieldName] = {
               currencyVariants: {},
               selectedCurrency: currencyKey,
@@ -1348,9 +1285,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   console.log('Total detected fields:', Object.keys(detectedFields).length)
   console.log('Detected fields:', Object.keys(detectedFields))
 
-  // ========================================================================
-  // STEP 7: Separate into primary (required) and additional fields
-  // ========================================================================
   const primaryFields = {}
   const primaryFieldsWithMetadata = {}
   const additionalFields = {}
@@ -1358,14 +1292,22 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   for (const [colName, detection] of Object.entries(detectedFields)) {
     const { semanticKey, isRequired } = semanticFieldMap.get(colName) || { isRequired: false }
 
-    // Extract the selected value (based on selectedCurrency or default to the value field)
     const selectedValue = detection.selectedCurrency && detection.currencyVariants[detection.selectedCurrency]
       ? detection.currencyVariants[detection.selectedCurrency]
       : detection.value
 
     if (isRequired) {
-      primaryFields[colName] = selectedValue
-      primaryFieldsWithMetadata[colName] = detection
+      // FIX: Map the semantic key back to the caller's original required-column
+      // name (e.g. 'face_value' → 'FaceValue'). Previously primaryFields kept
+      // the semantic key, so a downstream `missingFields = requiredColumns.filter(
+      // col => !primaryFields[col])` check flagged every matched field as
+      // missing because 'FaceValue' !== 'face_value'.
+      const requiredColMatch = requiredColumns.find(reqCol =>
+        reqCol.toLowerCase().replace(/[-_\s]/g, '') === colName.toLowerCase().replace(/[-_\s]/g, '')
+      )
+      const outputKey = requiredColMatch || colName
+      primaryFields[outputKey] = selectedValue
+      primaryFieldsWithMetadata[outputKey] = detection
     } else {
       additionalFields[colName] = selectedValue
     }
@@ -1375,9 +1317,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   console.log('Additional fields:', Object.keys(additionalFields).length)
   console.log('Missing required fields:', requiredColumns.filter(col => !primaryFields[col]))
 
-  // ========================================================================
-  // STEP 8: Detect currencies
-  // ========================================================================
   const currencies = detectCurrencies(data)
   if (customCurrency) {
     const normalized = normalizeCurrencyToCode(customCurrency)
@@ -1387,9 +1326,6 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   }
   console.log('Detected currencies:', currencies)
 
-  // ========================================================================
-  // STEP 9: Build result
-  // ========================================================================
   const missingFields = requiredColumns.filter(col => !primaryFields[col])
 
   console.log('=== Final Detection Result ===')

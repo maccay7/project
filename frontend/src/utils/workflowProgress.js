@@ -1,3 +1,4 @@
+// [MODIFIED] workflowProgress.js
 /** State-driven workflow step completion – steps marked completed only after successful completion,
     preserved when navigating backwards, synchronized across pages, advances only after success,
     reverts only on explicit reset or new session. */
@@ -6,15 +7,28 @@ const WORKFLOW_PROGRESS_KEY = 'dura_workflow_progress'
 
 import sessionManager from '@/services/sessionManager.js'
 
+// FIX: sessionManager.getSession() is async and returns a Promise, not a
+// session object. The original code did `const s = sessionManager.getSession(id);
+// if (s && s.workflow_progress) return s.workflow_progress` — s was always a
+// Promise, so the branch never fired and session-backed progress was silently
+// lost. Now we read the synchronous in-memory cache (`sessionManager.sessions`)
+// which is populated on boot from localStorage.
+function getSessionProgressSync(sessionId) {
+  if (!sessionId) return null
+  try {
+    const cached = sessionManager.sessions?.find(s => s.id === sessionId)
+    if (cached && cached.workflow_progress) return cached.workflow_progress
+  } catch {
+    // ignore
+  }
+  return null
+}
+
 function getWorkflowProgress(sessionId) {
   if (!sessionId) return {}
   try {
-    try {
-      const s = sessionManager.getSession(sessionId)
-      if (s && s.workflow_progress) return s.workflow_progress
-    } catch (e) {
-      // ignore and fallback to localStorage
-    }
+    const sessionProgress = getSessionProgressSync(sessionId)
+    if (sessionProgress) return sessionProgress
 
     const stored = localStorage.getItem(WORKFLOW_PROGRESS_KEY)
     const all = stored ? JSON.parse(stored) : {}
@@ -26,40 +40,45 @@ function getWorkflowProgress(sessionId) {
 
 function saveWorkflowProgress(sessionId, progress) {
   if (!sessionId) return
+
+  // Local write first (synchronous, always succeeds or logs)
   try {
     const stored = localStorage.getItem(WORKFLOW_PROGRESS_KEY)
     const all = stored ? JSON.parse(stored) : {}
     all[sessionId] = progress
     localStorage.setItem(WORKFLOW_PROGRESS_KEY, JSON.stringify(all))
-
-    try {
-      const s = sessionManager.getSession(sessionId) || {}
-      const serverProgress = s.workflow_progress || {}
-      const merged = { ...serverProgress, ...progress }
-      sessionManager.updateSession(sessionId, { workflow_progress: merged })
-    } catch (e) {
-      // ignore backend failures — local copy remains
-    }
   } catch (e) {
-    console.error('Failed to save workflow progress:', e)
+    console.error('Failed to save workflow progress (local):', e)
+  }
+
+  // Fire-and-forget backend sync
+  try {
+    const serverProgress = getSessionProgressSync(sessionId) || {}
+    const merged = { ...serverProgress, ...progress }
+    sessionManager.updateSession(sessionId, { workflow_progress: merged })
+      .catch(err => console.warn('Workflow backend sync failed:', err))
+  } catch (e) {
+    // ignore
   }
 }
 
 function clearWorkflowProgress(sessionId) {
   if (!sessionId) return
+
   try {
     const stored = localStorage.getItem(WORKFLOW_PROGRESS_KEY)
     const all = stored ? JSON.parse(stored) : {}
     delete all[sessionId]
     localStorage.setItem(WORKFLOW_PROGRESS_KEY, JSON.stringify(all))
-
-    try {
-      sessionManager.updateSession(sessionId, { workflow_progress: {} })
-    } catch (e) {
-      // ignore
-    }
   } catch (e) {
-    console.error('Failed to clear workflow progress:', e)
+    console.error('Failed to clear workflow progress (local):', e)
+  }
+
+  try {
+    sessionManager.updateSession(sessionId, { workflow_progress: {} })
+      .catch(err => console.warn('Workflow backend clear failed:', err))
+  } catch (e) {
+    // ignore
   }
 }
 

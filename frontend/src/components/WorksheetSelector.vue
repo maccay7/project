@@ -1,3 +1,4 @@
+<!-- [MODIFIED] WorksheetSelector.vue -->
 <template>
   <div class="worksheet-selector">
     <div class="selector-header">
@@ -51,7 +52,7 @@
           </div>
         </div>
         <div class="sheet-status">
-          <span class="status-badge" :class="worksheetStatus[sheet.name]">
+          <span class="status-badge" :class="getBadgeClass(sheet.name)">
             {{ getStatusText(sheet.name) }}
           </span>
         </div>
@@ -59,7 +60,7 @@
           v-if="worksheetStatus[sheet.name] !== 'completed'"
           class="btn-work-on-sheet"
           @click.stop="workOnSheet(sheet.name)"
-          :disabled="worksheetStatus[sheet.name] === 'in-progress'"
+          :disabled="worksheetStatus[sheet.name] === 'in_progress'"
         >
           <v-icon small>mdi-pencil</v-icon>
           Work on Sheet
@@ -68,7 +69,7 @@
           v-if="worksheetStatus[sheet.name] !== 'completed'"
           class="btn-auto-detect-sheet"
           @click.stop="autoDetectSheet(sheet.name)"
-          :disabled="worksheetStatus[sheet.name] === 'in-progress' || isDetecting"
+          :disabled="worksheetStatus[sheet.name] === 'in_progress' || isDetecting"
         >
           <v-icon v-if="!isDetecting" small>mdi-magnify</v-icon>
           <v-icon v-else small class="spin-animation">mdi-loading</v-icon>
@@ -153,6 +154,13 @@ function getStatusText(sheetName) {
     case 'in_progress': return 'In Progress'
     default: return 'Not Started'
   }
+}
+
+function getBadgeClass(sheetName) {
+  const status = props.worksheetStatus[sheetName]
+  if (status === 'completed') return 'completed'
+  if (status === 'in_progress') return 'in-progress'
+  return 'not_started'
 }
 
 function selectSheet(sheetName) {
@@ -337,6 +345,11 @@ function viewResults(sheetName) {
   color: white;
 }
 
+.status-badge.not_started {
+  background: #e0e0e0;
+  color: #666;
+}
+
 .btn-work-on-sheet {
   background: #0B2044;
   color: white;
@@ -406,51 +419,6 @@ function viewResults(sheetName) {
 
 .btn-view-results:hover {
   background: #1976D2;
-  transform: translateY(-1px);
-}
-
-.status-badge.not_started {
-  background: #e0e0e0;
-  color: #666;
-}
-
-.btn-work-on-sheet,
-.btn-view-results {
-  flex-shrink: 0;
-  padding: 6px 12px;
-  border: none;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.2s;
-}
-
-.btn-work-on-sheet {
-  background: #0B2044;
-  color: white;
-}
-
-.btn-work-on-sheet:hover:not(:disabled) {
-  background: #1a3a6e;
-  transform: translateY(-1px);
-}
-
-.btn-work-on-sheet:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-view-results {
-  background: #4CAF50;
-  color: white;
-}
-
-.btn-view-results:hover {
-  background: #45a049;
   transform: translateY(-1px);
 }
 </style>

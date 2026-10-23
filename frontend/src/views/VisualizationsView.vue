@@ -422,7 +422,10 @@ async function loadYieldCurve() {
             })
           }
 
-          await sessionManager.updateInstrumentWorkflow(sid, selectedInstrument.value, {
+          // FIXED: updateInstrumentWorkflow does not exist; saveInstrumentWorkflow
+          // is the correct method. Previous call was inside try/catch and threw
+          // silently, so yield curve data was never persisted.
+          await sessionManager.saveInstrumentWorkflow(sid, selectedInstrument.value, {
             ...workflow,
             fredFilters: { ...fredFilters.value },
             yieldCurveData: yieldCurvePoints
@@ -545,7 +548,6 @@ function renderYieldChart() {
       min: 0,
       max: effectiveMax,
       ticks: {
-        // 🔥 FIX: never let Chart.js hide intermediate ticks.
         autoSkip: false,
         stepSize: 1,
         maxRotation: 0,
@@ -633,7 +635,6 @@ async function loadComparisonChart() {
             min: 0,
             max: maxMaturity,
             ticks: {
-              // 🔥 FIX: show every integer year label
               autoSkip: false,
               stepSize: 1,
               callback: (val) => Number.isInteger(val) && val >= 0 ? val : ''
@@ -668,7 +669,8 @@ async function goToReports() {
           })
         }
 
-        await sessionManager.updateInstrumentWorkflow(sid, selectedInstrument.value, {
+        // FIXED: same as loadYieldCurve — saveInstrumentWorkflow is the correct method.
+        await sessionManager.saveInstrumentWorkflow(sid, selectedInstrument.value, {
           ...workflow,
           fredFilters: { ...fredFilters.value },
           yieldCurveData: yieldCurvePoints
@@ -682,8 +684,16 @@ async function goToReports() {
 }
 
 onMounted(async () => {
-  await loadFilterOptions()
-  if (route.query.dataset_id) loadData()
+  // FIXED: loadFilterOptions throws on backend failure — previously produced
+  // an unhandled promise rejection in onMounted. Now caught and logged.
+  try {
+    await loadFilterOptions()
+  } catch (e) {
+    console.warn('FRED filter options failed to load:', e?.message || e)
+  }
+  if (route.query.dataset_id) {
+    loadData().catch(err => console.error('loadData failed:', err))
+  }
 })
 </script>
 

@@ -1,3 +1,4 @@
+<!-- [MODIFIED] ExcelViewer.vue -->
 <template>
   <div class="excel-viewer" :class="{ 'has-mapping': showMappingControls }">
     <div class="sheet-tabs" v-if="workbookSheets.length > 1">
@@ -139,6 +140,17 @@ import 'luckysheet/dist/plugins/css/pluginsCss.css'
 import 'luckysheet/dist/plugins/plugins.css'
 import 'luckysheet/dist/css/luckysheet.css'
 
+function getColumnLetter(index) {
+  let letter = ''
+  let num = index + 1
+  while (num > 0) {
+    const rem = (num - 1) % 26
+    letter = String.fromCharCode(65 + rem) + letter
+    num = Math.floor((num - 1) / 26)
+  }
+  return letter
+}
+
 export default {
   name: 'ExcelViewer',
   props: {
@@ -234,7 +246,7 @@ export default {
 
     const selectedCellRef = computed(() => {
       if (!selectedCell.value) return ''
-      const colLetter = String.fromCharCode(65 + selectedCell.value.col)
+      const colLetter = getColumnLetter(selectedCell.value.col)
       const rowNum = (currentPage.value - 1) * pageSize.value + selectedCell.value.row + 1
       return colLetter + rowNum
     })
@@ -380,9 +392,10 @@ export default {
       editingCell.value = { row, col }
       editValue.value = val !== undefined ? val : ''
       nextTick(() => {
-        if (editInput.value) {
-          editInput.value.focus()
-          editInput.value.select()
+        const el = Array.isArray(editInput.value) ? editInput.value[0] : editInput.value
+        if (el && typeof el.focus === 'function') {
+          el.focus()
+          el.select()
         }
       })
     }
@@ -439,6 +452,8 @@ export default {
     function handleKeyDown(event) {
       if (editingCell.value) return
       if (!selectedCell.value) return
+      const tag = (event.target?.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return
       const { row, col } = selectedCell.value
       let newRow = row, newCol = col
       let handled = true

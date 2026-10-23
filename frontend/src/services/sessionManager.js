@@ -1,3 +1,4 @@
+// services/sessionManager.js
 import api from './api.js'
 
 const STORAGE_KEY = 'dura_sessions'
@@ -10,6 +11,13 @@ class SessionManager {
     this.loadCache()
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // CACHE (localStorage)
+  // FIX #1: instrumentWorkflow and versions are now persisted and
+  // restored. Previously they were stripped by saveCache and reset
+  // to null on load, which caused silent data loss on reload
+  // (saving one instrument's workflow wiped the others).
+  // ─────────────────────────────────────────────────────────────
   loadCache() {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
@@ -23,8 +31,8 @@ class SessionManager {
         instrument_count: m.instrument_count || 0,
         version_count: m.version_count || 0,
         total_value: m.total_value || 0,
-        instrumentWorkflow: null,
-        versions: null,
+        instrumentWorkflow: m.instrumentWorkflow || {},
+        versions: m.versions || [],
         worksheets: m.worksheets || {},
         workbookName: m.workbookName || null
       }))
@@ -46,7 +54,9 @@ class SessionManager {
       version_count: s.version_count || 0,
       total_value: s.total_value || 0,
       worksheets: s.worksheets || {},
-      workbookName: s.workbookName || null
+      workbookName: s.workbookName || null,
+      instrumentWorkflow: s.instrumentWorkflow || {},
+      versions: s.versions || []
     }))
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(metadata))
@@ -62,22 +72,30 @@ class SessionManager {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // READ
+  // ─────────────────────────────────────────────────────────────
   async getAllSessions() {
     try {
       const response = await api.sessionsAPI.list()
-      const backendSessions = (response && response.success && Array.isArray(response.data)) ? response.data : []
+      // Tolerant shape check: accept response.data or response.sessions
+      const raw = response && response.success
+        ? (Array.isArray(response.data) ? response.data
+          : Array.isArray(response.sessions) ? response.sessions
+          : [])
+        : []
+      const backendSessions = raw.map(bs => ({
+        ...bs,
+        id: bs.id || bs.session_id
+      }))
+
       const merged = [...this.sessions]
       for (const bs of backendSessions) {
-        // Normalize the ID field
-        const normalizedBs = {
-          ...bs,
-          id: bs.id || bs.session_id
-        }
-        const idx = merged.findIndex(s => s.id === normalizedBs.id || s.session_id === normalizedBs.id)
+        const idx = merged.findIndex(s => s.id === bs.id || s.session_id === bs.id)
         if (idx !== -1) {
-          merged[idx] = { ...merged[idx], ...normalizedBs }
+          merged[idx] = { ...merged[idx], ...bs }
         } else {
-          merged.push(normalizedBs)
+          merged.push(bs)
         }
       }
       this.sessions = merged
@@ -96,7 +114,10 @@ class SessionManager {
     }
     try {
       const response = await api.sessionsAPI.get(id)
-      const data = response && response.success ? response.data : null
+      // Tolerant shape check: accept response.data or response.session
+      const data = response && response.success
+        ? (response.data || response.session || null)
+        : null
       if (data) {
         const mapped = {
           id: data.id || data.session_id,
@@ -123,10 +144,19 @@ class SessionManager {
       }
     } catch (err) {
       console.error('Failed to fetch session from backend:', err)
+      // FIX #4: on forced refresh failure, fall back to cache
+      // instead of returning null and breaking downstream callers.
+      if (forceRefresh) {
+        const cached = this.sessions.find(s => s.id === id)
+        if (cached) return cached
+      }
     }
     return null
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // ACTIVE SESSION
+  // ─────────────────────────────────────────────────────────────
   setActiveSession(session) {
     if (!session) {
       this.activeSessionId = null
@@ -146,6 +176,9 @@ class SessionManager {
     return this.activeSessionId
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // CREATE / UPDATE
+  // ─────────────────────────────────────────────────────────────
   async createSession(nameOverride = '') {
     const newSession = {
       id: Date.now().toString(),
@@ -157,6 +190,8 @@ class SessionManager {
       total_value: 0,
       instrumentWorkflow: {},
       versions: [],
+      worksheets: {},
+      workbookName: null
     }
     this.sessions.unshift(newSession)
     this.saveCache()
@@ -171,6 +206,8 @@ class SessionManager {
         payload: newSession,
         instrument_workflows: {},
         versions: [],
+        worksheets: {},
+        workbookName: null
       })
     } catch (err) {
       console.error('Failed to create session on backend:', err)
@@ -186,8 +223,9 @@ class SessionManager {
     const existingWorkflows = this.sessions[idx].instrumentWorkflow || {}
     const existingWorksheets = this.sessions[idx].worksheets || {}
     const existingWorkbookName = this.sessions[idx].workbookName || null
+
     this.sessions[idx] = { ...this.sessions[idx], ...updates, timestamp: Date.now() }
-    
+
     if (!updates.versions) {
       this.sessions[idx].versions = existingVersions
     }
@@ -240,6 +278,13 @@ class SessionManager {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // INSTRUMENT WORKFLOW
+  // FIX #2: removed the redundant second api.sessionsAPI.save call.
+  // updateSession already performs the backend save with the correct
+  // merged payload; the second call was both redundant and used a
+  // stale pre-update session snapshot.
+  // ─────────────────────────────────────────────────────────────
   async saveInstrumentWorkflow(sessionId, instrumentKey, workflow) {
     const session = await this.getSession(sessionId)
     if (!session) return
@@ -249,44 +294,27 @@ class SessionManager {
 
     await this.updateSession(sessionId, {
       instrumentWorkflow: iw,
-      instrument_count: instrumentCount,
+      instrument_count: instrumentCount
     })
 
-    try {
-      await api.sessionsAPI.save({
-        id: sessionId,
-        session_id: sessionId,
-        name: session.name,
-        status: session.status,
-        payload: session,
-        instrument_workflows: iw,
-        versions: session.versions || [],
-        instrument_count: instrumentCount,
-        version_count: session.version_count || 0,
-      })
-    } catch (err) {
-      console.error('Failed to sync workflow to backend:', err)
-    }
-
-    await this.getSession(sessionId)
+    // Confirm the backend accepted the update (no-op if response OK).
+    await this.getSession(sessionId, true)
   }
 
-  // NEW: Save worksheet data to session
+  // ─────────────────────────────────────────────────────────────
+  // WORKSHEETS
+  // ─────────────────────────────────────────────────────────────
   async saveWorksheetData(sessionId, worksheetName, worksheetData) {
     const session = await this.getSession(sessionId)
     if (!session) return
 
-    // Initialize worksheets structure if not exists
     const worksheets = session.worksheets || {}
-    
-    // Save/update worksheet data
     worksheets[worksheetName] = {
       ...worksheetData,
       timestamp: Date.now(),
       status: 'saved'
     }
 
-    // Update session
     await this.updateSession(sessionId, {
       worksheets,
       workbookName: worksheetData.workbookName || session.workbookName || 'Workbook'
@@ -295,21 +323,18 @@ class SessionManager {
     console.log('Saved worksheet data:', worksheetName, 'to session:', sessionId)
   }
 
-  // NEW: Get worksheet data from session
   async getWorksheetData(sessionId, worksheetName) {
     const session = await this.getSession(sessionId)
     if (!session || !session.worksheets) return null
     return session.worksheets[worksheetName] || null
   }
 
-  // NEW: Get all worksheets from session
   async getAllWorksheets(sessionId) {
     const session = await this.getSession(sessionId)
     if (!session || !session.worksheets) return {}
     return session.worksheets
   }
 
-  // NEW: Get worksheet status
   async getWorksheetStatus(sessionId, worksheetName) {
     const data = await this.getWorksheetData(sessionId, worksheetName)
     return data ? data.status : null
@@ -320,6 +345,9 @@ class SessionManager {
     return session?.instrumentWorkflow?.[instrumentKey] || null
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // VERSIONS
+  // ─────────────────────────────────────────────────────────────
   async addVersion(sessionId, version) {
     const session = await this.getSession(sessionId)
     if (!session) return null
@@ -329,14 +357,14 @@ class SessionManager {
     const record = {
       versionNumber,
       timestamp: Date.now(),
-      ...version,
+      ...version
     }
     versions.unshift(record)
     const newVersionCount = versions.length
-    
-    await this.updateSession(sessionId, { 
-      versions, 
-      version_count: newVersionCount 
+
+    await this.updateSession(sessionId, {
+      versions,
+      version_count: newVersionCount
     })
 
     try {
@@ -351,7 +379,7 @@ class SessionManager {
         version.reportSnapshot || null,
         null
       )
-      // Force refresh to get the latest version count from backend
+      // Refresh to pick up any backend-side version metadata.
       await this.getSession(sessionId, true)
     } catch (err) {
       console.error('Failed to save version to backend:', err)
@@ -359,6 +387,13 @@ class SessionManager {
     return record
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // COUNTS
+  // FIX #3: derive instrument count from workflows first; fall back
+  // to the stored counter only if workflows have no data. Previously
+  // instrument_count (always defined, defaults to 0) short-circuited
+  // the workflow scan, so the derived count was never used.
+  // ─────────────────────────────────────────────────────────────
   countSessionInstrumentsFromWorkflows(workflows) {
     if (!workflows || typeof workflows !== 'object') return 0
     const keys = ['money-market', 'bonds', 'tbills']
@@ -381,12 +416,14 @@ class SessionManager {
   countSessionInstruments(sessionId) {
     const session = this.sessions.find(s => s.id === sessionId)
     if (!session) return 0
-    if (session.instrument_count !== undefined) {
-      return session.instrument_count
-    }
-    return this.countSessionInstrumentsFromWorkflows(session.instrumentWorkflow || {})
+    const derived = this.countSessionInstrumentsFromWorkflows(session.instrumentWorkflow || {})
+    if (derived > 0) return derived
+    return session.instrument_count || 0
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // MISC
+  // ─────────────────────────────────────────────────────────────
   clearAllSessions() {
     this.sessions = []
     localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
