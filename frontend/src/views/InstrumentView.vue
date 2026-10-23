@@ -737,12 +737,18 @@
 
                 <div class="calculations-section">
                   <h3>{{ instrumentLabel }} Calculations</h3>
-                  
+
                   <div v-if="isCalculating" class="calculating-animation">
                     <v-icon size="16" class="spin-animation">mdi-loading</v-icon>
                     <span>Calculating...</span>
                   </div>
-                  
+                  <div v-else-if="allCalculations.status === 'error' && allCalculations.message" class="calc-error-banner">
+                    {{ allCalculations.message }}
+                  </div>
+                  <div v-else-if="!calculationFields.length" class="no-calcs-message">
+                    <v-icon size="48" color="#999">mdi-calculator-variant-outline</v-icon>
+                    <p>No calculated values available. Ensure the required inputs are present in the cleaned data.</p>
+                  </div>
                   <div v-else class="calculations-grid">
                     <div
                       v-for="calc in calculationFields"
@@ -1400,6 +1406,11 @@ import { autoDetectInstrumentFields } from '@/utils/autoDetectInstrument.js'
 import Chart from 'chart.js/auto'
 import 'chartjs-adapter-date-fns'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
+import {
+  buildAggregatesFromBackend,
+  hasDisplayableCalculation,
+  formatCalculationFailureMessage
+} from '@/utils/calculationDisplay.js'
 
 function formatInstrumentTypeLabel(type) {
   if (type === 'money-market') return 'Money Market (money-market)'
@@ -1459,12 +1470,20 @@ const FIELD_MAPPINGS = {
   'bonds': {
     'clean_price': 'Clean Price',
     'dirty_price': 'Dirty Price',
+    'current_price': 'Current Price',
+    'currentPrice': 'Current Price',
+    'price': 'Price',
     'coupon_rate': 'Coupon Rate',
     'couponRate': 'Coupon Rate',
+    'annual_coupon': 'Annual Coupon',
+    'annualCoupon': 'Annual Coupon',
+    'coupon_per_period': 'Coupon per Period',
+    'couponPerPeriod': 'Coupon per Period',
     'yield_to_maturity': 'Yield to Maturity',
     'yieldToMaturity': 'Yield to Maturity',
     'current_yield': 'Current Yield',
     'currentYield': 'Current Yield',
+    'duration': 'Duration',
     'macaulay_duration': 'Macaulay Duration',
     'macaulayDuration': 'Macaulay Duration',
     'modified_duration': 'Modified Duration',
@@ -1474,6 +1493,10 @@ const FIELD_MAPPINGS = {
     'accruedInterest': 'Accrued Interest',
     'face_value': 'Face Value',
     'faceValue': 'Face Value',
+    'years_to_maturity': 'Years to Maturity',
+    'yearsToMaturity': 'Years to Maturity',
+    'price_per_100': 'Price per 100',
+    'pricePer100': 'Price per 100',
     'total_value': 'Total Value',
     'totalValue': 'Total Value',
     'instrument_name': 'Instrument Name',
@@ -2481,23 +2504,22 @@ const calculationFields = computed(() => {
   const allCalc = allCalculations.value || {}
   const selectedCalc = selectedCalculations.value || {}
 
-  return fields.map(field => {
-    let value = selectedCalc[field.key] !== undefined ? selectedCalc[field.key] :
-                allCalc[field.key] !== undefined ? allCalc[field.key] :
-                selectedCalc[toSnakeCase(field.key)] !== undefined ? selectedCalc[toSnakeCase(field.key)] :
-                allCalc[toSnakeCase(field.key)] !== undefined ? allCalc[toSnakeCase(field.key)] : null
+  return fields
+    .map(field => {
+      let value = selectedCalc[field.key] !== undefined ? selectedCalc[field.key] :
+                  allCalc[field.key] !== undefined ? allCalc[field.key] :
+                  selectedCalc[toSnakeCase(field.key)] !== undefined ? selectedCalc[toSnakeCase(field.key)] :
+                  allCalc[toSnakeCase(field.key)] !== undefined ? allCalc[toSnakeCase(field.key)] : null
 
-    if (value === null || value === undefined) {
-      const agg = allCalc.agg || selectedCalc.agg || {}
-      value = agg[field.key] !== undefined ? agg[field.key] :
-              agg[toSnakeCase(field.key)] !== undefined ? agg[toSnakeCase(field.key)] : null
-    }
+      if (value === null || value === undefined) {
+        const agg = allCalc.agg || selectedCalc.agg || {}
+        value = agg[field.key] !== undefined ? agg[field.key] :
+                agg[toSnakeCase(field.key)] !== undefined ? agg[toSnakeCase(field.key)] : null
+      }
 
-    return {
-      ...field,
-      value
-    }
-  })
+      return { ...field, value }
+    })
+    .filter(field => field.value !== null && field.value !== undefined && field.value !== '')
 })
 
 function toSnakeCase(str) {
@@ -2540,7 +2562,7 @@ function normalizeFieldName(fieldName) {
     interest_rate: 'interest_rate',
     yield_to_maturity: 'yield_to_maturity',
     spread: 'spread',
-    principal: 'face_value',
+    principal: 'principal',
     face_value: 'face_value',
     par_value: 'face_value',
     notional: 'face_value',
@@ -5365,92 +5387,40 @@ async function calculateMetrics() {
 
         const backendInstrumentNames = response?.instrument_names || []
         const calcArray = response.data.calculations || []
+        const backendAggregates = response.data.aggregates || {}
 
-        if (sheetType.value === 'single' && calcArray.length === 1) {
+        if (calcArray.length === 1) {
           const singleCalc = calcArray[0]
           calculations.value = singleCalc
 
-          const agg = {
-            totalValue: singleCalc.total_value ?? singleCalc.calculated_value ?? null,
-            instrumentCount: 1,
-            avgRate: singleCalc.interest_rate ?? singleCalc.coupon_rate ?? singleCalc.discount_rate ?? null,
-            weightedAvgRate: singleCalc.interest_rate ?? singleCalc.coupon_rate ?? singleCalc.discount_rate ?? null,
-            totalInterest: singleCalc.interest_earned ?? null,
-            interestEarned: singleCalc.interest_earned ?? null,
-            annualYield: singleCalc.annual_yield ?? null,
-            effectiveAnnualRate: singleCalc.effective_annual_rate ?? null,
-            avgDaysToMaturity: singleCalc.days_to_maturity ?? singleCalc.term_days ?? null,
-            totalPrincipal: singleCalc.principal ?? singleCalc.face_value ?? null,
-            fred: response.data.fred || null,
-            accruedInterest: singleCalc.accrued_interest ?? null,
-            annualCoupon: singleCalc.annual_coupon ?? null,
-            bondEquivalentYield: singleCalc.bond_equivalent_yield ?? null,
-            couponRate: singleCalc.coupon_rate ?? null,
-            currentPrice: singleCalc.current_price ?? null,
-            currentYield: singleCalc.current_yield ?? null,
-            duration: singleCalc.duration ?? null,
-            faceValue: singleCalc.face_value ?? null,
-            frequency: singleCalc.frequency ?? null,
-            modifiedDuration: singleCalc.modified_duration ?? null,
-            yearsToMaturity: singleCalc.years_to_maturity ?? null,
-            yieldToMaturity: singleCalc.yield_to_maturity ?? null,
-            yieldCurveRate: singleCalc.yield_curve_rate ?? null,
-            discountYield: singleCalc.discount_yield ?? null,
-            effectiveYield: singleCalc.effective_yield ?? null,
-            termDays: singleCalc.term_days ?? null,
-            status: singleCalc.status ?? null
-          }
+          const agg = buildAggregatesFromBackend(backendAggregates, singleCalc, instrumentType.value)
+          agg.instrumentCount = agg.instrumentCount ?? 1
+          if (response.data.fred) agg.fred = response.data.fred
 
-          if (singleCalc.status === 'cannot_calculate' || singleCalc.error) {
-            const errorMsg = singleCalc.error || 'Calculation failed'
-            const missingFieldsList = singleCalc.missing_fields || []
-            const invalidFields = singleCalc.invalid_fields || []
+          const displayable = hasDisplayableCalculation(agg)
+          const failedStatuses = ['cannot_calculate', 'error']
+          const isFailed = failedStatuses.includes(singleCalc.status) || (!displayable && singleCalc.status !== 'success')
 
-            let fullErrorMsg = errorMsg
-            if (missingFieldsList.length > 0) {
-              fullErrorMsg += ` Missing: ${missingFieldsList.join(', ')}`
-            }
-            if (invalidFields.length > 0) {
-              const invalidMsg = invalidFields.map(f => `${f.field} (${f.reason})`).join(', ')
-              fullErrorMsg += ` Invalid: ${invalidMsg}`
-            }
-
+          if (singleCalc.status === 'partial' && (singleCalc.error || singleCalc.missing_fields?.length)) {
+            const warningMsg = formatCalculationFailureMessage(singleCalc, 'Partial calculation')
+            showSnackbar(`Partial calculation: ${warningMsg}`, 'warning')
+            agg.status = 'partial'
+          } else if (isFailed && !displayable) {
+            const fullErrorMsg = formatCalculationFailureMessage(singleCalc)
             showSnackbar(`Calculation failed: ${fullErrorMsg}`, 'error')
             allCalculations.value = {
               status: 'error',
               message: fullErrorMsg,
               error: singleCalc.error,
-              missing_field: singleCalc.missing_field,
-              missing_fields: missingFieldsList,
-              invalid_fields: invalidFields,
+              missing_fields: singleCalc.missing_fields || [],
+              invalid_fields: singleCalc.invalid_fields || [],
               ...agg
             }
             selectedCalculations.value = allCalculations.value
+          } else {
+            allCalculations.value = agg
+            selectedCalculations.value = agg
           }
-
-          if (singleCalc.status === 'partial' && singleCalc.error) {
-            const missingFieldsList = singleCalc.missing_fields || []
-            const invalidFields = singleCalc.invalid_fields || []
-
-            let warningMsg = singleCalc.error
-            if (missingFieldsList.length > 0) {
-              warningMsg += ` Missing: ${missingFieldsList.join(', ')}`
-            }
-            if (invalidFields.length > 0) {
-              const invalidMsg = invalidFields.map(f => `${f.field} (${f.reason})`).join(', ')
-              warningMsg += ` Invalid: ${invalidMsg}`
-            }
-
-            showSnackbar(`Partial calculation: ${warningMsg}`, 'warning')
-            agg.status = 'partial'
-            agg.error = singleCalc.error
-            agg.missing_field = singleCalc.missing_field
-            agg.missing_fields = missingFieldsList
-            agg.invalid_fields = invalidFields
-          }
-
-          allCalculations.value = agg
-          selectedCalculations.value = agg
 
           const row = {
             'Instrument Name': backendInstrumentNames[0] || singleCalc.instrument_name || 'Instrument',
@@ -5495,47 +5465,20 @@ async function calculateMetrics() {
           calculations.value = agg
           showSnackbar('Calculated locally — backend returned empty result. Verify the /calculations/execute-by-type endpoint.', 'warning', 6000)
         } else if (calcArray.length > 1) {
-          const aggregates = response.data.aggregates || {}
+          const agg = buildAggregatesFromBackend(backendAggregates, null, instrumentType.value)
+          agg.instrumentCount = agg.instrumentCount ?? calcArray.length
+          if (response.data.fred) agg.fred = response.data.fred
 
-          const agg = {
-            totalValue: aggregates.totalValue ?? aggregates.total_value ?? null,
-            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? calcArray.length,
-            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? null,
-            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? null,
-            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? null,
-            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? null,
-            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? null,
-            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? null,
-            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? null,
-            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? null,
-            fred: response.data.fred || null,
-            accruedInterest: aggregates.accrued_interest ?? null,
-            annualCoupon: aggregates.annual_coupon ?? null,
-            bondEquivalentYield: aggregates.bond_equivalent_yield ?? null,
-            couponRate: aggregates.coupon_rate ?? null,
-            currentPrice: aggregates.current_price ?? null,
-            currentYield: aggregates.current_yield ?? null,
-            duration: aggregates.duration ?? null,
-            faceValue: aggregates.face_value ?? null,
-            frequency: aggregates.frequency ?? null,
-            modifiedDuration: aggregates.modified_duration ?? null,
-            yearsToMaturity: aggregates.years_to_maturity ?? null,
-            yieldToMaturity: aggregates.yield_to_maturity ?? null,
-            yieldCurveRate: aggregates.yield_curve_rate ?? null,
-            purchasePrice: aggregates.purchase_price ?? null,
-            termDays: aggregates.term_days ?? null,
-            discountAmount: aggregates.discount_amount ?? null,
-            discountYield: aggregates.discount_yield ?? null,
-            moneyMarketYield: aggregates.money_market_yield ?? null,
-            holdingPeriodYield: aggregates.holding_period_yield ?? null,
-            effectiveAnnualYield: aggregates.effective_annual_yield ?? null,
-            principal: aggregates.principal ?? null,
-            interestRate: aggregates.interest_rate ?? null,
-            effectiveYield: aggregates.effective_yield ?? null
+          if (!hasDisplayableCalculation(agg) && response.data.status === 'cannot_calculate') {
+            const firstFail = calcArray.find(c => c.status !== 'success') || calcArray[0]
+            const fullErrorMsg = formatCalculationFailureMessage(firstFail)
+            showSnackbar(`Calculation failed: ${fullErrorMsg}`, 'error')
+            allCalculations.value = { status: 'error', message: fullErrorMsg, ...agg }
+            selectedCalculations.value = allCalculations.value
+          } else {
+            allCalculations.value = agg
+            selectedCalculations.value = agg
           }
-
-          allCalculations.value = agg
-          selectedCalculations.value = agg
 
           const rows = calcArray.map((calc, idx) => {
             const mappedCalc = mapBackendFieldsToDisplayNames(calc, instrumentType.value)
@@ -5659,20 +5602,8 @@ async function calculateMetrics() {
 
           instrumentSummary.value = { columns: Array.from(currentCols), rows: rowsWithWorkbook }
 
-          const aggregates = response.data.aggregates || response.data || {}
-          const agg = {
-            totalValue: aggregates.totalValue ?? aggregates.total_value ?? null,
-            instrumentCount: aggregates.instrument_count ?? aggregates.instrumentCount ?? null,
-            avgRate: aggregates.avgRate ?? aggregates.avg_rate ?? null,
-            weightedAvgRate: aggregates.weightedAvgRate ?? aggregates.weighted_avg_rate ?? null,
-            totalInterest: aggregates.totalInterest ?? aggregates.total_interest ?? null,
-            interestEarned: aggregates.interestEarned ?? aggregates.interest_earned ?? null,
-            annualYield: aggregates.annualYield ?? aggregates.annual_yield ?? null,
-            effectiveAnnualRate: aggregates.effectiveAnnualRate ?? aggregates.effective_annual_rate ?? null,
-            avgDaysToMaturity: aggregates.avgDaysToMaturity ?? aggregates.avg_days_to_maturity ?? null,
-            totalPrincipal: aggregates.totalPrincipal ?? aggregates.total_principal ?? null
-          }
-
+          const agg = buildAggregatesFromBackend(backendAggregates, calcArray[0] || null, instrumentType.value)
+          if (response.data.fred) agg.fred = response.data.fred
           allCalculations.value = agg
           selectedCalculations.value = agg
 
@@ -8832,4 +8763,16 @@ onBeforeUnmount(() => {
   .header-right { width: 100%; justify-content: flex-start; }
   .btn-save-session { width: 100%; justify-content: center; }
 }
+
+.no-calcs-message {
+  grid-column: 1 / -1;
+  padding: 40px 20px;
+  text-align: center;
+  color: #999;
+  font-size: 14px;
+  background: #f9fafc;
+  border-radius: 12px;
+  border: 1px dashed #ccc;
+}
+.no-calcs-message p { margin: 12px 0 0 0; }
 </style>
