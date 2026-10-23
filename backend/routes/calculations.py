@@ -669,6 +669,9 @@ def calculations_routes(app):
             maturity = payload.get('maturity')
             country = payload.get('country')
             sheet_name = payload.get('sheet_name')
+            session_id = payload.get('session_id')
+            dataset_id = payload.get('dataset_id')
+            section_id = payload.get('section_id')
             if not data:
                 return jsonify({'success': False, 'status': 'error',
                                 'message': 'No data provided'}), 400
@@ -680,7 +683,7 @@ def calculations_routes(app):
             _attach_fred(result, inst_type, maturity, country, currency)
             _fix_instrument_count(result)
 
-            return jsonify({
+            response_body = {
                 'success': True,
                 'is_multi_instrument': False,
                 'instrument_type': inst_type,
@@ -689,7 +692,17 @@ def calculations_routes(app):
                 'instrument_summary': {'columns': [], 'rows': []},
                 'portfolio_summary': {'columns': [], 'rows': [],
                                       'portfolio_total': 0, 'instrument_counts': {}},
-            })
+            }
+            if session_id and result.get('calculations'):
+                try:
+                    save_calculation(
+                        inst_type, data, response_body,
+                        dataset_id=dataset_id, session_id=session_id,
+                        sheet_name=sheet_name, section_id=section_id,
+                    )
+                except Exception as e:
+                    print(f"Legacy save failed: {e}")
+            return jsonify(response_body)
         return _handler
 
     _legacy_per_type('tbills')
