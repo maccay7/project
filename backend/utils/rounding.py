@@ -83,11 +83,21 @@ MONEY_FIELDS = {
     "realized_gain_loss",
 }
 
+DAY_FIELDS = {
+    "days_to_maturity", "days_to_next_coupon", "days_accrued",
+    "days_in_coupon_period", "term_days", "days_since_issue",
+    "total_term_days", "remaining_days", "days",
+}
 
-def auto_round_by_field_name(field_name: str, value: Any) -> Optional[float]:
+
+def auto_round_by_field_name(field_name: str, value: Any) -> Any:
     if value is None:
         return None
     field_lower = field_name.lower()
+
+    if field_lower in DAY_FIELDS:
+        f = _to_float(value)
+        return None if f is None else int(round(f))
 
     if any(k in field_lower for k in ("rate", "yield", "spread", "percent", "return")):
         return round_percentage(value)

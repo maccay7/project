@@ -53,30 +53,18 @@ COUNTRY_SERIES_MAP = {
         '10Y': 'DGS10', '20Y': 'DGS20', '30Y': 'DGS30',
         '4W': 'DTB4WK', '13W': 'DTB3', '26W': 'DTB6', '52W': 'DTB1Y',
     },
-    'GB': {
-        '3M': 'IR3TTS01GBM156N', '1Y': 'IR3TTS01GBM156N',
-        '5Y': 'IR5TTS01GBM156N', '10Y': 'IRLTLT01GBM156N',
-    },
-    'JP': {
-        '3M': 'IR3TTS01JPM156N', '1Y': 'IR3TTS01JPM156N',
-        '5Y': 'IR5TTS01JPM156N', '10Y': 'IRLTLT01JPM156N',
-    },
-    'EUR': {
-        '3M': 'IR3TTS01EZM156N', '1Y': 'IR3TTS01EZM156N',
-        '5Y': 'IR5TTS01EZM156N', '10Y': 'IRLTLT01EZM156N',
-    },
-    'CA': {
-        '3M': 'IR3TTS01CAM156N', '1Y': 'IR3TTS01CAM156N',
-        '5Y': 'IR5TTS01CAM156N', '10Y': 'IRLTLT01CAM156N',
-    },
-    'AU': {
-        '3M': 'IR3TTS01AUM156N', '1Y': 'IR3TTS01AUM156N',
-        '5Y': 'IR5TTS01AUM156N', '10Y': 'IRLTLT01AUM156N',
-    },
-    'ZA': {
-        '3M': 'IR3TTS01ZAM156N', '1Y': 'IR3TTS01ZAM156N',
-        '5Y': 'IR5TTS01ZAM156N', '10Y': 'IRLTLT01ZAM156N',
-    },
+    'GB': {'3M': 'IR3TTS01GBM156N', '1Y': 'IR3TTS01GBM156N',
+           '5Y': 'IR5TTS01GBM156N', '10Y': 'IRLTLT01GBM156N'},
+    'JP': {'3M': 'IR3TTS01JPM156N', '1Y': 'IR3TTS01JPM156N',
+           '5Y': 'IR5TTS01JPM156N', '10Y': 'IRLTLT01JPM156N'},
+    'EUR': {'3M': 'IR3TTS01EZM156N', '1Y': 'IR3TTS01EZM156N',
+            '5Y': 'IR5TTS01EZM156N', '10Y': 'IRLTLT01EZM156N'},
+    'CA': {'3M': 'IR3TTS01CAM156N', '1Y': 'IR3TTS01CAM156N',
+           '5Y': 'IR5TTS01CAM156N', '10Y': 'IRLTLT01CAM156N'},
+    'AU': {'3M': 'IR3TTS01AUM156N', '1Y': 'IR3TTS01AUM156N',
+           '5Y': 'IR5TTS01AUM156N', '10Y': 'IRLTLT01AUM156N'},
+    'ZA': {'3M': 'IR3TTS01ZAM156N', '1Y': 'IR3TTS01ZAM156N',
+           '5Y': 'IR5TTS01ZAM156N', '10Y': 'IRLTLT01ZAM156N'},
 }
 
 
@@ -88,38 +76,36 @@ def normalize_country(country):
 
 
 def currency_for_country(country):
-    code = normalize_country(country)
-    return COUNTRY_CURRENCY.get(code, 'USD')
+    return COUNTRY_CURRENCY.get(normalize_country(country), 'USD')
 
 
 def series_for_country(country, maturity):
-    if not country or not str(country).strip():
-        country = 'US'
+    """Return (series_id, label, used_maturity, country, currency, note).
+
+    Returns series_id=None when the country is not supported or no
+    maturity matches. NEVER substitutes US data.
+    """
     country_upper = normalize_country(country)
+    maturity = (maturity or '1Y').strip().upper()
+    currency = currency_for_country(country_upper)
+
     maturity_map = COUNTRY_SERIES_MAP.get(country_upper)
     if not maturity_map:
-        maturity_map = COUNTRY_SERIES_MAP.get('US')
-        note = f'Country "{country}" not in map, using US fallback'
-        country_upper = 'US'
-    else:
-        note = ''
-
-    if not maturity:
-        maturity = '1Y'
-    maturity = str(maturity).upper().strip()
+        return (None, None, maturity, country_upper, currency,
+                f'No FRED series configured for country {country_upper}')
 
     series_id = maturity_map.get(maturity)
     if series_id:
-        label = f'{maturity} {country_upper} Treasury'
-        return series_id, label, maturity, country_upper, currency_for_country(country_upper), note
+        return (series_id, f'{maturity} {country_upper} Treasury',
+                maturity, country_upper, currency, '')
 
     for key in maturity_map:
         if maturity in key or key in maturity:
-            series_id = maturity_map[key]
-            label = f'{key} {country_upper} Treasury'
-            return series_id, label, key, country_upper, currency_for_country(country_upper), note
+            return (maturity_map[key], f'{key} {country_upper} Treasury',
+                    key, country_upper, currency, '')
 
-    return None, None, maturity, country_upper, currency_for_country(country_upper), 'No series found'
+    return (None, None, maturity, country_upper, currency,
+            f'No {maturity} series for {country_upper}')
 
 
 def fetch_fred_observation(series_id, from_date=None, to_date=None, max_retries=3):
@@ -131,56 +117,42 @@ def fetch_fred_observation(series_id, from_date=None, to_date=None, max_retries=
         'series_id': series_id,
         'api_key': FRED_API_KEY,
         'file_type': 'json',
+        'sort_order': 'desc',
+        'limit': 1,
     }
     if from_date and to_date:
         params['observation_start'] = from_date
         params['observation_end'] = to_date
-        params['sort_order'] = 'desc'
-        params['limit'] = 1
-    else:
-        params['sort_order'] = 'desc'
-        params['limit'] = 1
 
     for attempt in range(max_retries):
         try:
             resp = requests.get(f'{FRED_BASE_URL}/series/observations',
                                 params=params, timeout=30)
             if resp.status_code != 200:
-                logger.error(f"FRED API status {resp.status_code} for series {series_id} (attempt {attempt + 1}/{max_retries})")
-                if attempt < max_retries - 1:
-                    continue
-                return None, None
+                logger.error(f"FRED status {resp.status_code} for {series_id} "
+                             f"(attempt {attempt + 1}/{max_retries})")
+                continue
             data = resp.json()
             if 'error_code' in data:
-                logger.error(f"FRED error: {data.get('error_message')} for series {series_id} (attempt {attempt + 1}/{max_retries})")
-                if attempt < max_retries - 1:
-                    continue
-                return None, None
+                logger.error(f"FRED error: {data.get('error_message')} for {series_id}")
+                continue
             for obs in data.get('observations', []):
                 if obs.get('value') and obs.get('value') != '.':
                     try:
                         return float(obs['value']), obs.get('date')
                     except (ValueError, TypeError):
                         continue
-            logger.warning(f"No valid observation for series {series_id} (attempt {attempt + 1}/{max_retries})")
+            logger.warning(f"No valid observation for {series_id}")
             return None, None
         except requests.exceptions.Timeout:
-            logger.warning(f"FRED API timeout for series {series_id} (attempt {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                continue
-            return None, None
+            logger.warning(f"Timeout for {series_id} (attempt {attempt + 1}/{max_retries})")
         except Exception as e:
-            logger.error(f"Exception fetching FRED series {series_id}: {e} (attempt {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                continue
-            return None, None
+            logger.error(f"Exception for {series_id}: {e}")
 
     return None, None
 
 
 def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None):
-    if not country:
-        country = 'US'
     if maturities is None:
         maturities = ['1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y']
 
@@ -193,54 +165,48 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
     points = []
 
     if from_date and to_date:
-        logger.info(f"Date range mode: Fetching time series from {from_date} to {to_date}")
         key_maturity = '10Y'
         series_id, label, used_mat, _, _, note = series_for_country(country, key_maturity)
         if series_id:
             try:
-                params = {
-                    'series_id': series_id,
-                    'api_key': FRED_API_KEY,
-                    'file_type': 'json',
-                    'observation_start': from_date,
-                    'observation_end': to_date,
-                    'sort_order': 'asc',
-                    'limit': 1000
-                }
-                logger.info(f"Fetching FRED time series for {series_id} from {from_date} to {to_date}")
-                resp = requests.get(f'{FRED_BASE_URL}/series/observations',
-                                    params=params, timeout=30)
+                resp = requests.get(
+                    f'{FRED_BASE_URL}/series/observations',
+                    params={
+                        'series_id': series_id,
+                        'api_key': FRED_API_KEY,
+                        'file_type': 'json',
+                        'observation_start': from_date,
+                        'observation_end': to_date,
+                        'sort_order': 'asc',
+                        'limit': 1000,
+                    },
+                    timeout=30,
+                )
                 if resp.status_code == 200:
-                    data = resp.json()
-                    if 'observations' in data:
-                        for obs in data['observations']:
-                            if obs.get('value') and obs.get('value') != '.':
-                                try:
-                                    val = float(obs['value'])
-                                    points.append({
-                                        'maturity': maturity_map.get(used_mat, 10.0),
-                                        'maturityLabel': used_mat,
-                                        'rate': round(val, 4),
-                                        'date': obs.get('date'),
-                                        'source': 'fred',
-                                        'x': obs.get('date'),
-                                        'y': round(val, 4)
-                                    })
-                                except (ValueError, TypeError):
-                                    continue
-                        logger.info(f"Fetched {len(points)} time series points for {key_maturity} from {from_date} to {to_date}")
-                else:
-                    logger.error(f"FRED API status {resp.status_code} for time series {series_id}")
+                    for obs in resp.json().get('observations', []):
+                        if obs.get('value') and obs.get('value') != '.':
+                            try:
+                                val = float(obs['value'])
+                                points.append({
+                                    'maturity': maturity_map.get(used_mat, 10.0),
+                                    'maturityLabel': used_mat,
+                                    'rate': round(val, 4),
+                                    'date': obs.get('date'),
+                                    'source': 'fred',
+                                    'x': obs.get('date'),
+                                    'y': round(val, 4),
+                                })
+                            except (ValueError, TypeError):
+                                continue
             except Exception as e:
                 logger.error(f"Error fetching time series for {series_id}: {e}")
     else:
-        logger.info("Standard yield curve mode: Fetching current rates across maturities")
         for mat_label in maturities:
             series_id, label, used_mat, _, _, note = series_for_country(country, mat_label)
             if not series_id:
-                logger.warning(f"No series found for {country} {mat_label} — skipping")
+                logger.warning(f"No series for {country} {mat_label} — skipping")
                 continue
-            val, date = fetch_fred_observation(series_id, from_date=from_date, to_date=to_date, max_retries=2)
+            val, date = fetch_fred_observation(series_id)
             if val is not None:
                 points.append({
                     'maturity': maturity_map.get(used_mat, 1.0),
@@ -254,20 +220,13 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
         points.sort(key=lambda x: x['date'] or '')
     else:
         points.sort(key=lambda x: x['maturity'])
-
-    logger.info(f"Returning {len(points)} FRED data points - NO FALLBACKS")
     return points
 
 
 def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency='USD'):
-    if not country:
-        country = 'US'
-    if not maturity:
-        maturity = '1Y'
-    if not currency:
-        currency = currency_for_country(country)
+    series_id, label, used_mat, country_upper, inferred_ccy, note = \
+        series_for_country(country, maturity)
 
-    series_id, label, used_mat, country_upper, inferred_ccy, note = series_for_country(country, maturity)
     if series_id:
         val, date = fetch_fred_observation(series_id)
         if val is not None:
@@ -281,31 +240,19 @@ def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency=
                 'date': date,
                 'note': note,
             }
+
     return {
-        'error': f'No benchmark data available for {instrument_type} {maturity} {country}',
+        'error': f'No benchmark data for {instrument_type} {maturity} {country_upper}',
         'benchmark_rate': None,
-        'note': 'FRED API returned no data',
+        'note': note or 'FRED API returned no data',
     }
 
 
 def attach_fred_to_calculation(result, instrument_type, maturity='1Y',
                                country='US', currency='USD'):
-    if not country:
-        country = 'US'
-    if not maturity:
-        maturity = '1Y'
-    if not currency:
-        currency = currency_for_country(country)
     try:
         benchmark = get_market_benchmark(instrument_type, maturity, country, currency)
-        if benchmark.get('benchmark_rate') is not None:
-            result['fred'] = benchmark
-        else:
-            result['fred'] = {
-                'benchmark_rate': None,
-                'error': benchmark.get('error'),
-                'note': benchmark.get('note'),
-            }
+        result['fred'] = benchmark
     except Exception as e:
         logger.error(f"Error attaching FRED benchmark: {e}")
         result['fred'] = {
@@ -318,12 +265,11 @@ def attach_fred_to_calculation(result, instrument_type, maturity='1Y',
 def build_filter_options():
     countries = []
     for code in COUNTRY_SERIES_MAP:
-        maturities = [{'code': mat, 'name': mat} for mat in COUNTRY_SERIES_MAP[code]]
         countries.append({
             'code': code,
             'name': code,
             'currency': currency_for_country(code),
-            'maturities': maturities,
+            'maturities': [{'code': m, 'name': m} for m in COUNTRY_SERIES_MAP[code]],
         })
     return {
         'countries': countries,

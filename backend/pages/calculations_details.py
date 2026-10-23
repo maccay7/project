@@ -1,5 +1,6 @@
 import math
 import re
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -87,7 +88,7 @@ def parse_frequency(value: Any) -> Optional[int]:
         frequency_map = {
             'annual': 1, 'annually': 1, 'yearly': 1, '1': 1, 'once per year': 1,
             'semi-annual': 2, 'semi-annually': 2, 'semiannual': 2,
-            'semi annul': 2, 'semi annually': 2, 'semiannually': 2,
+            'semi annually': 2, 'semiannually': 2, 'semi annual': 2,
             'bi-annual': 2, 'biannual': 2, 'bi annual': 2,
             'half-yearly': 2, 'half yearly': 2, '2': 2, 'twice per year': 2,
             'quarterly': 4, 'quarter': 4, '4': 4, 'four times per year': 4,
@@ -104,15 +105,10 @@ def parse_frequency(value: Any) -> Optional[int]:
 
 
 _DATE_FORMATS = (
-    "%Y-%m-%d",
-    "%m/%d/%Y", "%m/%d/%y",
-    "%d/%m/%Y", "%d/%m/%y",
-    "%Y/%m/%d",
-    "%d-%m-%Y", "%m-%d-%Y",
-    "%d-%m-%y", "%m-%d-%y",
-    "%d.%m.%Y", "%d %b %Y", "%d-%b-%Y",
-    "%d-%b-%y", "%d %b %y",
-    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y", "%d/%m/%y",
+    "%Y/%m/%d", "%d-%m-%Y", "%m-%d-%Y", "%d-%m-%y", "%m-%d-%y",
+    "%d.%m.%Y", "%d %b %Y", "%d-%b-%Y", "%d-%b-%y", "%d %b %y",
+    "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
 )
 
 
@@ -128,8 +124,7 @@ def parse_date(value: Any) -> Optional[date]:
         try:
             n = float(value)
             if 1 <= n <= 2958465:
-                base = datetime(1899, 12, 30)
-                return (base + timedelta(days=int(n))).date()
+                return (datetime(1899, 12, 30) + timedelta(days=int(n))).date()
         except Exception:
             pass
         return None
@@ -149,22 +144,31 @@ def round_money(value: Any) -> Optional[float]:
     val = safe_float(value)
     if val is None:
         return None
-    return round(val, 2)
+    return float(Decimal(str(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def round_time(value: Any) -> Optional[int]:
     val = safe_float(value)
-    if val is None:
+    return None if val is None else int(round(val))
+
+
+def _rate(value):
+    """Round a percentage to 4 dp using half-up (not banker's)."""
+    if value is None:
         return None
-    return int(round(val))
+    try:
+        return float(Decimal(str(value)).quantize(Decimal("0.0001"),
+                                                   rounding=ROUND_HALF_UP))
+    except Exception:
+        return None
 
 
 def days_between(d1: date, d2: date) -> int:
     return abs((d2 - d1).days)
 
 
-def _days_derivation(val_d: Optional[date], mat_d: Optional[date], days: Optional[int]) -> Optional[Dict[str, Any]]:
-    """Return a from → to → N days breakdown for display."""
+def _days_derivation(val_d: Optional[date], mat_d: Optional[date],
+                     days: Optional[int]) -> Optional[Dict[str, Any]]:
     if not (val_d and mat_d and days is not None):
         return None
     return {
@@ -177,6 +181,27 @@ def _days_derivation(val_d: Optional[date], mat_d: Optional[date], days: Optiona
 
 
 SPECIFIC_ALIASES: Dict[str, List[str]] = {
+    "face_value": [
+        "face value", "facevalue", "face_value",
+        "par value", "parvalue", "par_value",
+        "redemption value", "redemptionvalue", "redemption_value",
+        "maturity value", "maturityvalue", "maturity_value",
+        "nominal value", "nominalvalue", "nominal_value",
+    ],
+    "coupon_rate": [
+        "coupon rate", "couponrate", "coupon_rate",
+        "coupon", "annual coupon", "annualcoupon",
+        "fixed rate", "fixedrate",
+        "nominal rate", "nominalrate",
+        "stated rate", "statedrate",
+        "interest rate", "interestrate",
+    ],
+    "coupon_frequency": [
+        "coupon frequency", "couponfrequency", "coupon_frequency",
+        "Coupon Frequency", "CouponFrequency", "Coupon_Frequency",
+        "payment frequency", "paymentfrequency",
+        "frequency", "coupon period", "payments per year",
+    ],
     "principal": [
         "principal", "principle", "principal amount", "principle amount",
         "face value", "facevalue", "face_value", "face amount",
@@ -201,6 +226,12 @@ SPECIFIC_ALIASES: Dict[str, List[str]] = {
         "term days", "term_days", "termdays", "term in days",
         "tenor", "term", "days", "period",
     ],
+    "term_days": [
+        "term days", "termdays", "term_days",
+        "days to maturity", "daystomaturity",
+        "maturity days", "maturitydays",
+        "tenor", "term", "days",
+    ],
     "issue_date": [
         "issue date", "issuedate", "issue_date",
         "start date", "startdate", "start_date",
@@ -208,6 +239,10 @@ SPECIFIC_ALIASES: Dict[str, List[str]] = {
         "settlement date", "settlementdate", "settlement_date",
         "origination date", "value date", "valuedate", "value_date",
         "trade date", "tradedate", "trade_date",
+    ],
+    "last_coupon_date": [
+        "last coupon date", "lastcoupondate", "last_coupon_date",
+        "previous coupon date", "previouscoupondate", "previous_coupon_date",
     ],
     "maturity_date": [
         "maturity date", "maturitydate", "maturity_date",
@@ -249,8 +284,6 @@ SPECIFIC_ALIASES: Dict[str, List[str]] = {
         "security", "security id", "securityid",
         "instrument id", "instrumentid", "isin", "ticker",
     ],
-    # REMOVED: counterparty, instrument, bond, tbill, t-bill
-    # These were hijacking instrument_name for single-instrument sheets.
     "instrument_name": [
         "instrument name", "instrumentname", "instrument_name",
         "bond name", "bondname", "bond_name",
@@ -263,7 +296,6 @@ SPECIFIC_ALIASES: Dict[str, List[str]] = {
         "description",
         "name", "ticker", "symbol",
     ],
-    # NEW: keep counterparty visible as its own field
     "counterparty": [
         "counterparty", "counter party", "counter-party", "cp",
         "account name", "client name",
@@ -273,13 +305,6 @@ SPECIFIC_ALIASES: Dict[str, List[str]] = {
     "country": ["country", "jurisdiction", "domicile"],
     "sector": ["sector", "industry", "industry group"],
     "rating": ["credit rating", "rating", "moody", "s&p", "fitch"],
-    "face_value": [
-        "face value", "facevalue", "face_value",
-        "par value", "parvalue", "par_value",
-        "redemption value", "redemptionvalue", "redemption_value",
-        "maturity value", "maturityvalue", "maturity_value",
-        "nominal value", "nominalvalue", "nominal_value",
-    ],
     "discount_rate": [
         "discount rate", "discountrate", "discount_rate",
         "bank discount", "bankdiscount",
@@ -288,27 +313,7 @@ SPECIFIC_ALIASES: Dict[str, List[str]] = {
         "auction rate", "auctionrate",
         "discount",
     ],
-    "term_days": [
-        "term days", "termdays", "term_days",
-        "days to maturity", "daystomaturity",
-        "maturity days", "maturitydays",
-        "tenor", "term", "days",
-    ],
     "auction_date": ["auction date", "auctiondate", "issue date", "settlement date"],
-    "coupon_rate": [
-        "coupon rate", "couponrate", "coupon_rate",
-        "coupon", "annual coupon", "annualcoupon",
-        "fixed rate", "fixedrate",
-        "nominal rate", "nominalrate",
-        "stated rate", "statedrate",
-        "interest rate", "interestrate",
-    ],
-    "coupon_frequency": [
-        "coupon frequency", "couponfrequency", "coupon_frequency",
-        "Coupon Frequency", "CouponFrequency", "Coupon_Frequency",
-        "payment frequency", "paymentfrequency",
-        "frequency", "coupon period", "payments per year",
-    ],
     "years_to_maturity": [
         "years to maturity", "yearstomaturity", "years_to_maturity",
         "maturity years", "maturityyears",
@@ -357,6 +362,7 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
     normalized: Dict[str, Any] = {}
     consumed: set = set()
 
+    # Pass 1: exact (lowercased) match.
     for target, aliases in SPECIFIC_ALIASES.items():
         for alias in aliases:
             alias_l = alias.lower().strip()
@@ -370,12 +376,14 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
             if target in normalized:
                 break
 
+    # Pass 2: token-subset match. Aliases with fewer than 2 tokens are
+    # skipped — this stops "coupon" from claiming "last_coupon_date".
     for target, aliases in SPECIFIC_ALIASES.items():
         if target in normalized:
             continue
         for alias in aliases:
             alias_tokens = _tokenize(alias)
-            if not alias_tokens:
+            if len(alias_tokens) < 2:
                 continue
             for src_key in row.keys():
                 if src_key in consumed:
@@ -387,6 +395,7 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
             if target in normalized:
                 break
 
+    # Pass 3: pass through anything else.
     for key, value in row.items():
         if key not in consumed and key not in normalized:
             unwrapped = _unwrap_cell(value)
@@ -398,8 +407,7 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def _extract_instrument_name(row: Dict[str, Any]) -> Optional[str]:
     candidates = [
-        "instrument_name",
-        "BondName", "TBillName",
+        "instrument_name", "BondName", "TBillName",
         "Instrument Name", "Security", "Name",
         "Ticker", "Symbol", "ISIN", "isin", "Security ID",
     ]
@@ -457,8 +465,8 @@ def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
         if years is None:
             val_d = parse_date(norm.get("valuation_date"))
             mat_d = parse_date(norm.get("maturity_date"))
-            if val_d and mat_d:
-                years = days_between(val_d, mat_d) / 365.0
+            if val_d and mat_d and mat_d >= val_d:
+                years = (mat_d - val_d).days / 365.0
             else:
                 d2m = safe_float(norm.get("days_to_maturity"))
                 if d2m is not None:
@@ -466,13 +474,7 @@ def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
         if years is None or years <= 0:
             missing.append("years_to_maturity (or Valuation Date + Maturity Date)")
 
-        freq = (parse_frequency(norm.get("coupon_frequency"))
-                or parse_frequency(norm.get("frequency"))
-                or parse_frequency(norm.get("Coupon Frequency"))
-                or parse_frequency(raw_coupon_frequency))
         note("coupon_frequency"); note("frequency"); note("Coupon Frequency")
-        if freq is None or freq <= 0:
-            missing.append("coupon_frequency (Annual=1, Semi-annual=2, Quarterly=4, Monthly=12)")
 
         if face is not None and face <= 0:
             invalid.append(("face_value", "must be > 0"))
@@ -509,13 +511,13 @@ def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
         if days is None:
             val_d = parse_date(norm.get("valuation_date"))
             mat_d = parse_date(norm.get("maturity_date"))
-            if val_d and mat_d:
-                days = days_between(val_d, mat_d)
+            if val_d and mat_d and mat_d >= val_d:
+                days = (mat_d - val_d).days
         if days is None:
             iss_d = parse_date(norm.get("issue_date"))
             mat_d = parse_date(norm.get("maturity_date"))
-            if iss_d and mat_d:
-                days = days_between(iss_d, mat_d)
+            if iss_d and mat_d and mat_d >= iss_d:
+                days = (mat_d - iss_d).days
         if days is None or days <= 0:
             missing.append("term_days (or Valuation Date + Maturity Date)")
 
@@ -541,13 +543,13 @@ def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
         if days is None:
             val_d = parse_date(norm.get("valuation_date"))
             mat_d = parse_date(norm.get("maturity_date"))
-            if val_d and mat_d:
-                days = days_between(val_d, mat_d)
+            if val_d and mat_d and mat_d >= val_d:
+                days = (mat_d - val_d).days
         if days is None:
             iss_d = parse_date(norm.get("issue_date"))
             mat_d = parse_date(norm.get("maturity_date"))
-            if iss_d and mat_d:
-                days = days_between(iss_d, mat_d)
+            if iss_d and mat_d and mat_d >= iss_d:
+                days = (mat_d - iss_d).days
         if days is None or days <= 0:
             missing.append("term_days (or Valuation Date + Maturity Date)")
 
@@ -582,52 +584,41 @@ def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
     }
 
 
-def _solve_ytm(price: float, face: float, coupon_rate: float,
-               years: float, frequency: int) -> Optional[float]:
+def _solve_ytm(price, face, coupon_rate, years, frequency):
     if price is None or face is None or coupon_rate is None:
         return None
-    if price <= 0 or face <= 0 or years <= 0 or frequency <= 0:
+    if price <= 0 or face <= 0 or years is None or years <= 0 or frequency <= 0:
         return None
+    n = max(1, int(round(years * frequency)))
     coupon = face * coupon_rate / frequency
-    n = int(round(years * frequency))
-    if n <= 0:
-        return None
-    annual_coupon = face * coupon_rate
-    ytm = annual_coupon / price if price > 0 else 0.05
-    for _ in range(200):
-        r = ytm / frequency
+
+    def pv(y):
+        r = y / frequency
         if r <= -1:
-            r = 1e-6
-        pv = 0.0
-        dpv = 0.0
-        for t in range(1, n + 1):
-            disc = (1 + r) ** t
-            pv += coupon / disc
-            dpv += -t * coupon / (disc * (1 + r))
-        disc_n = (1 + r) ** n
-        pv += face / disc_n
-        dpv += -n * face / (disc_n * (1 + r))
-        diff = pv - price
-        if abs(diff) < 1e-8:
-            break
-        if abs(dpv) < 1e-14:
-            break
-        ytm_new = ytm - (diff * frequency) / dpv
-        if abs(ytm_new - ytm) < 1e-10:
-            ytm = ytm_new
-            break
-        ytm = ytm_new
-        if ytm < -0.99:
-            ytm = 1e-6
-    if ytm is None or math.isnan(ytm) or math.isinf(ytm):
+            return float("inf")
+        total = sum(coupon / ((1 + r) ** t) for t in range(1, n + 1))
+        return total + face / ((1 + r) ** n)
+
+    lo, hi = -0.99, 10.0
+    f_lo = pv(lo) - price
+    f_hi = pv(hi) - price
+    if f_lo * f_hi > 0:
         return None
-    return ytm
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        f_mid = pv(mid) - price
+        if abs(f_mid) < 1e-8 or (hi - lo) < 1e-10:
+            return mid
+        if f_mid * f_lo < 0:
+            hi = mid
+        else:
+            lo = mid
+            f_lo = f_mid
+    return (lo + hi) / 2
 
 
-def _price_from_ytm(face: float, coupon_rate: float, ytm: float,
-                    years: float, frequency: int) -> Optional[float]:
-    if (face is None or coupon_rate is None or ytm is None
-            or years is None or frequency is None):
+def _price_from_ytm(face, coupon_rate, ytm, years, frequency):
+    if any(v is None for v in (face, coupon_rate, ytm, years, frequency)):
         return None
     if face <= 0 or years <= 0 or frequency <= 0:
         return None
@@ -636,17 +627,80 @@ def _price_from_ytm(face: float, coupon_rate: float, ytm: float,
         return None
     n = max(1, int(round(years * frequency)))
     coupon_per = face * coupon_rate / frequency
-    try:
-        pv = 0.0
-        for t in range(1, n + 1):
-            pv += coupon_per / ((1 + r) ** t)
-        pv += face / ((1 + r) ** n)
-        return pv
-    except (ZeroDivisionError, OverflowError):
+    pv = sum(coupon_per / ((1 + r) ** t) for t in range(1, n + 1))
+    return pv + face / ((1 + r) ** n)
+
+
+def _parse_bond_price(item, face):
+    raw = item.get("price") or item.get("purchase_price") or item.get("current_price")
+    if raw is None:
         return None
+    s = str(raw).strip()
+    if s.endswith("%"):
+        pct = parse_percentage(raw)
+        if pct is not None and face is not None:
+            return face * pct
+        return None
+    p = safe_float(raw)
+    if p is None:
+        return None
+    if face is not None and face >= 100 and 0 < p < face * 0.3:
+        return p * face / 100.0
+    return p
 
 
-def calculate_treasury_bill(item: Dict[str, Any], benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
+def _bond_accrued(item, face, coupon_rate, frequency, day_count_str):
+    if face is None or coupon_rate is None or not frequency:
+        return None, None
+    last = parse_date(item.get("last_coupon_date")) or parse_date(item.get("issue_date"))
+    settle = parse_date(item.get("valuation_date")) or parse_date(item.get("settlement_date"))
+    if not last or not settle:
+        return None, None
+    days = (settle - last).days
+    if days < 0:
+        return None, None
+    basis = 360.0 if "360" in day_count_str else 365.0
+    days_in_period = basis / frequency
+    coupon_per = face * coupon_rate / frequency
+    return coupon_per * (days / days_in_period), days
+
+
+_CAMEL_PAIRS = {
+    "face_value": "faceValue", "current_price": "currentPrice",
+    "coupon_rate": "couponRate", "years_to_maturity": "yearsToMaturity",
+    "yield_to_maturity": "yieldToMaturity",
+    "modified_duration": "modifiedDuration",
+    "macaulay_duration": "macaulayDuration",
+    "current_yield": "currentYield", "accrued_interest": "accruedInterest",
+    "annual_coupon": "annualCoupon", "coupon_payment": "couponPayment",
+    "coupon_per_period": "couponPerPeriod", "days_accrued": "daysAccrued",
+    "price_per_100": "pricePer100",
+    "bond_equivalent_yield": "bondEquivalentYield",
+    "yield_curve_rate": "yieldCurveRate",
+    "present_value": "presentValue", "fair_value": "fairValue",
+    "carrying_value": "carryingValue", "discount_rate": "discountRate",
+    "total_value": "totalValue", "term_days": "termDays",
+    "interest_rate": "interestRate", "interest_earned": "interestEarned",
+    "maturity_value": "maturityValue", "total_interest": "totalInterest",
+    "discount_yield": "discountYield", "effective_yield": "effectiveYield",
+    "effective_annual_rate": "effectiveAnnualRate",
+    "effective_annual_yield": "effectiveAnnualYield",
+    "money_market_yield": "moneyMarketYield",
+    "holding_period_yield": "holdingPeriodYield",
+    "discount_amount": "discountAmount",
+    "purchase_price": "purchasePrice", "market_value": "marketValue",
+}
+
+
+def _add_camel_aliases(result):
+    for snake, camel in _CAMEL_PAIRS.items():
+        if snake in result and camel not in result:
+            result[camel] = result[snake]
+    return result
+
+
+def calculate_treasury_bill(item: Dict[str, Any],
+                            benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     item = normalize_row(item)
     face = safe_float(item.get("face_value")) or safe_float(item.get("principal"))
     purchase_price = (safe_float(item.get("purchase_price"))
@@ -655,32 +709,35 @@ def calculate_treasury_bill(item: Dict[str, Any], benchmark_yield: Optional[floa
     discount_rate = parse_percentage(item.get("discount_rate"))
     currency = item.get("currency") or item.get("ccy") or item.get("currency_code")
 
-    day_count = item.get("day_count_convention") or item.get("day_count") or "ACT/360"
-    day_count_str = str(day_count).upper() if day_count else "ACT/360"
-    if "360" in day_count_str:
-        discount_basis = 360.0
-    elif "365" in day_count_str:
-        discount_basis = 365.0
-    else:
-        discount_basis = 360.0
+    day_count = str(item.get("day_count_convention") or item.get("day_count") or "ACT/360").upper()
+    discount_basis = 365.0 if "365" in day_count else 360.0
 
     val_d = parse_date(item.get("valuation_date"))
     mat_d = parse_date(item.get("maturity_date"))
     days = safe_float(item.get("term_days")) or safe_float(item.get("days_to_maturity"))
     if days is None and val_d and mat_d:
-        days = days_between(val_d, mat_d)
+        days = (mat_d - val_d).days if mat_d >= val_d else None
     if days is None:
         iss_d = parse_date(item.get("issue_date"))
-        if iss_d and mat_d:
-            days = days_between(iss_d, mat_d)
+        if iss_d and mat_d and mat_d >= iss_d:
+            days = (mat_d - iss_d).days
+
+    # Derive discount_rate when only price is supplied.
+    if (discount_rate is None and purchase_price is not None
+            and face is not None and days is not None and days > 0):
+        discount_rate = (face - purchase_price) / face * discount_basis / days
+
+    # Any of face, days, or a non-positive days => can't fully value.
+    bad = (face is None or days is None
+           or (days is not None and days <= 0))
 
     result = {
-        "status": "partial" if (face is None or days is None) else "success",
+        "status": "partial" if bad else "success",
         "instrument_type": "tbills",
         "face_value": round_money(face),
         "term_days": round_time(days) if days is not None and days > 0 else None,
-        "discount_rate": round(discount_rate * 100.0, 4) if discount_rate is not None else None,
-        "day_count_convention": day_count_str,
+        "discount_rate": _rate(discount_rate * 100) if discount_rate is not None else None,
+        "day_count_convention": day_count,
         "currency": currency,
     }
 
@@ -688,261 +745,171 @@ def calculate_treasury_bill(item: Dict[str, Any], benchmark_yield: Optional[floa
     if derivation:
         result["derivations"] = {"days_to_maturity": derivation}
 
-    if face is not None and days is not None and days > 0 and discount_rate is not None:
-        if purchase_price is None:
-            purchase_price = face * (1.0 - discount_rate * days / discount_basis)
-        result["purchase_price"] = (round_money(purchase_price)
-                                    if purchase_price is not None and purchase_price > 0 else None)
+    if (face is not None and days is not None and days > 0
+            and discount_rate is not None and purchase_price is None):
+        purchase_price = face * (1.0 - discount_rate * days / discount_basis)
 
-    carrying_value = safe_float(item.get("carrying_value")) or safe_float(item.get("book_value"))
-    if carrying_value is not None:
-        result["carrying_value"] = round_money(carrying_value)
+    if purchase_price is not None and purchase_price > 0:
+        result["purchase_price"] = round_money(purchase_price)
+
+    carrying = safe_float(item.get("carrying_value")) or safe_float(item.get("book_value"))
+    if carrying is not None:
+        result["carrying_value"] = round_money(carrying)
     elif isinstance(item.get("carrying_value"), str):
         result["carrying_value"] = item.get("carrying_value")
 
     if (face is not None and purchase_price is not None and purchase_price > 0
             and days is not None and days > 0):
         discount_amount = face - purchase_price
-        discount_yield = (discount_amount / face) * (discount_basis / days) * 100.0
-        money_market_yield = (discount_amount / purchase_price) * (discount_basis / days) * 100.0
-        bond_equivalent_yield = (discount_amount / purchase_price) * (365.0 / days) * 100.0
-        holding_period_yield = (discount_amount / purchase_price) * 100.0
-        effective_annual_yield = ((face / purchase_price) ** (365.0 / days) - 1.0) * 100.0
+        disc_yield = (discount_amount / face) * (discount_basis / days) * 100.0
+        mm_yield = (discount_amount / purchase_price) * (discount_basis / days) * 100.0
+        be_yield = (discount_amount / purchase_price) * (365.0 / days) * 100.0
+        hp_yield = (discount_amount / purchase_price) * 100.0
+        eff_yield = ((face / purchase_price) ** (365.0 / days) - 1.0) * 100.0
 
-        result["discount_amount"] = round_money(discount_amount)
-        result["discount_yield"] = round(discount_yield, 4)
-        result["money_market_yield"] = round(money_market_yield, 4)
-        result["bond_equivalent_yield"] = round(bond_equivalent_yield, 4)
-        result["holding_period_yield"] = round(holding_period_yield, 4)
-        result["effective_annual_yield"] = round(effective_annual_yield, 4)
-        result["yield_curve_rate"] = round(benchmark_yield * 100.0, 4) if benchmark_yield is not None else None
-        result["total_value"] = round_money(face)
-        result["status"] = "success"
+        result.update({
+            "discount_amount": round_money(discount_amount),
+            "discount_yield": _rate(disc_yield),
+            "money_market_yield": _rate(mm_yield),
+            "bond_equivalent_yield": _rate(be_yield),
+            "holding_period_yield": _rate(hp_yield),
+            "effective_annual_yield": _rate(eff_yield),
+            "yield_curve_rate": _rate(benchmark_yield * 100) if benchmark_yield is not None else None,
+            "total_value": round_money(face),
+            "status": "success",
+        })
 
-    result["faceValue"] = result["face_value"]
-    result["purchasePrice"] = result.get("purchase_price")
-    result["termDays"] = result["term_days"]
-    result["discountAmount"] = result.get("discount_amount")
-    result["discountYield"] = result.get("discount_yield")
-    result["moneyMarketYield"] = result.get("money_market_yield")
-    result["bondEquivalentYield"] = result.get("bond_equivalent_yield")
-    result["holdingPeriodYield"] = result.get("holding_period_yield")
-    result["effectiveAnnualYield"] = result.get("effective_annual_yield")
-    result["yieldCurveRate"] = result.get("yield_curve_rate")
-    result["totalValue"] = result.get("total_value")
-    result["carryingValue"] = result.get("carrying_value")
-
-    return result
+    return _add_camel_aliases(result)
 
 
-def calculate_bond(item: Dict[str, Any], benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
-    raw_coupon_frequency = (item.get('Coupon Frequency') or item.get('coupon_frequency')
-                            or item.get('frequency') or item.get('instrument_type'))
-
+def calculate_bond(item: Dict[str, Any],
+                   benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
+    raw_freq = (item.get("Coupon Frequency") or item.get("coupon_frequency")
+                or item.get("frequency"))
     item = normalize_row(item)
+
     face = safe_float(item.get("face_value")) or safe_float(item.get("principal"))
     coupon_rate = (parse_percentage(item.get("coupon_rate"))
                    or parse_percentage(item.get("interest_rate")))
     currency = item.get("currency") or item.get("ccy") or item.get("currency_code")
 
-    price_input = item.get("price") or item.get("purchase_price") or item.get("current_price")
-    price = None
-    if price_input is not None:
-        price_str = str(price_input).strip()
-        if price_str.endswith('%'):
-            price_pct = parse_percentage(price_input)
-            if price_pct is not None and face is not None:
-                price = face * price_pct
-        else:
-            price = safe_float(price_input)
-
-    day_count = item.get("day_count_convention") or item.get("day_count") or "ACT/365"
-    day_count_str = str(day_count).upper() if day_count else "ACT/365"
+    price = _parse_bond_price(item, face)
+    day_count = str(item.get("day_count_convention") or item.get("day_count") or "ACT/365").upper()
 
     val_d = parse_date(item.get("valuation_date"))
     mat_d = parse_date(item.get("maturity_date"))
 
-    years = safe_float(item.get('years_to_maturity'))
+    years = safe_float(item.get("years_to_maturity"))
     if years is None and val_d and mat_d:
-        years = days_between(val_d, mat_d) / 365.0
+        years = ((mat_d - val_d).days / 365.0) if mat_d >= val_d else None
     if years is None:
         d2m = safe_float(item.get("days_to_maturity"))
         if d2m is not None and d2m > 0:
             years = d2m / 365.0
 
-    frequency = (parse_frequency(item.get('frequency'))
-                 or parse_frequency(item.get('coupon_frequency'))
-                 or parse_frequency(item.get('instrument_type'))
-                 or parse_frequency(item.get('Coupon Frequency'))
-                 or parse_frequency(raw_coupon_frequency))
-
-    if frequency is not None and (frequency <= 0 or frequency > 365):
-        frequency = None
+    frequency = (
+        parse_frequency(item.get("frequency"))
+        or parse_frequency(item.get("coupon_frequency"))
+        or parse_frequency(raw_freq)
+    )
+    defaulted_freq = False
+    if frequency is None or frequency <= 0 or frequency > 365:
+        frequency = 2
+        defaulted_freq = True
 
     result = {
-        "status": ("partial" if (face is None or coupon_rate is None or years is None
-                                 or frequency is None or price is None) else "success"),
+        "status": "partial",
         "instrument_type": "bonds",
         "face_value": round_money(face),
-        "coupon_rate": round(coupon_rate * 100.0, 4) if coupon_rate is not None else None,
+        "coupon_rate": _rate(coupon_rate * 100) if coupon_rate is not None else None,
         "years_to_maturity": round(years, 4) if years is not None else None,
-        "frequency": int(frequency) if frequency is not None and frequency > 0 else None,
-        "day_count_convention": day_count_str,
+        "frequency": frequency,
+        "coupon_frequency": frequency,
+        "day_count_convention": day_count,
         "currency": currency,
     }
+    if defaulted_freq:
+        result["warning"] = "Coupon frequency not specified — defaulted to semi-annual (2)."
 
     if val_d and mat_d:
-        days_derivation = _days_derivation(val_d, mat_d, days_between(val_d, mat_d))
-        if days_derivation:
-            result["derivations"] = {"days_to_maturity": days_derivation}
-
-    if frequency is None:
-        result["error"] = ("Invalid or missing coupon frequency. Full calculations require "
-                           "valid frequency (1=annual, 2=semi-annual, 4=quarterly, 12=monthly).")
-        result["missing_field"] = "coupon_frequency"
+        d = days_between(val_d, mat_d)
+        result.setdefault("derivations", {})["days_to_maturity"] = _days_derivation(val_d, mat_d, d)
 
     if face is not None and coupon_rate is not None:
         result["annual_coupon"] = round_money(face * coupon_rate)
+        result["coupon_payment"] = round_money(face * coupon_rate / frequency)
+        result["coupon_per_period"] = result["coupon_payment"]
 
-    discount_rate = None
-    if benchmark_yield is not None and benchmark_yield > 0:
-        risk_free_rate = benchmark_yield / 100.0
-    else:
-        risk_free_rate = parse_percentage(item.get("risk_free_rate"))
+    if face is None or coupon_rate is None or years is None or years <= 0:
+        result["error"] = "Missing required inputs (face_value, coupon_rate, or years_to_maturity)"
+        return _add_camel_aliases(result)
 
-    country_risk_premium = parse_percentage(item.get("country_risk_premium"))
-    credit_spread = parse_percentage(item.get("credit_spread")) or parse_percentage(item.get("spread"))
+    ytm_input = (parse_percentage(item.get("yield"))
+                 or parse_percentage(item.get("yield_to_maturity")))
 
-    if risk_free_rate is not None:
-        discount_rate = risk_free_rate
-        if country_risk_premium is not None:
-            discount_rate += country_risk_premium
-        if credit_spread is not None:
-            discount_rate += credit_spread
-        result["discount_rate"] = round(discount_rate * 100.0, 4)
+    if price is None or price <= 0:
+        if ytm_input is not None:
+            price = _price_from_ytm(face, coupon_rate, ytm_input, years, frequency)
 
-    if (face is not None and coupon_rate is not None and years is not None and years > 0
-            and frequency is not None and frequency > 0):
-        frequency = int(frequency)
+    if price is not None and price > 0:
+        result["current_price"] = round_money(price)
+        result["total_value"] = round_money(price)
 
-        ytm_input = (parse_percentage(item.get("yield"))
-                     or parse_percentage(item.get("yield_to_maturity")))
-        if ytm_input is not None and ytm_input > 1.0:
-            ytm_input = None
-            result["error"] = ("Invalid yield value (appears to be monetary, not percentage). "
-                               "Full calculations require valid yield or price.")
-            result["missing_field"] = "yield_to_maturity"
+        ytm = _solve_ytm(price, face, coupon_rate, years, frequency)
+        if ytm is None and ytm_input is not None:
+            ytm = ytm_input
+        ytm_pct = ytm * 100 if ytm is not None else None
 
-        if price is None or price <= 0:
-            if ytm_input is not None:
-                price = _price_from_ytm(face, coupon_rate, ytm_input, years, frequency)
-
-        if price is not None and price > 0:
-            result["current_price"] = round_money(price)
-            result["total_value"] = round_money(price)
-
-            annual_coupon = coupon_rate * face
-            coupon_per_period = annual_coupon / frequency
-            periods = max(1, int(round(years * frequency)))
-
-            present_value = None
-            if discount_rate is not None and discount_rate > 0:
-                r = discount_rate / frequency
-                pv_total = 0.0
-                for t in range(1, periods + 1):
+        macaulay = modified = convexity = None
+        if ytm is not None and ytm > -0.99:
+            r = ytm / frequency
+            if r > -1:
+                n = max(1, int(round(years * frequency)))
+                coupon_per = face * coupon_rate / frequency
+                pv_total = weighted = cx = 0.0
+                for t in range(1, n + 1):
                     disc = (1 + r) ** t
-                    pv_total += coupon_per_period / disc
-                disc_n = (1 + r) ** periods
-                pv_total += face / disc_n
-                present_value = pv_total
-                result["present_value"] = round_money(present_value)
-                if present_value is not None:
-                    result["fair_value"] = round_money(present_value - price)
+                    pv_c = coupon_per / disc
+                    pv_total += pv_c
+                    weighted += t * pv_c
+                    cx += t * (t + 1) * pv_c / ((1 + r) ** 2)
+                pv_f = face / (1 + r) ** n
+                pv_total += pv_f
+                weighted += n * pv_f
+                cx += n * (n + 1) * pv_f / ((1 + r) ** 2)
+                if pv_total > 0:
+                    macaulay = (weighted / pv_total) / frequency
+                    modified = macaulay / (1 + r)
+                    convexity = cx / pv_total / (frequency ** 2)
 
-            carrying_value = safe_float(item.get("carrying_value")) or safe_float(item.get("book_value"))
-            if carrying_value is not None:
-                result["carrying_value"] = round_money(carrying_value)
-            elif isinstance(item.get("carrying_value"), str):
-                result["carrying_value"] = item.get("carrying_value")
+        annual_coupon = face * coupon_rate
+        current_yield = annual_coupon / price * 100 if price > 0 else None
+        accrued, days_accrued = _bond_accrued(item, face, coupon_rate, frequency, day_count)
+        dv01 = price * modified * 0.0001 if (modified is not None and price > 0) else None
 
-            ytm = _solve_ytm(price, face, coupon_rate, years, frequency)
-            if ytm is None and ytm_input is not None:
-                ytm = ytm_input
-            ytm_pct = ytm * 100.0 if ytm is not None else None
+        result.update({
+            "yield_to_maturity": _rate(ytm_pct),
+            "duration": _rate(macaulay),
+            "macaulay_duration": _rate(macaulay),
+            "modified_duration": _rate(modified),
+            "convexity": _rate(convexity),
+            "dv01": _rate(dv01),
+            "current_yield": _rate(current_yield),
+            "accrued_interest": round_money(accrued),
+            "days_accrued": round_time(days_accrued) if days_accrued is not None else None,
+            "price_per_100": round(price / face * 100, 2) if face > 0 else None,
+            "bond_equivalent_yield": _rate(ytm_pct),
+            "yield_curve_rate": _rate(benchmark_yield * 100) if benchmark_yield is not None else None,
+            "status": "partial" if defaulted_freq else "success",
+        })
+    else:
+        result["error"] = "Need price or yield_to_maturity to value the bond"
 
-            macaulay = None
-            modified = None
-            if ytm is not None and ytm > -0.99:
-                r = ytm / frequency
-                if r > -1:
-                    pv_total = 0.0
-                    weighted = 0.0
-                    for t in range(1, periods + 1):
-                        disc = (1 + r) ** t
-                        pv_c = coupon_per_period / disc
-                        pv_total += pv_c
-                        weighted += t * pv_c
-                    disc_n = (1 + r) ** periods
-                    pv_f = face / disc_n
-                    pv_total += pv_f
-                    weighted += periods * pv_f
-                    if pv_total > 0:
-                        macaulay = (weighted / pv_total) / frequency
-                        modified = macaulay / (1 + r)
-
-            current_yield = (annual_coupon / price) * 100.0 if price > 0 else None
-            accrued = None
-            days_accrued = None
-            last_coupon_d = (parse_date(item.get("last_coupon_date"))
-                             or parse_date(item.get("issue_date")))
-            settle_d = (parse_date(item.get("valuation_date"))
-                        or parse_date(item.get("settlement_date")))
-            if last_coupon_d and settle_d:
-                days_accrued = days_between(last_coupon_d, settle_d)
-                if "30" in day_count_str or "360" in day_count_str:
-                    days_in_period = 360.0 / frequency
-                elif "ACT" in day_count_str:
-                    days_in_period = 365.0 / frequency
-                else:
-                    days_in_period = 365.0 / frequency
-                accrued = coupon_per_period * (days_accrued / days_in_period)
-
-            result["yield_to_maturity"] = round(ytm_pct, 4) if ytm_pct is not None else None
-            result["duration"] = round(macaulay, 4) if macaulay is not None else None
-            result["modified_duration"] = round(modified, 4) if modified is not None else None
-            result["current_yield"] = round(current_yield, 4) if current_yield is not None else None
-            result["accrued_interest"] = round_money(accrued)
-            result["coupon_per_period"] = round_money(coupon_per_period) if coupon_per_period is not None else None
-            result["days_accrued"] = round_time(days_accrued) if days_accrued is not None else None
-            result["price_per_100"] = (round((price / face) * 100.0, 2)
-                                       if price is not None and face is not None and face > 0 else None)
-            result["bond_equivalent_yield"] = round(ytm_pct, 4) if ytm_pct is not None else None
-            result["yield_curve_rate"] = round(benchmark_yield * 100.0, 4) if benchmark_yield is not None else None
-            result["status"] = "success"
-
-    result["faceValue"] = result["face_value"]
-    result["currentPrice"] = result.get("current_price")
-    result["couponRate"] = result["coupon_rate"]
-    result["yearsToMaturity"] = result["years_to_maturity"]
-    result["yieldToMaturity"] = result.get("yield_to_maturity")
-    result["modifiedDuration"] = result.get("modified_duration")
-    result["currentYield"] = result.get("current_yield")
-    result["accruedInterest"] = result.get("accrued_interest")
-    result["annualCoupon"] = result.get("annual_coupon")
-    result["couponPerPeriod"] = result.get("coupon_per_period")
-    result["daysAccrued"] = result.get("days_accrued")
-    result["pricePer100"] = result.get("price_per_100")
-    result["bondEquivalentYield"] = result.get("bond_equivalent_yield")
-    result["yieldCurveRate"] = result.get("yield_curve_rate")
-    result["presentValue"] = result.get("present_value")
-    result["fairValue"] = result.get("fair_value")
-    result["carryingValue"] = result.get("carrying_value")
-    result["discountRate"] = result.get("discount_rate")
-
-    return result
+    return _add_camel_aliases(result)
 
 
-def calculate_money_market(item: Dict[str, Any], benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
+def calculate_money_market(item: Dict[str, Any],
+                           benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     item = normalize_row(item)
     principal = (safe_float(item.get("principal"))
                  or safe_float(item.get("face_value"))
@@ -951,34 +918,30 @@ def calculate_money_market(item: Dict[str, Any], benchmark_yield: Optional[float
             or parse_percentage(item.get("rate")))
     currency = item.get("currency") or item.get("ccy") or item.get("currency_code")
 
-    day_count = item.get("day_count_convention") or item.get("day_count") or "ACT/360"
-    day_count_str = str(day_count).upper() if day_count else "ACT/360"
-    if "360" in day_count_str:
-        day_count_divisor = 360.0
-    elif "365" in day_count_str:
-        day_count_divisor = 365.0
-    else:
-        day_count_divisor = 360.0
+    day_count = str(item.get("day_count_convention") or item.get("day_count") or "ACT/360").upper()
+    divisor = 365.0 if "365" in day_count else 360.0
 
     val_d = parse_date(item.get("valuation_date"))
     mat_d = parse_date(item.get("maturity_date"))
     days = safe_float(item.get("term_days")) or safe_float(item.get("days_to_maturity"))
     if days is None and val_d and mat_d:
-        days = days_between(val_d, mat_d)
+        days = (mat_d - val_d).days if mat_d >= val_d else None
     if days is None:
         iss_d = parse_date(item.get("issue_date"))
-        if iss_d and mat_d:
-            days = days_between(iss_d, mat_d)
+        if iss_d and mat_d and mat_d >= iss_d:
+            days = (mat_d - iss_d).days
 
     market_value = safe_float(item.get("market_value"))
 
+    bad = (principal is None or rate is None or days is None
+           or (days is not None and days <= 0))
     result = {
-        "status": "partial" if (principal is None or rate is None or days is None) else "success",
+        "status": "partial" if bad else "success",
         "instrument_type": "money-market",
         "principal": round_money(principal),
-        "interest_rate": round(rate * 100.0, 4) if rate is not None else None,
+        "interest_rate": _rate(rate * 100) if rate is not None else None,
         "term_days": round_time(days) if days is not None and days > 0 else None,
-        "day_count_convention": day_count_str,
+        "day_count_convention": day_count,
         "currency": currency,
     }
 
@@ -989,40 +952,27 @@ def calculate_money_market(item: Dict[str, Any], benchmark_yield: Optional[float
     if market_value is not None:
         result["market_value"] = round_money(market_value)
 
-    if (principal is not None and principal > 0 and rate is not None
-            and days is not None and days > 0):
-        interest = principal * rate * (days / day_count_divisor)
+    if principal is not None and principal > 0 and rate is not None and days is not None and days > 0:
+        interest = principal * rate * (days / divisor)
         total_value = principal + interest
-        discount_yield = (interest / total_value) * (day_count_divisor / days) * 100.0 if total_value else None
-        effective_yield = (interest / principal) * (365.0 / days) * 100.0
-        bond_equivalent_yield = (interest / principal) * (365.0 / days) * 100.0
+        disc_yield = (interest / total_value) * (divisor / days) * 100.0 if total_value else None
+        eff_yield = (interest / principal) * (365.0 / days) * 100.0
+        be_yield = (interest / principal) * (365.0 / days) * 100.0
 
-        result["interest_earned"] = round_money(interest)
-        result["total_value"] = round_money(total_value)
-        result["maturity_value"] = round_money(total_value)
-        result["total_interest"] = round_money(interest)
-        result["discount_yield"] = round(discount_yield, 4) if discount_yield is not None else None
-        result["effective_yield"] = round(effective_yield, 4)
-        result["effective_annual_rate"] = round(effective_yield, 4)
-        result["bond_equivalent_yield"] = round(bond_equivalent_yield, 4)
-        result["yield_curve_rate"] = round(benchmark_yield * 100.0, 4) if benchmark_yield is not None else None
-        result["status"] = "success"
+        result.update({
+            "interest_earned": round_money(interest),
+            "total_value": round_money(total_value),
+            "maturity_value": round_money(total_value),
+            "total_interest": round_money(interest),
+            "discount_yield": _rate(disc_yield),
+            "effective_yield": _rate(eff_yield),
+            "effective_annual_rate": _rate(eff_yield),
+            "bond_equivalent_yield": _rate(be_yield),
+            "yield_curve_rate": _rate(benchmark_yield * 100) if benchmark_yield is not None else None,
+            "status": "success",
+        })
 
-    result["interestRate"] = result["interest_rate"]
-    result["termDays"] = result["term_days"]
-    result["interestEarned"] = result.get("interest_earned")
-    result["totalValue"] = result.get("total_value")
-    result["maturityValue"] = result.get("maturity_value")
-    result["totalInterest"] = result.get("total_interest")
-    result["discountYield"] = result.get("discount_yield")
-    result["effectiveYield"] = result.get("effective_yield")
-    result["effectiveAnnualRate"] = result.get("effective_annual_rate")
-    result["bondEquivalentYield"] = result.get("bond_equivalent_yield")
-    result["yieldCurveRate"] = result.get("yield_curve_rate")
-    if "market_value" in result:
-        result["marketValue"] = result["market_value"]
-
-    return result
+    return _add_camel_aliases(result)
 
 
 def calc_single(row: Dict[str, Any], instrument_type: str,
@@ -1032,27 +982,8 @@ def calc_single(row: Dict[str, Any], instrument_type: str,
         row = {**row, "valuation_date": valuation_date}
 
     validation = validate_row(row, instrument_type)
-    if not validation["can_calculate"]:
-        return {
-            "status": "error",
-            "instrumentId": (row.get("Instrument Name") or row.get("instrument_name")
-                             or "instrument-1"),
-            "instrumentType": instrument_type,
-            "inputs": validation["normalized_row"],
-            "sourceData": row,
-            "missing_fields": validation["missing_fields"],
-            "invalid_fields": validation["invalid_fields"],
-            "errors": [
-                *[{"field": f, "code": "missing",
-                   "message": f"Missing required field: {f}"}
-                  for f in validation["missing_fields"]],
-                *[{"field": iv["field"], "code": "invalid",
-                   "message": f"{iv['field']}: {iv['reason']}"}
-                  for iv in validation["invalid_fields"]],
-            ],
-        }
-
     norm = validation["normalized_row"]
+
     if instrument_type == "bonds":
         calc = calculate_bond(norm, benchmark_yield)
     elif instrument_type == "money-market":
@@ -1060,12 +991,18 @@ def calc_single(row: Dict[str, Any], instrument_type: str,
     else:
         calc = calculate_treasury_bill(norm, benchmark_yield)
 
-    name = _extract_instrument_name(norm) or (row.get("Instrument Name")
-                                              or row.get("instrument_name")
-                                              or "instrument-1")
+    name = (_extract_instrument_name(norm)
+            or row.get("Instrument Name")
+            or row.get("instrument_name")
+            or "instrument-1")
+
+    calc_status = calc.get("status", "error")
+    status_out = "success" if calc_status == "success" else (
+        "partial" if calc_status == "partial" else "error"
+    )
 
     return {
-        "status": "success" if calc.get("status") == "success" else "error",
+        "status": status_out,
         "instrumentId": name,
         "instrumentType": instrument_type,
         "inputs": norm,
@@ -1079,9 +1016,9 @@ def calc_single(row: Dict[str, Any], instrument_type: str,
             "yield_to_maturity": calc.get("yield_to_maturity"),
         },
         "sourceData": row,
-        "missing_fields": [calc.get("missing_field")] if calc.get("missing_field") else [],
-        "invalid_fields": [],
-        "errors": [] if calc.get("status") == "success" else [
+        "missing_fields": validation["missing_fields"],
+        "invalid_fields": validation["invalid_fields"],
+        "errors": [] if status_out != "error" else [
             {"field": "calculation", "code": "failed",
              "message": calc.get("error", "Unknown error")}
         ],
@@ -1133,31 +1070,29 @@ def calculate_data(data: List[Dict],
             calc["instrument_name"] = name
 
         instrument_results.append(calc)
+
         if calc.get("status") == "success":
             successful.append(calc)
         elif calc.get("status") == "partial":
-            has_meaningful_data = (
-                (calc.get("face_value") is not None and calc.get("face_value") > 0)
-                or (calc.get("principal") is not None and calc.get("principal") > 0)
-                or (calc.get("current_price") is not None and calc.get("current_price") > 0)
-                or (calc.get("total_value") is not None and calc.get("total_value") > 0)
+            has_data = (
+                (calc.get("face_value") or 0) > 0
+                or (calc.get("principal") or 0) > 0
+                or (calc.get("current_price") or 0) > 0
+                or (calc.get("total_value") or 0) > 0
             )
-            if has_meaningful_data:
-                successful.append(calc)
-            else:
-                failed.append(calc)
+            (successful if has_data else failed).append(calc)
         else:
             failed.append(calc)
 
     unique_names = set()
-    unnamed_rows = 0
+    unnamed = 0
     for r in successful:
         nm = r.get("instrument_name")
         if nm and str(nm).strip():
             unique_names.add(str(nm).strip())
         else:
-            unnamed_rows += 1
-    unique_instrument_count = len(unique_names) + unnamed_rows
+            unnamed += 1
+    unique_instrument_count = len(unique_names) + unnamed
 
     aggregates: Dict[str, Any] = {
         "instrument_count": unique_instrument_count,
@@ -1198,11 +1133,11 @@ def calculate_data(data: List[Dict],
             aggregates["avg_discount_rate"] = round(m, 4) if m is not None else None
             m = _mean("term_days")
             aggregates["avg_days_to_maturity"] = round(m, 2) if m is not None else None
-            face_values = [r["face_value"] for r in successful if r.get("face_value") is not None]
-            discount_rates = [r["money_market_yield"] for r in successful if r.get("money_market_yield") is not None]
-            if face_values and sum(face_values) > 0 and len(face_values) == len(discount_rates):
+            faces = [r["face_value"] for r in successful if r.get("face_value") is not None]
+            mm_ys = [r["money_market_yield"] for r in successful if r.get("money_market_yield") is not None]
+            if faces and sum(faces) > 0 and len(faces) == len(mm_ys):
                 aggregates["weighted_avg_discount"] = round(
-                    sum(f * d for f, d in zip(face_values, discount_rates)) / sum(face_values), 4)
+                    sum(f * d for f, d in zip(faces, mm_ys)) / sum(faces), 4)
             m = _mean("purchase_price")
             aggregates["avg_investment"] = round(m, 2) if m is not None else None
             m = _mean("bond_equivalent_yield")

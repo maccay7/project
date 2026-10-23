@@ -8,8 +8,6 @@ from pages.calculations_details import (
 )
 from utils.db import get_db
 from utils.fred_config import attach_fred_to_calculation, get_market_benchmark
-from utils.field_mapping_engine import create_field_mapping_engine, InstrumentType
-from utils.calculation_dependencies import create_calculation_dependency_engine
 from utils.instrument_detection import create_instrument_detector
 
 
@@ -62,26 +60,19 @@ def _instrument_identity(result_row):
     candidates = [
         result_row.get('instrumentId'),
         result_row.get('instrument_id'),
-        result_row.get('isin'),
-        result_row.get('ISIN'),
-        result_row.get('instrument_name'),
-        result_row.get('instrumentName'),
+        result_row.get('isin'), result_row.get('ISIN'),
+        result_row.get('instrument_name'), result_row.get('instrumentName'),
         result_row.get('name'),
     ]
     for nested_key in ('calculation', 'inputs', 'sourceData'):
         nested = result_row.get(nested_key)
         if isinstance(nested, dict):
             candidates.extend([
-                nested.get('instrumentId'),
-                nested.get('instrument_id'),
-                nested.get('isin'),
-                nested.get('ISIN'),
-                nested.get('instrument_name'),
-                nested.get('instrumentName'),
-                nested.get('Instrument'),
-                nested.get('Instrument ID'),
-                nested.get('BondName'),
-                nested.get('TBillName'),
+                nested.get('instrumentId'), nested.get('instrument_id'),
+                nested.get('isin'), nested.get('ISIN'),
+                nested.get('instrument_name'), nested.get('instrumentName'),
+                nested.get('Instrument'), nested.get('Instrument ID'),
+                nested.get('BondName'), nested.get('TBillName'),
             ])
     for c in candidates:
         if c is None:
@@ -112,16 +103,6 @@ def _unique_instrument_count(individual_results, backend_count=0):
 
 
 def _resolve_instrument_name(rows, sheet_name):
-    """Apply the worksheet name as the instrument name for single-instrument
-    payloads, per Dura Capital's single-instrument-sheet rule.
-
-    - If the payload is a single dict (e.g. /api/calculations/single), treat
-      the dict as one instrument row.
-    - If the payload is a list with exactly one row, treat that row as one
-      instrument.
-    - If a specific instrument_name is already present, leave it alone.
-    - Never touches multi-row payloads (multi-instrument tables).
-    """
     if not sheet_name:
         return rows
     name = str(sheet_name).strip()
@@ -417,26 +398,15 @@ def calculations_routes(app):
                                         'message': 'instrument_type is required'}]}), 400
 
         row = _resolve_instrument_name(row, sheet_name)
-
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
         result = calc_single(row, inst_type, valuation_date=valuation_date,
                              benchmark_yield=benchmark_yield)
-        if result['status'] != 'success':
-            return jsonify({
-                'status': 'error',
-                'calculationId': None,
-                'instrumentId': result['instrumentId'],
-                'instrumentType': inst_type,
-                'inputs': result.get('inputs', {}),
-                'sourceData': result.get('sourceData', row),
-                'errors': result.get('errors', []),
-            }), 400
 
         calculation_id = str(uuid.uuid4())
         response = {
             'calculationId': calculation_id,
-            'status': 'success',
+            'status': result['status'],
             'valuationDate': valuation_date,
             'instrumentId': result['instrumentId'],
             'instrumentType': inst_type,
@@ -447,9 +417,16 @@ def calculations_routes(app):
             'valuation': result['valuation'],
             'methodology': f'{inst_type}-v1',
             'sourceData': row,
+            'missing_fields': result.get('missing_fields', []),
+            'invalid_fields': result.get('invalid_fields', []),
+            'errors': result.get('errors', []),
             'warnings': [],
         }
         _attach_fred(response, inst_type, maturity, country, currency)
+
+        # Return 200 for success AND partial. Only 400 when nothing can be calculated.
+        if result['status'] == 'error' and not result['calculation']:
+            return jsonify(response), 400
         return jsonify(response)
 
     @app.route('/api/calculations/multiple', methods=['POST', 'OPTIONS'])
@@ -487,7 +464,6 @@ def calculations_routes(app):
             merged.append(r)
 
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
-
         calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date,
                                      benchmark_yield=benchmark_yield)
         _attach_fred(calc_result, inst_type, maturity, country, currency)
@@ -520,12 +496,12 @@ def calculations_routes(app):
                     'effective_yield': calc.get('effective_yield'),
                     'yield_to_maturity': calc.get('yield_to_maturity'),
                 },
-                'errors': [] if calc.get('status') == 'success' else [
+                'errors': [] if calc.get('status') in ('success', 'partial') else [
                     {'field': 'calculation', 'code': 'failed',
                      'message': calc.get('error', 'Cannot calculate')}],
             })
 
-        success_count = sum(1 for r in individual if r['status'] == 'success')
+        success_count = sum(1 for r in individual if r['status'] in ('success', 'partial'))
         failure_count = len(individual) - success_count
 
         backend_count = calc_result.get('instrument_count', 0)
@@ -646,7 +622,6 @@ def calculations_routes(app):
             merged.append(r)
 
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
-
         calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date,
                                      benchmark_yield=benchmark_yield)
         _attach_fred(calc_result, inst_type, maturity, country, currency)
@@ -699,9 +674,7 @@ def calculations_routes(app):
                                 'message': 'No data provided'}), 400
 
             data = _resolve_instrument_name(data, sheet_name)
-
             benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
-
             result = calculate_data(data, inst_type, valuation_date=valuation_date,
                                     benchmark_yield=benchmark_yield)
             _attach_fred(result, inst_type, maturity, country, currency)
@@ -740,9 +713,7 @@ def calculations_routes(app):
                             'message': 'No uploaded data'}), 400
 
         data = _resolve_instrument_name(data, sheet_name)
-
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
-
         result = calculate_data(data, inst_type, valuation_date=valuation_date,
                                 benchmark_yield=benchmark_yield)
         _attach_fred(result, inst_type, maturity, country, currency)
@@ -786,15 +757,13 @@ def calculations_routes(app):
         inst_type = det.instrument_type if det else None
         if not inst_type:
             return jsonify({
-                'success': False,
-                'status': 'error',
+                'success': False, 'status': 'error',
                 'message': ('Could not determine instrument type from the '
                             'uploaded data. Please specify instrument_type '
                             'explicitly.'),
             }), 400
 
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
-
         result = calculate_data(data, inst_type, valuation_date=valuation_date,
                                 benchmark_yield=benchmark_yield)
         _fix_instrument_count(result)
