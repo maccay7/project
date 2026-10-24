@@ -164,7 +164,6 @@ def _parse_workbook_safely(file_path, instrument_type):
 
 
 def _resolve_file_row(dataset_id):
-    """Return (file_path, original_file_name) or (None, None) if not found."""
     with _db() as (conn, cursor):
         if not conn:
             return None, None
@@ -244,9 +243,21 @@ def dataset_routes(app):
             )
         except Exception as meta_err:
             traceback.print_exc()
+            # B5 FIX — cleanup the orphaned file if metadata insert raises
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
             return jsonify({'success': False, 'message': f'Metadata save failed: {str(meta_err)}'}), 500
 
         if not dataset_id:
+            # B5 FIX — cleanup the orphaned file if metadata insert returned None
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
             return jsonify({'success': False, 'message': 'Failed to save dataset metadata'}), 500
 
         return jsonify({
@@ -576,12 +587,6 @@ def dataset_routes(app):
             traceback.print_exc()
             return jsonify({'success': False, 'message': str(e)}), 500
 
-    # ─────────────────────────────────────────────────────────────────────
-    # NEW — Serve the ORIGINAL uploaded file unchanged.
-    #   /file     → inline stream (for the in-app viewer)
-    #   /download → attachment (for "Download Original Workbook" button)
-    # Both read the stored uploads/<uuid>.<ext> byte-for-byte. Read-only.
-    # ─────────────────────────────────────────────────────────────────────
     @app.route('/api/dataset/<int:dataset_id>/file', methods=['GET', 'OPTIONS'])
     def view_dataset_file(dataset_id):
         if request.method == 'OPTIONS':

@@ -148,11 +148,15 @@ def fred_routes(app):
                 f"currency={currency} from={from_date} to={to_date}"
             )
 
+            # B1 FIX — pass instrument_type through so the resolver can
+            # pick a per-instrument series when configured. Default is
+            # identical to prior behaviour (same series regardless of type).
             points = get_yield_curve(
                 country,
                 maturities=maturities,
                 from_date=from_date,
-                to_date=to_date
+                to_date=to_date,
+                instrument_type=instrument_type,
             )
 
             if not points:

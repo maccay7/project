@@ -5,6 +5,10 @@ from contextlib import contextmanager
 from datetime import datetime
 from flask import request, jsonify, send_file
 from utils.db import get_db
+from utils.fred_config import (
+    FRED_API_KEY, FRED_BASE_URL, get_yield_curve,
+)
+import requests
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side
 
@@ -83,6 +87,42 @@ def _safe_filename(requested_name, fallback):
     return base or fallback
 
 
+def _to_snake_case(name):
+    s = str(name).strip()
+    s = re.sub(r'[\s\-]+', '_', s)
+    s = re.sub(r'(?<=[a-z0-9])([A-Z])', r'_\1', s)
+    return s.lower()
+
+
+def _dedupe_columns(columns):
+    seen = set()
+    kept = []
+    for col in columns:
+        key = _to_snake_case(col)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(col)
+    return kept
+
+
+def _escape_html(text):
+    if text is None:
+        return ''
+    return (str(text).replace('&', '&amp;').replace('<', '&lt;')
+            .replace('>', '&gt;').replace('"', '&quot;'))
+
+
+def _safe_num(v):
+    try:
+        f = float(v)
+        if f != f:
+            return None
+        return f
+    except (TypeError, ValueError):
+        return None
+
+
 def create_reports_table():
     with _db() as (conn, cursor):
         if not conn:
@@ -104,6 +144,249 @@ def create_reports_table():
         except Exception as e:
             print(f"Error creating reports table: {e}")
             return False
+
+
+def _load_visualisation_config(session_id, explicit_config=None):
+    if explicit_config:
+        return explicit_config
+    if not session_id:
+        return None
+    with _db() as (conn, cursor):
+        if not conn:
+            return None
+        try:
+            cursor.execute(
+                "SELECT visualisation_config FROM report_configurations "
+                "WHERE session_id = %s LIMIT 1", (session_id,))
+            row = cursor.fetchone()
+        except Exception:
+            return None
+    if not row:
+        return None
+    raw = row.get('visualisation_config') if isinstance(row, dict) else (row[0] if row else None)
+    if not raw:
+        return None
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _fetch_curve_observations(config):
+    curves = []
+    errors = []
+
+    if not FRED_API_KEY:
+        return {'curves': [], 'errors': ['FRED_API_KEY not configured on server']}
+
+    series_ids = config.get('series_ids') or []
+    if isinstance(series_ids, str):
+        series_ids = [series_ids]
+
+    from_date = config.get('from_date')
+    to_date = config.get('to_date')
+
+    for sid in series_ids:
+        try:
+            params = {
+                'series_id': sid,
+                'api_key': FRED_API_KEY,
+                'file_type': 'json',
+                'sort_order': 'asc',
+                'limit': 5000,
+            }
+            if from_date:
+                params['observation_start'] = from_date
+            if to_date:
+                params['observation_end'] = to_date
+            resp = requests.get(f'{FRED_BASE_URL}/series/observations',
+                                params=params, timeout=20)
+            if resp.status_code != 200:
+                errors.append(f'FRED {sid}: HTTP {resp.status_code}')
+                continue
+            obs = resp.json().get('observations', []) or []
+            pts = []
+            for o in obs:
+                val = _safe_num(o.get('value'))
+                if val is None:
+                    continue
+                pts.append({'date': o.get('date'), 'value': val})
+            if pts:
+                curves.append({
+                    'label': sid,
+                    'series_id': sid,
+                    'x_axis': 'date',
+                    'points': pts,
+                })
+            else:
+                errors.append(f'FRED {sid}: no observations returned')
+        except Exception as e:
+            errors.append(f'FRED {sid}: {e}')
+
+    if not series_ids:
+        country = config.get('country') or 'US'
+        maturities = config.get('maturities') or [
+            '1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y'
+        ]
+        inst_types = config.get('instrument_types') or ['money-market']
+        inst = inst_types[0] if isinstance(inst_types, list) and inst_types else 'money-market'
+        try:
+            if from_date and to_date:
+                for mat in maturities:
+                    pts = get_yield_curve(country, from_date=from_date,
+                                          to_date=to_date,
+                                          instrument_type=inst,
+                                          maturity=mat)
+                    if pts:
+                        curves.append({
+                            'label': f'{country} {mat} time series',
+                            'series_id': None,
+                            'x_axis': 'date',
+                            'points': [{'date': p['date'], 'value': p['rate']}
+                                       for p in pts],
+                        })
+                    else:
+                        errors.append(
+                            f'No FRED {mat} data for {country} between '
+                            f'{from_date} and {to_date}'
+                        )
+            else:
+                pts = get_yield_curve(country, maturities=maturities,
+                                      instrument_type=inst)
+                if pts:
+                    curves.append({
+                        'label': f'{country} yield curve',
+                        'series_id': None,
+                        'x_axis': 'maturity',
+                        'points': [{
+                            'maturity': p['maturity'],
+                            'maturity_label': p['maturityLabel'],
+                            'value': p['rate'],
+                        } for p in pts],
+                    })
+                else:
+                    errors.append(f'No FRED curve data for {country}')
+        except Exception as e:
+            errors.append(f'Yield curve fetch failed: {e}')
+
+    return {'curves': curves, 'errors': errors}
+
+
+def _build_svg_line_chart(curve, width=760, height=320):
+    points = [p for p in (curve.get('points') or [])
+              if _safe_num(p.get('value')) is not None]
+    if not points:
+        return ''
+
+    x_axis = curve.get('x_axis', 'date')
+    width = int(width)
+    height = int(height)
+    ml, mr, mt, mb = 70, 20, 40, 60
+    pw = width - ml - mr
+    ph = height - mt - mb
+
+    values = [_safe_num(p['value']) for p in points]
+    vmin = min(values)
+    vmax = max(values)
+    if vmax - vmin < 1e-9:
+        vmax = vmin + 1.0
+
+    n = len(points)
+
+    def x_at(i):
+        return ml + (i / max(1, n - 1)) * pw
+
+    def y_at(v):
+        return mt + ph - ((v - vmin) / (vmax - vmin)) * ph
+
+    x_labels = []
+    if x_axis == 'date':
+        idxs = sorted(set([0, n // 4, n // 2, (3 * n) // 4, n - 1]))
+        for i in idxs:
+            lbl = points[i].get('date') or ''
+            x_labels.append((x_at(i), str(lbl)))
+    else:
+        step = max(1, n // 8)
+        for i in range(0, n, step):
+            lbl = points[i].get('maturity_label') or str(points[i].get('maturity', ''))
+            x_labels.append((x_at(i), str(lbl)))
+
+    y_ticks = []
+    for k in range(5):
+        v = vmin + (vmax - vmin) * (k / 4.0)
+        y_ticks.append((y_at(v), f'{v:.2f}%'))
+
+    path_parts = []
+    for i, p in enumerate(points):
+        cmd = 'M' if i == 0 else 'L'
+        path_parts.append(f'{cmd} {x_at(i):.1f} {y_at(_safe_num(p["value"])):.1f}')
+    path_d = ' '.join(path_parts)
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" '
+        f'style="background:#fff;font-family:Arial,Helvetica,sans-serif;">',
+        f'<text x="{width/2:.0f}" y="22" text-anchor="middle" font-size="14" '
+        f'font-weight="bold" fill="#0B2044">{_escape_html(curve.get("label") or "Yield Curve")}</text>',
+    ]
+    for y, lbl in y_ticks:
+        parts.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{ml+pw}" y2="{y:.1f}" '
+                     f'stroke="#e5e7eb" stroke-width="1"/>')
+        parts.append(f'<text x="{ml-6}" y="{y+3:.1f}" text-anchor="end" '
+                     f'font-size="10" fill="#444">{lbl}</text>')
+    parts.append(f'<line x1="{ml}" y1="{mt+ph}" x2="{ml+pw}" y2="{mt+ph}" '
+                 f'stroke="#666" stroke-width="1"/>')
+    parts.append(f'<line x1="{ml}" y1="{mt}" x2="{ml}" y2="{mt+ph}" '
+                 f'stroke="#666" stroke-width="1"/>')
+    parts.append(f'<path d="{path_d}" fill="none" stroke="#0B2044" stroke-width="2"/>')
+    for i, p in enumerate(points):
+        parts.append(f'<circle cx="{x_at(i):.1f}" cy="{y_at(_safe_num(p["value"])):.1f}" '
+                     f'r="2" fill="#0B2044"/>')
+    for x, lbl in x_labels:
+        parts.append(f'<text x="{x:.1f}" y="{mt+ph+18}" text-anchor="middle" '
+                     f'font-size="10" fill="#444">{_escape_html(lbl)}</text>')
+    parts.append(f'<text x="{ml+pw/2:.0f}" y="{height-10}" text-anchor="middle" '
+                 f'font-size="10" fill="#666">'
+                 f'{"Date" if x_axis == "date" else "Maturity"}</text>')
+    parts.append('</svg>')
+    return ''.join(parts)
+
+
+def _build_curves_html(config):
+    result = _fetch_curve_observations(config)
+    curves = result.get('curves') or []
+    errors = result.get('errors') or []
+    if not curves and not errors:
+        return ''
+
+    blocks = ['<div style="page-break-before: always; padding: 20px;">',
+              '<h2 style="font-family:Arial;font-size:18px;color:#0B2044;'
+              'border-bottom:2px solid #0B2044;padding-bottom:8px;">'
+              'Live FRED Yield Curves</h2>']
+
+    if curves:
+        for curve in curves:
+            svg = _build_svg_line_chart(curve)
+            if svg:
+                blocks.append(f'<div style="margin-bottom:24px;">{svg}</div>')
+    else:
+        blocks.append('<div style="font-family:Arial;font-size:12px;color:#666;'
+                      'padding:10px;">No live FRED curves were returned for the '
+                      'selected filters.</div>')
+
+    if errors:
+        blocks.append('<div style="font-family:Arial;font-size:11px;color:#b91c1c;'
+                      'background:#fef2f2;padding:10px;border-radius:4px;">')
+        blocks.append('<strong>FRED data warnings:</strong>'
+                      '<ul style="margin:6px 0 0 16px;">')
+        for e in errors:
+            blocks.append(f'<li>{_escape_html(e)}</li>')
+        blocks.append('</ul></div>')
+
+    blocks.append('</div>')
+    return ''.join(blocks)
 
 
 def _pick(item, *keys):
@@ -155,7 +438,8 @@ def generate_appendix_data(data, instrument_type):
     return appendix
 
 
-def generate_report_excel(session_id, report_data, instrument_type):
+def generate_report_excel(session_id, report_data, instrument_type,
+                          visualisation_config=None):
     output_dir = 'reports'
     os.makedirs(output_dir, exist_ok=True)
 
@@ -235,6 +519,7 @@ def generate_report_excel(session_id, report_data, instrument_type):
     if data and len(data) > 0:
         raw_headers = list(data[0].keys())
         headers = [h for h in raw_headers if h not in _SUMMARY_EXPORT_EXCLUDED]
+        headers = _dedupe_columns(headers)
 
         ws_data.append(headers)
         for col_idx, header in enumerate(headers, start=1):
@@ -261,6 +546,46 @@ def generate_report_excel(session_id, report_data, instrument_type):
                 except Exception:
                     pass
             ws_data.column_dimensions[column].width = min(max_length + 2, 50)
+
+    if visualisation_config:
+        try:
+            curve_result = _fetch_curve_observations(visualisation_config)
+            curves = curve_result.get('curves') or []
+            errors = curve_result.get('errors') or []
+            if curves or errors:
+                ws_curves = wb.create_sheet('Yield Curves')
+                ws_curves['A1'] = 'LIVE FRED YIELD CURVES'
+                ws_curves['A1'].font = title_font
+                row = 3
+                for curve in curves:
+                    ws_curves.cell(row=row, column=1,
+                                   value=curve.get('label') or 'Curve').font = header_font
+                    row += 1
+                    x_axis = curve.get('x_axis', 'date')
+                    x_header = 'Date' if x_axis == 'date' else 'Maturity'
+                    ws_curves.cell(row=row, column=1, value=x_header).font = header_font
+                    ws_curves.cell(row=row, column=2, value='Rate (%)').font = header_font
+                    row += 1
+                    for p in curve.get('points', []):
+                        x_val = (p.get('date') if x_axis == 'date'
+                                 else p.get('maturity_label', p.get('maturity')))
+                        ws_curves.cell(row=row, column=1, value=x_val).font = normal_font
+                        ws_curves.cell(row=row, column=2,
+                                       value=p.get('value')).font = normal_font
+                        row += 1
+                    row += 2
+                if errors:
+                    row += 1
+                    ws_curves.cell(row=row, column=1,
+                                   value='FRED warnings:').font = header_font
+                    row += 1
+                    for e in errors:
+                        ws_curves.cell(row=row, column=1, value=e).font = normal_font
+                        row += 1
+                ws_curves.column_dimensions['A'].width = 30
+                ws_curves.column_dimensions['B'].width = 20
+        except Exception as e:
+            print(f'[reports] Failed to add live FRED curves to Excel: {e}')
 
     ws_appendix = wb.create_sheet('Appendix')
     appendix = generate_appendix_data(data, instrument_type)
@@ -402,13 +727,41 @@ def _render_html_to_page_images(html, tmpdir):
         return page_paths
 
 
-def generate_word_from_html(session_id, report_html, requested_name=None):
+def _inject_curves_into_html(html, visualisation_config):
+    if not visualisation_config:
+        return html
+    curves_html = _build_curves_html(visualisation_config)
+    if not curves_html:
+        return html
+    if '</body>' in html:
+        return html.replace('</body>', curves_html + '</body>', 1)
+    return html + curves_html
+
+
+def generate_word_from_html(session_id, report_html, requested_name=None,
+                            visualisation_config=None, allow_backend_fallback=True):
+    """
+    If ``allow_backend_fallback`` is True and no explicit ``visualisation_config``
+    was passed, the saved session config is used to inject live FRED curves.
+
+    If ``allow_backend_fallback`` is False, no curve is ever injected — the
+    caller is responsible for including the real curves in ``report_html``.
+    This is the mode the InstrumentView frontend uses (it builds real SVGs
+    client-side), so we never end up with TWO curve sets (one client-rendered
+    from the user's selection, one injected from stale session config).
+    """
     if not _DOCX_AVAILABLE:
         raise RuntimeError("python-docx not installed. Run: pip install python-docx")
     if not _PLAYWRIGHT_AVAILABLE:
         raise RuntimeError(
             "Playwright not installed. Install with: pip install playwright && playwright install chromium"
         )
+
+    if visualisation_config is None and allow_backend_fallback:
+        visualisation_config = _load_visualisation_config(session_id)
+
+    if visualisation_config:
+        report_html = _inject_curves_into_html(report_html, visualisation_config)
 
     output_dir = 'reports'
     os.makedirs(output_dir, exist_ok=True)
@@ -476,10 +829,14 @@ def reports_routes(app):
         report_type = payload.get('report_type', 'portfolio')
         instrument_type = payload.get('instrument_type') or 'portfolio'
         report_data = payload.get('report_data', {})
+        explicit_config = payload.get('visualisation_config')
         if not session_id:
             return jsonify({'success': False, 'message': 'Session ID is required'}), 400
 
-        file_path = generate_report_excel(session_id, report_data, instrument_type)
+        visualisation_config = explicit_config or _load_visualisation_config(session_id)
+
+        file_path = generate_report_excel(session_id, report_data, instrument_type,
+                                         visualisation_config=visualisation_config)
         report_id = save_report(session_id, report_type, report_data, file_path)
         if report_id:
             return jsonify({
@@ -499,6 +856,35 @@ def reports_routes(app):
             payload.get('instrument_type') or 'portfolio',
         )
         return jsonify({'success': True, 'data': appendix})
+
+    @app.route('/api/report/curve-data', methods=['POST', 'OPTIONS'])
+    def report_curve_data():
+        if request.method == 'OPTIONS':
+            return '', 200
+        payload = request.get_json() or {}
+        session_id = payload.get('session_id')
+        explicit_config = payload.get('visualisation_config')
+        visualisation_config = explicit_config or _load_visualisation_config(session_id)
+        if not visualisation_config:
+            return jsonify({'success': False,
+                            'error': 'No visualisation_config supplied and no '
+                                     'saved config found for this session'}), 400
+
+        data = _fetch_curve_observations(visualisation_config)
+        svg_blocks = []
+        for curve in data.get('curves', []):
+            svg = _build_svg_line_chart(curve)
+            if svg:
+                svg_blocks.append({'label': curve.get('label'), 'svg': svg})
+        return jsonify({
+            'success': True,
+            'data': {
+                'curves': data.get('curves', []),
+                'errors': data.get('errors', []),
+                'svg_charts': svg_blocks,
+                'config': visualisation_config,
+            }
+        })
 
     @app.route('/api/report/<int:report_id>/download', methods=['GET', 'OPTIONS'])
     def download_report(report_id):
@@ -528,20 +914,44 @@ def reports_routes(app):
         session_id = payload.get('session_id')
         report_html = payload.get('report_html')
         requested_name = payload.get('file_name')
+        explicit_config = payload.get('visualisation_config')
+        include_live_curves = bool(payload.get('include_live_curves', False))
+
         if not session_id:
             return jsonify({'success': False, 'message': 'Session ID is required'}), 400
         if not report_html:
             return jsonify({'success': False, 'message': 'report_html is required'}), 400
 
+        # Only inject backend FRED curves when the caller explicitly asks.
+        # The frontend already embeds real SVGs built from the exact data the
+        # user is viewing on the Visualizations page — so the default is to
+        # render the client HTML as-is and avoid duplicate / stale injection.
+        if include_live_curves:
+            visualisation_config = explicit_config or _load_visualisation_config(session_id)
+            if not visualisation_config:
+                return jsonify({
+                    'success': False,
+                    'message': ('include_live_curves was requested but no '
+                                'visualisation_config was supplied and no saved '
+                                'config exists for this session.')
+                }), 400
+            allow_backend_fallback = True
+        else:
+            visualisation_config = None
+            allow_backend_fallback = False
+
         try:
             file_path, display_name = generate_word_from_html(
-                session_id, report_html, requested_name
+                session_id, report_html, requested_name,
+                visualisation_config=visualisation_config,
+                allow_backend_fallback=allow_backend_fallback,
             )
             if file_path and os.path.exists(file_path):
                 return jsonify({
                     'success': True,
                     'data': {'file_path': file_path, 'file_name': display_name,
-                             'stored_file_name': os.path.basename(file_path)}
+                             'stored_file_name': os.path.basename(file_path),
+                             'live_curves_included': include_live_curves}
                 })
             return jsonify({'success': False, 'message': 'Failed to generate Word document'}), 500
         except Exception as e:

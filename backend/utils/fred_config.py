@@ -67,6 +67,11 @@ COUNTRY_SERIES_MAP = {
            '5Y': 'IR5TTS01ZAM156N', '10Y': 'IRLTLT01ZAM156N'},
 }
 
+# Per-instrument series overrides. Empty by default — all instruments
+# share the country-wide series. Populate to make T-Bills / Bonds /
+# Money Market use distinct FRED series.
+INSTRUMENT_SERIES_OVERRIDES = {}
+
 
 def normalize_country(country):
     if not country:
@@ -80,10 +85,8 @@ def currency_for_country(country):
 
 
 def series_for_country(country, maturity):
-    """Return (series_id, label, used_maturity, country, currency, note).
-
-    Returns series_id=None when the country is not supported or no
-    maturity matches. NEVER substitutes US data.
+    """Return 6-tuple:
+       (series_id, label, used_maturity, country, currency, note).
     """
     country_upper = normalize_country(country)
     maturity = (maturity or '1Y').strip().upper()
@@ -106,6 +109,44 @@ def series_for_country(country, maturity):
 
     return (None, None, maturity, country_upper, currency,
             f'No {maturity} series for {country_upper}')
+
+
+def _series_for_instrument(instrument_type, country_upper, maturity):
+    """Resolve a series honoring the per-instrument override if present.
+
+    ALWAYS returns a 4-tuple: (series_id, label, used_maturity, note).
+
+    This is the ONLY place where the 6-tuple from series_for_country()
+    is unpacked. Every caller unpacks 4 values.
+    """
+    inst = (instrument_type or '').strip().lower().replace('_', '-')
+    override = INSTRUMENT_SERIES_OVERRIDES.get(inst)
+    if override:
+        direct = override.get(maturity)
+        if direct:
+            return (direct, f'{maturity} {inst} benchmark', maturity, '')
+        for key in override:
+            if maturity in key or key in maturity:
+                return (override[key], f'{key} {inst} benchmark', key, '')
+
+    result = series_for_country(country_upper, maturity)
+    try:
+        n = len(result)
+    except TypeError:
+        raise ValueError(
+            f"series_for_country returned non-tuple {result!r} "
+            f"(type={type(result).__name__})"
+        )
+    if n >= 6:
+        sid, label, used_mat, _country, _currency, note = result[:6]
+    elif n == 4:
+        sid, label, used_mat, note = result
+    else:
+        raise ValueError(
+            f"series_for_country returned {n}-tuple; expected 4 or 6. "
+            f"Got: {result!r}"
+        )
+    return (sid, label, used_mat, note)
 
 
 def fetch_fred_observation(series_id, from_date=None, to_date=None, max_retries=3):
@@ -152,7 +193,16 @@ def fetch_fred_observation(series_id, from_date=None, to_date=None, max_retries=
     return None, None
 
 
-def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None):
+def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None,
+                    instrument_type=None, maturity=None):
+    """Fetch a FRED yield curve or time series.
+
+    When ``from_date`` and ``to_date`` are given, this returns a time
+    series for one maturity (``maturity``, default ``10Y``).
+
+    When ``from_date`` / ``to_date`` are omitted, this returns a single
+    cross-sectional curve across ``maturities``.
+    """
     if maturities is None:
         maturities = ['1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y']
 
@@ -162,11 +212,14 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
         '4W': 0.077, '13W': 0.25, '26W': 0.5, '52W': 1.0,
     }
 
+    country_upper = normalize_country(country)
     points = []
 
     if from_date and to_date:
-        key_maturity = '10Y'
-        series_id, label, used_mat, _, _, note = series_for_country(country, key_maturity)
+        key_maturity = (maturity or '10Y').strip().upper()
+        series_id, label, used_mat, note = _series_for_instrument(
+            instrument_type, country_upper, key_maturity
+        )
         if series_id:
             try:
                 resp = requests.get(
@@ -202,9 +255,11 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
                 logger.error(f"Error fetching time series for {series_id}: {e}")
     else:
         for mat_label in maturities:
-            series_id, label, used_mat, _, _, note = series_for_country(country, mat_label)
+            series_id, label, used_mat, note = _series_for_instrument(
+                instrument_type, country_upper, mat_label
+            )
             if not series_id:
-                logger.warning(f"No series for {country} {mat_label} — skipping")
+                logger.warning(f"No series for {country_upper} {mat_label} — skipping")
                 continue
             val, date = fetch_fred_observation(series_id)
             if val is not None:
@@ -224,8 +279,12 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None)
 
 
 def get_market_benchmark(instrument_type, maturity='1Y', country='US', currency='USD'):
-    series_id, label, used_mat, country_upper, inferred_ccy, note = \
-        series_for_country(country, maturity)
+    country_upper = normalize_country(country)
+
+    series_id, label, used_mat, note = _series_for_instrument(
+        instrument_type, country_upper, maturity
+    )
+    inferred_ccy = currency_for_country(country_upper)
 
     if series_id:
         val, date = fetch_fred_observation(series_id)

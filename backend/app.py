@@ -15,6 +15,7 @@ from routes.version_history import version_history_routes
 from routes.reports import reports_routes
 from routes.mapping_templates import mapping_templates_routes
 from routes.mapping import mapping_routes
+from routes.render import render_routes
 
 app = Flask(__name__)
 
@@ -34,6 +35,7 @@ version_history_routes(app)
 reports_routes(app)
 mapping_templates_routes(app)
 mapping_routes(app)
+render_routes(app)
 
 @app.route('/api/<path:path>', methods=['OPTIONS'])
 def handle_options(path):

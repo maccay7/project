@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from contextlib import contextmanager
 from flask import request, jsonify
@@ -37,6 +38,34 @@ def _db():
                 conn.close()
             except Exception:
                 pass
+
+
+def _to_snake_case(name):
+    """Normalise a column name so camelCase / snake_case / spaced variants
+    all collapse to the same key. Words are preserved so genuinely
+    different columns (e.g. face_value vs current_price) stay distinct."""
+    s = str(name).strip()
+    s = re.sub(r'[\s\-]+', '_', s)
+    s = re.sub(r'(?<=[a-z0-9])([A-Z])', r'_\1', s)
+    return s.lower()
+
+
+def dedupe_columns(columns):
+    """Keep only the first occurrence of each semantically-identical column.
+
+    Two columns are considered identical when their snake_case forms match.
+    Example: face_value / faceValue / Face Value -> keep only the first.
+    Example: face_value / current_price -> both kept, they are different.
+    """
+    seen = set()
+    kept = []
+    for col in columns:
+        key = _to_snake_case(col)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(col)
+    return kept
 
 
 def normalize_instrument_type(instrument_type):
@@ -261,7 +290,7 @@ def save_calculation(instrument_type, input_data, result_data,
             (session_id, instrument_type, input_hash))
         dup = cursor.fetchone()
         if dup:
-            return dup['id']
+            return dup['id'] if isinstance(dup, dict) else dup[0]
 
         cursor.execute(
             """INSERT INTO calculations
@@ -424,7 +453,6 @@ def calculations_routes(app):
         }
         _attach_fred(response, inst_type, maturity, country, currency)
 
-        # Return 200 for success AND partial. Only 400 when nothing can be calculated.
         if result['status'] == 'error' and not result['calculation']:
             return jsonify(response), 400
         return jsonify(response)
@@ -866,11 +894,17 @@ def calculations_routes(app):
                             'Instrument Type': row.get('instrument_type'),
                             **c,
                         })
-            cols = set()
+            # Preserve insertion order, then drop camelCase duplicates.
+            cols = []
+            seen = set()
             for r in summary_rows:
-                cols.update(r.keys())
+                for k in r.keys():
+                    if k not in seen:
+                        seen.add(k)
+                        cols.append(k)
+            cols = dedupe_columns(cols)
             return jsonify({'success': True,
-                            'data': {'columns': sorted(cols), 'rows': summary_rows}})
+                            'data': {'columns': cols, 'rows': summary_rows}})
 
     @app.route('/api/calculations/portfolio-summary', methods=['POST', 'OPTIONS'])
     def portfolio_summary():

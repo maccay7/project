@@ -186,7 +186,17 @@ def create_sessions_table():
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             ''')
             conn.commit()
-            print("report_configurations verified/created")
+
+            # Add visualisation_config column if it does not exist yet.
+            cursor.execute("SHOW COLUMNS FROM report_configurations LIKE 'visualisation_config'")
+            if not cursor.fetchone():
+                cursor.execute(
+                    "ALTER TABLE report_configurations ADD COLUMN visualisation_config JSON"
+                )
+                conn.commit()
+                print("report_configurations migrated – added visualisation_config")
+            else:
+                print("report_configurations verified/created")
 
         except Exception as e:
             print(f"Table setup error: {e}")
@@ -540,22 +550,34 @@ def sessions_routes(app):
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id is required'}), 400
 
+        visualisation_config = payload.get('visualisation_config')
+        visualisation_json = None
+        if visualisation_config is not None:
+            try:
+                visualisation_json = json.dumps(visualisation_config)
+            except Exception as e:
+                return jsonify({'success': False,
+                                'message': f'visualisation_config must be JSON-serialisable: {e}'}), 400
+
         with _db() as (conn, cursor):
             if not conn:
                 return jsonify({'success': False, 'message': 'DB connection failed'}), 500
             try:
                 cursor.execute('''
                     INSERT INTO report_configurations
-                        (session_id, selected_instruments, report_type)
-                    VALUES (%s, %s, %s)
+                        (session_id, selected_instruments, report_type, visualisation_config)
+                    VALUES (%s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         selected_instruments = VALUES(selected_instruments),
                         report_type = VALUES(report_type),
+                        visualisation_config = COALESCE(VALUES(visualisation_config),
+                                                        visualisation_config),
                         updated_at = CURRENT_TIMESTAMP
                 ''', (
                     session_id,
                     json.dumps(payload.get('selected_instruments', {})) if payload.get('selected_instruments') else None,
-                    payload.get('report_type', 'session')
+                    payload.get('report_type', 'session'),
+                    visualisation_json,
                 ))
                 conn.commit()
                 return jsonify({'success': True})
@@ -574,7 +596,8 @@ def sessions_routes(app):
                 return jsonify({'success': False, 'message': 'DB connection failed'}), 500
             try:
                 cursor.execute('''
-                    SELECT selected_instruments, report_type, generated_at, updated_at
+                    SELECT selected_instruments, report_type, visualisation_config,
+                           generated_at, updated_at
                     FROM report_configurations
                     WHERE session_id = %s
                     LIMIT 1
@@ -593,6 +616,7 @@ def sessions_routes(app):
             'data': {
                 'selectedInstruments': _decode_json(row.get('selected_instruments'), {}),
                 'reportType': row.get('report_type', 'session'),
+                'visualisationConfig': _decode_json(row.get('visualisation_config'), {}),
                 'generatedAt': row.get('generated_at').isoformat() if row.get('generated_at') else None,
                 'updatedAt': row.get('updated_at').isoformat() if row.get('updated_at') else None
             }
