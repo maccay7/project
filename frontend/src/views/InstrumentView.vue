@@ -86,24 +86,13 @@
                 <span>{{ uploadedFile.name }}</span>
                 <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
                 <button class="remove-btn" @click="removeFile">×</button>
-                <button class="btn-auto-detect-green"
-        @click="autoDetectSingleInstrument"
-        :disabled="isDetecting || (!currentSheetName && !workbookSheets.length)"
-        v-if="worksheetSelected || currentSheetName || workbookSheets.length">
-                  <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
-                  <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
-                  {{ getDetectionButtonText() }}
-                </button>
                 <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
-                <button v-if="originalDatasetId" class="btn-download-workbook" @click="downloadOriginalWorkbook">
-                  <v-icon size="16">mdi-download</v-icon> Download Original
-                </button>
                 <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
                 <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!worksheetSelected">Review Excel</button>
                 <button v-if="sheetType === 'multi'" class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
               </div>
 
-              <div v-if="worksheetWorkflow.workbookSheets.length > 0 && !worksheetSelected" class="worksheet-selector-section">
+              <div v-if="worksheetWorkflow.workbookSheets.length > 0" class="worksheet-selector-section" style="margin-top: 20px;">
                 <WorksheetSelector
                   :workbook-sheets="worksheetWorkflow.workbookSheets"
                   :worksheet-status="worksheetWorkflow.worksheetStatus"
@@ -158,6 +147,11 @@
                 </div>
               </div>
 
+              <!-- ============================================================
+                   DIALOGS — deduplicated (was 8x mapping / 2x saved / 7 orphans)
+                   ============================================================ -->
+
+              <!-- SINGLE: Map Columns dialog -->
               <v-dialog v-model="showMappingDialog" max-width="650px">
                 <v-card>
                   <v-card-title class="mapping-dialog-title">
@@ -166,19 +160,20 @@
                     <span class="mapping-count">{{ requiredColumns.length }} required fields</span>
                   </v-card-title>
                   <v-card-text class="mapping-dialog-body">
-                    <!-- [NEW] Header Row Selection -->
-                    <div v-if="isolatedTableData && isolatedTableData.rawTableData" class="header-selection-section" style="margin-bottom: 24px; padding: 16px; background: #f0f8ff; border-radius: 8px; border-left: 4px solid #2196F3;">
-                      <label style="font-weight: 600; color: #0B2044; margin-bottom: 8px; display: block; font-size: 14px;">
-                        <v-icon size="16" style="margin-right: 4px; vertical-align: middle;">mdi-format-line-spacing</v-icon>
+                    <div v-if="isolatedTableData && isolatedTableData.rawTableData"
+                         class="header-selection-section"
+                         style="margin-bottom: 24px; padding: 16px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #0B2044;">
+                      <label style="font-weight: 600; color: #0B2044; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; font-size: 14px;">
+                        <v-icon size="16" color="#0B2044">mdi-format-line-spacing</v-icon>
                         Select Header Row for Mapping
                       </label>
                       <select v-model="selectedHeaderRowIndex" @change="updateIsolatedTableData" class="mapping-select" style="width: 100%;">
                         <option v-for="(row, idx) in isolatedTableData.rawTableData" :key="idx" :value="idx">
-                          Row {{ idx + 1 }}: {{ row.filter(c => c !== null && String(c).trim() !== '').slice(0, 5).join(' | ') }}{{ row.filter(c => c !== null && String(c).trim() !== '').length > 5 ? ' ...' : '' }}
+                          Row {{ idx + 1 }}: {{ getRowPreview(row) }}
                         </option>
                       </select>
                       <p style="font-size: 12px; color: #666; margin-top: 8px;">
-                        If the detected column headers below are incorrect, choose the correct row from the dropdown above. The mapping will update automatically.
+                        If the detected column headers below are incorrect, choose the correct row above.
                       </p>
                     </div>
 
@@ -212,6 +207,7 @@
                 </v-card>
               </v-dialog>
 
+              <!-- SINGLE: Saved Mappings dialog -->
               <v-dialog v-model="showSavedMappingsDialog" max-width="700px">
                 <v-card>
                   <v-card-title class="saved-mappings-popup-title">
@@ -249,23 +245,29 @@
                 </v-card>
               </v-dialog>
 
-              <v-dialog v-model="showMultiTableDetectionSuccess" max-width="700px">
+              <!-- MULTI-TABLE DETECTION — required vs additional, selectable -->
+              <v-dialog v-model="showMultiTableDetectionSuccess" max-width="800px">
                 <v-card>
                   <v-card-title class="detection-success-title">
-                    Multi-Table Detection Successful ✓
+                    Multi-Table Detection Successful
                     <v-spacer></v-spacer>
+                    <span class="detection-count">{{ multiTableDetectionResults.length }} table(s)</span>
                     <button class="btn-close-dialog" @click="showMultiTableDetectionSuccess = false">×</button>
                   </v-card-title>
+
                   <v-card-text class="detection-success-body">
                     <div class="instrument-type-display">
                       <strong>Instrument:</strong> {{ formatInstrumentTypeLabel(instrumentType) }}
+                      <span class="required-summary">
+                        {{ multiRequiredCount }} required · {{ multiAdditionalCount }} additional
+                      </span>
                     </div>
-                    
+
                     <div class="currency-selection-section">
-                      <label class="currency-label">Select Currency to Include in Auto-Detected Values:</label>
+                      <label class="currency-label">Currency to include in auto-detected values:</label>
                       <v-select
                         v-model="selectedCurrency"
-                        @change="handleCurrencyChange"
+                        @update:modelValue="handleCurrencyChange"
                         :items="currencyOptions"
                         label="Currency"
                         variant="outlined"
@@ -282,142 +284,230 @@
                           density="compact"
                           maxlength="3"
                           hide-details
-                          @input="handleCustomCurrencyInput"
-                          class="custom-currency-field-vuetify"
-                        >
-                          <template v-slot:append>
-                            <span class="currency-code-badge">{{ customCurrency.length }}/3</span>
-                          </template>
-                        </v-text-field>
+                          @update:modelValue="handleCustomCurrencyInput"
+                        ></v-text-field>
                       </div>
                       <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
-                        <strong>Detected Currencies in Section:</strong> {{ detectedCurrencies.join(', ') }}
-                      </div>
-                      <div v-if="selectedCurrency && selectedCurrency !== 'custom'" class="selected-currency-info">
-                        Including values for: <strong>{{ selectedCurrency }}</strong>
-                      </div>
-                      <div v-else-if="selectedCurrency === 'custom' && customCurrency" class="selected-currency-info">
-                        Including values for custom currency: <strong>{{ customCurrency.toUpperCase() }}</strong>
-                      </div>
-                      <div v-else class="selected-currency-info">
-                        Including values for all detected currencies
+                        <strong>Detected currencies:</strong> {{ detectedCurrencies.join(', ') }}
                       </div>
                     </div>
-                    
-                    <div class="multi-table-summary">
-                      <strong>{{ multiTableDetectionResults.length }} table(s) selected</strong>
-                      <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">All detected fields from selected tables will be combined into a single instrument for calculations.</p>
-                    </div>
-                    
+
                     <div class="multi-instruments-list">
-                      <div v-for="(instrument, index) in multiTableDetectionResults" :key="index" class="multi-instrument-item">
+                      <div
+                        v-for="(instrument, index) in multiTableDetectionResults"
+                        :key="index"
+                        class="multi-instrument-item"
+                      >
                         <div class="multi-instrument-header">
                           <strong>Table {{ index + 1 }}: {{ instrument.tableName }}</strong>
                           <span class="field-count-badge">{{ Object.keys(instrument.fields).length }} fields</span>
                         </div>
-                        <div class="multi-instrument-fields">
-                          <div v-for="(value, field) in instrument.fields" :key="field" class="multi-detected-field-item">
-                            <span class="multi-detected-field-label">{{ field }}:</span>
-                            <span class="multi-detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                            <span v-if="instrument.fieldsWithMetadata?.[field]?.location" class="multi-detected-field-location">@ {{ instrument.fieldsWithMetadata[field].location }}</span>
-                            <!-- [FIX-MULTICURRENCY] per-field currency selector inside the multi-table popup -->
-                            <div v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1" class="currency-variant-selector">
-                              <select
-                                :value="value.selectedCurrency"
-                                @change="updateMultiTableCurrency(instrument, field, $event.target.value)"
-                                class="currency-select"
+
+                        <!-- REQUIRED fields -->
+                        <div class="field-group">
+                          <div class="field-group-title">
+                            <v-icon size="14" color="#2e7d32">mdi-check-circle</v-icon>
+                            Required for {{ instrumentLabel }} calculation
+                          </div>
+                          <div class="field-grid">
+                            <div
+                              v-for="(value, field) in instrument.fields"
+                              :key="'req-' + field"
+                              v-show="isRequiredField(field)"
+                              class="field-row field-row--required"
+                            >
+                              <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
+                              <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                              <span v-if="instrument.fieldsWithMetadata?.[field]?.location" class="field-loc">
+                                @ {{ instrument.fieldsWithMetadata[field].location }}
+                              </span>
+                              <div
+                                v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1"
+                                class="currency-variant-selector"
                               >
-                                <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
-                                  {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
-                                </option>
-                              </select>
+                                <select
+                                  :value="value.selectedCurrency"
+                                  @change="updateMultiTableCurrency(instrument, field, $event.target.value)"
+                                  class="currency-select"
+                                >
+                                  <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
+                                    {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
+                                  </option>
+                                </select>
+                              </div>
                             </div>
                           </div>
                         </div>
+
+                        <!-- ADDITIONAL fields (toggleable) -->
+                        <div v-if="hasAdditionalFields(instrument)" class="field-group">
+                          <div class="field-group-title">
+                            <v-icon size="14" color="#1565c0">mdi-plus-circle</v-icon>
+                            Additional detected fields
+                            <span class="field-group-hint">(used only if checked)</span>
+                          </div>
+                          <div class="field-grid">
+                            <label
+                              v-for="(value, field) in instrument.fields"
+                              :key="'add-' + field"
+                              v-show="!isRequiredField(field)"
+                              class="field-row field-row--additional"
+                              :class="{ 'field-row--excluded': excludedDetectedFields.has(field) }"
+                            >
+                              <input
+                                type="checkbox"
+                                :checked="!excludedDetectedFields.has(field)"
+                                @change="toggleExcludeField(field)"
+                                class="field-checkbox"
+                              />
+                              <span class="field-name">{{ field }}</span>
+                              <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                              <span v-if="instrument.fieldsWithMetadata?.[field]?.location" class="field-loc">
+                                @ {{ instrument.fieldsWithMetadata[field].location }}
+                              </span>
+                            </label>
+                          </div>
+                        </div>
+
                         <div v-if="instrument.missingFields.length > 0" class="multi-missing-fields">
-                          <span class="missing-label">Missing:</span>
+                          <span class="missing-label">Missing required:</span>
                           {{ instrument.missingFields.join(', ') }}
                         </div>
                       </div>
                     </div>
                   </v-card-text>
-                  <v-card-actions>
-                    <button class="btn-secondary" @click="showMultiTableDetectionSuccess = false">Close</button>
-                    <button class="btn-primary" @click="useMultiTableDetectedFields">Use Combined Fields</button>
+
+                  <v-card-actions class="detection-footer">
+                    <span class="footer-selection-summary">
+                      {{ selectedAdditionalCount }} additional field(s) will be included
+                    </span>
+                    <v-spacer></v-spacer>
+                    <button class="btn-secondary" @click="showMultiTableDetectionSuccess = false">Cancel</button>
+                    <button class="btn-primary" @click="useMultiTableDetectedFields" :disabled="isDetecting">
+                      <v-icon v-if="isDetecting" size="16" class="spin-animation">mdi-loading</v-icon>
+                      Use Combined Fields
+                    </button>
                   </v-card-actions>
                 </v-card>
               </v-dialog>
 
-              <v-dialog v-model="showDetectionSuccess" max-width="500px">
+              <!-- SINGLE-INSTRUMENT DETECTION — required vs additional, selectable -->
+              <v-dialog v-model="showDetectionSuccess" max-width="700px">
                 <v-card>
                   <v-card-title class="detection-success-title">
-                    Auto Detection Successful ✓
+                    Auto Detection Successful
                     <v-spacer></v-spacer>
+                    <span class="detection-count">
+                      {{ Object.keys(autoDetectedFields).length }} required ·
+                      {{ Object.keys(autoDetectedAdditionalFields).length }} additional
+                    </span>
                     <button class="btn-close-dialog" @click="showDetectionSuccess = false">×</button>
                   </v-card-title>
+
                   <v-card-text class="detection-success-body">
                     <div class="instrument-type-display">
                       <strong>Instrument:</strong> {{ formatInstrumentTypeLabel(detectedInstrumentType) }}
                     </div>
-                    
-                    <div class="detected-fields-list">
-                      <div v-if="Object.keys(autoDetectedFields).length > 0">
-                        <h4>Detected Fields ({{ Object.keys(autoDetectedFields).length }})</h4>
-                        <div v-for="(value, field) in autoDetectedFields" :key="field" class="detected-field-item">
-                          <span class="detected-field-label">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}:</span>
-                          <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                          <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="detected-field-location">@ {{ autoDetectedFieldsWithMetadata[field].location }}</span>
-                          <div v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1" class="currency-variant-selector">
-                            <select v-model="value.selectedCurrency" @change="updateSelectedCurrency(field, value.selectedCurrency)" class="currency-select">
+
+                    <div v-if="Object.keys(autoDetectedFields).length > 0" class="field-group">
+                      <div class="field-group-title">
+                        <v-icon size="14" color="#2e7d32">mdi-check-circle</v-icon>
+                        Required fields detected
+                      </div>
+                      <div class="field-grid">
+                        <div
+                          v-for="(value, field) in autoDetectedFields"
+                          :key="field"
+                          class="field-row field-row--required"
+                        >
+                          <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
+                          <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                          <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="field-loc">
+                            @ {{ autoDetectedFieldsWithMetadata[field].location }}
+                          </span>
+                          <div
+                            v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1"
+                            class="currency-variant-selector"
+                          >
+                            <select
+                              v-model="value.selectedCurrency"
+                              @change="updateSelectedCurrency(field, value.selectedCurrency)"
+                              class="currency-select"
+                            >
                               <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
                                 {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
                               </option>
                             </select>
                           </div>
                         </div>
-                      </div>
-
-                      <div v-if="Object.keys(autoDetectedAdditionalFields).length > 0">
-                        <h4>Additional Detected Fields ({{ Object.keys(autoDetectedAdditionalFields).length }})</h4>
-                        <div v-for="(value, field) in autoDetectedAdditionalFields" :key="'add-' + field" class="detected-field-item">
-                          <span class="detected-field-label">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}:</span>
-                          <span class="detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                          <div v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1" class="currency-variant-selector">
-                            <select v-model="value.selectedCurrency" @change="updateSelectedCurrency(field, value.selectedCurrency, true)" class="currency-select">
-                              <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
-                                {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
-                              </option>
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div v-if="Object.keys(autoDetectedFields).length === 0 && Object.keys(autoDetectedAdditionalFields).length === 0" class="no-detection-message">
-                        <p>No required fields detected in this worksheet.</p>
-                        <p>Try selecting a different section or check if the field names match the expected format.</p>
                       </div>
                     </div>
-                    
+
+                    <div v-if="Object.keys(autoDetectedAdditionalFields).length > 0" class="field-group">
+                      <div class="field-group-title">
+                        <v-icon size="14" color="#1565c0">mdi-plus-circle</v-icon>
+                        Additional detected fields
+                        <span class="field-group-hint">(used only if checked)</span>
+                      </div>
+                      <div class="field-grid">
+                        <label
+                          v-for="(value, field) in autoDetectedAdditionalFields"
+                          :key="'add-' + field"
+                          class="field-row field-row--additional"
+                          :class="{ 'field-row--excluded': excludedDetectedFields.has(field) }"
+                        >
+                          <input
+                            type="checkbox"
+                            :checked="!excludedDetectedFields.has(field)"
+                            @change="toggleExcludeField(field)"
+                            class="field-checkbox"
+                          />
+                          <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
+                          <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                          <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="field-loc">
+                            @ {{ autoDetectedFieldsWithMetadata[field].location }}
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div
+                      v-if="Object.keys(autoDetectedFields).length === 0 && Object.keys(autoDetectedAdditionalFields).length === 0"
+                      class="no-detection-message"
+                    >
+                      <p>No fields were detected in this worksheet.</p>
+                      <p>Try selecting a different sheet, section, or check the field names.</p>
+                    </div>
+
                     <div v-if="Object.keys(autoDetectedFields).length < requiredColumns.length" class="missing-fields-warning">
-                      <p><strong>Missing Required Fields:</strong></p>
+                      <p><strong>Missing required fields:</strong></p>
                       <ul>
                         <li v-for="col in requiredColumns.filter(c => !autoDetectedFields[c])" :key="col">{{ col }}</li>
                       </ul>
                     </div>
                   </v-card-text>
-                  <v-card-actions>
-                    <button class="btn-secondary" @click="showDetectionSuccess = false">Close</button>
-                    <button class="btn-primary" @click="useDetectedFields">Work on This Worksheet</button>
+
+                  <v-card-actions class="detection-footer">
+                    <span class="footer-selection-summary">
+                      {{ Object.keys(autoDetectedAdditionalFields).length - excludedDetectedFields.size }} additional field(s) will be included
+                    </span>
+                    <v-spacer></v-spacer>
+                    <button class="btn-secondary" @click="showDetectionSuccess = false">Cancel</button>
+                    <button class="btn-primary" @click="useDetectedFields">
+                      Work on This Worksheet
+                    </button>
                   </v-card-actions>
                 </v-card>
               </v-dialog>
 
+              <!-- SINGLE: Workbook viewer -->
               <v-dialog v-model="showWorkbookViewer" max-width="95%" persistent>
                 <v-card style="height: 90vh;">
                   <v-card-title class="excel-dialog-title-no-logo">
                     <span>Excel Workbook – {{ currentSheetName || 'Select a sheet' }}</span>
                     <v-spacer></v-spacer>
-                    <button class="btn-auto-detect-green" @click="() => autoDetectSingleInstrument()" v-if="currentSheetName && workbookSheets.length" :disabled="isDetecting">
+                    
+                    <button class="btn-auto-detect-green" @click="() => autoDetectSingleInstrument()" v-if="workbookSheets.length > 0" :disabled="isDetecting">
                       <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
                       <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
                       {{ getDetectionButtonText() }}
@@ -452,62 +542,27 @@
                 </v-card>
               </v-dialog>
 
-              <div class="required-columns">
-                <h4 v-if="sheetType === 'multi'">Required Columns</h4>
-                <h4 v-else>Required Values (Single Instrument)</h4>
+              <!-- ============================================================
+                   END dialogs
+                   ============================================================ -->
+
+              <div class="required-columns" v-if="sheetType === 'multi'">
+                <h4>Required Columns</h4>
                 
-                <div v-if="sheetType === 'multi'" class="columns-list">
+                <div class="columns-list">
                   <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
                     <span class="badge-icon">{{ hasRequiredColumn(col) ? '✓' : '○' }}</span>
                     {{ col }}
                   </span>
                 </div>
                 
-                <div v-else class="extracted-values-table">
-                  <div class="table-header">
-                    <span class="header-field">Field</span>
-                    <span class="header-value">Extracted Value</span>
-                    <span class="header-status">Status</span>
-                  </div>
-                  <div v-for="(value, key) in extractedValues" :key="key" class="table-row" :class="{ 'row-missing': !value || value === 'N/A' }">
-                    <span class="row-field">{{ autoDetectedFieldsWithMetadata[key]?.originalLabel || key }}</span>
-                    <div class="row-value">
-                      <input
-                        v-if="value && value !== 'N/A'"
-                        type="text"
-                        class="value-input"
-                        :value="value"
-                        @input="updateExtractedValue(key, $event.target.value)"
-                        @blur="updateExtractedValue(key, $event.target.value)"
-                      />
-                      <input
-                        v-else
-                        type="text"
-                        class="value-input placeholder"
-                        placeholder="Enter value..."
-                        @input="updateExtractedValue(key, $event.target.value)"
-                        @blur="updateExtractedValue(key, $event.target.value)"
-                      />
-                      <button class="btn-clear-value" @click="clearExtractedValue(key)" title="Clear value">×</button>
-                    </div>
-                    <span class="row-status" :class="{ 'status-missing': !value || value === 'N/A' }">
-                      {{ value && value !== 'N/A' ? '✓ Detected' : '! Missing' }}
-                    </span>
-                  </div>
-                </div>
-                
-                <div v-if="rawData.length && sheetType === 'multi' && missingColumns.length" class="warning-message">
+                <div v-if="rawData.length && missingColumns.length" class="warning-message">
                   <span class="warning-icon">⚠</span>
                   <span>Missing required columns. Use the dropdowns on the column headers or click "Map Columns" to assign them.</span>
                 </div>
-                <div v-if="rawData.length && sheetType === 'multi' && missingColumns.length === 0 && mappingApplied" class="success-message">
+                <div v-if="rawData.length && missingColumns.length === 0 && mappingApplied" class="success-message">
                   <span class="success-icon">✓</span>
                   <span>All columns mapped. Ready to continue.</span>
-                </div>
-                <div v-if="sheetType === 'single' && Object.keys(extractedValues).length > 0" class="values-summary">
-                  <span class="summary-text">
-                    {{ Object.values(extractedValues).filter(v => v && v !== 'N/A').length }} of {{ Object.keys(extractedValues).length }} required values detected
-                  </span>
                 </div>
               </div>
 
@@ -563,70 +618,79 @@
                   </div>
                   <div class="cleaning-buttons">
                     <button class="btn-primary" @click="applyCleaning">Clean Data</button>
+                    <button class="btn-secondary" @click="toggleAllAdditionalFields" v-if="sheetType === 'single'">
+                      <v-icon size="14">{{ excludedDetectedFields.size > 0 ? 'mdi-check-all' : 'mdi-close-circle-outline' }}</v-icon>
+                      {{ excludedDetectedFields.size > 0 ? 'Include all fields' : 'Exclude all additional' }}
+                    </button>
                   </div>
                 </div>
 
-                <div v-if="sheetType === 'single'" class="detected-values-section">
-                  <h3>Detected Values — Final Inputs for Valuation</h3>
+                <!-- COMPACT FIELD SELECTOR — single instrument -->
+                <div v-if="sheetType === 'single' && displayedSelectionFields.length > 0" class="detected-values-section">
+                  <h3>Field Selection — Final Inputs for Valuation</h3>
                   <p class="section-hint">
-                    These are the field values taken from the worksheet. Excluded fields will NOT be sent to the valuation engine.
-                    The same values are shown in the Excel preview below — edit any cell there and it updates here.
+                    Checked fields flow to the valuation engine. Unchecked fields are removed from the preview below and excluded from all calculations.
+                    Any edits made in the Excel preview will reflect here instantly.
                   </p>
 
-                  <div v-if="Object.keys(autoDetectedFields).length > 0" class="detected-values-table">
-                    <div class="table-header">
-                      <span class="header-field">Field</span>
-                      <span class="header-value">Cleaned Value</span>
-                      <span class="header-status">Status</span>
-                      <span class="header-action">Action</span>
-                    </div>
-                    <div v-for="(value, key) in autoDetectedFields" :key="key" class="table-row" :class="{ 'row-excluded': excludedDetectedFields.has(key) }">
-                      <span class="row-field">{{ autoDetectedFieldsWithMetadata[key]?.originalLabel || key }}</span>
-                      <div class="row-value">
-                        <span class="value-display">{{ formatDetectedValue(key, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                      </div>
-                      <span class="row-status" :class="{ 'status-excluded': excludedDetectedFields.has(key), 'status-included': !excludedDetectedFields.has(key) }">
-                        {{ excludedDetectedFields.has(key) ? 'Excluded' : 'Included' }}
+                  <div class="compact-fields-table">
+                    <div
+                      v-for="key in displayedSelectionFields"
+                      :key="key"
+                      class="compact-field-row"
+                      :class="{ 'compact-field-row--excluded': excludedDetectedFields.has(key) }"
+                    >
+                      <label class="compact-checkbox">
+                        <input
+                          type="checkbox"
+                          :checked="!excludedDetectedFields.has(key)"
+                          @change="toggleExcludeField(key)"
+                        />
+                      </label>
+                      <span class="compact-field-name">{{ autoDetectedFieldsWithMetadata[key]?.originalLabel || key }}</span>
+                      <span class="compact-field-value">
+                        {{ getFieldSelectionValue(key, autoDetectedFields[key]) }}
                       </span>
-                      <div class="row-action">
-                        <button class="btn-toggle-exclude" @click="toggleExcludeField(key)"
-                          :class="{ 'btn-exclude': !excludedDetectedFields.has(key), 'btn-include': excludedDetectedFields.has(key) }">
-                          {{ excludedDetectedFields.has(key) ? 'Include' : 'Exclude' }}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div class="detected-values-summary">
-                      <span class="summary-text">
-                        {{ Object.keys(autoDetectedFields).length - excludedDetectedFields.size }} of {{ Object.keys(autoDetectedFields).length }} values will be used in calculation
-                      </span>
-                    </div>
-
-                    <div class="add-field-section">
-                      <h4>Add Field</h4>
-                      <div class="add-field-form">
-                        <input v-model="newFieldName" type="text" placeholder="Field name" class="add-field-input" />
-                        <input v-model="newFieldValue" type="text" placeholder="Value" class="add-field-input" />
-                        <button class="btn-add-field" @click="addCustomField">Add Field</button>
+                      <div v-if="autoDetectedFields[key] && typeof autoDetectedFields[key] === 'object' && autoDetectedFields[key]?.currencyVariants && Object.keys(autoDetectedFields[key].currencyVariants).length > 1 && !excludedDetectedFields.has(key)" class="currency-variant-selector" style="flex: 0 0 auto;">
+                        <select v-model="autoDetectedFields[key].selectedCurrency" @change="updateSelectedCurrency(key, autoDetectedFields[key].selectedCurrency)" class="currency-select" style="min-width: 80px; padding: 2px 6px; font-size: 11px;">
+                          <option v-for="(variantValue, currency) in autoDetectedFields[key].currencyVariants" :key="currency" :value="currency">
+                            {{ currency }}
+                          </option>
+                        </select>
                       </div>
                     </div>
                   </div>
 
-                  <div v-if="cleanedData.length" class="preview-section" style="margin-top: 20px;">
-                    <h4>Cleaned Data Preview — {{ cleanedData.length }} row(s)</h4>
-                    <p class="section-hint">
-                      These are the cleaned input values that will be sent to the valuation engine. Excluded fields have already been removed.
-                    </p>
-                    <div class="excel-scroll-wrapper">
-                      <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
+                  <div class="compact-summary">
+                    {{ Object.keys(autoDetectedFields).length - excludedDetectedFields.size }} of {{ Object.keys(autoDetectedFields).length }} fields included
+                  </div>
+
+                  <div class="add-field-section">
+                    <h4>Add Field</h4>
+                    <div class="add-field-form">
+                      <input v-model="newFieldName" type="text" placeholder="Field name" class="add-field-input" />
+                      <input v-model="newFieldValue" type="text" placeholder="Value" class="add-field-input" />
+                      <button class="btn-add-field" @click="addCustomField">Add</button>
                     </div>
                   </div>
                 </div>
 
-                <div v-if="sheetType !== 'single' && cleanedData.length" class="preview-section">
-                  <h4>Cleaned Data ({{ cleanedData.length }} rows)</h4>
+                <!-- EXCEL PREVIEW — single source of truth -->
+                <div v-if="cleanedData.length" class="preview-section" style="margin-top: 20px;">
+                  <h4>
+                    <v-icon size="16" style="color: #0B2044; margin-right: 6px;">mdi-microsoft-excel</v-icon>
+                    Cleaned Data Preview — {{ cleanedData.length }} row(s) · {{ Object.keys(cleanedData[0] || {}).length }} columns
+                  </h4>
+                  <p class="section-hint">
+                    This preview is the single source of truth. Any cell edited here flows directly to Calculations.
+                    Excluded fields have already been removed.
+                  </p>
                   <div class="excel-scroll-wrapper">
-                    <ExcelViewer :data="cleanedData" :headers="cleanPreviewHeaders" @data-update="onCleanedExcelUpdate" />
+                    <ExcelViewer
+                      :data="cleanedData"
+                      :headers="cleanPreviewHeaders"
+                      @data-update="onCleanedExcelUpdate"
+                    />
                   </div>
                 </div>
 
@@ -649,7 +713,7 @@
                       </v-card>
                     </v-col>
                   </v-row>
-                  
+
                   <div v-if="cleaningOperationsSummary.length" class="cleaning-operations-summary">
                     <h4 class="operations-title">Operations Performed:</h4>
                     <ul class="operations-list">
@@ -659,8 +723,8 @@
                       </li>
                     </ul>
                   </div>
-                  
-                  <p class="success-text text-center">✓ Data is now clean and ready for calculations</p>
+
+                  <p class="success-text text-center">Data is clean and ready for calculations</p>
                 </div>
 
                 <div class="navigation-buttons">
@@ -2185,7 +2249,7 @@ const currentSheetName = ref('')
 const selectedSectionId = ref('')
 const singleInstrumentExtractedValues = ref({})
 const isolatedTableData = ref(null)
-const selectedHeaderRowIndex = ref(0) // [NEW] Track header row selection
+const selectedHeaderRowIndex = ref(0)
 const autoDetectedFields = ref({})
 const autoDetectedFieldsWithMetadata = ref({})
 const autoDetectedAdditionalFields = ref({})
@@ -2389,7 +2453,9 @@ const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
 const uploadPreviewHeaders = computed(() => {
-  if (Object.values(columnMapping.value).some(v => v)) {
+  // FIX: For multi-instrument sheets, always show required columns as headers
+  // so the mapping dropdowns are always visible in the preview.
+  if (sheetType.value === 'multi') {
     return requiredColumns.value
   }
   return originalFileColumns.value.length ? originalFileColumns.value : Object.keys(rawData.value[0] || {})
@@ -2455,7 +2521,7 @@ function getDisplayColumns() {
   ].map(s => s.toLowerCase().replace(/[_\s\-]+/g, '')))
 
   const seen = new Set()
-  const seenLabels = new Set()  // NEW: dedupe by rendered label too
+  const seenLabels = new Set()
   const result = []
 
   const consider = (rawKey) => {
@@ -2464,8 +2530,6 @@ function getDisplayColumns() {
     if (INTERNAL_ONLY.has(norm)) return
     if (norm.startsWith('derivation')) return
     if (seen.has(norm)) return
-    // Final guard: if this column's display label already appeared for a
-    // different raw key, skip it — prevents two identically-labelled columns.
     const label = formatColumnHeader(rawKey).toLowerCase().replace(/[\s_\-]+/g, '')
     if (seenLabels.has(label)) return
     seen.add(norm)
@@ -3193,6 +3257,7 @@ function handleWorksheetSelect(sheetName) {
         sheetType.value = detection.type
         if (detection.type === 'multi') {
           columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
+          applyCurrentMapping() // FIX: Apply mapping immediately so preview shows transformed data
           showMappingDialog.value = true
         } else {
           columnMapping.value = {}
@@ -3262,6 +3327,122 @@ function handleSheetSelectedFromViewer(sheetName) { currentSheetName.value = she
 function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
   currentSheetName.value = sheetName
   singleInstrumentExtractedValues.value = extractedValues
+}
+
+// ─────────────────────────────────────────────────────────────
+// NEW HELPERS (row preview + required/additional classification)
+// ─────────────────────────────────────────────────────────────
+
+// Truncated, non-crowded row preview for the header-row dropdown.
+// Shows only non-empty cells, max 4, each capped at 18 chars.
+function getRowPreview(row) {
+  if (!row || !row.length) return '(empty row)'
+  const cells = []
+  let nonEmpty = 0
+  for (const c of row) {
+    if (c === null || c === undefined || String(c).trim() === '') continue
+    nonEmpty++
+    if (cells.length >= 4) continue
+    let s = String(c).trim().replace(/\s+/g, ' ')
+    if (s.length > 18) s = s.slice(0, 18) + '…'
+    cells.push(s)
+  }
+  if (!cells.length) return '(empty row)'
+  return cells.join(' · ') + (nonEmpty > 4 ? ' …' : '')
+}
+
+// ─────────────────────────────────────────────────────────────
+// REQUIRED vs ADDITIONAL field detection (used by the two popups)
+// ─────────────────────────────────────────────────────────────
+function normalizeFieldKey(key) {
+  return String(key || '').toLowerCase().replace(/[-_\s]+/g, '')
+}
+
+function isRequiredField(fieldKey) {
+  const norm = normalizeFieldKey(fieldKey)
+  return (requiredColumns.value || []).some(col => normalizeFieldKey(col) === norm)
+}
+
+function hasAdditionalFields(instrument) {
+  if (!instrument?.fields) return false
+  return Object.keys(instrument.fields).some(k => !isRequiredField(k))
+}
+
+const displayedSelectionFields = computed(() => {
+  const keys = new Set()
+  // Add all fields present in the cleaned preview (the source of truth)
+  if (cleanedData.value.length > 0) {
+    Object.keys(cleanedData.value[0]).forEach(k => keys.add(k))
+  }
+  // Add excluded fields so they remain visible in the list to be re-included
+  Object.keys(autoDetectedFields.value).forEach(k => {
+    if (excludedDetectedFields.value.has(k)) keys.add(k)
+  })
+  return Array.from(keys)
+})
+
+// Counts for the multi-table popup summary
+const multiRequiredCount = computed(() => {
+  let n = 0
+  for (const inst of multiTableDetectionResults.value) {
+    for (const k of Object.keys(inst.fields || {})) {
+      if (isRequiredField(k)) n++
+    }
+  }
+  return n
+})
+
+const multiAdditionalCount = computed(() => {
+  let n = 0
+  for (const inst of multiTableDetectionResults.value) {
+    for (const k of Object.keys(inst.fields || {})) {
+      if (!isRequiredField(k)) n++
+    }
+  }
+  return n
+})
+
+const selectedAdditionalCount = computed(() => {
+  let n = 0
+  for (const inst of multiTableDetectionResults.value) {
+    for (const k of Object.keys(inst.fields || {})) {
+      if (!isRequiredField(k) && !excludedDetectedFields.value.has(k)) n++
+    }
+  }
+  return n
+})
+
+// Bulk-toggle: include or exclude every additional field at once.
+function toggleAllAdditionalFields() {
+  const allAdditional = new Set()
+  for (const k of Object.keys(autoDetectedFields.value || {})) {
+    if (!isRequiredField(k)) allAdditional.add(k)
+  }
+  for (const k of Object.keys(autoDetectedAdditionalFields.value || {})) {
+    if (!isRequiredField(k)) allAdditional.add(k)
+  }
+  if (excludedDetectedFields.value.size > 0) {
+    excludedDetectedFields.value = new Set()
+  } else {
+    excludedDetectedFields.value = new Set(allAdditional)
+  }
+  try {
+    sessionStorage.setItem('excluded_fields', JSON.stringify([...excludedDetectedFields.value]))
+  } catch (e) { /* ignore */ }
+  if (cleanedData.value.length > 0) {
+    applyCleaning()
+  }
+  debouncedSave()
+}
+
+// Helper to sync the Field Selection list with the Excel preview
+function getFieldSelectionValue(key, rawValue) {
+  // If the field is included and exists in the preview, use the preview's value
+  if (!excludedDetectedFields.value.has(key) && cleanedData.value.length > 0 && cleanedData.value[0][key] !== undefined) {
+    return formatDetectedValue(key, cleanedData.value[0][key])
+  }
+  // Otherwise, fall back to the originally detected value
+  return formatDetectedValue(key, typeof rawValue === 'object' && rawValue !== null ? rawValue.value : rawValue)
 }
 
 // [NEW] Handle header row selection & re-mapping
@@ -3838,19 +4019,21 @@ async function handleMultiTableDetect(event) {
   }
 }
 
-// [FIX-MULTICURRENCY] Preserve multi-currency fields (with currencyVariants)
-// in autoDetectedFields while still committing the currently-selected scalar
-// values into rawData / cleanedData / extractedValues.
+// [FIX-MULTICURRENCY + EXCLUSION] Preserve multi-currency fields (with
+// currencyVariants) in autoDetectedFields, but skip fields the user
+// explicitly excluded in the multi-table popup.
 function useMultiTableDetectedFields() {
   showMultiTableDetectionSuccess.value = false
   showWorkbookViewer.value = false
 
-  const fullFields = {}    // preserve object shape when >1 currency
-  const displayFields = {} // scalar snapshot for rawData / cleanedData
+  const fullFields = {}
+  const displayFields = {}
 
   for (const instrument of multiTableDetectionResults.value) {
     for (const [key, fieldObj] of Object.entries(instrument.fields)) {
       if (key in fullFields) continue
+      if (excludedDetectedFields.value.has(key)) continue
+
       const isMulti =
         typeof fieldObj === 'object' && fieldObj !== null &&
         fieldObj.currencyVariants &&
@@ -3914,11 +4097,8 @@ function formatDetectedValue(field, value) {
   return String(value)
 }
 
-// [FIX-MULTICURRENCY] Full propagation. Previously this function did nothing
-// because it accessed autoDetectedFields[fieldName] (the Ref object) instead
-// of autoDetectedFields.value[fieldName] (the actual field). This version
-// also mirrors the new value into Cleaning / Calculations / Summary, then
-// saves and re-runs calculations so every downstream page updates.
+// [FIX-MULTICURRENCY] Full propagation. Mirrors the selected currency value
+// into Cleaning / Calculations / Summary, then saves and re-runs calculations.
 function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
   const targetRef = isAdditional ? autoDetectedAdditionalFields : autoDetectedFields
   const targetFields = targetRef.value || {}
@@ -3968,7 +4148,6 @@ function updateMultiTableCurrency(instrument, fieldName, currency) {
   fieldData.selectedCurrency = currency
   fieldData.value = fieldData.currencyVariants[currency]
   fieldData.currency = currency
-  // reactive nudge so the popup re-renders with the new selected value
   multiTableDetectionResults.value = [...multiTableDetectionResults.value]
 }
 
@@ -4075,8 +4254,11 @@ async function useDetectedFields() {
   isUsingDetectedFields.value = true
   showDetectionSuccess.value = false
   showWorkbookViewer.value = false
+
   const values = {}
-  for (const [key, value] of Object.entries(autoDetectedFields.value)) {
+  const applyIfIncluded = (key, value) => {
+    // FIX: honour the excludedDetectedFields toggle set from the popup.
+    if (excludedDetectedFields.value.has(key)) return
     if (typeof value === 'object' && value !== null) {
       if (value.currencyVariants && value.selectedCurrency && value.currencyVariants[value.selectedCurrency]) {
         values[key] = value.currencyVariants[value.selectedCurrency]
@@ -4087,19 +4269,11 @@ async function useDetectedFields() {
       values[key] = value
     }
   }
+  for (const [key, value] of Object.entries(autoDetectedFields.value)) applyIfIncluded(key, value)
   for (const [key, value] of Object.entries(autoDetectedAdditionalFields.value)) {
-    if (!(key in values)) {
-      if (typeof value === 'object' && value !== null) {
-        if (value.currencyVariants && value.selectedCurrency && value.currencyVariants[value.selectedCurrency]) {
-          values[key] = value.currencyVariants[value.selectedCurrency]
-        } else {
-          values[key] = value.value
-        }
-      } else {
-        values[key] = value
-      }
-    }
+    if (!(key in values)) applyIfIncluded(key, value)
   }
+
   if (selectedCurrency.value && selectedCurrency.value !== 'custom') {
     values['Currency'] = selectedCurrency.value
   } else if (selectedCurrency.value === 'custom' && customCurrency.value) {
@@ -4242,6 +4416,20 @@ function toggleExcludeField(fieldKey) {
     excludedDetectedFields.value.add(fieldKey)
   }
   excludedDetectedFields.value = new Set(excludedDetectedFields.value)
+
+  // Persist across page reloads
+  try {
+    sessionStorage.setItem('excluded_fields', JSON.stringify([...excludedDetectedFields.value]))
+  } catch (e) { /* ignore */ }
+
+  // FIX: rebuild cleanedData from rawData so the Excel preview
+  // and the valuation engine reflect the current exclusion set.
+  // The preview is now the single source of truth.
+  if (cleanedData.value.length > 0 && rawData.value.length > 0) {
+    applyCleaning()
+  }
+
+  debouncedSave()
 }
 
 function addCustomField() {
@@ -4606,6 +4794,26 @@ function onRawExcelUpdate(data, sourceData) {
 
 function onCleanedExcelUpdate(data) {
   cleanedData.value = data
+  
+  // Sync edits from the Excel preview back to the Field Selection list
+  if (data.length > 0) {
+    Object.entries(data[0]).forEach(([key, val]) => {
+      if (autoDetectedFields.value[key] !== undefined) {
+         if (typeof autoDetectedFields.value[key] === 'object' && autoDetectedFields.value[key] !== null) {
+            autoDetectedFields.value[key].value = val
+            if (autoDetectedFields.value[key].currencyVariants && autoDetectedFields.value[key].selectedCurrency) {
+               autoDetectedFields.value[key].currencyVariants[autoDetectedFields.value[key].selectedCurrency] = val
+            }
+         } else {
+            autoDetectedFields.value[key] = val
+         }
+      }
+      if (extractedValues.value) {
+        extractedValues.value[key] = val
+      }
+    })
+  }
+  
   debouncedSave()
   calculateMetrics()
 }
@@ -6276,7 +6484,7 @@ async function loadAllSelectedInstrumentCurves(workflowMap = null) {
       }
     }
 
-    // NEW: Truncate the curve to match the Visualisations page selection
+    // Truncate the curve to match the Visualisations page selection
     if (filters.maturityMode !== 'date' && filters.maturity && filters.maturity !== '__custom__') {
       const filterYears = parseMaturityToYears(filters.maturity)
       if (filterYears > 0) {
@@ -6542,8 +6750,6 @@ function buildInstrumentCurveSvg(validPoints, title, color, isDateMode = false, 
 
 // ─────────────────────────────────────────────────────────────
 // FIX 8 — showFormula prefers backend `derivations`.
-// Echoes parsed dates + identifiers so the popup is complete.
-// Only falls back to manual computation for legacy records.
 // ─────────────────────────────────────────────────────────────
 function showFormula(metricKey) {
   const formulaMap = {
@@ -7021,9 +7227,6 @@ async function loadAllInstrumentWorkflowsForReport(workflowMap = null) {
 
 // ─────────────────────────────────────────────────────────────
 // FIX 9 — prefetchPreviewWorkflows checks singular key first.
-// Previously only `instrumentWorkflows` (plural) candidates
-// existed, which never matched the sessionManager shape
-// `instrumentWorkflow` (singular), forcing slower fallbacks.
 // ─────────────────────────────────────────────────────────────
 async function prefetchPreviewWorkflows(sid) {
   const map = {}
@@ -7414,10 +7617,7 @@ let _previewHtmlCachedAt = 0
 const PREVIEW_HTML_CACHE_MS = 5000
 
 // ─────────────────────────────────────────────────────────────
-// FIX 10 — previewReport invalidates the cache on every explicit
-// request. Previously a 5s cache meant changing filters on
-// Visualisations then reopening the report showed the PREVIOUS
-// curve for up to 5 seconds.
+// FIX 10 — previewReport invalidates the cache on every explicit request.
 // ─────────────────────────────────────────────────────────────
 async function previewReport() {
   // Force a fresh read of the session BEFORE generating the report
@@ -8276,4 +8476,190 @@ onBeforeUnmount(() => {
 }
 .no-calcs-message { grid-column: 1 / -1; padding: 40px 20px; text-align: center; color: #999; font-size: 14px; background: #f9fafc; border-radius: 12px; border: 1px dashed #ccc; }
 .no-calcs-message p { margin: 12px 0 0 0; }
+
+/* ── Detection popup additions ─────────────────────────── */
+.detection-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: white;
+  padding: 3px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 12px;
+}
+.instrument-type-display {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f8f9ff;
+  border-radius: 8px;
+  border-left: 3px solid #0B2044;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.required-summary {
+  margin-left: auto;
+  font-size: 12px;
+  color: #2e7d32;
+  background: #e8f5e9;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+.field-group {
+  margin-bottom: 18px;
+}
+.field-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0B2044;
+  margin-bottom: 10px;
+}
+.field-group-hint {
+  font-weight: 400;
+  color: #999;
+  font-size: 12px;
+}
+.field-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #fafafa;
+  border-radius: 6px;
+  font-size: 13px;
+  border-left: 3px solid transparent;
+  width: 100%;
+  box-sizing: border-box;
+}
+.field-row--required {
+  background: #e8f5e9;
+  border-left-color: #2e7d32;
+}
+.field-row--additional {
+  background: #fff;
+  border-left-color: #1565c0;
+  cursor: pointer;
+}
+.field-row--additional:hover {
+  background: #f0f7ff;
+}
+.field-row--excluded {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.field-name {
+  font-weight: 600;
+  color: #0B2044;
+  flex: 1 1 25%;
+  min-width: 120px;
+  word-break: break-word;
+}
+.field-value {
+  font-family: 'Courier New', monospace;
+  color: #2e7d32;
+  font-weight: 600;
+  flex: 1 1 25%;
+}
+.field-loc {
+  font-size: 11px;
+  color: #999;
+  font-style: italic;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.field-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #0B2044;
+  flex: 0 0 auto;
+}
+.currency-variant-selector {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.detection-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: #f9fafc;
+  border-top: 1px solid #e0e0e0;
+}
+.footer-selection-summary {
+  font-size: 13px;
+  color: #666;
+}
+
+/* ── Compact cleaning field selector ───────────────────── */
+.compact-fields-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+}
+.compact-field-row {
+  display: grid;
+  grid-template-columns: 26px 1fr 1.4fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background 0.15s;
+}
+.compact-field-row:last-child { border-bottom: none; }
+.compact-field-row:hover { background: #f8f9ff; }
+.compact-field-row--excluded {
+  background: #fff4f4;
+  opacity: 0.65;
+}
+.compact-field-row--excluded .compact-field-name,
+.compact-field-row--excluded .compact-field-value {
+  text-decoration: line-through;
+  color: #999;
+}
+.compact-checkbox input {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #0B2044;
+}
+.compact-field-name {
+  font-weight: 600;
+  color: #0B2044;
+  font-size: 12px;
+}
+.compact-field-value {
+  font-family: 'Courier New', monospace;
+  color: #2e7d32;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compact-summary {
+  font-size: 12px;
+  color: #666;
+  padding: 6px 12px;
+  background: #f0f4ff;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
 </style>

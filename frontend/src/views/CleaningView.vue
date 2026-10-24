@@ -2,13 +2,11 @@
   <fixed-layout>
     <div class="cleaning-view">
 
-      <!-- Header -->
       <div class="page-header">
         <h1>Data Cleaning</h1>
         <p>Clean and prepare your dataset for analysis</p>
       </div>
 
-      <!-- Action Buttons -->
       <div class="action-buttons">
         <v-btn color="#0B2A44" @click="loadData">
           <v-icon left>mdi-database</v-icon> Load Dataset
@@ -30,10 +28,8 @@
         </v-btn>
       </div>
 
-      <!-- Show only after dataset loaded -->
       <template v-if="dataset && dataset.data">
 
-        <!-- KPI Cards -->
         <v-card class="stats-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-database</v-icon> Dataset Overview
@@ -60,46 +56,46 @@
           </v-card-text>
         </v-card>
 
-        <!-- Required Values (Single Instrument) -->
         <v-card v-if="hasDetectedValues" class="stats-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-format-list-checks</v-icon>
-            Required Values (Single Instrument)
+            Field Selection
+            <v-spacer></v-spacer>
+            <v-btn
+              v-if="hasAdditionalFields"
+              size="small"
+              variant="text"
+              color="#0B2A44"
+              @click="toggleAllAdditional"
+            >
+              {{ excludedFields.size > 0 ? 'Include all' : 'Exclude additional' }}
+            </v-btn>
           </v-card-title>
           <v-card-text>
-            <table class="required-values-table">
-              <thead>
-                <tr>
-                  <th>Field</th>
-                  <th>Extracted Value</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="row in detectedValueRows"
-                  :key="row.key"
-                  :class="{ 'excluded-row': !row.included }"
-                >
-                  <td>{{ row.label }}</td>
-                  <td>{{ row.value }}</td>
-                  <td>
-                    <v-btn
-                      :color="row.included ? 'success' : 'grey'"
-                      size="small"
-                      variant="flat"
-                      @click="toggleFieldInclusion(row.key)"
-                    >
-                      {{ row.included ? 'Included' : 'Excluded' }}
-                    </v-btn>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="compact-fields-table">
+              <div
+                v-for="row in detectedValueRows"
+                :key="row.key"
+                class="compact-field-row"
+                :class="{ 'compact-field-row--excluded': !row.included }"
+              >
+                <label class="compact-checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="row.included"
+                    @change="toggleFieldInclusion(row.key)"
+                  />
+                </label>
+                <span class="compact-field-name">{{ row.label }}</span>
+                <span class="compact-field-value">{{ row.value }}</span>
+              </div>
+            </div>
+            <div class="compact-summary">
+              {{ detectedValueRows.filter(r => r.included).length }} of {{ detectedValueRows.length }} fields included
+            </div>
           </v-card-text>
         </v-card>
 
-        <!-- Excel Viewer with Full Dataset -->
         <v-card class="stats-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-microsoft-excel</v-icon> Dataset Viewer (Editable)
@@ -118,7 +114,6 @@
           </v-card-text>
         </v-card>
 
-        <!-- Cleaning Options -->
         <v-row>
           <v-col cols="12">
             <v-card class="stats-card">
@@ -156,12 +151,11 @@
           </v-col>
         </v-row>
 
-        <!-- Cleaned Dataset Preview using ExcelViewer -->
         <v-row v-if="results && results.cleanedData">
           <v-col cols="12">
             <v-card class="stats-card">
               <v-card-title class="card-title">
-                <v-icon class="title-icon">mdi-table-check</v-icon> Cleaned Data Preview
+                <v-icon class="title-icon">mdi-table-check</v-icon> Cleaned Data Preview (Source of Truth)
                 <v-spacer></v-spacer>
                 <v-chip color="green" size="small">Changes Applied</v-chip>
               </v-card-title>
@@ -195,7 +189,6 @@
           </v-col>
         </v-row>
 
-        <!-- Results Summary (fallback) -->
         <v-row v-if="results">
           <v-col cols="12">
             <v-card class="stats-card">
@@ -219,7 +212,6 @@
 
       </template>
 
-      <!-- No Data Message -->
       <v-card v-if="!dataset || !dataset.data" class="stats-card">
         <v-card-text class="text-center pa-8">
           <v-icon size="64" color="#999">mdi-database-off</v-icon>
@@ -245,7 +237,6 @@ import { markStepCompleted } from '@/utils/workflowProgress.js'
 const router = useRouter()
 const route = useRoute()
 
-// Data
 const dataset = ref(null)
 const originalDataset = ref(null)
 const uploadId = ref(null)
@@ -255,11 +246,9 @@ const showDatasetPreview = ref(false)
 const sheetNames = ref([])
 const selectedSheet = ref('')
 
-// Detected values (Required Values — Single Instrument)
 const detectedValues = ref({})
 const excludedFields = ref(new Set())
 
-// Cleaning options
 const cleaningOptions = ref([
   { key: 'removeDuplicates', label: 'Remove Duplicates', desc: 'Delete duplicate rows', value: true },
   { key: 'fillMissingValues', label: 'Fill Missing Values', desc: 'Replace empty values', value: true },
@@ -270,7 +259,6 @@ const cleaningOptions = ref([
   { key: 'standardizeCurrency', label: 'Standardize Currency', desc: 'Format currency values', value: false }
 ])
 
-// Date format options
 const dateFormatOptions = ref([
   { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
   { value: 'DD-MM-YYYY', label: 'DD-MM-YYYY' },
@@ -284,76 +272,109 @@ const dateFormatOptions = ref([
 const selectedDateFormat = ref('YYYY-MM-DD')
 
 const hasAnyOption = computed(() => cleaningOptions.value.some(o => o.value))
-
-// Required Values table
 const hasDetectedValues = computed(() => Object.keys(detectedValues.value).length > 0)
-
-const detectedValueRows = computed(() => {
-  return Object.entries(detectedValues.value).map(([key, value]) => ({
+const hasAdditionalFields = computed(() =>
+  detectedValueRows.value.some(r => !r.required)
+)
+const detectedValueRows = computed(() =>
+  Object.entries(detectedValues.value).map(([key, value]) => ({
     key,
     label: getFieldLabel(key),
     value: value === null || value === undefined || value === '' ? 'Not detected' : value,
-    included: !excludedFields.value.has(key)
+    included: !excludedFields.value.has(key),
+    required: isRequiredField(key)
   }))
-})
+)
+
+function isRequiredField(key) {
+  const norm = String(key).toLowerCase().replace(/[-_\s]/g, '')
+  const REQUIRED = ['principal', 'interestrate', 'daystomaturity', 'facevalue', 'discountrate', 'couponrate', 'yield', 'maturitydate', 'issuedate', 'frequency', 'instrumentname']
+  return REQUIRED.some(f => f.replace(/[-_\s]/g, '') === norm || norm.includes(f) || f.includes(norm))
+}
 
 function getFieldLabel(key) {
   const labels = {
-    principal: 'Principal',
-    interestRate: 'Interest Rate',
-    daysToMaturity: 'Days to Maturity',
-    issueDate: 'Issue Date',
-    maturityDate: 'Maturity Date',
-    faceValue: 'Face Value',
-    couponRate: 'Coupon Rate',
-    yield: 'Yield',
-    discountRate: 'Discount Rate',
-    frequency: 'Frequency',
-    couponFrequency: 'Coupon Frequency',
-    auctionDate: 'Auction Date',
-    instrumentName: 'Instrument Name',
-    purchasePrice: 'Purchase Price',
-    settlementDate: 'Settlement Date',
-    currency: 'Currency',
-    country: 'Country'
+    principal: 'Principal', interestRate: 'Interest Rate', daysToMaturity: 'Days to Maturity',
+    issueDate: 'Issue Date', maturityDate: 'Maturity Date', faceValue: 'Face Value',
+    couponRate: 'Coupon Rate', yield: 'Yield', discountRate: 'Discount Rate',
+    frequency: 'Frequency', couponFrequency: 'Coupon Frequency', auctionDate: 'Auction Date',
+    instrumentName: 'Instrument Name', purchasePrice: 'Purchase Price',
+    settlementDate: 'Settlement Date', currency: 'Currency', country: 'Country'
   }
   return labels[key] || key
 }
 
 function toggleFieldInclusion(key) {
   const next = new Set(excludedFields.value)
-  if (next.has(key)) {
-    next.delete(key)
-  } else {
-    next.add(key)
-  }
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
   excludedFields.value = next
+  persistExclusions()
+  if (results.value?.cleanedData) {
+    rebuildCleanedFromExclusions()
+  }
+}
+
+function toggleAllAdditional() {
+  const additional = new Set()
+  for (const row of detectedValueRows.value) {
+    if (!row.required) additional.add(row.key)
+  }
+  if (excludedFields.value.size > 0) {
+    excludedFields.value = new Set()
+  } else {
+    excludedFields.value = additional
+  }
+  persistExclusions()
+  if (results.value?.cleanedData) rebuildCleanedFromExclusions()
+}
+
+function persistExclusions() {
   try {
-    sessionStorage.setItem('excluded_fields', JSON.stringify([...next]))
+    sessionStorage.setItem('excluded_fields', JSON.stringify([...excludedFields.value]))
+  } catch (e) { /* ignore */ }
+  try {
+    const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
+    if (sid) {
+      sessionManager.getInstrumentWorkflow(sid, normalizeInstrumentType(dataset.value?.instrumentType))
+        .then(wf => {
+          if (wf) sessionManager.saveInstrumentWorkflow(sid, normalizeInstrumentType(dataset.value?.instrumentType), {
+            ...wf,
+            excludedDetectedFields: [...excludedFields.value]
+          })
+        })
+        .catch(() => {})
+    }
   } catch (e) { /* ignore */ }
 }
 
+function rebuildCleanedFromExclusions() {
+  const original = originalDataset.value?.data || dataset.value?.data || []
+  if (!original.length) return
+  const filtered = original.map(row => {
+    const newRow = {}
+    for (const [k, v] of Object.entries(row)) {
+      if (!excludedFields.value.has(k)) newRow[k] = v
+    }
+    return newRow
+  })
+  results.value.cleanedData = filtered
+  dataset.value.data = filtered
+}
+
 async function loadDetectedValues() {
-  // 1) Fast path: sessionStorage
   try {
     const stored =
       sessionStorage.getItem('detectedValues') ||
       sessionStorage.getItem('detected_values') ||
       sessionStorage.getItem('extracted_values')
-    if (stored) {
-      detectedValues.value = JSON.parse(stored)
-    }
+    if (stored) detectedValues.value = JSON.parse(stored)
     const storedExcluded = sessionStorage.getItem('excluded_fields')
-    if (storedExcluded) {
-      excludedFields.value = new Set(JSON.parse(storedExcluded))
-    }
-  } catch (e) {
-    detectedValues.value = {}
-  }
+    if (storedExcluded) excludedFields.value = new Set(JSON.parse(storedExcluded))
+  } catch (e) { detectedValues.value = {} }
 
   if (Object.keys(detectedValues.value).length) return
 
-  // 2) Slow path: read from the active session workflow
   try {
     const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
     if (!sid) return
@@ -372,12 +393,9 @@ async function loadDetectedValues() {
         return
       }
     }
-  } catch (e) {
-    console.warn('Failed to read detected values from session workflow:', e)
-  }
+  } catch (e) { console.warn('read from session workflow failed', e) }
 }
 
-// KPI Stats for Dataset Overview
 const kpiStats = computed(() => {
   if (!dataset.value?.data) return []
   return [
@@ -388,7 +406,6 @@ const kpiStats = computed(() => {
   ]
 })
 
-// ===== CLEANING RESULTS KPI STATS =====
 const resultStats = computed(() => {
   if (!results.value) return []
   return [
@@ -399,15 +416,12 @@ const resultStats = computed(() => {
   ]
 })
 
-// Load data from Upload page using dataset API
 async function loadData() {
   try {
     const datasetId = route.query.dataset_id
     if (!datasetId) return alert('No dataset selected. Load from Upload page first.')
-
     const res = await datasetAPI.load(datasetId)
     if (!res || !res.success) return alert('Failed to load dataset')
-
     const last = res.data
     dataset.value = {
       name: last.name,
@@ -421,7 +435,6 @@ async function loadData() {
     sheetNames.value = last.headers || ['Sheet1']
     selectedSheet.value = sheetNames.value[0]
     results.value = null
-    console.log(`CleaningView: loaded "${last.name}" (${dataset.value.data?.length || 0} rows)`)
     return
   } catch (err) {
     console.error(err)
@@ -429,84 +442,78 @@ async function loadData() {
   }
 }
 
-// Toggle dataset preview
-function toggleDatasetPreview() {
-  showDatasetPreview.value = !showDatasetPreview.value
-}
-
-// Reset options
+function toggleDatasetPreview() { showDatasetPreview.value = !showDatasetPreview.value }
 function resetOptions() {
   cleaningOptions.value.forEach(o => o.value = false)
   alert('Options reset')
 }
-
-// Clear results
 function clearResults() {
   results.value = null
   if (originalDataset.value) dataset.value = JSON.parse(JSON.stringify(originalDataset.value))
   alert('Results cleared')
 }
 
-// Delete dataset
 async function deleteData() {
   if (!uploadId.value) return alert('No dataset ID')
   if (!confirm('Delete permanently?')) return
   try {
     const res = await datasetAPI.delete(uploadId.value)
-    if (!res || res.success === false) {
-      alert('Failed to delete dataset: ' + (res?.message || 'Unknown error'))
-      return
-    }
+    if (!res || res.success === false) return alert('Failed to delete dataset: ' + (res?.message || 'Unknown error'))
     dataset.value = null
     originalDataset.value = null
     uploadId.value = null
     results.value = null
     alert('Dataset deleted')
-  } catch (err) {
-    console.error('Delete dataset error:', err)
-    alert('Error deleting dataset: ' + (err.message || err))
-  }
+  } catch (err) { console.error(err); alert('Error deleting dataset') }
 }
 
-// Handle cleaned data update
 function handleCleanedUpdate(newData) {
   if (results.value) {
     results.value.cleanedData = newData
     dataset.value.data = newData
+    const excludedNow = new Set(excludedFields.value)
+    const originalCols = Object.keys(originalDataset.value?.data?.[0] || {})
+    const currentCols = new Set(Object.keys(newData[0] || {}))
+    for (const col of originalCols) {
+      if (!currentCols.has(col)) excludedNow.add(col)
+    }
+    excludedFields.value = excludedNow
+    persistExclusions()
   }
 }
 
-// Handle data update from Excel viewer
 function handleDataUpdate(newData) {
-  if (dataset.value) {
-    dataset.value.data = newData
-  }
+  if (dataset.value) dataset.value.data = newData
 }
 
-// Start cleaning
 async function startCleaning() {
   if (!dataset.value?.data) return alert('No data to clean')
-
   isCleaning.value = true
   try {
     const options = {}
     cleaningOptions.value.forEach(opt => { if (opt.value) options[opt.key] = true })
-
-    if (options.formatDates) {
-      options.dateFormat = selectedDateFormat.value
-    }
+    if (options.formatDates) options.dateFormat = selectedDateFormat.value
 
     const response = await dataAPI.clean(dataset.value.data, options)
-
     if (response.success) {
+      let cleaned = response.data
+      if (excludedFields.value.size > 0) {
+        cleaned = cleaned.map(row => {
+          const newRow = {}
+          for (const [k, v] of Object.entries(row)) {
+            if (!excludedFields.value.has(k)) newRow[k] = v
+          }
+          return newRow
+        })
+      }
       results.value = {
         originalRows: dataset.value.data.length,
-        cleanedRows: response.data.length,
+        cleanedRows: cleaned.length,
         duplicatesRemoved: response.stats?.duplicates_removed || 0,
         missingValuesFilled: response.stats?.missing_values_filled || 0,
-        cleanedData: response.data
+        cleanedData: cleaned
       }
-      dataset.value.data = response.data
+      dataset.value.data = cleaned
       alert(`Cleaning completed! ${results.value.cleanedRows} rows remaining`)
     } else {
       alert('Cleaning failed')
@@ -519,43 +526,24 @@ async function startCleaning() {
   }
 }
 
-// Complete process
 async function completeProcess() {
   if (!dataset.value || !results.value) return alert('No results to save')
   try {
     const name = dataset.value.name || `cleaned_${Date.now()}`
-    const payload = {
-      name,
-      file_base64: dataset.value.file_base64 || '',
-      sheet_names: sheetNames.value || [],
-      upload_id: uploadId.value || null,
-      data: dataset.value.data || [],
-      headers: sheetNames.value || [],
-      instrument_type: dataset.value.instrumentType || null
-    }
     const res = await datasetAPI.save(
-      payload.name,
-      payload.file_base64,
-      payload.sheet_names,
-      payload.upload_id,
-      payload.data,
-      payload.headers
+      name,
+      dataset.value.file_base64 || '',
+      sheetNames.value || [],
+      uploadId.value || null,
+      dataset.value.data || [],
+      sheetNames.value || [],
+      dataset.value.instrumentType || null
     )
-    if (res && res.success) {
-      alert('Process completed! Cleaned data saved to datasets')
-    } else {
-      alert('Failed to save cleaned data')
-    }
-  } catch (err) {
-    console.error(err)
-    alert('Failed to save cleaned data')
-  }
+    if (res && res.success) alert('Process completed! Cleaned data saved to datasets')
+    else alert('Failed to save cleaned data')
+  } catch (err) { console.error(err); alert('Failed to save cleaned data') }
 }
 
-// ─────────────────────────────────────────────────────────────
-// ADDED — normalize raw instrument_type strings (from the dataset
-// row) to the workflow's canonical keys used everywhere else.
-// ─────────────────────────────────────────────────────────────
 function normalizeInstrumentType(raw) {
   if (!raw) return 'money-market'
   const s = String(raw).toLowerCase().trim().replace(/[_\s]+/g, '-')
@@ -565,25 +553,11 @@ function normalizeInstrumentType(raw) {
   return 'money-market'
 }
 
-// Go to calculations
-// FIXED (Prompt 5): the previous version only marked the step complete
-// and navigated — it never wrote the cleaned data anywhere the
-// Calculations page (InstrumentView) reads from. InstrumentView reads
-// ui_sessions.instrument_workflows[type].cleanedData, so we now
-// persist the cleaned snapshot there before navigating. Stale
-// calculation results are cleared because they were computed against
-// the previous cleaned data. Archived snapshots (completedInstrumentSummary,
-// completedPortfolioSummary) are preserved so past reports still work.
 async function goToCalculations() {
   if (!results.value) return alert('Please clean data first')
   const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
-  if (!sid) {
-    alert('No active session. Open Dashboard first.')
-    return
-  }
+  if (!sid) return alert('No active session. Open Dashboard first.')
 
-  // Resolve the correct instrument type from the dataset record —
-  // not from localStorage, which may point at a different instrument.
   const rawType = dataset.value?.instrumentType
   const normalizedType = normalizeInstrumentType(rawType)
 
@@ -597,15 +571,14 @@ async function goToCalculations() {
       rawData: dataset.value.data,
       instrumentType: normalizedType,
       sheetType: 'multi',
-      // Stale results — computed against previous cleaned data.
       calculations: {},
       allCalculations: {},
       selectedCalculations: {},
       instrumentSummary: { columns: [], rows: [] },
       portfolioSummary: { columns: [], rows: [] },
-      // Archived snapshots preserved.
       completedInstrumentSummary: wf.completedInstrumentSummary || { columns: [], rows: [] },
       completedPortfolioSummary: wf.completedPortfolioSummary || { columns: [], rows: [] },
+      excludedDetectedFields: [...excludedFields.value],
       last_tab: 'calculations',
       sessionSavedAt: new Date().toISOString()
     })
@@ -624,9 +597,7 @@ async function goToCalculations() {
 
 onMounted(() => {
   loadDetectedValues()
-  if (route.query.dataset_id) {
-    loadData()
-  }
+  if (route.query.dataset_id) loadData()
 })
 </script>
 
@@ -661,11 +632,40 @@ onMounted(() => {
 .result-item span:first-child { color: #666; font-weight: 500; }
 .result-item span:last-child { color: #0B2A44; font-weight: 700; }
 .result-actions { display: flex; gap: 12px; margin-top: 20px; }
-.required-values-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.required-values-table th { text-align: left; padding: 10px 12px; background: rgba(11,42,68,0.05); color: #0B2A44; font-weight: 600; border-bottom: 2px solid #0B2A44; }
-.required-values-table td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; color: #333; }
-.required-values-table .excluded-row { opacity: 0.5; text-decoration: line-through; }
-.required-values-table .excluded-row td { color: #999; }
+
+.compact-fields-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+}
+.compact-field-row {
+  display: grid;
+  grid-template-columns: 26px 1fr 1.4fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background 0.15s;
+}
+.compact-field-row:last-child { border-bottom: none; }
+.compact-field-row:hover { background: #f8f9ff; }
+.compact-field-row--excluded { background: #fff4f4; opacity: 0.65; }
+.compact-field-row--excluded .compact-field-name,
+.compact-field-row--excluded .compact-field-value {
+  text-decoration: line-through;
+  color: #999;
+}
+.compact-checkbox input { width: 15px; height: 15px; cursor: pointer; accent-color: #0B2044; }
+.compact-field-name { font-weight: 600; color: #0B2044; font-size: 12px; }
+.compact-field-value { font-family: 'Courier New', monospace; color: #2e7d32; font-size: 12px; font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compact-summary { font-size: 12px; color: #666; padding: 6px 12px; background: #f0f4ff; border-radius: 6px; }
+
 @media (max-width: 600px) {
   .cleaning-view { padding: 0 16px; }
   .action-buttons { flex-direction: column; }

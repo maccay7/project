@@ -258,12 +258,12 @@ const props = defineProps({
   fileName: { type: String, default: '' },
   instrumentType: { type: String, default: 'money-market' },
   worksheetStatuses: { type: Object, default: () => ({}) },
-  datasetId: { type: [String, Number], default: null }
+  datasetId: { type: [String, Number], default: null },
+  detectingFromParent: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'workbook-loaded', 'detect-start', 'detect-end'])
 
-// ── View mode toggle ──
 const viewMode = ref('grid')
 const renderUrl = computed(() => {
   if (!props.datasetId) return ''
@@ -307,6 +307,14 @@ async function checkRender() {
 watch(viewMode, (v) => {
   if (v === 'excel') checkRender()
 }, { immediate: true })
+
+// FIX: reset the local detection flag whenever the parent finishes
+// its multi-table detection loop. Previously the flag was set to
+// true and never cleared, so the blue Auto Detect button became
+// permanently disabled after the first click.
+watch(() => props.detectingFromParent, (val) => {
+  if (!val) isDetecting.value = false
+})
 
 const sheets = ref([])
 const activeSheetIndex = ref(0)
@@ -1285,6 +1293,10 @@ function autoDetectSelectedTables() {
     }
   }
 
+  // Note: do NOT reset isDetecting.value = false here.
+  // The parent (InstrumentView) will flip detectingFromParent
+  // back to false once its detection loop completes, and the
+  // watcher in this file clears the flag.
   emit('multi-table-detect', {
     sheetName: activeSheet.value.name,
     tables: selectedTableData,
@@ -1371,32 +1383,101 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
     console.log(`ExcelWorkbookViewer: parse finished in ${(performance.now() - t0).toFixed(0)}ms, ${workbook.worksheets.length} sheet(s)`)
 
     const loadedSheets = []
+    
+    const MAX_ROWS = 2000
+    const MAX_COLS = 100
+
+    // --- STYLE FIX: Extract real theme colors from workbook ---
+    const defaultThemeColors = [
+      '#FFFFFF', '#000000', '#E7E6E6', '#44546A',
+      '#4472C4', '#ED7D31', '#A5A5A5', '#FFC000',
+      '#5B9BD5', '#70AD47', '#0563C1', '#954F72'
+    ];
+    let workbookThemeColors = defaultThemeColors;
+    if (workbook.model && workbook.model.theme && workbook.model.theme.colors) {
+      workbookThemeColors = workbook.model.theme.colors;
+      while (workbookThemeColors.length < 12) {
+        workbookThemeColors.push(defaultThemeColors[workbookThemeColors.length]);
+      }
+    }
+
+    const indexedColors = {
+      0: '#000000', 1: '#FFFFFF', 2: '#FF0000', 3: '#00FF00',
+      4: '#0000FF', 5: '#FFFF00', 6: '#FF00FF', 7: '#00FFFF',
+      8: '#000000', 9: '#FFFFFF', 10: '#FF0000', 11: '#00FF00',
+      12: '#0000FF', 13: '#FFFF00', 14: '#FF00FF', 15: '#00FFFF',
+      16: '#800000', 17: '#008000', 18: '#000080', 19: '#808000',
+      20: '#800080', 21: '#008080', 22: '#C0C0C0', 23: '#808080',
+      24: '#9999FF', 25: '#993366', 26: '#FFFFCC', 27: '#CCFFFF',
+      28: '#660066', 29: '#FF8080', 30: '#0066CC', 31: '#CCCCFF',
+      32: '#000080', 33: '#FF00FF', 34: '#FFFF00', 35: '#00FFFF',
+      36: '#800080', 37: '#800000', 38: '#008080', 39: '#0000FF',
+      40: '#00CCFF', 41: '#CCFFFF', 42: '#CCFFCC', 43: '#FFFF99',
+      44: '#99CCFF', 45: '#FF99CC', 46: '#CC99FF', 47: '#FFCC99',
+      48: '#3366FF', 49: '#33CCCC', 50: '#99CC00', 51: '#FFCC00',
+      52: '#FF9900', 53: '#FF6600', 54: '#666699', 55: '#969696',
+      56: '#003366', 57: '#339966', 58: '#003300', 59: '#333300',
+      60: '#993300', 61: '#993366', 62: '#333399', 63: '#333333',
+      64: 'transparent'
+    };
+
+    function applyTint(hex, tint) {
+      if (!tint || tint === 0) return hex;
+      let r = parseInt(hex.slice(1, 3), 16);
+      let g = parseInt(hex.slice(3, 5), 16);
+      let b = parseInt(hex.slice(5, 7), 16);
+      
+      if (tint < 0) {
+        const factor = 1 + tint;
+        r = Math.round(r * factor);
+        g = Math.round(g * factor);
+        b = Math.round(b * factor);
+      } else {
+        r = Math.round(r + (255 - r) * tint);
+        g = Math.round(g + (255 - g) * tint);
+        b = Math.round(b + (255 - b) * tint);
+      }
+      
+      return '#' + [r, g, b].map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
+    }
+
+    const getColorHex = (colorObj) => {
+      if (!colorObj) return null;
+      
+      let baseHex = null;
+      
+      if (colorObj.argb) {
+        const argb = colorObj.argb;
+        if (argb === '00000000') return null; // Transparent
+        baseHex = '#' + argb.slice(-6);
+      } else if (colorObj.indexed !== undefined) {
+        if (colorObj.indexed === 64) return null; // System background
+        baseHex = indexedColors[colorObj.indexed];
+        if (baseHex === 'transparent') return null;
+      } else if (colorObj.theme !== undefined) {
+        baseHex = workbookThemeColors[colorObj.theme] || null;
+      }
+      
+      if (baseHex && colorObj.tint) {
+        baseHex = applyTint(baseHex, colorObj.tint);
+      }
+      
+      return baseHex;
+    };
 
     workbook.eachSheet((worksheet) => {
-      const HARD_ROW_LIMIT = 5000
-      const HARD_COL_LIMIT = 100
-      
       let maxRow = 0
       let maxCol = 0
       
-      // 1. Find the TRUE visual range (values + styles) up to the hard cap
-      for (let r = 1; r <= HARD_ROW_LIMIT; r++) {
-        const row = worksheet.getRow(r)
-        for (let c = 1; c <= HARD_COL_LIMIT; c++) {
-          const cell = row.getCell(c)
-          if (!cell) continue
-          
-          const hasValue = cell.value !== null && cell.value !== undefined && cell.value !== ''
-          const hasFill = cell.fill && cell.fill.type === 'pattern' && cell.fill.fgColor && cell.fill.fgColor.argb && cell.fill.fgColor.argb !== 'FFFFFFFF'
-          const hasBorder = cell.border && (cell.border.top || cell.border.bottom || cell.border.left || cell.border.right)
-          const hasFont = cell.font && (cell.font.bold || cell.font.italic || (cell.font.color && cell.font.color.argb && cell.font.color.argb !== 'FF000000'))
-          
-          if (hasValue || hasFill || hasBorder || hasFont) {
-            if (r > maxRow) maxRow = r
-            if (c > maxCol) maxCol = c
-          }
-        }
-      }
+      // 1. Find bounds quickly using eachRow (stops at MAX_ROWS)
+      worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+        if (rowNumber > MAX_ROWS) return false;
+        if (rowNumber > maxRow) maxRow = rowNumber;
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          if (colNumber > MAX_COLS) return;
+          if (colNumber > maxCol) maxCol = colNumber;
+        })
+      })
 
       if (maxRow === 0 || maxCol === 0) {
         loadedSheets.push({
@@ -1408,22 +1489,19 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
       const fullData = []
       const styleMap = new Map()
 
-      // Initialize grid
       for (let r = 0; r < maxRow; r++) {
         fullData.push(new Array(maxCol).fill(''))
       }
 
-      // 2. Parse Cells (Values + Styles) based on the bounded range
-      for (let r = 1; r <= maxRow; r++) {
-        const row = worksheet.getRow(r)
-        for (let c = 1; c <= maxCol; c++) {
-          const cell = row.getCell(c)
-          if (!cell) continue
-          
-          const rIdx = r - 1
-          const cIdx = c - 1
+      // 2. Parse cells directly
+      worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+        if (rowNumber > maxRow) return;
+        const rIdx = rowNumber - 1;
+        
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          if (colNumber > maxCol) return;
+          const cIdx = colNumber - 1;
 
-          // Extract Value
           let val = cell.value
           if (val && typeof val === 'object') {
             if (val.text) val = val.text
@@ -1433,21 +1511,21 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
           }
           fullData[rIdx][cIdx] = val !== null && val !== undefined ? val : ''
 
-          // Extract Style
           const style = {}
           if (cell.font) {
             if (cell.font.bold) style.fontWeight = '700'
-            if (cell.font.color && cell.font.color.argb) style.color = '#' + cell.font.color.argb.slice(-6)
+            const fontColor = getColorHex(cell.font.color);
+            if (fontColor) style.color = fontColor;
             if (cell.font.size) style.fontSize = cell.font.size + 'px'
             if (cell.font.name) style.fontFamily = cell.font.name
             if (cell.font.italic) style.fontStyle = 'italic'
           }
-          if (cell.fill && cell.fill.type === 'pattern' && cell.fill.fgColor) {
-            let rgb = cell.fill.fgColor.argb
-            if (rgb && rgb !== 'FF000000' && rgb !== '00000000') {
-              style.backgroundColor = '#' + rgb.slice(-6)
-            }
+          
+          if (cell.fill && cell.fill.type === 'pattern') {
+            const fillColor = getColorHex(cell.fill.fgColor);
+            if (fillColor) style.backgroundColor = fillColor;
           }
+          
           if (cell.alignment) {
             if (cell.alignment.horizontal) style.textAlign = cell.alignment.horizontal
             if (cell.alignment.vertical) style.alignItems = cell.alignment.vertical === 'middle' ? 'center' : cell.alignment.vertical
@@ -1456,32 +1534,30 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
 
           const borderCss = (edge) => {
             if (!edge) return null
-            const styleMapBorders = { 1: 'thin', 2: 'medium', 3: 'thick', 4: 'dashed', 5: 'dotted', 6: 'double', 7: 'hair' }
-            const st = styleMapBorders[edge.style] || 'solid'
-            const w = (edge.style === 2 || edge.style === 3 || edge.style === 6) ? '2px' : '1px'
-            const color = edge.color && edge.color.argb ? '#' + edge.color.argb.slice(-6) : '#d4d4d4'
+            const st = typeof edge.style === 'string' ? edge.style : (['thin', 'medium', 'thick', 'dashed', 'dotted', 'double', 'hair'][edge.style - 1] || 'thin')
+            const w = (st === 'medium' || st === 'thick' || st === 'double') ? '2px' : '1px'
+            const color = getColorHex(edge.color) || '#d4d4d4'
             return `${w} ${st} ${color}`
           }
 
           const t = borderCss(cell.border?.top);    if (t) style.borderTop = t
           const b = borderCss(cell.border?.bottom); if (b) style.borderBottom = b
           const l = borderCss(cell.border?.left);   if (l) style.borderLeft = l
-          const rr = borderCss(cell.border?.right);  if (rr) style.borderRight = rr
+          const r = borderCss(cell.border?.right);  if (r) style.borderRight = r
 
           if (Object.keys(style).length > 0) {
             styleMap.set(`${rIdx}:${cIdx}`, style)
           }
-        }
-      }
+        })
+      })
 
-      // 3. Parse Merges
       const mergedRanges = []
       if (worksheet.model && worksheet.model.merges) {
         worksheet.model.merges.forEach((mergeStr) => {
           const [start, end] = mergeStr.split(':')
           const startCell = worksheet.getCell(start)
           const endCell = worksheet.getCell(end)
-          
+
           mergedRanges.push({
             min_row: Math.max(0, startCell.row - 1),
             max_row: Math.min(maxRow - 1, endCell.row - 1),
@@ -1491,14 +1567,13 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
         })
       }
 
-      // 4. Dimensions
       const sheetColWidths = {}
       worksheet.columns.forEach((col, idx) => {
         if (idx < maxCol && col.width) {
           sheetColWidths[idx] = Math.round(col.width * 7 + 5)
         }
       })
-      
+
       const sheetRowHeights = {}
       worksheet.eachRow({ includeEmpty: false }, (row, idx) => {
         const rIdx = idx - 1
@@ -1507,7 +1582,6 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
         }
       })
 
-      // 5. jsonData for Auto Detect
       const jsonData = []
       if (fullData.length > 0) {
         const headerRow = fullData[0].map((h, i) => h === '' || h === null ? `Column${i + 1}` : String(h))
@@ -1540,7 +1614,7 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
     activeSheetIndex.value = 0
     console.log(`ExcelWorkbookViewer: parse DONE in ${(performance.now() - t0).toFixed(0)}ms — ${loadedSheets.length} sheet(s)`)
     emit('workbook-loaded', props.fileName)
-    
+
     nextTick(() => {
       if (loadedSheets.length > 0) {
         emit('sheet-selected', loadedSheets[0].name)

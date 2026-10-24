@@ -350,6 +350,12 @@ export default {
         }
       }
 
+      // FIX: If clicking the already selected cell, start editing immediately (like Excel)
+      if (selectedCell.value && selectedCell.value.row === rowIndex && selectedCell.value.col === colIndex) {
+        startEditing(rowIndex, colIndex)
+        return
+      }
+
       if (clickTimer) {
         clearTimeout(clickTimer)
         clickTimer = null
@@ -392,10 +398,12 @@ export default {
       editingCell.value = { row, col }
       editValue.value = val !== undefined ? val : ''
       nextTick(() => {
-        const el = Array.isArray(editInput.value) ? editInput.value[0] : editInput.value
-        if (el && typeof el.focus === 'function') {
-          el.focus()
-          el.select()
+        // FIX: Use querySelector to reliably find the active input element 
+        // instead of relying on a ref inside a v-for loop.
+        const inputEl = document.querySelector('.editing-cell input')
+        if (inputEl) {
+          inputEl.focus()
+          inputEl.select()
         }
       })
     }
@@ -455,6 +463,15 @@ export default {
       const tag = (event.target?.tagName || '').toLowerCase()
       if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return
       const { row, col } = selectedCell.value
+      
+      // FIX: Start editing when a printable character is typed
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        startEditing(row, col)
+        editValue.value = event.key
+        event.preventDefault()
+        return
+      }
+
       let newRow = row, newCol = col
       let handled = true
       switch (event.key) {

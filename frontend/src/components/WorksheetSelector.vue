@@ -66,7 +66,6 @@
           Work on Sheet
         </button>
         <button
-          v-if="worksheetStatus[sheet.name] !== 'completed'"
           class="btn-auto-detect-sheet"
           @click.stop="autoDetectSheet(sheet.name)"
           :disabled="worksheetStatus[sheet.name] === 'in_progress' || isDetecting"
@@ -76,7 +75,7 @@
           Auto Detect
         </button>
         <button
-          v-else
+          v-if="worksheetStatus[sheet.name] === 'completed'"
           class="btn-view-results"
           @click.stop="viewResults(sheet.name)"
         >
