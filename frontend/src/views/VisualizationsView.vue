@@ -1,7 +1,6 @@
 <template>
   <fixed-layout>
     <div class="visualizations-view">
-
       <div class="page-header">
         <h1>Data Visualizations</h1>
         <p>Visualize your financial calculations with interactive charts</p>
@@ -17,7 +16,6 @@
       </div>
 
       <template v-if="hasData">
-
         <v-card class="stats-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-chart-line</v-icon> Calculation Overview
@@ -47,6 +45,13 @@
         <v-card class="chart-card">
           <v-card-title class="card-title">
             <v-icon class="title-icon">mdi-chart-line</v-icon> Yield Curve (FRED API)
+            <v-spacer></v-spacer>
+            <v-chip v-if="selectedInstrumentHasSavedCurve" color="success" size="small">
+              Saved for {{ displayInstrumentLabel }}
+            </v-chip>
+            <v-chip v-else color="warning" size="small">
+              Not yet saved for {{ displayInstrumentLabel }}
+            </v-chip>
           </v-card-title>
           <v-card-text>
             <v-row class="mb-3">
@@ -56,7 +61,7 @@
                   :items="instrumentOptions"
                   label="Instrument"
                   density="compact"
-                  @update:model-value="loadYieldCurve"
+                  @update:model-value="onFilterChange"
                 />
               </v-col>
               <v-col cols="12" md="3">
@@ -67,7 +72,7 @@
                   item-value="code"
                   label="Country / region"
                   density="compact"
-                  @update:model-value="() => { onCountryChange(); loadYieldCurve() }"
+                  @update:model-value="() => { onCountryChange(); onFilterChange() }"
                 />
               </v-col>
               <v-col cols="12" md="3">
@@ -78,7 +83,7 @@
                   item-value="code"
                   label="Currency"
                   density="compact"
-                  @update:model-value="loadYieldCurve"
+                  @update:model-value="onFilterChange"
                 />
               </v-col>
               <v-col cols="12" md="3">
@@ -108,7 +113,7 @@
                   item-value="code"
                   label="Benchmark maturity"
                   density="compact"
-                  @update:model-value="loadYieldCurve"
+                  @update:model-value="onFilterChange"
                 />
               </v-col>
             </v-row>
@@ -120,7 +125,7 @@
                   type="date"
                   label="From Date"
                   density="compact"
-                  @update:model-value="loadYieldCurve"
+                  @update:model-value="onFilterChange"
                 />
               </v-col>
               <v-col cols="12" md="4">
@@ -129,51 +134,16 @@
                   type="date"
                   label="To Date"
                   density="compact"
-                  @update:model-value="loadYieldCurve"
+                  @update:model-value="onFilterChange"
                 />
               </v-col>
             </v-row>
             <p v-if="dateRangeError" class="date-error mb-2">{{ dateRangeError }}</p>
-
             <p class="fred-note mb-2">
-              Market data from FRED — {{ fredFilters.country }} ({{ fredFilters.currency }}). Non-US countries use government bond yields available on FRED.
+              Market data from FRED — {{ fredFilters.country }} ({{ fredFilters.currency }}).
             </p>
             <v-alert v-if="yieldLoading" type="info" density="compact" class="mb-3">Loading Yield Curve...</v-alert>
             <v-alert v-if="yieldError" type="error" density="compact" class="mb-3">{{ yieldError }}</v-alert>
-            <v-row v-if="yieldAnalytics && !yieldLoading" class="mb-3">
-              <v-col cols="12" sm="6" md="3">
-                <v-card class="analytics-card">
-                  <v-card-text class="text-center">
-                    <div class="analytics-label">Latest Yield</div>
-                    <div class="analytics-value">{{ yieldAnalytics.latest_yield }}%</div>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-              <v-col cols="12" sm="6" md="3">
-                <v-card class="analytics-card">
-                  <v-card-text class="text-center">
-                    <div class="analytics-label">Highest Yield</div>
-                    <div class="analytics-value">{{ yieldAnalytics.highest_yield }}%</div>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-              <v-col cols="12" sm="6" md="3">
-                <v-card class="analytics-card">
-                  <v-card-text class="text-center">
-                    <div class="analytics-label">Lowest Yield</div>
-                    <div class="analytics-value">{{ yieldAnalytics.lowest_yield }}%</div>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-              <v-col cols="12" sm="6" md="3">
-                <v-card class="analytics-card">
-                  <v-card-text class="text-center">
-                    <div class="analytics-label">Average Yield</div>
-                    <div class="analytics-value">{{ yieldAnalytics.average_yield }}%</div>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-            </v-row>
             <div class="chart-container">
               <canvas ref="yieldCanvas"></canvas>
             </div>
@@ -197,6 +167,9 @@
             <v-btn color="#0B2A44" size="large" @click="goToReports">
               Proceed to Reports <v-icon right>mdi-arrow-right</v-icon>
             </v-btn>
+            <p style="font-size:12px;color:#666;margin-top:8px;">
+              The report will use the curve currently saved for each instrument.
+            </p>
           </v-card-text>
         </v-card>
       </template>
@@ -209,13 +182,12 @@
           <v-btn color="#0B2A44" @click="loadData">Load Data</v-btn>
         </v-card-text>
       </v-card>
-
     </div>
   </fixed-layout>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import api from '@/services/api.js'
@@ -243,7 +215,31 @@ const instrumentOptions = [
   { title: 'Money Market', value: 'money_market' }
 ]
 
-const yieldAnalytics = ref(null)
+const savedCurvePresence = ref({ 'money-market': false, bonds: false, tbills: false })
+
+const selectedInstrumentHasSavedCurve = computed(() => {
+  const keys = workflowKeysFor(selectedInstrument.value)
+  return keys.length > 0 && keys.every(k => savedCurvePresence.value[k])
+})
+
+const displayInstrumentLabel = computed(() => {
+  const keys = workflowKeysFor(selectedInstrument.value)
+  return keys.map(k => k === 'tbills' ? 'T-Bills' : k === 'bonds' ? 'Bonds' : 'Money Market').join(' + ')
+})
+
+function workflowKeysFor(instrumentKey) {
+  const s = String(instrumentKey || '').toLowerCase().replace(/[_\s]+/g, '-')
+  if (s === 'all') return ['money-market', 'bonds', 'tbills']
+  if (s === 'tbills' || s === 't-bills' || s === 'tbill' || s === 'treasury-bills'
+      || s === 'treasurybills' || s === 'treasury-bill' || s === 'tbo') {
+    return ['tbills']
+  }
+  if (s === 'bonds' || s === 'bond') return ['bonds']
+  if (s === 'money-market' || s === 'moneymarket' || s === 'mm' || s === 'money') {
+    return ['money-market']
+  }
+  return []
+}
 
 const { fredFilters, countryItems, currencyItems, maturityItems, loadFilterOptions, onCountryChange } = useFredMarket('1Y')
 
@@ -268,6 +264,68 @@ const dateRangeError = computed(() => {
   if (fromDate && toDate && fromDate > toDate) return 'From date must be on or before To date.'
   return ''
 })
+
+function extractYieldPoints(apiData, isDateMode = false) {
+  if (!apiData) return []
+  const out = []
+  
+  if (apiData.datasets?.[0]?.data?.length) {
+    for (const pt of apiData.datasets[0].data) {
+      const rate = parseFloat(pt.y ?? pt.rate)
+      if (isNaN(rate) || rate === 0) continue
+      const rawX = pt.x
+      const isDate = typeof rawX === 'string' || (typeof rawX === 'number' && rawX > 9999999999)
+      if (isDate) {
+        const d = pt.date || (typeof rawX === 'string' ? rawX : new Date(rawX).toISOString().slice(0, 10))
+        out.push({ x: new Date(d).getTime(), y: rate, maturityLabel: d, rate, date: d, isDate: true })
+      } else {
+        const mat = parseFloat(rawX)
+        if (isNaN(mat)) continue
+        out.push({
+          x: mat, y: rate,
+          maturity: mat,
+          maturityLabel: pt.label || String(mat),
+          rate,
+          date: pt.date || null,
+          isDate: false
+        })
+      }
+    }
+    return out
+  }
+  
+  if (Array.isArray(apiData.maturities) && Array.isArray(apiData.rates)) {
+    apiData.maturities.forEach((m, i) => {
+      const rate = parseFloat(apiData.rates[i])
+      if (isNaN(rate) || rate === 0) return
+      const dateStr = apiData.dates?.[i] || null
+      
+      if (isDateMode && dateStr) {
+        const ts = new Date(dateStr).getTime()
+        out.push({
+          x: ts, y: rate,
+          maturity: null,
+          maturityLabel: dateStr,
+          rate,
+          date: dateStr,
+          isDate: true
+        })
+      } else {
+        const mat = parseFloat(m) || 1.0
+        out.push({
+          x: mat, y: rate,
+          maturity: mat,
+          maturityLabel: apiData.labels?.[i] || String(m),
+          rate,
+          date: dateStr,
+          isDate: false
+        })
+      }
+    })
+    return out
+  }
+  return out
+}
 
 async function loadData() {
   try {
@@ -294,9 +352,14 @@ async function loadData() {
     kpiStats.value[2].value = (calcData.value.fred?.benchmark_rate ?? getAvgYield(calculations)) + '%'
     if (calcData.value.fred?.maturity) fredFilters.value.maturity = calcData.value.fred.maturity
 
+    await refreshSavedCurvePresence()
+
+    // If session already has a curve for the current instrument, restore the
+    // filters that produced it — so the chart matches what the report will show.
+    await restoreFiltersFromSession()
+
     await loadYieldCurve()
     await loadComparisonChart()
-    console.log(`Loaded ${calculations.length} records`)
   } catch (err) {
     console.error(err)
     alert('Error loading data')
@@ -316,13 +379,50 @@ function clearData() {
     calcData.value = null
     if (yieldChart) { yieldChart.destroy(); yieldChart = null }
     if (compareChart) { compareChart.destroy(); compareChart = null }
-    alert('Data cleared')
   }
 }
 
 function setMaturityMode(mode) {
   fredFilters.value.maturityMode = mode
+  onFilterChange()
+}
+
+function onFilterChange() {
   loadYieldCurve()
+}
+
+async function refreshSavedCurvePresence() {
+  const sid = sessionManager.getActiveSessionId()
+  if (!sid) return
+  for (const key of ['money-market', 'bonds', 'tbills']) {
+    try {
+      const wf = await sessionManager.getInstrumentWorkflow(sid, key)
+      savedCurvePresence.value[key] = !!(wf?.yieldCurveData && wf.yieldCurveData.length >= 2)
+    } catch {
+      savedCurvePresence.value[key] = false
+    }
+  }
+}
+
+async function restoreFiltersFromSession() {
+  const sid = sessionManager.getActiveSessionId()
+  if (!sid) return
+  const keys = workflowKeysFor(selectedInstrument.value)
+  for (const key of keys) {
+    try {
+      const wf = await sessionManager.getInstrumentWorkflow(sid, key)
+      const f = wf?.fredFilters
+      if (f && f.country) {
+        if (f.country) fredFilters.value.country = f.country
+        if (f.currency) fredFilters.value.currency = f.currency
+        if (f.maturity) fredFilters.value.maturity = f.maturity
+        if (f.maturityMode) fredFilters.value.maturityMode = f.maturityMode
+        if (f.fromDate) fredFilters.value.fromDate = f.fromDate
+        if (f.toDate) fredFilters.value.toDate = f.toDate
+        return
+      }
+    } catch { /* keep defaults */ }
+  }
 }
 
 function chartDatasets(payload) {
@@ -333,12 +433,8 @@ function chartDatasets(payload) {
         chartData = d.data
       } else {
         const maturities = d.maturities || payload.labels || []
-        chartData = d.data.map((val, idx) => ({
-          x: maturities[idx] || idx,
-          y: val
-        }))
+        chartData = d.data.map((val, idx) => ({ x: maturities[idx] || idx, y: val }))
       }
-
       return {
         label: d.label,
         data: chartData,
@@ -375,9 +471,10 @@ async function loadYieldCurve() {
       const cached = yieldCurveCache.value.get(cacheKey)
       if (Date.now() - cached.timestamp < 300000) {
         yieldData.value = cached.data
-        yieldAnalytics.value = cached.analytics
         await nextTick()
         renderYieldChart()
+        await persistYieldCurveToSession(cached.data)
+        await refreshSavedCurvePresence()
         return
       }
     }
@@ -389,63 +486,71 @@ async function loadYieldCurve() {
     const params = {
       instrument_type: selectedInstrument.value,
       country: fredFilters.value.country,
-      currency: fredFilters.value.currency
+      currency: fredFilters.value.currency,
+      maturity: fredFilters.value.maturity // Always send maturity
     }
     if (fredFilters.value.maturityMode === 'date') {
       params.from_date = fredFilters.value.fromDate
       params.to_date = fredFilters.value.toDate
-    } else {
-      params.maturity = fredFilters.value.maturity
     }
 
-    console.log('VisualizationsView: Fetching yield curve with params:', params)
     const res = await api.fredAPI.getYieldCurve(params)
 
-    if (res?.success && res.data?.datasets?.length) {
+    if (res?.success && (res.data?.datasets?.length || res.data?.maturities?.length)) {
       yieldData.value = res.data
-      yieldAnalytics.value = res.data.analytics || null
       yieldCurveCache.value.set(cacheKey, {
         data: res.data,
-        analytics: res.data.analytics || null,
         timestamp: Date.now()
       })
-
-      const session = sessionManager.getActiveSession()
-      const sid = session?.id || sessionManager.getActiveSessionId()
-      if (sid) {
-        const workflow = await sessionManager.getInstrumentWorkflow(sid, selectedInstrument.value)
-        if (workflow) {
-          const yieldCurvePoints = []
-          if (res.data.datasets[0]?.data) {
-            res.data.datasets[0].data.forEach(pt => {
-              yieldCurvePoints.push({ maturity: pt.x, rate: pt.y, date: pt.date })
-            })
-          }
-
-          // FIXED: updateInstrumentWorkflow does not exist; saveInstrumentWorkflow
-          // is the correct method. Previous call was inside try/catch and threw
-          // silently, so yield curve data was never persisted.
-          await sessionManager.saveInstrumentWorkflow(sid, selectedInstrument.value, {
-            ...workflow,
-            fredFilters: { ...fredFilters.value },
-            yieldCurveData: yieldCurvePoints
-          })
-        }
-      }
+      await persistYieldCurveToSession(res.data)
+      await refreshSavedCurvePresence()
     } else {
       yieldError.value = res?.data?.error || res?.error || 'Unable to load Yield Curve. Please try again.'
       yieldData.value = null
-      yieldAnalytics.value = null
     }
     await nextTick()
     renderYieldChart()
   } catch (err) {
     yieldError.value = 'Unable to load Yield Curve. Please try again.'
     yieldData.value = null
-    yieldAnalytics.value = null
     console.error(err)
   } finally {
     yieldLoading.value = false
+  }
+}
+
+async function persistYieldCurveToSession(apiData) {
+  const session = sessionManager.getActiveSession()
+  const sid = session?.id || sessionManager.getActiveSessionId()
+  if (!sid) return
+
+  const isDateMode = fredFilters.value.maturityMode === 'date'
+  const points = extractYieldPoints(apiData, isDateMode)
+  if (!points.length) return
+
+  const targetKeys = workflowKeysFor(selectedInstrument.value)
+  const filters = {
+    country: fredFilters.value.country,
+    currency: fredFilters.value.currency,
+    maturity: fredFilters.value.maturity,
+    maturityMode: fredFilters.value.maturityMode,
+    fromDate: fredFilters.value.fromDate,
+    toDate: fredFilters.value.toDate
+  }
+
+  for (const key of targetKeys) {
+    try {
+      const workflow = await sessionManager.getInstrumentWorkflow(sid, key)
+      const base = workflow || {}
+      await sessionManager.saveInstrumentWorkflow(sid, key, {
+        ...base,
+        fredFilters: filters,
+        yieldCurveData: points,
+        yieldCurveSavedAt: new Date().toISOString()
+      })
+    } catch (e) {
+      console.warn('Failed to persist yield curve for', key, e)
+    }
   }
 }
 
@@ -454,94 +559,48 @@ function renderYieldChart() {
   if (yieldChart) yieldChart.destroy()
   const ctx = yieldCanvas.value.getContext('2d')
 
-  // Handle date range mode vs maturity mode
-  let xAxisType = 'linear'
   let xAxisTitle = 'Maturity'
   let xScaleOptions = {}
   let filteredData = []
 
   if (fredFilters.value.maturityMode === 'date') {
-    // Date range mode: show dates on x-axis
-    xAxisType = 'time'
     xAxisTitle = 'Date'
-
     filteredData = yieldData.value.datasets.map(ds => {
       const dateFilteredData = ds.data
         .filter(pt => pt.date !== null && pt.date !== undefined)
         .sort((a, b) => new Date(a.date) - new Date(b.date))
-
-      const data = dateFilteredData.map(pt => {
-        const dateObj = new Date(pt.date)
-        return {
-          x: dateObj.getTime(),
-          y: pt.y,
-          label: pt.date,
-          originalDate: pt.date
-        }
-      })
+      const data = dateFilteredData.map(pt => ({
+        x: new Date(pt.date).getTime(),
+        y: pt.y,
+        label: pt.date,
+        originalDate: pt.date
+      }))
       return { ...ds, data }
     })
-
     xScaleOptions = {
       type: 'time',
-      time: {
-        unit: 'month',
-        displayFormats: {
-          month: 'MMM yyyy'
-        }
-      },
+      time: { unit: 'month', displayFormats: { month: 'MMM yyyy' } },
       title: { display: true, text: xAxisTitle },
-      ticks: {
-        maxRotation: 45,
-        minRotation: 45
-      }
+      ticks: { maxRotation: 45, minRotation: 45 }
     }
   } else {
-    // Maturity mode: show every integer year 0…N on the x-axis
     const maturities = yieldData.value.maturities || []
     const maxMaturity = maturities.length ? Math.max(...maturities) : 10
     const selectedMaturityStr = fredFilters.value.maturity || '1Y'
-
     let effectiveMax = maxMaturity
-
     const match = selectedMaturityStr.match(/^(\d+)([YMW])$/)
     if (match) {
       const num = parseInt(match[1], 10)
-      const unit = match[2]
-      if (unit === 'Y') {
-        xAxisTitle = 'Years'
-        effectiveMax = Math.min(maxMaturity, num)
-      } else if (unit === 'M') {
-        xAxisTitle = 'Months'
-        effectiveMax = Math.min(maxMaturity, num)
-      } else if (unit === 'W') {
-        xAxisTitle = 'Weeks'
-        effectiveMax = Math.min(maxMaturity, num)
-      }
-    } else {
-      xAxisTitle = 'Years'
-      const num = parseFloat(selectedMaturityStr) || 10
+      xAxisTitle = match[2] === 'Y' ? 'Years' : match[2] === 'M' ? 'Months' : 'Weeks'
       effectiveMax = Math.min(maxMaturity, num)
+    } else {
+      effectiveMax = Math.min(maxMaturity, parseFloat(selectedMaturityStr) || 10)
     }
-
     filteredData = yieldData.value.datasets.map(ds => {
       let data = ds.data.filter(pt => pt.x <= effectiveMax)
-      if (!data.some(pt => pt.x === 0)) {
-        data = [{ x: 0, y: data[0]?.y || 0 }, ...data]
-      }
+      if (!data.some(pt => pt.x === 0)) data = [{ x: 0, y: data[0]?.y || 0 }, ...data]
       return { ...ds, data }
     })
-
-    const dataPoints = filteredData[0]?.data || []
-    const labelsMap = {}
-    dataPoints.forEach(pt => {
-      const xVal = pt.x
-      const labelIndex = yieldData.value.maturities.findIndex(m => Math.abs(m - xVal) < 0.01)
-      if (labelIndex !== -1 && yieldData.value.labels && yieldData.value.labels[labelIndex]) {
-        labelsMap[xVal] = yieldData.value.labels[labelIndex]
-      }
-    })
-
     xScaleOptions = {
       type: 'linear',
       title: { display: true, text: xAxisTitle },
@@ -550,14 +609,7 @@ function renderYieldChart() {
       ticks: {
         autoSkip: false,
         stepSize: 1,
-        maxRotation: 0,
-        minRotation: 0,
-        callback: function (value) {
-          if (!Number.isInteger(value) || value < 0) return null
-          if (value > effectiveMax) return null
-          if (labelsMap[value]) return labelsMap[value]
-          return value.toString()
-        }
+        callback: value => Number.isInteger(value) && value >= 0 && value <= effectiveMax ? value.toString() : null
       }
     }
   }
@@ -577,11 +629,7 @@ function renderYieldChart() {
         legend: { position: 'top' },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              const pt = ctx.raw
-              const label = pt.label || pt.x
-              return `${label}: ${pt.y.toFixed(2)}%`
-            }
+            label: ctx => `${ctx.raw.label || ctx.raw.x}: ${ctx.raw.y.toFixed(2)}%`
           }
         }
       },
@@ -606,27 +654,15 @@ async function loadComparisonChart() {
     if (compareChart) compareChart.destroy()
     const ctx = compareCanvas.value?.getContext('2d')
     if (!ctx) return
-
     const maturities = res.data.maturities || []
     const maxMaturity = maturities.length ? Math.max(...maturities) : 10
-
     compareChart = new Chart(ctx, {
       type: 'line',
       data: { datasets: chartDatasets(res.data) },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'top' },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const pt = ctx.raw
-                return `${ctx.dataset.label} ${pt.x.toFixed(0)}Y: ${pt.y.toFixed(2)}%`
-              }
-            }
-          }
-        },
+        plugins: { legend: { position: 'top' } },
         scales: {
           y: { title: { display: true, text: 'Yield (%)' } },
           x: {
@@ -634,11 +670,7 @@ async function loadComparisonChart() {
             title: { display: true, text: 'Maturity (Years)' },
             min: 0,
             max: maxMaturity,
-            ticks: {
-              autoSkip: false,
-              stepSize: 1,
-              callback: (val) => Number.isInteger(val) && val >= 0 ? val : ''
-            }
+            ticks: { autoSkip: false, stepSize: 1 }
           }
         }
       }
@@ -654,28 +686,22 @@ async function goToReports() {
     alert('Dataset reference missing. Please run calculations first.')
     return
   }
+  // If a FRED load is still in flight, wait for it so the session save is current.
+  if (yieldLoading.value) {
+    await new Promise(resolve => {
+      const check = setInterval(() => {
+        if (!yieldLoading.value) { clearInterval(check); resolve() }
+      }, 100)
+      setTimeout(() => { clearInterval(check); resolve() }, 8000)
+    })
+  }
   try {
     const session = sessionManager.getActiveSession()
     const sid = session?.id || sessionManager.getActiveSessionId()
     if (sid) {
       await markStepCompleted(String(sid), 'visualizations')
-
-      const workflow = await sessionManager.getInstrumentWorkflow(sid, selectedInstrument.value)
-      if (workflow) {
-        const yieldCurvePoints = []
-        if (yieldData.value?.datasets?.[0]?.data) {
-          yieldData.value.datasets[0].data.forEach(pt => {
-            yieldCurvePoints.push({ maturity: pt.x, rate: pt.y })
-          })
-        }
-
-        // FIXED: same as loadYieldCurve — saveInstrumentWorkflow is the correct method.
-        await sessionManager.saveInstrumentWorkflow(sid, selectedInstrument.value, {
-          ...workflow,
-          fredFilters: { ...fredFilters.value },
-          yieldCurveData: yieldCurvePoints
-        })
-      }
+      if (yieldData.value) await persistYieldCurveToSession(yieldData.value)
+      await refreshSavedCurvePresence()
     }
   } catch (e) {
     console.warn('Failed to save FRED settings:', e)
@@ -684,8 +710,6 @@ async function goToReports() {
 }
 
 onMounted(async () => {
-  // FIXED: loadFilterOptions throws on backend failure — previously produced
-  // an unhandled promise rejection in onMounted. Now caught and logged.
   try {
     await loadFilterOptions()
   } catch (e) {
@@ -703,16 +727,14 @@ onMounted(async () => {
 .page-header h1 { color: #0B2A44; font-size: 32px; font-weight: 700; margin-bottom: 8px; }
 .page-header p { color: #666; font-size: 16px; }
 .action-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 30px; }
-.stats-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.stats-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); border-radius: 12px 12px 0 0; }
-.chart-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
-.chart-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); }
+.stats-card, .chart-card { border-radius: 12px; margin-bottom: 30px; background: white; border: 1px solid rgba(11,42,68,0.08); position: relative; }
+.stats-card::before, .chart-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #0B2A44, #1E88E5); border-radius: 12px 12px 0 0; }
 .card-title { display: flex; align-items: center; color: #0B2A44; font-weight: 600; font-size: 18px; padding: 16px 20px 0 20px; }
 .title-icon { margin-right: 8px; }
 .fred-note { font-size: 13px; color: #666; }
 .chart-container { height: 400px; position: relative; padding: 16px; }
 .kpi-card { background: white; border-radius: 20px; padding: 18px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); transition: all 0.3s ease; }
-.kpi-top-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50); transform: scaleX(1); }
+.kpi-top-bar { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #0B2044, #1E88E5, #4CAF50); }
 .kpi-card:hover { transform: translateY(-5px); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.15); }
 .kpi-icon { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform 0.3s ease; }
 .kpi-card:hover .kpi-icon { transform: scale(1.05); }
@@ -721,9 +743,6 @@ onMounted(async () => {
 .kpi-value { font-size: 20px; font-weight: 800; color: #0B2044; }
 .kpi-title { font-size: 10px; color: #888; }
 .action-card { border-radius: 12px; background: white; border: 1px solid rgba(11,42,68,0.08); text-align: center; padding: 16px; }
-.analytics-card { border-radius: 8px; background: #f8f9ff; border: 1px solid #e0e0e0; }
-.analytics-label { font-size: 12px; color: #666; margin-bottom: 4px; }
-.analytics-value { font-size: 18px; font-weight: 700; color: #0B2044; }
 .maturity-mode-toggle { display: flex; gap: 6px; }
 .mode-btn { flex: 1; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 6px; background: white; cursor: pointer; font-size: 12px; color: #0B2044; }
 .mode-btn.active { background: #0B2A44; color: white; border-color: #0B2A44; }

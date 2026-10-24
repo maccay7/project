@@ -407,6 +407,7 @@
                       :instrument-type="instrumentType"
                       :worksheet-statuses="worksheetStatuses"
                       :detecting-from-parent="isDetecting"
+                      :dataset-id="originalDatasetId"
                       @close="showWorkbookViewer = false"
                       @sheet-selected="handleSheetSelectedFromViewer"
                       @single-instrument-extracted="handleSingleInstrumentExtracted"
@@ -794,7 +795,7 @@
                         <table class="excel-table">
                           <thead>
                             <tr>
-                              <th v-for="col in instrumentSummaryColumnsForDisplay" :key="col">{{ col }}</th>
+                              <th v-for="col in instrumentSummaryColumnsForDisplay" :key="col">{{ formatColumnHeader(col) }}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1170,7 +1171,7 @@
                           <thead>
                             <tr>
                               <th v-for="col in instrumentSummaryColumnsForDisplay" :key="col" @click="sortByColumn(col)" class="sortable-header">
-                                <span>{{ col }}</span>
+                                <span>{{ formatColumnHeader(col) }}</span>
                                 <span class="sort-indicator" v-if="sortColumn === col">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
                               </th>
                             </tr>
@@ -1415,6 +1416,29 @@ import {
   formatCalculationFailureMessage
 } from '@/utils/calculationDisplay.js'
 
+// ─────────────────────────────────────────────────────────────
+// FIX 1 — dedupeColumns helper.
+// Backend emits face_value AND faceValue, valuation_date AND
+// valuationDate. Collapse to ONE column using snake_case as the key.
+// ─────────────────────────────────────────────────────────────
+function dedupeColumns(cols) {
+  const seen = new Set()
+  const out = []
+  const norm = (c) => String(c)
+    .trim()
+    .replace(/[\s\-]+/g, '_')
+    .replace(/(?<=[a-z0-9])([A-Z])/g, '_$1')
+    .toLowerCase()
+  for (const c of cols || []) {
+    if (c === null || c === undefined || c === '') continue
+    const k = norm(c)
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(c)
+  }
+  return out
+}
+
 function formatInstrumentTypeLabel(type) {
   if (type === 'money-market') return 'Money Market (money-market)'
   if (type === 'tbills') return 'Treasury Bills (tbills)'
@@ -1449,6 +1473,10 @@ function autoDetectTable(data) {
 const router = useRouter()
 const route = useRoute()
 
+// ─────────────────────────────────────────────────────────────
+// FIX 2 — FIELD_MAPPINGS now maps snake_case AND camelCase
+// aliases for every field, including dates and identifiers.
+// ─────────────────────────────────────────────────────────────
 const FIELD_MAPPINGS = {
   'money-market': {
     'discount_yield': 'Discount Yield',
@@ -1462,12 +1490,24 @@ const FIELD_MAPPINGS = {
     'principal': 'Principal',
     'term_days': 'Days to Maturity',
     'termDays': 'Days to Maturity',
+    'days_to_maturity': 'Days to Maturity',
+    'daysToMaturity': 'Days to Maturity',
     'total_value': 'Total Value',
     'totalValue': 'Total Value',
     'yield_curve_rate': 'Yield Curve Rate',
     'yieldCurveRate': 'Yield Curve Rate',
+    'valuation_date': 'Valuation Date',
+    'valuationDate': 'Valuation Date',
+    'maturity_date': 'Maturity Date',
+    'maturityDate': 'Maturity Date',
+    'issue_date': 'Issue Date',
+    'issueDate': 'Issue Date',
+    'settlement_date': 'Settlement Date',
+    'settlementDate': 'Settlement Date',
     'instrument_name': 'Instrument Name',
+    'instrumentName': 'Instrument Name',
     'instrument_type': 'Instrument Type',
+    'instrumentType': 'Instrument Type',
     'status': 'Status'
   },
   'bonds': {
@@ -1500,10 +1540,29 @@ const FIELD_MAPPINGS = {
     'yearsToMaturity': 'Years to Maturity',
     'price_per_100': 'Price per 100',
     'pricePer100': 'Price per 100',
+    'valuation_date': 'Valuation Date',
+    'valuationDate': 'Valuation Date',
+    'maturity_date': 'Maturity Date',
+    'maturityDate': 'Maturity Date',
+    'issue_date': 'Issue Date',
+    'issueDate': 'Issue Date',
+    'settlement_date': 'Settlement Date',
+    'settlementDate': 'Settlement Date',
+    'last_coupon_date': 'Last Coupon Date',
+    'lastCouponDate': 'Last Coupon Date',
+    'days_accrued': 'Days Accrued',
+    'daysAccrued': 'Days Accrued',
+    'coupon_frequency': 'Coupon Frequency',
+    'couponFrequency': 'Coupon Frequency',
+    'frequency': 'Frequency',
     'total_value': 'Total Value',
     'totalValue': 'Total Value',
+    'yield_curve_rate': 'Yield Curve Rate',
+    'yieldCurveRate': 'Yield Curve Rate',
     'instrument_name': 'Instrument Name',
+    'instrumentName': 'Instrument Name',
     'instrument_type': 'Instrument Type',
+    'instrumentType': 'Instrument Type',
     'status': 'Status'
   },
   'tbills': {
@@ -1515,16 +1574,38 @@ const FIELD_MAPPINGS = {
     'investmentYield': 'Investment Yield',
     'bond_equivalent_yield': 'Bond Equivalent Yield',
     'bondEquivalentYield': 'Bond Equivalent Yield',
+    'effective_annual_yield': 'Effective Annual Yield',
+    'effectiveAnnualYield': 'Effective Annual Yield',
+    'money_market_yield': 'Money Market Yield',
+    'moneyMarketYield': 'Money Market Yield',
+    'holding_period_yield': 'Holding Period Yield',
+    'holdingPeriodYield': 'Holding Period Yield',
     'face_value': 'Face Value',
     'faceValue': 'Face Value',
     'purchase_price': 'Purchase Price',
     'purchasePrice': 'Purchase Price',
+    'discount_amount': 'Discount Amount',
+    'discountAmount': 'Discount Amount',
     'total_value': 'Total Value',
     'totalValue': 'Total Value',
     'days_to_maturity': 'Days to Maturity',
     'daysToMaturity': 'Days to Maturity',
+    'term_days': 'Days to Maturity',
+    'termDays': 'Days to Maturity',
+    'valuation_date': 'Valuation Date',
+    'valuationDate': 'Valuation Date',
+    'maturity_date': 'Maturity Date',
+    'maturityDate': 'Maturity Date',
+    'issue_date': 'Issue Date',
+    'issueDate': 'Issue Date',
+    'settlement_date': 'Settlement Date',
+    'settlementDate': 'Settlement Date',
+    'yield_curve_rate': 'Yield Curve Rate',
+    'yieldCurveRate': 'Yield Curve Rate',
     'instrument_name': 'Instrument Name',
+    'instrumentName': 'Instrument Name',
     'instrument_type': 'Instrument Type',
+    'instrumentType': 'Instrument Type',
     'status': 'Status'
   }
 }
@@ -1532,20 +1613,20 @@ const FIELD_MAPPINGS = {
 const INPUT_FIELDS = {
   'money-market': [
     'Principal', 'Interest Rate', 'Discount Rate', 'Purchase Price',
-    'Issue Date', 'Maturity Date', 'Settlement Date', 'Days to Maturity',
-    'Compounding Frequency', 'Day Count Convention',
+    'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date',
+    'Days to Maturity', 'Compounding Frequency', 'Day Count Convention',
     'Status', 'Error', 'Instrument Name', 'Instrument Type'
   ],
   'bonds': [
-    'Face Value', 'Par Value', 'Coupon Rate', 'Coupon Frequency',
+    'Face Value', 'Par Value', 'Coupon Rate', 'Coupon Frequency', 'Frequency',
     'Yield to Maturity', 'Issue Date', 'Maturity Date', 'Settlement Date',
-    'Years to Maturity', 'Frequency', 'Day Count Convention',
-    'Status', 'Error', 'Instrument Name', 'Instrument Type'
+    'Valuation Date', 'Last Coupon Date', 'Years to Maturity',
+    'Day Count Convention', 'Status', 'Error', 'Instrument Name', 'Instrument Type'
   ],
   'tbills': [
     'Face Value', 'Discount Rate', 'Purchase Price',
-    'Issue Date', 'Maturity Date', 'Settlement Date', 'Days to Maturity',
-    'Day Count Convention',
+    'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date',
+    'Days to Maturity', 'Day Count Convention',
     'Status', 'Error', 'Instrument Name', 'Instrument Type'
   ]
 }
@@ -1553,34 +1634,31 @@ const INPUT_FIELDS = {
 function mapBackendFieldsToDisplayNames(row, instrumentType) {
   const mapping = FIELD_MAPPINGS[instrumentType] || {}
   const mappedRow = {}
-
   for (const [key, value] of Object.entries(row)) {
     const displayKey = mapping[key] || key
+    if (displayKey in mappedRow && mappedRow[displayKey] !== value) {
+      if (mappedRow[displayKey] === null || mappedRow[displayKey] === undefined || mappedRow[displayKey] === '') {
+        mappedRow[displayKey] = value
+      }
+      continue
+    }
     mappedRow[displayKey] = value
   }
-
   return mappedRow
 }
 
 function filterToCalculatedFields(row, instrumentType) {
   const inputFields = INPUT_FIELDS[instrumentType] || []
   const filteredRow = {}
-
   const alwaysInclude = ['Instrument Name', 'Instrument Type', 'Worksheet', 'Workbook']
-
   for (const [key, value] of Object.entries(row)) {
     if (alwaysInclude.includes(key)) {
       filteredRow[key] = value
       continue
     }
-
     const isInput = inputFields.includes(key)
-
-    if (!isInput) {
-      filteredRow[key] = value
-    }
+    if (!isInput) filteredRow[key] = value
   }
-
   return filteredRow
 }
 
@@ -1588,37 +1666,30 @@ const VALID_FREQUENCIES = /^(annual(ly)?|semi[- ]?annual(ly)?|quarter(ly)?|month
 
 function isPlausibleValue(canonicalKey, value) {
   if (value === null || value === undefined || value === '') return false
-
   const lc = String(canonicalKey).toLowerCase()
-
   if (lc.includes('frequency') || (lc.includes('interest') && lc.includes('payment') && lc.includes('frequency')) || (lc.includes('payment') && lc.includes('frequency'))) {
     return VALID_FREQUENCIES.test(String(value).trim())
   }
-
   if (lc.includes('rate') || lc.includes('yield') || lc.includes('coupon') || lc.includes('discount')) {
     const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[%,$\s]/g, ''))
     if (isNaN(n)) return false
     return n >= 0 && n <= 100
   }
-
   if (lc.includes('value') || lc.includes('amount') || lc.includes('price') || lc.includes('principal') || lc.includes('face') || lc.includes('notional') || lc.includes('nominal') || lc.includes('par')) {
     const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[$,\s]/g, ''))
     if (isNaN(n)) return false
     return n >= 0
   }
-
   if (lc.includes('date') || lc.includes('maturity') || lc.includes('auction') || lc.includes('settlement') || lc.includes('issue') || (lc.includes('coupon') && lc.includes('date'))) {
     if (value instanceof Date) return !isNaN(value.getTime())
     const d = new Date(value)
     return !isNaN(d.getTime())
   }
-
   if (lc.includes('days') || lc.includes('term') || lc.includes('tenor') || (lc.includes('maturity') && !lc.includes('date'))) {
     const n = typeof value === 'number' ? value : parseFloat(String(value))
     if (isNaN(n)) return false
     return n >= 0 && Number.isInteger(n)
   }
-
   return true
 }
 
@@ -1626,7 +1697,7 @@ const SEMANTIC_FIELD_GROUPS = {
   name: ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name', 'Instrument'],
   faceValue: ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount', 'Notional Amount', 'Purchase Price', 'Future Value'],
   rate: ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon', 'Investment Yield', 'Effective Annual Yield', 'Benchmark Rate', 'Reference Rate', 'Spread', 'Margin'],
-  date: ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date', 'Call Date', 'Put Date', 'Coupon Date'],
+  date: ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date', 'Call Date', 'Put Date', 'Coupon Date', 'Last Coupon Date'],
   frequency: ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency', 'Compounding Frequency'],
   term: ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years', 'Accrued Days', 'Days in Coupon Period', 'Term to Maturity'],
   currency: ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency', 'Exchange Rate', 'FX Rate'],
@@ -1657,14 +1728,11 @@ function findSemanticType(key) {
 function isSemanticMatch(detectedKey, targetField, semanticType) {
   const detectedLower = normalizeKeyForMatch(detectedKey)
   const targetLower = normalizeKeyForMatch(targetField)
-
   if (detectedLower === targetLower) return true
   if (detectedLower.includes(targetLower) || targetLower.includes(detectedLower)) return true
-
   const fields = SEMANTIC_FIELD_GROUPS[semanticType] || []
   const detectedInList = fields.some(f => normalizeKeyForMatch(f) === detectedLower)
   const targetInList = fields.some(f => normalizeKeyForMatch(f) === targetLower)
-
   return detectedInList && targetInList
 }
 
@@ -1672,70 +1740,49 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
   const normalised = {}
   const normalisedMeta = {}
   const usedCanonical = new Set()
-
   const targetColumns = requiredColsOverride || requiredColumns.value || []
-
   const detectedSemantics = {}
   for (const rawKey of Object.keys(fields || {})) {
     detectedSemantics[rawKey] = findSemanticType(rawKey) || 'generic'
   }
-
   const rawEntries = Object.entries(fields || {}).sort(
     (a, b) => String(b[0]).length - String(a[0]).length
   )
-
   for (const [rawKey, rawValue] of rawEntries) {
     const semantic = detectedSemantics[rawKey]
-
     let matchedCanonical = null
     for (const targetCol of targetColumns) {
       if (usedCanonical.has(targetCol)) continue
-
       const targetLower = normalizeKeyForMatch(targetCol)
       const rawKeyLower = normalizeKeyForMatch(rawKey)
-
       if (rawKeyLower === targetLower) {
         matchedCanonical = targetCol
         break
       }
-
       if (semantic && semantic !== 'generic' && isSemanticMatch(rawKey, targetCol, semantic)) {
         matchedCanonical = targetCol
         break
       }
-
       if (rawKeyLower.includes(targetLower) || targetLower.includes(rawKeyLower)) {
         matchedCanonical = targetCol
         break
       }
     }
-
-    if (!matchedCanonical) {
-      matchedCanonical = rawKey
-    }
-
-    if (usedCanonical.has(matchedCanonical)) {
-      continue
-    }
-
-    const actualValue =
-      rawValue && typeof rawValue === 'object' && 'value' in rawValue
-        ? rawValue.value
-        : rawValue
-
+    if (!matchedCanonical) matchedCanonical = rawKey
+    if (usedCanonical.has(matchedCanonical)) continue
+    const actualValue = rawValue && typeof rawValue === 'object' && 'value' in rawValue
+      ? rawValue.value
+      : rawValue
     if (semantic !== 'generic' && !isPlausibleValue(matchedCanonical, actualValue)) {
       continue
     }
-
     normalised[matchedCanonical] = actualValue
     usedCanonical.add(matchedCanonical)
-
     const meta = fieldsWithMetadata ? fieldsWithMetadata[rawKey] : null
     const metaCopy = meta && typeof meta === 'object' ? { ...meta } : {}
     metaCopy.originalLabel = rawKey
     normalisedMeta[matchedCanonical] = metaCopy
   }
-
   return { fields: normalised, fieldsWithMetadata: normalisedMeta }
 }
 
@@ -1745,29 +1792,22 @@ function deriveDaysToMaturity(fields, metadata) {
     k === 'daystomaturity' || k === 'termdays' || k === 'term' || k === 'tenor'
   )
   if (alreadyHasDays) return
-
   const normalized = {}
   for (const [k, v] of Object.entries(fields)) {
     normalized[normalizeKeyForMatch(k)] = v
   }
-
   const startDate = normalized['valuationdate'] || normalized['settlementdate'] || normalized['issuedate']
   const maturityDate = normalized['maturitydate']
-
   if (!startDate || !maturityDate) return
-
   const start = new Date(startDate)
   const maturity = new Date(maturityDate)
   if (isNaN(start.getTime()) || isNaN(maturity.getTime())) return
-
   const days = Math.ceil((maturity.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
   if (days <= 0) return
-
   const daysKey = (requiredColumns.value || []).find(c => {
     const n = normalizeKeyForMatch(c)
     return n === 'daystomaturity' || n === 'termdays'
   }) || 'days_to_maturity'
-
   fields[daysKey] = days
   metadata[daysKey] = {
     value: days,
@@ -2031,7 +2071,7 @@ const showCumulativeHistory = ref(false)
 const originalRawData = ref([])
 const originalFileColumns = ref([])
 const originalFileBuffer = ref(null)
-const originalDatasetId = ref(null)   // NEW — server-side dataset id for the original upload
+const originalDatasetId = ref(null)
 const sheetTotalRows = ref(0)
 const sessionSavedAt = ref(null)
 const showPreview = ref(false)
@@ -2046,20 +2086,10 @@ let lastSessionId = ''
 let lastSaveTime = 0
 const SAVE_DEBOUNCE_MS = 2000
 
-const snackbar = ref({
-  show: false,
-  message: '',
-  color: 'error',
-  timeout: 4000
-})
+const snackbar = ref({ show: false, message: '', color: 'error', timeout: 4000 })
 
 function showSnackbar(message, color = 'error', timeout = 4000) {
-  snackbar.value = {
-    show: true,
-    message,
-    color,
-    timeout
-  }
+  snackbar.value = { show: true, message, color, timeout }
 }
 
 const savedTemplates = ref([])
@@ -2164,9 +2194,7 @@ const availableSummaryWorksheets = computed(() => [])
 
 const mappingShownForSheet = ref({})
 
-const currentSummaryRows = computed(() => {
-  return instrumentSummary.value.rows
-})
+const currentSummaryRows = computed(() => instrumentSummary.value.rows)
 
 const activeValuationDate = computed(() => {
   const s = activeSession.value
@@ -2189,7 +2217,6 @@ const activeValuationDate = computed(() => {
 const descriptiveAnalytics = computed(() => {
   const rows = currentSummaryRows.value
   if (!rows.length) return {}
-
   if (allCalculations.value && (allCalculations.value.totalValue !== undefined || allCalculations.value.instrumentCount !== undefined)) {
     const stats = {}
     stats['Number of Records'] = allCalculations.value.instrumentCount || rows.length
@@ -2197,7 +2224,6 @@ const descriptiveAnalytics = computed(() => {
     stats['Weighted Average Yield'] = allCalculations.value.avgRate || allCalculations.value.weightedAvgRate || 0
     stats['Weighted Average Maturity'] = allCalculations.value.avgDaysToMaturity || 0
     stats['Average Rate'] = allCalculations.value.avgRate || 0
-
     for (const [k, v] of Object.entries(stats)) {
       if (typeof v === 'number') {
         const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(k.toLowerCase())
@@ -2210,15 +2236,12 @@ const descriptiveAnalytics = computed(() => {
     }
     return stats
   }
-
   const getValue = (row) => parseFloat(row['Total Value'] ?? row['total_value'] ?? row['Calculated Value'] ?? row['calculated_value'] ?? row['Value'] ?? row['value'] ?? 0)
   const getYield = (row) => parseFloat(row['Yield'] ?? row['yield'] ?? row['Rate'] ?? row['rate'] ?? row['Interest Rate'] ?? row['interest_rate'] ?? row['Coupon Rate'] ?? row['coupon_rate'] ?? row['Discount Rate'] ?? row['discount_rate'] ?? 0)
   const getMaturity = (row) => parseFloat(row['Days to Maturity'] ?? row['days_to_maturity'] ?? row['Term'] ?? row['term'] ?? row['Maturity'] ?? row['maturity'] ?? 0)
-
   const values = rows.map(getValue).filter(v => !isNaN(v) && v > 0)
   const yields = rows.map(getYield).filter(v => !isNaN(v))
   const maturities = rows.map(getMaturity).filter(v => !isNaN(v) && v > 0)
-
   const stats = {}
   if (values.length) {
     const sum = values.reduce((a, b) => a + b, 0)
@@ -2253,7 +2276,6 @@ const dataQualitySummary = computed(() => {
   const totalCols = requiredColumns.value.length || 1
   const mappedCols = requiredColumns.value.filter(col => columnMapping.value[col] && columnMapping.value[col] !== '__na__').length
   const completeness = rows.length > 0 ? Math.min(100, Math.round((mappedCols / totalCols) * 100)) : 0
-
   return {
     rowsProcessed: cleaningStats.value.totalRows || rows.length || 0,
     columnsMapped: mappedCols,
@@ -2367,22 +2389,7 @@ const benchmarkYield = computed(() => {
 
 const EXCLUDED_COLUMNS = new Set([
   '_raw', '_source', 'index', '__v',
-  'instrument_name', 'instrument_type',
-  'discount_yield', 'effective_yield', 'interest_earned',
-  '_row_index', 'term_days', 'total_value',
-  'total_interest', 'avg_rate', 'weighted_avg_rate',
-  'avg_days_to_maturity', 'total_principal', 'annual_yield',
-  'effective_annual_rate', 'instrument_count', 'fred_benchmark',
-  'coupon_rate', 'coupon_payment', 'accrued_interest',
-  'clean_price', 'dirty_price', 'yield_to_maturity',
-  'discount_rate', 'investment_yield', 'maturity_value',
-  'present_value', 'purchase_price', 'issue_price',
-  'days_to_maturity', 'face_value', 'principal',
-  'bond_equivalent_yield', 'currency',
-  'valuationtype', 'workbook', 'worksheet',
-  'carryingvalue', 'daycountconvention', 'derivations',
-  'discountamount', 'yieldcurverate', 'moneymarketyield',
-  'holdingperiodyield'
+  '_row_index', 'valuationtype'
 ].map(s => s.toLowerCase().replace(/[_\s\-]+/g, '')))
 
 function isExcludedColumn(col) {
@@ -2403,21 +2410,54 @@ function formatColumnHeader(col) {
     .replace(/\b\w/g, c => c.toUpperCase())
 }
 
+// ─────────────────────────────────────────────────────────────
+// FIX 3 — getDisplayColumns() dedupes via snake_case.
+// ─────────────────────────────────────────────────────────────
 function getDisplayColumns() {
-  let allColumns = [...(instrumentSummary.value.columns || [])]
-  if (completedInstrumentSummary.value.columns) {
-    allColumns = [...allColumns, ...completedInstrumentSummary.value.columns]
+  const INTERNAL_ONLY = new Set([
+    '_raw', '_source', 'index', '__v', '_row_index', 'valuationtype'
+  ].map(s => s.toLowerCase().replace(/[_\s\-]+/g, '')))
+
+  const seen = new Set()
+  const seenLabels = new Set()  // NEW: dedupe by rendered label too
+  const result = []
+
+  const consider = (rawKey) => {
+    if (!rawKey) return
+    const norm = String(rawKey).toLowerCase().replace(/[_\s\-]+/g, '')
+    if (INTERNAL_ONLY.has(norm)) return
+    if (norm.startsWith('derivation')) return
+    if (seen.has(norm)) return
+    // Final guard: if this column's display label already appeared for a
+    // different raw key, skip it — prevents two identically-labelled columns.
+    const label = formatColumnHeader(rawKey).toLowerCase().replace(/[\s_\-]+/g, '')
+    if (seenLabels.has(label)) return
+    seen.add(norm)
+    seenLabels.add(label)
+    result.push(String(rawKey))
   }
 
-  const cols = allColumns.filter(c => c && !isExcludedColumn(c))
-  const seen = new Set()
-  return cols.filter(c => {
-    const base = c.replace(/_\d+$/, '').trim()
-    const key = base.toLowerCase()
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  for (const r of (instrumentSummary.value.rows || [])) {
+    for (const k of Object.keys(r)) consider(k)
+  }
+  for (const r of (completedInstrumentSummary.value.rows || [])) {
+    for (const k of Object.keys(r)) consider(k)
+  }
+
+  if (result.length === 0) {
+    const typeMapping = FIELD_MAPPINGS[instrumentType.value] || {}
+    const rawCols = [
+      ...(instrumentSummary.value.columns || []),
+      ...(completedInstrumentSummary.value.columns || [])
+    ]
+    for (const c of rawCols) {
+      if (!c) continue
+      const base = String(c).replace(/_\d+$/, '').trim()
+      consider(typeMapping[base] || base)
+    }
+  }
+
+  return dedupeColumns(result)
 }
 
 const instrumentSummaryColumnsForDisplay = computed(() => getDisplayColumns())
@@ -2434,44 +2474,23 @@ const instrumentSearchQuery = ref('')
 
 const sortedInstrumentSummaryRows = computed(() => {
   let rows = []
-
   if (excelPopupMode.value === 'current') {
-    rows = instrumentSummary.value.rows.map(row => ({
-      ...row,
-      'Valuation Type': 'Current'
-    }))
+    rows = instrumentSummary.value.rows.map(row => ({ ...row, 'Valuation Type': 'Current' }))
   } else if (excelPopupMode.value === 'previous') {
     const allPrevious = completedInstrumentSummary.value.rows || []
     if (allPrevious.length > 0) {
       const lastSummary = allPrevious[allPrevious.length - 1]
-      rows = [lastSummary].map(row => ({
-        ...row,
-        'Valuation Type': 'Previous'
-      }))
+      rows = [lastSummary].map(row => ({ ...row, 'Valuation Type': 'Previous' }))
     }
   } else if (excelPopupMode.value === 'all') {
-    const currentRows = instrumentSummary.value.rows.map(row => ({
-      ...row,
-      'Valuation Type': 'Current'
-    }))
-
-    const previousRows = (completedInstrumentSummary.value.rows || []).map(row => ({
-      ...row,
-      'Valuation Type': 'Previous'
-    }))
-
+    const currentRows = instrumentSummary.value.rows.map(row => ({ ...row, 'Valuation Type': 'Current' }))
+    const previousRows = (completedInstrumentSummary.value.rows || []).map(row => ({ ...row, 'Valuation Type': 'Previous' }))
     rows = [...currentRows, ...previousRows]
   }
-
   if (instrumentSearchQuery.value) {
     const query = instrumentSearchQuery.value.toLowerCase()
-    rows = rows.filter(row => {
-      return Object.values(row).some(val =>
-        String(val).toLowerCase().includes(query)
-      )
-    })
+    rows = rows.filter(row => Object.values(row).some(val => String(val).toLowerCase().includes(query)))
   }
-
   if (!sortColumn.value) return rows
   return [...rows].sort((a, b) => {
     let valA = a[sortColumn.value]
@@ -2492,9 +2511,7 @@ const paginatedInstrumentSummaryRows = computed(() => {
   return rows.slice(start, end)
 })
 
-const totalPages = computed(() => {
-  return Math.ceil(sortedInstrumentSummaryRows.value.length / rowsPerPage.value)
-})
+const totalPages = computed(() => Math.ceil(sortedInstrumentSummaryRows.value.length / rowsPerPage.value))
 
 const currentWorkbookPreviousSummaries = computed(() => {
   if (!currentWorkbookName.value || !completedInstrumentSummary.value.rows) return []
@@ -2507,20 +2524,17 @@ const calculationFields = computed(() => {
   const fields = config.value.calculationFields || []
   const allCalc = allCalculations.value || {}
   const selectedCalc = selectedCalculations.value || {}
-
   return fields
     .map(field => {
       let value = selectedCalc[field.key] !== undefined ? selectedCalc[field.key] :
                   allCalc[field.key] !== undefined ? allCalc[field.key] :
                   selectedCalc[toSnakeCase(field.key)] !== undefined ? selectedCalc[toSnakeCase(field.key)] :
                   allCalc[toSnakeCase(field.key)] !== undefined ? allCalc[toSnakeCase(field.key)] : null
-
       if (value === null || value === undefined) {
         const agg = allCalc.agg || selectedCalc.agg || {}
         value = agg[field.key] !== undefined ? agg[field.key] :
                 agg[toSnakeCase(field.key)] !== undefined ? agg[toSnakeCase(field.key)] : null
       }
-
       return { ...field, value }
     })
     .filter(field => field.value !== null && field.value !== undefined && field.value !== '')
@@ -2533,19 +2547,15 @@ function toSnakeCase(str) {
       .replace(/([a-z])([A-Z])/g, '$1_$2')
       .replace(/[\s\-]+/g, '_')
       .toLowerCase()
-  } catch (e) {
-    return str
-  }
+  } catch (e) { return str }
 }
 
-// ⭐ FIXED — snake-case FIRST so lookup is case-insensitive
 function normalizeFieldName(fieldName) {
   if (!fieldName || typeof fieldName !== 'string') return fieldName
   const snake = fieldName
     .replace(/([a-z])([A-Z])/g, '$1_$2')
     .replace(/[\s\-]+/g, '_')
     .toLowerCase()
-
   const fieldMap = {
     coupon_rate: 'coupon_rate',
     coupon_frequency: 'coupon_frequency',
@@ -2588,7 +2598,6 @@ function formatCalcValue(key, value) {
   if (value === null || value === undefined) return '—'
   const field = config.value.calculationFields.find(f => f.key === key)
   if (!field) return value
-
   if (typeof value === 'number' && !isNaN(value)) {
     const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(key.toLowerCase())
     if (isTimeField) {
@@ -2602,7 +2611,6 @@ function formatCalcValue(key, value) {
     if (field.suffix) return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + field.suffix
     return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
-
   if (field.prefix) return field.prefix + value
   if (field.suffix) return value + field.suffix
   return value
@@ -2614,9 +2622,7 @@ function isStepComplete(tab) {
 
 function switchTab(tab) {
   const idx = steps.value.findIndex(s => s.tab === tab)
-  if (idx > farthestAllowedIndex.value) {
-    return
-  }
+  if (idx > farthestAllowedIndex.value) return
   saveSessionData()
   activeTab.value = tab
   forceUpdate.value++
@@ -2629,11 +2635,7 @@ function switchTab(tab) {
 function goToDashboard() { saveSessionData(); router.push('/dashboard') }
 function goToCalculations() { activeTab.value = 'calculations'; forceUpdate.value++ }
 async function goToPortfolioSummary() {
-  try {
-    await saveSessionData(true)
-  } catch (e) {
-    console.warn('Save before portfolio summary failed:', e)
-  }
+  try { await saveSessionData(true) } catch (e) { console.warn('Save before portfolio summary failed:', e) }
   const sessionId = activeSession.value?.id || sessionManager.getActiveSessionId() || localStorage.getItem('dura_active_session_id')
   if (sessionId) {
     sessionManager.setActiveSession({ id: sessionId })
@@ -2760,7 +2762,6 @@ function computeAnalytics(rows) {
   const values = rows.map(getValue).filter(v => !isNaN(v) && v > 0)
   const yields = rows.map(getYield).filter(v => !isNaN(v))
   const maturities = rows.map(getMaturity).filter(v => !isNaN(v) && v > 0)
-
   const stats = {}
   if (values.length) {
     const sum = values.reduce((a, b) => a + b, 0)
@@ -2790,9 +2791,7 @@ function computeAggregate(rows) {
     bondEquivalentYield: null, totalPurchasePrice: null, avgInvestment: null,
     holdingPeriodYield: null, annualizedYield: null, pricePer100: null
   }
-
   if (!rows || !rows.length) return agg
-
   const getNumber = (row, ...keys) => {
     for (const key of keys) {
       const val = row[key]
@@ -2803,9 +2802,7 @@ function computeAggregate(rows) {
     }
     return 0
   }
-
   let total = 0, count = 0, rateSum = 0, weightedSum = 0
-
   rows.forEach(row => {
     const value = getNumber(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
     const rate = getNumber(row, 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Interest Rate', 'interest_rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate', 'Yield', 'yield')
@@ -2814,44 +2811,35 @@ function computeAggregate(rows) {
     rateSum += rate
     weightedSum += value * rate
   })
-
   const avgRate = count > 0 ? rateSum / count : 0
   const weightedAvg = total > 0 ? weightedSum / total : 0
-
   const daysValues = rows.map(r => parseFloat(r['Days to Maturity'] || r['days_to_maturity'] || r['Term'] || r['term'] || r['Avg Days to Maturity'] || r['avg_days_to_maturity'] || NaN)).filter(v => !isNaN(v) && v > 0)
   const avgDays = daysValues.length ? daysValues.reduce((a, b) => a + b, 0) / daysValues.length : null
-
   agg.totalValue = total
   agg.instrumentCount = count
   agg.avgRate = avgRate
   agg.weightedAvgRate = weightedAvg
   agg.avgDaysToMaturity = avgDays
   agg.totalPrincipal = total
-
   const couponSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate'), 0)
   agg.avgCouponRate = count > 0 ? couponSum / count : 0
   agg.weightedAvgCoupon = weightedAvg
   agg.avgYTM = avgRate || null
-
   const discountSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate'), 0)
   agg.avgDiscountRate = count > 0 ? discountSum / count : 0
   agg.weightedAvgDiscount = weightedAvg
   agg.avgInvestment = count > 0 ? total / count : null
-
   return agg
 }
 
 function runInstrumentCalculations(row, instrumentType) {
   const results = {}
   const getNumber = (val) => { const num = parseFloat(val); return isNaN(num) ? 0 : num }
-
   const nameCol = columnMapping.value['Instrument Name'] || 'Instrument'
   const instrumentName = row[nameCol] || row['Instrument'] || row['Name'] || 'Instrument'
-
   const amount = getNumber(row['Amount'] || row['FaceValue'] || row['Principal'] || row['Value'] || 0)
   const rate = getNumber(row['Rate'] || row['InterestRate'] || row['CouponRate'] || row['DiscountRate'] || row['Yield'] || 0)
   const days = getNumber(row['DaysToMaturity'] || row['Term'] || row['Maturity'] || null)
-
   if (instrumentType === 'money-market') {
     const interest = amount * (rate / 100) * (days / 360)
     results['Instrument Name'] = instrumentName
@@ -2924,9 +2912,11 @@ function runInstrumentCalculations(row, instrumentType) {
   return results
 }
 
+// ─────────────────────────────────────────────────────────────
+// FIX 4 — processInstrumentData dedupes columns.
+// ─────────────────────────────────────────────────────────────
 function processInstrumentData(sheetName, data, instrumentType) {
   if (!data || !data.length) return
-
   const rows = data.map((row, index) => {
     const nameCol = columnMapping.value['Instrument Name'] || 'Instrument'
     const instrumentName = row[nameCol] || row['Instrument'] || row['Name'] || `Instrument ${index + 1}`
@@ -2939,7 +2929,6 @@ function processInstrumentData(sheetName, data, instrumentType) {
       'Worksheet': sheetName
     }
   })
-
   const existingRows = instrumentSummary.value.rows || []
   const mergedRows = [...existingRows]
   rows.forEach(newRow => {
@@ -2947,19 +2936,15 @@ function processInstrumentData(sheetName, data, instrumentType) {
     const exists = mergedRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
     if (!exists) mergedRows.push(newRow)
   })
-
   const allCols = new Set()
   mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-  instrumentSummary.value = { columns: Array.from(allCols), rows: mergedRows }
-
+  instrumentSummary.value = { columns: dedupeColumns(Array.from(allCols)), rows: mergedRows }
   const agg = computeAggregate(mergedRows)
   const uniqueNames = new Set(mergedRows.map(r => r['Instrument Name']))
   agg.instrumentCount = uniqueNames.size
-
   allCalculations.value = agg
   selectedCalculations.value = agg
   calculations.value = agg
-
   saveSessionData()
   return { success: true, rows, aggregate: agg }
 }
@@ -2995,7 +2980,6 @@ async function loadHistoryFile(item) {
     alert('This file cannot be loaded because the file data is missing. Please upload the file again.')
     return
   }
-
   if (confirm(`Load ${item.name}? Current unsaved data will be lost.`)) {
     const base64String = item.fileData.split(',')[1]
     const binaryString = atob(base64String)
@@ -3004,10 +2988,8 @@ async function loadHistoryFile(item) {
       bytes[i] = binaryString.charCodeAt(i)
     }
     const arrayBuffer = bytes.buffer
-
     originalFileBuffer.value = arrayBuffer
     uploadedFile.value = { name: item.name, size: arrayBuffer.byteLength }
-
     try {
       const sid = activeSession.value?.id || sessionManager.getActiveSessionId() || null
       const result = await worksheetWorkflow.handleFileUpload(new File([arrayBuffer], item.name), sid)
@@ -3025,15 +3007,11 @@ async function loadHistoryFile(item) {
                 originalDatasetId: result.datasetId,
                 originalFileName: item.name
               })
-            } catch (e) {
-              console.warn('Failed to persist originalDatasetId (history):', e)
-            }
+            } catch (e) { console.warn('Failed to persist originalDatasetId (history):', e) }
           }
         }
         showSnackbar(`Loaded ${item.name} from history`, 'success')
-
         clearActiveCache(true)
-
         showWorkbookViewer.value = true
         activeTab.value = 'upload'
         forceUpdate.value++
@@ -3043,7 +3021,6 @@ async function loadHistoryFile(item) {
     } catch (err) {
       showSnackbar('Failed to load file', 'error')
     }
-
     saveSessionData()
   }
 }
@@ -3077,7 +3054,6 @@ function handleDrop(e) {
 async function readFileData(file) {
   fileLoading.value = true
   uploadError.value = ''
-
   try {
     const base64Promise = new Promise((resolve, reject) => {
       const reader = new FileReader()
@@ -3089,18 +3065,13 @@ async function readFileData(file) {
       reader.readAsDataURL(file)
     })
     await base64Promise
-
     const sid = activeSession.value?.id || sessionManager.getActiveSessionId() || null
     const result = await worksheetWorkflow.handleFileUpload(file, sid)
-
     if (result.success) {
       workbookSheets.value = worksheetWorkflow.workbookSheets.value
       worksheetStatus.value = worksheetWorkflow.worksheetStatus.value
       originalFileBuffer.value = worksheetWorkflow.originalFileBuffer.value
       worksheetStatuses.value = {}
-
-      // NEW — remember the server-side dataset id so the viewer / download
-      // endpoints work even after a page reload or session reopen.
       if (result.datasetId) {
         originalDatasetId.value = result.datasetId
         if (sid) {
@@ -3111,19 +3082,14 @@ async function readFileData(file) {
               originalDatasetId: result.datasetId,
               originalFileName: file.name
             })
-          } catch (e) {
-            console.warn('Failed to persist originalDatasetId:', e)
-          }
+          } catch (e) { console.warn('Failed to persist originalDatasetId:', e) }
         }
       }
-
       clearActiveCache(false)
-
       worksheetSelected.value = false
       currentSheetName.value = ''
       showPreview.value = false
       sheetType.value = 'multi'
-
       addToHistory(file.name, result.sheets[0]?.data || [], uploadedFileBase64.value)
       debouncedSave()
       forceUpdate.value++
@@ -3160,25 +3126,21 @@ function removeFile() {
   worksheetSelected.value = false
   uploadError.value = ''
   sheetTotalRows.value = 0
-  originalDatasetId.value = null   // NEW
+  originalDatasetId.value = null
   worksheetWorkflow.reset()
   debouncedSave()
   forceUpdate.value++
   if (fileInput.value) fileInput.value.value = ''
 }
 
-function togglePreview() {
-  showPreview.value = !showPreview.value
-}
+function togglePreview() { showPreview.value = !showPreview.value }
 
 function handleWorksheetSelect(sheetName) {
   const result = worksheetWorkflow.selectWorksheet(sheetName)
   if (result.success) {
     currentSheetName.value = sheetName
     worksheetSelected.value = true
-
     clearActiveCache(true)
-
     const sheet = workbookSheets.value.find(s => s.name === sheetName)
     if (sheet) {
       const previewResult = worksheetWorkflow.parseSheetPreview(sheetName, 100)
@@ -3190,7 +3152,6 @@ function handleWorksheetSelect(sheetName) {
         sheetTotalRows.value = previewResult.totalRows || 0
       }
       sheetType.value = 'multi'
-
       if (rawData.value.length > 0) {
         const detection = detectSheetType(rawData.value, instrumentType.value)
         sheetType.value = detection.type
@@ -3202,7 +3163,6 @@ function handleWorksheetSelect(sheetName) {
           mappingApplied.value = true
         }
       }
-
       showPreview.value = true
       activeTab.value = 'upload'
       forceUpdate.value++
@@ -3219,7 +3179,6 @@ function clearActiveCache(preservePreviousValuations = true) {
       completedPortfolioSummary.value = JSON.parse(JSON.stringify(portfolioSummary.value))
     }
   }
-
   if (!isUsingDetectedFields.value) {
     cleanedData.value = []
     calculations.value = {}
@@ -3238,19 +3197,15 @@ function clearActiveCache(preservePreviousValuations = true) {
     selectedCalculations.value = {}
     columnMapping.value = {}
   }
-
   instrumentSummary.value = { columns: [], rows: [] }
   portfolioSummary.value = { columns: [], rows: [] }
-
   if (!preservePreviousValuations) {
     completedInstrumentSummary.value = { columns: [], rows: [] }
     completedPortfolioSummary.value = { columns: [], rows: [] }
   }
-
   fieldDetectionResults.value = { detected_fields: {}, summary: {} }
   showMultiTableDetectionSuccess.value = false
   multiTableDetectionResults.value = []
-
   rawData.value = []
   originalRawData.value = []
   previewData.value = []
@@ -3259,27 +3214,15 @@ function clearActiveCache(preservePreviousValuations = true) {
   extractedValues.value = {}
   singleInstrumentExtractedValues.value = {}
   isolatedTableData.value = null
-
   mappingApplied.value = false
   showMappingDialog.value = false
   fixedValuesTracker.value.clear()
-
-  cleaningStats.value = {
-    totalRows: 0,
-    cleanedRows: 0,
-    modifiedRows: 0,
-    duplicateRows: 0,
-    missingValueRows: 0
-  }
-
+  cleaningStats.value = { totalRows: 0, cleanedRows: 0, modifiedRows: 0, duplicateRows: 0, missingValueRows: 0 }
   formulas.value = {}
   manualInputs.value = {}
 }
 
-function handleSheetSelectedFromViewer(sheetName) {
-  currentSheetName.value = sheetName
-}
-
+function handleSheetSelectedFromViewer(sheetName) { currentSheetName.value = sheetName }
 function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
   currentSheetName.value = sheetName
   singleInstrumentExtractedValues.value = extractedValues
@@ -3287,17 +3230,8 @@ function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
 
 function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }) {
   currentSheetName.value = sheetName
-
   clearActiveCache(true)
-
-  isolatedTableData.value = {
-    sheetName,
-    tableName,
-    data,
-    headers,
-    tableRange
-  }
-
+  isolatedTableData.value = { sheetName, tableName, data, headers, tableRange }
   showWorkbookViewer.value = false
   rawData.value = data
   originalRawData.value = JSON.parse(JSON.stringify(data))
@@ -3313,10 +3247,7 @@ function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }
 }
 
 async function handleAutoDetectSheet(sheetName) {
-  if (!originalFileBuffer.value) {
-    alert('File buffer not available')
-    return
-  }
+  if (!originalFileBuffer.value) { alert('File buffer not available'); return }
   currentSheetName.value = sheetName
   await autoDetectSingleInstrument()
 }
@@ -3324,22 +3255,18 @@ async function handleAutoDetectSheet(sheetName) {
 async function handleWorkOnSheet(sheetName) {
   fileLoading.value = true
   uploadError.value = ''
-
   clearActiveCache(true)
-
   try {
     const result = await worksheetWorkflow.processWorksheet(
       sheetName,
       requiredColumns.value,
       columnVariations.value
     )
-
     if (result.success) {
       const sheetData = result.data || []
       rawData.value = sheetData
       sheetType.value = result.type || 'multi'
       extractedValues.value = result.extractedValues || {}
-
       if (sheetData.length > 0) {
         const headers = Object.keys(sheetData[0])
         originalRawData.value = JSON.parse(JSON.stringify(sheetData))
@@ -3353,15 +3280,8 @@ async function handleWorkOnSheet(sheetName) {
         }
         originalRawData.value = []
       }
-
-      worksheetStatus.value[sheetName] = {
-        ...worksheetStatus.value[sheetName],
-        processed: true,
-        sheetType: result.type
-      }
-
+      worksheetStatus.value[sheetName] = { ...worksheetStatus.value[sheetName], processed: true, sheetType: result.type }
       worksheetSelected.value = true
-
       if (result.type === 'multi') {
         currentMappingTemplateId.value = null
         const headers = Object.keys(sheetData[0] || {})
@@ -3387,7 +3307,6 @@ async function handleWorkOnSheet(sheetName) {
         originalFileColumns.value = [...fileColumns.value]
         showPreview.value = true
       }
-
       debouncedSave()
       forceUpdate.value++
     } else {
@@ -3402,44 +3321,34 @@ async function handleWorkOnSheet(sheetName) {
 
 function handleViewResults(sheetName) {
   const status = worksheetStatus.value[sheetName]
-  if (status?.processed) {
-    activeTab.value = 'calculations'
-  }
+  if (status?.processed) activeTab.value = 'calculations'
 }
 
 function applyCurrentMapping() {
-  if (!originalRawData.value.length) {
-    return
-  }
+  if (!originalRawData.value.length) return
   if (sheetType.value === 'single') {
     rawData.value = originalRawData.value
     mappingApplied.value = true
     return
   }
-
   const required = requiredColumns.value || []
   const hasAnyMapping = required.some(
     col => columnMapping.value[col] && columnMapping.value[col] !== '__na__'
   )
-
   if (!hasAnyMapping) {
     rawData.value = originalRawData.value
     mappingApplied.value = false
     showPreview.value = true
     return
   }
-
   const transformed = originalRawData.value.map(row => {
     const out = {}
     for (const reqCol of required) {
       const srcCol = columnMapping.value[reqCol]
-      out[reqCol] = (srcCol && srcCol !== '__na__' && row[srcCol] !== undefined)
-        ? row[srcCol]
-        : ''
+      out[reqCol] = (srcCol && srcCol !== '__na__' && row[srcCol] !== undefined) ? row[srcCol] : ''
     }
     return out
   })
-
   rawData.value = transformed
   mappingApplied.value = true
   showPreview.value = true
@@ -3515,28 +3424,19 @@ function refreshFileColumns() {
 
 function getCellValue(cell) {
   if (cell == null) return ""
-
   if (typeof cell === 'object' && cell !== null) {
     if (cell.w !== undefined && cell.w !== null) return cell.w
     if (cell.v !== undefined && cell.v !== null) return cell.v
     if (cell.f !== undefined && cell.f !== null) return cell.f
     if (Array.isArray(cell)) return cell.join(', ')
-    try {
-      return JSON.stringify(cell)
-    } catch {
-      return String(cell)
-    }
+    try { return JSON.stringify(cell) } catch { return String(cell) }
   }
-
   return cell
 }
 
 function openMappingDialog() {
-  if (sheetType.value === 'single') {
-    return
-  }
+  if (sheetType.value === 'single') return
   refreshFileColumns()
-
   if (!fileColumns.value.length && rawData.value.length) {
     const headers = Object.keys(rawData.value[0] || {})
     if (headers.length) {
@@ -3551,7 +3451,6 @@ function openMappingDialog() {
       originalFileColumns.value = [...headers]
     }
   }
-
   if (!fileColumns.value.length && workbookSheets.value.length && currentSheetName.value) {
     const sheet = workbookSheets.value.find(s => s.name === currentSheetName.value)
     if (sheet && sheet.headers && sheet.headers.length) {
@@ -3559,28 +3458,21 @@ function openMappingDialog() {
       originalFileColumns.value = [...sheet.headers]
     }
   }
-
   showMappingDialog.value = true
 }
 
-function closeMappingDialog() {
-  showMappingDialog.value = false
-}
+function closeMappingDialog() { showMappingDialog.value = false }
 
 async function applyColumnMappingAndClose() {
   applyCurrentMapping()
-
   if (currentMappingTemplateId.value) {
     try {
       await mappingTemplateManager.updateTemplate(currentMappingTemplateId.value, {
         columnMapping: columnMapping.value,
         fileColumns: fileColumns.value
       })
-    } catch (e) {
-      // non-fatal
-    }
+    } catch (e) { /* non-fatal */ }
   }
-
   showMappingDialog.value = false
   showPreview.value = true
   forceUpdate.value++
@@ -3593,13 +3485,8 @@ function resetMapping() {
   applyCurrentMapping()
 }
 
-// ⭐ FIXED — original workbook is now fetched from the server when the
-// in-memory buffer is gone (page reload, reopened session).
 async function openWorkbookViewer() {
   let buffer = originalFileBuffer.value
-
-  // If we don't have the file in memory, fetch the original from the server
-  // by its stored dataset id.
   if ((!buffer || buffer.byteLength === 0) && originalDatasetId.value) {
     try {
       const res = await fetch(`${API_BASE_URL}/api/dataset/${originalDatasetId.value}/file`)
@@ -3619,25 +3506,18 @@ async function openWorkbookViewer() {
       return
     }
   }
-
   if (!buffer || buffer.byteLength === 0) {
-    showSnackbar(
-      'No original workbook is available for this session. Please re-upload the file.',
-      'error'
-    )
+    showSnackbar('No original workbook is available for this session. Please re-upload the file.', 'error')
     return
   }
-
   if (worksheetWorkflow.workbookSheets.value?.length > 0) {
     workbookSheets.value = [...worksheetWorkflow.workbookSheets.value]
   } else {
     workbookSheets.value = []
   }
-
   if (activeSession.value?.id) {
     loadWorksheetStatuses()
   }
-
   try {
     showWorkbookViewer.value = true
     await nextTick()
@@ -3646,7 +3526,6 @@ async function openWorkbookViewer() {
   }
 }
 
-// NEW — download the original uploaded workbook byte-for-byte.
 async function downloadOriginalWorkbook() {
   if (!originalDatasetId.value) {
     showSnackbar('No original workbook is stored for this session.', 'error')
@@ -3656,12 +3535,10 @@ async function downloadOriginalWorkbook() {
     const res = await fetch(`${API_BASE_URL}/api/dataset/${originalDatasetId.value}/download`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const blob = await res.blob()
-
     let filename = `workbook_${originalDatasetId.value}.xlsx`
     const cd = res.headers.get('Content-Disposition') || ''
     const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd)
     if (match) filename = decodeURIComponent(match[1])
-
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -3677,33 +3554,19 @@ async function downloadOriginalWorkbook() {
 }
 
 function workOnSelectedSheet() {
-  if (!currentSheetName.value) {
-    alert('Please select a sheet first')
-    return
-  }
-
-  if (!originalFileBuffer.value) {
-    alert('File buffer not available')
-    return
-  }
+  if (!currentSheetName.value) { alert('Please select a sheet first'); return }
+  if (!originalFileBuffer.value) { alert('File buffer not available'); return }
   handleWorkOnSheet(currentSheetName.value)
   showWorkbookViewer.value = false
 }
 
 async function autoDetectSingleInstrument() {
   const sheetName = currentSheetName.value || workbookSheets.value?.[0]?.name
-  if (!sheetName || !originalFileBuffer.value) {
-    alert('Please select a sheet first')
-    return
-  }
+  if (!sheetName || !originalFileBuffer.value) { alert('Please select a sheet first'); return }
   currentSheetName.value = sheetName
-
-  if (isDetecting.value) {
-    return
-  }
+  if (isDetecting.value) return
   isDetecting.value = true
   detectionStatus.value = 'scanning'
-
   autoDetectedFields.value = {}
   autoDetectedFieldsWithMetadata.value = {}
   autoDetectedAdditionalFields.value = {}
@@ -3711,14 +3574,11 @@ async function autoDetectSingleInstrument() {
   detectedInstrumentType.value = ''
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
-
   try {
     if (!requiredColumns.value || requiredColumns.value.length === 0) {
       await loadConfig()
     }
-
     detectionStatus.value = 'analyzing'
-
     let currencyFilter = null
     if (selectedCurrency.value) {
       if (selectedCurrency.value === 'custom') {
@@ -3727,43 +3587,28 @@ async function autoDetectSingleInstrument() {
         currencyFilter = selectedCurrency.value.toUpperCase()
       }
     }
-
     detectionStatus.value = 'detecting'
-
     const detectionPromise = autoDetectInstrumentFields(
       originalFileBuffer.value,
       currentSheetName.value,
       requiredColumns.value,
       instrumentType.value,
-      null,
-      null,
-      currencyFilter,
-      (status) => {
-        detectionStatus.value = status
-      }
+      null, null, currencyFilter,
+      (status) => { detectionStatus.value = status }
     )
-
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('Detection timeout - scan took too long')), 30000)
     )
-
     const detectionResult = await Promise.race([detectionPromise, timeoutPromise])
-
     detectionStatus.value = 'validating'
-
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
       detectionResult?.fieldsWithMetadata,
       instrumentType.value,
       requiredColumns.value
     )
-
     detectionStatus.value = 'complete'
-
-    const deriveUnion = {
-      ...normalized.fields,
-      ...(detectionResult?.additionalFields || {}),
-    }
+    const deriveUnion = { ...normalized.fields, ...(detectionResult?.additionalFields || {}) }
     const deriveUnionMeta = { ...normalized.fieldsWithMetadata }
     for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
       if (!(key in deriveUnionMeta)) {
@@ -3774,7 +3619,6 @@ async function autoDetectSingleInstrument() {
       }
     }
     deriveDaysToMaturity(deriveUnion, deriveUnionMeta)
-
     const primaryAfterDerive = { ...normalized.fields }
     const metaAfterDerive = { ...normalized.fieldsWithMetadata }
     for (const [key, value] of Object.entries(deriveUnion)) {
@@ -3783,15 +3627,12 @@ async function autoDetectSingleInstrument() {
         metaAfterDerive[key] = deriveUnionMeta[key]
       }
     }
-
     autoDetectedFields.value = primaryAfterDerive
     autoDetectedFieldsWithMetadata.value = metaAfterDerive
     autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
     detectedCurrencies.value = detectionResult?.currencies || []
     detectedInstrumentType.value = instrumentType.value
-
     await nextTick()
-
     if (!selectedCurrency.value) {
       if (detectedCurrencies.value.length === 1) {
         selectedCurrency.value = detectedCurrencies.value[0]
@@ -3799,7 +3640,6 @@ async function autoDetectSingleInstrument() {
         selectedCurrency.value = ''
       }
     }
-
     showDetectionSuccess.value = true
   } catch (error) {
     if (Object.keys(autoDetectedFields.value).length > 0) {
@@ -3814,14 +3654,9 @@ async function autoDetectSingleInstrument() {
 
 async function handleMultiTableDetect(event) {
   if (!event?.tables?.length) return
-  if (!originalFileBuffer.value) {
-    alert('File buffer not available — please re-upload the workbook.')
-    return
-  }
-
+  if (!originalFileBuffer.value) { alert('File buffer not available — please re-upload the workbook.'); return }
   isDetecting.value = true
   detectionStatus.value = 'scanning'
-
   autoDetectedFields.value = {}
   autoDetectedFieldsWithMetadata.value = {}
   autoDetectedAdditionalFields.value = {}
@@ -3832,10 +3667,8 @@ async function handleMultiTableDetect(event) {
   showDetectionSuccess.value = false
   showMultiTableDetectionSuccess.value = false
   multiTableDetectionResults.value = []
-
   try {
     const detectedInstruments = []
-
     let currencyFilter = null
     if (selectedCurrency.value) {
       if (selectedCurrency.value === 'custom') {
@@ -3844,17 +3677,13 @@ async function handleMultiTableDetect(event) {
         currencyFilter = selectedCurrency.value.toUpperCase()
       }
     }
-
     const totalTables = event.tables.length
     let processedTables = 0
-
     for (const table of event.tables) {
       processedTables++
       detectionStatus.value = `analyzing (table ${processedTables} of ${totalTables})`
-
       try {
         const tableData = table.data
-
         const TABLE_TIMEOUT_MS = 20000
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(
@@ -3862,7 +3691,6 @@ async function handleMultiTableDetect(event) {
             TABLE_TIMEOUT_MS
           )
         )
-
         const detectionPromise = autoDetectInstrumentFields(
           originalFileBuffer.value,
           event.sheetName,
@@ -3871,27 +3699,18 @@ async function handleMultiTableDetect(event) {
           table.range,
           tableData,
           currencyFilter,
-          (status) => {
-            detectionStatus.value = status
-          }
+          (status) => { detectionStatus.value = status }
         )
-
         const detectionResult = await Promise.race([detectionPromise, timeoutPromise])
-
         const normalized = normalizeDetectedFields(
           detectionResult?.fields,
           detectionResult?.fieldsWithMetadata,
           event.instrumentType,
           requiredColumns.value
         )
-
         const mergedFields = { ...normalized.fields }
         const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
-
-        const deriveUnion = {
-          ...mergedFields,
-          ...(detectionResult?.additionalFields || {}),
-        }
+        const deriveUnion = { ...mergedFields, ...(detectionResult?.additionalFields || {}) }
         const deriveUnionMeta = { ...mergedFieldsWithMetadata }
         for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
           if (!(key in deriveUnionMeta)) {
@@ -3908,7 +3727,6 @@ async function handleMultiTableDetect(event) {
             mergedFieldsWithMetadata[key] = deriveUnionMeta[key]
           }
         }
-
         if (Object.keys(mergedFields).length > 0) {
           detectedInstruments.push({
             tableName: table.tableName,
@@ -3924,7 +3742,6 @@ async function handleMultiTableDetect(event) {
         console.error(`Error detecting table ${table.tableName}:`, error)
       }
     }
-
     detectionStatus.value = 'complete'
     multiTableDetectionResults.value = detectedInstruments
     showMultiTableDetectionSuccess.value = true
@@ -3941,7 +3758,6 @@ async function handleMultiTableDetect(event) {
 function useMultiTableDetectedFields() {
   showMultiTableDetectionSuccess.value = false
   showWorkbookViewer.value = false
-
   const combinedFields = {}
   for (const instrument of multiTableDetectionResults.value) {
     for (const [key, fieldObj] of Object.entries(instrument.fields)) {
@@ -3951,79 +3767,53 @@ function useMultiTableDetectedFields() {
       }
     }
   }
-
   if (!combinedFields.InstrumentName && multiTableDetectionResults.value.length > 0) {
     combinedFields.InstrumentName = multiTableDetectionResults.value[0].instrumentName || ''
   }
-
   const tabularData = [combinedFields]
-
   rawData.value = tabularData
   originalRawData.value = JSON.parse(JSON.stringify(tabularData))
   cleanedData.value = JSON.parse(JSON.stringify(tabularData))
-
   const headers = Object.keys(combinedFields)
   fileColumns.value = headers
   originalFileColumns.value = [...headers]
-
   worksheetSelected.value = true
   showPreview.value = true
   sheetType.value = 'single'
   mappingApplied.value = true
-
   extractedValues.value = combinedFields
   autoDetectedFields.value = combinedFields
-
   activeTab.value = 'cleaning'
 }
 
 function formatDetectedValue(field, value) {
   if (value === null || value === undefined) return '—'
-
   const lc = String(field).toLowerCase()
-
-  if (lc.includes('frequency') || (lc.includes('coupon') && lc.includes('frequency'))) {
-    return String(value)
-  }
-
-  if (lc.includes('interest') && lc.includes('payment') && lc.includes('frequency')) {
-    return String(value)
-  }
-  if (lc.includes('payment') && lc.includes('frequency')) {
-    return String(value)
-  }
-
+  if (lc.includes('frequency') || (lc.includes('coupon') && lc.includes('frequency'))) return String(value)
+  if (lc.includes('interest') && lc.includes('payment') && lc.includes('frequency')) return String(value)
+  if (lc.includes('payment') && lc.includes('frequency')) return String(value)
   if (lc.includes('date') || lc.includes('maturity')) {
     try {
       const date = new Date(value)
       if (!isNaN(date.getTime())) {
-        return date.toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-          timeZone: 'UTC'
-        })
+        return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
       }
     } catch {}
   }
-
   if (lc.includes('rate') || lc.includes('yield') || lc.includes('coupon') || lc.includes('discount')) {
     const num = parseFloat(value)
     if (!isNaN(num)) return num.toFixed(2) + '%'
   }
-
   if (lc.includes('value') || lc.includes('amount') || lc.includes('price') || lc.includes('principal')) {
     const num = parseFloat(value)
     if (!isNaN(num)) return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
-
   return String(value)
 }
 
 function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
   const targetFields = isAdditional ? autoDetectedAdditionalFields : autoDetectedFields
   const fieldData = targetFields[fieldName]
-
   if (fieldData && fieldData.currencyVariants && fieldData.currencyVariants[currency]) {
     fieldData.selectedCurrency = currency
     fieldData.value = fieldData.currencyVariants[currency]
@@ -4032,10 +3822,7 @@ function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
 }
 
 async function handleCustomCurrencyInput() {
-  if (customCurrency.value) {
-    customCurrency.value = customCurrency.value.toUpperCase()
-  }
-
+  if (customCurrency.value) customCurrency.value = customCurrency.value.toUpperCase()
   if (customCurrency.value && customCurrency.value.length === 3) {
     try {
       const detectionResult = await autoDetectInstrumentFields(
@@ -4043,42 +3830,29 @@ async function handleCustomCurrencyInput() {
         currentSheetName.value,
         requiredColumns.value,
         instrumentType.value,
-        null,
-        null,
+        null, null,
         customCurrency.value,
-        (status) => {
-          detectionStatus.value = status
-        }
+        (status) => { detectionStatus.value = status }
       )
-
       const normalized = normalizeDetectedFields(
         detectionResult?.fields,
         detectionResult?.fieldsWithMetadata,
         instrumentType.value,
         requiredColumns.value
       )
-
       if (Object.keys(normalized.fields).length > 0) {
         autoDetectedFields.value = normalized.fields
         autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
         detectedCurrencies.value = detectionResult?.currencies || []
       }
-    } catch (error) {
-      // non-fatal
-    }
+    } catch (error) { /* non-fatal */ }
   }
 }
 
 async function handleCurrencyChange() {
-  if (!currentSheetName.value || !originalFileBuffer.value) {
-    return
-  }
-
-  if (isDetecting.value) {
-    return
-  }
+  if (!currentSheetName.value || !originalFileBuffer.value) return
+  if (isDetecting.value) return
   isDetecting.value = true
-
   try {
     let currencyFilter = null
     if (selectedCurrency.value) {
@@ -4088,35 +3862,24 @@ async function handleCurrencyChange() {
         currencyFilter = selectedCurrency.value.toUpperCase()
       }
     }
-
     const detectionResult = await autoDetectInstrumentFields(
       originalFileBuffer.value,
       currentSheetName.value,
       requiredColumns.value,
       instrumentType.value,
-      null,
-      null,
-      currencyFilter,
-      (status) => {
-        detectionStatus.value = status
-      }
+      null, null, currencyFilter,
+      (status) => { detectionStatus.value = status }
     )
-
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
       detectionResult?.fieldsWithMetadata,
       instrumentType.value,
       requiredColumns.value
     )
-
     const mergedFields = { ...normalized.fields }
     const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
-
     if (Object.keys(mergedFields).length > 0) {
-      const deriveUnion = {
-        ...mergedFields,
-        ...(detectionResult?.additionalFields || {}),
-      }
+      const deriveUnion = { ...mergedFields, ...(detectionResult?.additionalFields || {}) }
       const deriveUnionMeta = { ...mergedFieldsWithMetadata }
       for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
         if (!(key in deriveUnionMeta)) {
@@ -4133,18 +3896,14 @@ async function handleCurrencyChange() {
           mergedFieldsWithMetadata[key] = deriveUnionMeta[key]
         }
       }
-
       autoDetectedFields.value = mergedFields
       autoDetectedFieldsWithMetadata.value = mergedFieldsWithMetadata
       autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
       detectedCurrencies.value = detectionResult?.currencies || []
       detectedInstrumentType.value = instrumentType.value
     }
-
     showDetectionSuccess.value = true
-  } catch (error) {
-    // non-fatal
-  } finally {
+  } catch (error) { /* non-fatal */ } finally {
     isDetecting.value = false
   }
 }
@@ -4154,26 +3913,18 @@ async function useDetectedFields() {
   const preservedDetectedFieldsWithMetadata = JSON.parse(JSON.stringify(autoDetectedFieldsWithMetadata.value))
   const preservedDetectedAdditionalFields = JSON.parse(JSON.stringify(autoDetectedAdditionalFields.value))
   const preservedDetectedCurrencies = JSON.parse(JSON.stringify(detectedCurrencies.value))
-
   const mergedDetectedFields = { ...preservedDetectedFields }
   for (const [key, value] of Object.entries(preservedDetectedAdditionalFields)) {
-    if (!(key in mergedDetectedFields)) {
-      mergedDetectedFields[key] = value
-    }
+    if (!(key in mergedDetectedFields)) mergedDetectedFields[key] = value
   }
-
   autoDetectedFields.value = mergedDetectedFields
   autoDetectedFieldsWithMetadata.value = preservedDetectedFieldsWithMetadata
   autoDetectedAdditionalFields.value = preservedDetectedAdditionalFields
   detectedCurrencies.value = preservedDetectedCurrencies
-
   isUsingDetectedFields.value = true
-
   showDetectionSuccess.value = false
   showWorkbookViewer.value = false
-
   const values = {}
-
   for (const [key, value] of Object.entries(autoDetectedFields.value)) {
     if (typeof value === 'object' && value !== null) {
       if (value.currencyVariants && value.selectedCurrency && value.currencyVariants[value.selectedCurrency]) {
@@ -4185,7 +3936,6 @@ async function useDetectedFields() {
       values[key] = value
     }
   }
-
   for (const [key, value] of Object.entries(autoDetectedAdditionalFields.value)) {
     if (!(key in values)) {
       if (typeof value === 'object' && value !== null) {
@@ -4199,13 +3949,11 @@ async function useDetectedFields() {
       }
     }
   }
-
   if (selectedCurrency.value && selectedCurrency.value !== 'custom') {
     values['Currency'] = selectedCurrency.value
   } else if (selectedCurrency.value === 'custom' && customCurrency.value) {
     values['Currency'] = customCurrency.value.toUpperCase()
   }
-
   if (currentSheetName.value && String(currentSheetName.value).trim()) {
     const sheetName = String(currentSheetName.value).trim()
     if (!values['TBillName']) values['TBillName'] = sheetName
@@ -4214,28 +3962,22 @@ async function useDetectedFields() {
     if (!values['Instrument Name']) values['Instrument Name'] = sheetName
     if (!values['instrument_name']) values['instrument_name'] = sheetName
   }
-
   const instType = String(instrumentType.value || '').trim()
   if (instType) {
     if (!values['instrument_type']) values['instrument_type'] = instType
     if (!values['Instrument Type']) values['Instrument Type'] = instType
   }
-
   extractedValues.value = values
-
   rawData.value = [{ ...values }]
   originalRawData.value = [{ ...values }]
   cleanedData.value = [{ ...values }]
   fileColumns.value = Object.keys(values)
   originalFileColumns.value = [...fileColumns.value]
-
   worksheetSelected.value = true
   showPreview.value = true
   sheetType.value = 'single'
   mappingApplied.value = true
-
   showWorkbookViewer.value = false
-
   await nextTick()
   activeTab.value = 'cleaning'
   await nextTick()
@@ -4243,19 +3985,15 @@ async function useDetectedFields() {
 
 function handleProcessSheetFromViewer(sheetName, sheetData, sheetHeaders) {
   currentSheetName.value = sheetName
-
   clearActiveCache(true)
-
   originalRawData.value = sheetData || []
   rawData.value = sheetData.map(row => {
     const normalized = {}
     for (const [key, value] of Object.entries(row)) {
-      const extracted = getCellValue(value)
-      normalized[key] = extracted
+      normalized[key] = getCellValue(value)
     }
     return normalized
   })
-
   fileColumns.value = sheetHeaders || []
   originalFileColumns.value = [...fileColumns.value]
   worksheetSelected.value = true
@@ -4290,16 +4028,13 @@ function handleProcessSheet(sheetName, sheetData, sheetHeaders) {
 
 function handleProcessSheetFromModal(payload) {
   worksheetStatus.value[payload.sheetName] = 'in_progress'
-
   rawData.value = payload.data
   originalRawData.value = JSON.parse(JSON.stringify(payload.data))
   originalFileColumns.value = payload.headers || []
   fileColumns.value = [...originalFileColumns.value]
   currentSheetName.value = payload.sheetName
-
   const sheetDetection = detectSheetType(payload.data, instrumentType.value)
   sheetType.value = sheetDetection.type
-
   if (sheetDetection.type === 'single') {
     handleSingleInstrumentSheet(payload.data, payload.sheetName)
   } else {
@@ -4339,22 +4074,15 @@ function convertExtractedToTabular(extractedValues) {
     discountRate: 'Discount Rate',
     frequency: 'Frequency'
   }
-
   for (const [key, value] of Object.entries(extractedValues)) {
     const columnName = columnMapping[key] || key
     row[columnName] = value
   }
-
   return [row]
 }
 
-function updateExtractedValue(key, value) {
-  extractedValues.value[key] = value
-}
-
-function clearExtractedValue(key) {
-  extractedValues.value[key] = 'N/A'
-}
+function updateExtractedValue(key, value) { extractedValues.value[key] = value }
+function clearExtractedValue(key) { extractedValues.value[key] = 'N/A' }
 
 function toggleExcludeField(fieldKey) {
   if (excludedDetectedFields.value.has(fieldKey)) {
@@ -4370,10 +4098,8 @@ function addCustomField() {
     alert('Please enter both field name and value')
     return
   }
-
   const fieldName = newFieldName.value.trim()
   const fieldValue = newFieldValue.value.trim()
-
   autoDetectedFields.value[fieldName] = {
     value: fieldValue,
     currencyVariants: {},
@@ -4384,52 +4110,34 @@ function addCustomField() {
     detectedFrom: 'custom',
     semanticMatch: fieldName
   }
-
   autoDetectedFieldsWithMetadata.value[fieldName] = {
     location: 'custom',
     source: 'manual',
     originalLabel: fieldName
   }
-
   extractedValues.value[fieldName] = fieldValue
-
-  if (cleanedData.value.length > 0) {
-    cleanedData.value[0][fieldName] = fieldValue
-  }
-
-  if (rawData.value.length > 0) {
-    rawData.value[0][fieldName] = fieldValue
-  }
-
-  if (!fileColumns.value.includes(fieldName)) {
-    fileColumns.value.push(fieldName)
-  }
-
+  if (cleanedData.value.length > 0) cleanedData.value[0][fieldName] = fieldValue
+  if (rawData.value.length > 0) rawData.value[0][fieldName] = fieldValue
+  if (!fileColumns.value.includes(fieldName)) fileColumns.value.push(fieldName)
   newFieldName.value = ''
   newFieldValue.value = ''
-
   debouncedSave()
 }
 
 async function loadWorksheetStatuses() {
   if (!activeSession.value?.id) return
-
   try {
     const worksheets = await sessionManager.getAllWorksheets(activeSession.value.id)
     worksheetStatuses.value = {}
     for (const [name, data] of Object.entries(worksheets)) {
       worksheetStatuses.value[name] = data.status || 'saved'
     }
-  } catch (err) {
-    // non-fatal
-  }
+  } catch (err) { /* non-fatal */ }
 }
 
 function markWorksheetAsSaved() {
   const worksheetName = currentSheetName.value
-  if (worksheetName) {
-    worksheetStatuses.value[worksheetName] = 'saved'
-  }
+  if (worksheetName) worksheetStatuses.value[worksheetName] = 'saved'
 }
 
 function findMatchingRequiredColumn(column, requiredColumns) {
@@ -4443,10 +4151,8 @@ function findMatchingRequiredColumn(column, requiredColumns) {
 
 function autoDetectColumns(data, instrumentType) {
   if (!data || data.length === 0) return { success: false }
-
   const firstRow = data[0]
   let matchCount = 0
-
   const systemColumns = []
   if (instrumentType === 'money-market') {
     systemColumns.push('instrument_type', 'face_value', 'purchase_price', 'days_to_maturity', 'issue_date', 'maturity_date', 'coupon_rate', 'yield')
@@ -4455,7 +4161,6 @@ function autoDetectColumns(data, instrumentType) {
   } else if (instrumentType === 'tbills') {
     systemColumns.push('instrument_type', 'face_value', 'purchase_price', 'days_to_maturity', 'issue_date', 'maturity_date', 'discount_rate')
   }
-
   Object.keys(firstRow).forEach(col => {
     const normalizedCol = col.toLowerCase().trim()
     systemColumns.forEach(sysCol => {
@@ -4467,16 +4172,13 @@ function autoDetectColumns(data, instrumentType) {
       }
     })
   })
-
   const matchRatio = matchCount / systemColumns.length
-
   return { success: matchRatio > 0.4, data: data }
 }
 
 function buildDynamicColumns(results) {
   const allFields = new Set()
   const excludeFields = ['_raw', '_source', 'index', '__v']
-
   results.forEach(result => {
     Object.keys(result).forEach(key => {
       if (result[key] !== null && result[key] !== undefined && result[key] !== '' && !excludeFields.includes(key)) {
@@ -4484,13 +4186,11 @@ function buildDynamicColumns(results) {
       }
     })
   })
-
-  return [...allFields]
+  return dedupeColumns([...allFields])
 }
 
 function formatCellValue(value, col) {
   if (value === null || value === undefined || value === '') return '-'
-
   if (typeof value === 'number' && !isNaN(value)) {
     const isTimeField = col.toLowerCase().includes('day') || col.toLowerCase().includes('maturity') || col.toLowerCase().includes('duration') || col.toLowerCase().includes('term')
     if (isTimeField) {
@@ -4498,12 +4198,9 @@ function formatCellValue(value, col) {
       return rounded.toLocaleString()
     }
     const rounded = Math.round(value * 100) / 100
-    if (isPercentageField(col)) {
-      return rounded.toFixed(2) + '%'
-    }
+    if (isPercentageField(col)) return rounded.toFixed(2) + '%'
     return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
-
   if (isDateField(value)) {
     const d = new Date(value)
     return d.toLocaleDateString('en-US', {
@@ -4513,7 +4210,6 @@ function formatCellValue(value, col) {
       timeZone: 'UTC'
     })
   }
-
   return value
 }
 
@@ -4536,9 +4232,7 @@ function isNumericField(col) {
   return numericFields.some(f => lowerCol.includes(f))
 }
 
-const hasNumericColumns = computed(() => {
-  return portfolioSummary.value.columns.some(col => isNumericField(col))
-})
+const hasNumericColumns = computed(() => portfolioSummary.value.columns.some(col => isNumericField(col)))
 
 function calculateTotal(field) {
   let total = 0
@@ -4553,20 +4247,15 @@ function calculateTotal(field) {
 function exportSummary() {
   const currentData = instrumentSummary.value.rows || []
   const completedData = completedInstrumentSummary.value.rows || []
-
-  if (!currentData.length && !completedData.length) { return }
-
+  if (!currentData.length && !completedData.length) return
   const allColumns = new Set()
   currentData.forEach(row => Object.keys(row).forEach(k => allColumns.add(k)))
   completedData.forEach(row => Object.keys(row).forEach(k => allColumns.add(k)))
-  const displayCols = Array.from(allColumns)
-
+  const displayCols = dedupeColumns(Array.from(allColumns))
   const wb = XLSX.utils.book_new()
-
   if (currentData.length) {
     const filteredCols = displayCols.filter(c => !isExcludedColumn(c))
     const headerRow = filteredCols.map(formatColumnHeader)
-
     const currentBody = currentData.map(row => filteredCols.map(col => {
       const value = row[col]
       if (typeof value === 'number' && !isNaN(value)) {
@@ -4575,15 +4264,12 @@ function exportSummary() {
       }
       return value !== undefined ? value : ''
     }))
-
     const wsCurrent = XLSX.utils.aoa_to_sheet([headerRow, ...currentBody])
     XLSX.utils.book_append_sheet(wb, wsCurrent, 'Current Selection')
   }
-
   if (completedData.length) {
     const filteredCols = displayCols.filter(c => !isExcludedColumn(c))
     const headerRow = filteredCols.map(formatColumnHeader)
-
     const completedBody = completedData.map(row => filteredCols.map(col => {
       const value = row[col]
       if (typeof value === 'number' && !isNaN(value)) {
@@ -4592,11 +4278,9 @@ function exportSummary() {
       }
       return value !== undefined ? value : ''
     }))
-
     const wsCompleted = XLSX.utils.aoa_to_sheet([headerRow, ...completedBody])
     XLSX.utils.book_append_sheet(wb, wsCompleted, 'All Completed History')
   }
-
   const summaryInfo = [
     ['Instrument Summary Export'],
     ['Export Date', new Date().toLocaleString()],
@@ -4608,7 +4292,6 @@ function exportSummary() {
   ]
   const wsInfo = XLSX.utils.aoa_to_sheet(summaryInfo)
   XLSX.utils.book_append_sheet(wb, wsInfo, 'Summary Info')
-
   const suffix = activeValuationDate.value ? `_${activeValuationDate.value}` : ''
   XLSX.writeFile(wb, `instrument_summary${suffix}.xlsx`)
 }
@@ -4657,13 +4340,10 @@ function handleWorkbookLoaded(fileName) {
   currentWorkbookName.value = fileName || 'Unknown'
 }
 
-function closeInstrumentExcelPopup() {
-  showInstrumentExcelPopup.value = false
-}
+function closeInstrumentExcelPopup() { showInstrumentExcelPopup.value = false }
 
 function continueWorkingOnCurrent() {
   clearActiveCache(true)
-
   showWorkbookViewer.value = true
   activeTab.value = 'upload'
   forceUpdate.value++
@@ -4671,10 +4351,8 @@ function continueWorkingOnCurrent() {
 
 function chooseAnotherSheet() {
   clearActiveCache(true)
-
   currentSheetName.value = ''
   worksheetSelected.value = false
-
   showWorkbookViewer.value = true
   activeTab.value = 'upload'
   forceUpdate.value++
@@ -4693,254 +4371,29 @@ function formatForExcel(value, type = 'number', key = '') {
   if (value === null || value === undefined || value === '') return ''
   const num = parseFloat(value)
   if (isNaN(num)) return value
-
   const isTimeField = key.toLowerCase().includes('day') || key.toLowerCase().includes('maturity') || key.toLowerCase().includes('duration') || key.toLowerCase().includes('term')
-  if (isTimeField) {
-    return Math.round(num)
-  }
-
-  if (type === 'percentage') {
-    return Math.round(num * 100) / 100
-  } else if (type === 'money') {
-    return Math.round(num * 100) / 100
-  }
+  if (isTimeField) return Math.round(num)
+  if (type === 'percentage') return Math.round(num * 100) / 100
+  if (type === 'money') return Math.round(num * 100) / 100
   return num
 }
 
-function exportInstrumentSummaryExcel() {
-  const rows = instrumentSummary.value.rows
-  if (!rows.length) {
-    return
-  }
-
-  try {
-    const wb = XLSX.utils.book_new()
-    const displayCols = getDisplayColumns()
-
-    let allRows = [...rows]
-
-    if (activeSession.value?.id) {
-      sessionManager.getAllWorksheets(activeSession.value.id).then(worksheets => {
-        for (const [worksheetName, worksheetData] of Object.entries(worksheets)) {
-          if (worksheetData.instrumentSummary && worksheetData.instrumentSummary.rows) {
-            const worksheetRows = worksheetData.instrumentSummary.rows.map(row => ({
-              ...row,
-              Worksheet: worksheetName
-            }))
-            allRows = [...allRows, ...worksheetRows]
-          }
-        }
-
-        const headerRow = displayCols.map(formatColumnHeader)
-        const bodyRows = allRows.map(row => displayCols.map(col => {
-          const val = row[col] !== undefined ? row[col] : ''
-          if (isPercentageField(col)) return formatForExcel(val, 'percentage', col)
-          if (/value|price|amount|principal|interest/i.test(col)) return formatForExcel(val, 'money', col)
-          return formatForExcel(val, 'number', col)
-        }))
-        const ws1 = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows])
-        XLSX.utils.book_append_sheet(wb, ws1, 'Instruments')
-
-        const analytics = computeAnalytics(allRows)
-        const analyticsRows = Object.entries(analytics).map(([key, value]) => {
-          let formattedValue = value
-          if (isPercentageField(key)) {
-            formattedValue = formatForExcel(value, 'percentage', key)
-          } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('interest')) {
-            formattedValue = formatForExcel(value, 'money', key)
-          } else {
-            formattedValue = formatForExcel(value, 'number', key)
-          }
-          return { Metric: key, Value: formattedValue }
-        })
-        const ws2 = XLSX.utils.json_to_sheet(analyticsRows)
-        XLSX.utils.book_append_sheet(wb, ws2, 'Analytics')
-
-        XLSX.writeFile(wb, `instrument_summary_${Date.now()}.xlsx`)
-      }).catch(() => {
-        exportCurrentRowsOnly(wb, displayCols, rows)
-      })
-    } else {
-      exportCurrentRowsOnly(wb, displayCols, rows)
-    }
-  } catch (e) {
-    showSnackbar('Failed to export Excel: ' + e.message, 'error')
-  }
-}
-
-function exportCurrentRowsOnly(wb, displayCols, rows) {
-  const filteredCols = displayCols.filter(c => !isExcludedColumn(c))
-  const headerRow = filteredCols.map(formatColumnHeader)
-  const bodyRows = rows.map(row => filteredCols.map(col => {
-    const val = row[col] !== undefined ? row[col] : ''
-    if (isPercentageField(col)) return formatForExcel(val, 'percentage', col)
-    if (/value|price|amount|principal|interest/i.test(col)) return formatForExcel(val, 'money', col)
-    return formatForExcel(val, 'number', col)
-  }))
-  const ws1 = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows])
-  XLSX.utils.book_append_sheet(wb, ws1, 'Instruments')
-
-  const analytics = computeAnalytics(rows)
-  const analyticsRows = Object.entries(analytics).map(([key, value]) => {
-    let formattedValue = value
-    if (isPercentageField(key)) {
-      formattedValue = formatForExcel(value, 'percentage', key)
-    } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('interest')) {
-      formattedValue = formatForExcel(value, 'money', key)
-    } else {
-      formattedValue = formatForExcel(value, 'number', key)
-    }
-    return { Metric: key, Value: formattedValue }
-  })
-  const ws2 = XLSX.utils.json_to_sheet(analyticsRows)
-  XLSX.utils.book_append_sheet(wb, ws2, 'Analytics')
-
-  XLSX.writeFile(wb, `instrument_summary_${Date.now()}.xlsx`)
-}
-
-function openWorkflowPopup(row, idx) {
-  selectedWorkflowInstrument.value = row
-  selectedWorkflowIndex.value = idx
-  showWorkflowPopup.value = true
-}
-
-function closeWorkflowPopup() {
-  showWorkflowPopup.value = false
-  selectedWorkflowInstrument.value = null
-  selectedWorkflowIndex.value = 0
-}
-
-function navigateToUpload() {
-  switchTab('upload')
-  closeWorkflowPopup()
-}
-
-function navigateToCleaning() {
-  switchTab('cleaning')
-  closeWorkflowPopup()
-}
-
-function navigateToCalculations() {
-  switchTab('calculations')
-  closeWorkflowPopup()
-}
-
-function navigateToVisualizations() {
-  switchTab('visualizations')
-  closeWorkflowPopup()
-}
-
-function goToPreviousStep() {
-  const currentTab = activeTab.value
-  const tabOrder = ['upload', 'cleaning', 'calculations', 'visualizations', 'summary']
-  const currentIndex = tabOrder.indexOf(currentTab)
-
-  if (currentIndex > 0) {
-    switchTab(tabOrder[currentIndex - 1])
-  }
-}
-
-function handleSheetSelection(sheetData) {
-  if (sheetData && sheetData.data) {
-    rawData.value = sheetData.data
-    originalRawData.value = JSON.parse(JSON.stringify(sheetData.data))
-    originalFileColumns.value = sheetData.headers || []
-    fileColumns.value = [...originalFileColumns.value]
-    columnMapping.value = autoMatchColumns(fileColumns.value, requiredColumns.value, columnVariations.value)
-    applyCurrentMapping()
-    showPreview.value = true
-    addToHistory(`${uploadedFile.value.name} - ${sheetData.sheetName}`, sheetData.data, uploadedFileBase64.value)
-    debouncedSave()
-    forceUpdate.value++
-  }
-  showWorkbookViewer.value = false
-}
-
-function openExcelReview(data, title) {
-  if (!data?.length) {
-    if (cleanedData.value.length) data = cleanedData.value
-    else if (rawData.value.length) data = rawData.value
-    else { return }
-  }
-  excelData.value = data
-  excelColumns.value = Object.keys(data[0] || {})
-  excelDialogTitle.value = title || 'Data Review'
-  showExcelDialog.value = true
-}
-
-function openInstrumentDataExcel() {
-  const instrumentData = []
-
-  const calcRow = {
-    'Metric': 'Calculations'
-  }
-
-  const fields = config.value.calculationFields
-  fields.forEach(field => {
-    const value = selectedCalculations.value[field.key] ?? allCalculations.value[field.key]
-    if (value !== undefined) {
-      let displayValue = value
-      if (typeof value === 'number' && !isNaN(value)) {
-        const isTimeField = field.key.toLowerCase().includes('day') || field.key.toLowerCase().includes('maturity') || field.key.toLowerCase().includes('duration') || field.key.toLowerCase().includes('term')
-        if (isTimeField) {
-          const rounded = Math.round(value)
-          if (field.prefix) displayValue = field.prefix + rounded.toLocaleString()
-          else if (field.suffix) displayValue = rounded.toLocaleString() + field.suffix
-          else displayValue = rounded.toLocaleString()
-        } else {
-          const rounded = Math.round(value * 100) / 100
-          if (field.prefix) displayValue = field.prefix + rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-          else if (field.suffix) displayValue = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + field.suffix
-          else displayValue = rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        }
-      } else if (field.prefix) {
-        displayValue = field.prefix + value
-      } else if (field.suffix) {
-        displayValue = value + field.suffix
-      }
-      calcRow[field.label] = displayValue
-    }
-  })
-
-  instrumentData.push(calcRow)
-
-  if (allCalculations.value.fred) {
-    const fredRow = {
-      'Metric': 'FRED Benchmark',
-      'Series ID': allCalculations.value.fred.series_id || '',
-      'Series Label': allCalculations.value.fred.series_label || '',
-      'Benchmark Rate': formatNumber(allCalculations.value.fred.benchmark_rate || 0),
-      'Spread vs Market': formatNumber(allCalculations.value.fred.spread_vs_market || 0),
-      'Country': allCalculations.value.fred.country || '',
-      'Currency': allCalculations.value.fred.currency || '',
-      'Maturity': allCalculations.value.fred.maturity || ''
-    }
-    instrumentData.push(fredRow)
-  }
-
-  excelData.value = instrumentData
-  excelColumns.value = Object.keys(instrumentData[0] || {})
-  excelDialogTitle.value = `${instrumentLabel} - Calculations & Yield Curve`
-  showExcelDialog.value = true
-}
-
+// ─────────────────────────────────────────────────────────────
+// FIX 5 — downloadCalculatedInstrumentsExcel dedupes columns.
+// ─────────────────────────────────────────────────────────────
 function downloadCalculatedInstrumentsExcel() {
   const summaryRows = instrumentSummary.value.rows || []
   if (!summaryRows.length) {
     showSnackbar('No calculated instruments to export', 'error')
     return
   }
-
   const workbook = XLSX.utils.book_new()
-
   const allColumns = new Set()
   summaryRows.forEach(row => {
     Object.keys(row).forEach(key => allColumns.add(key))
   })
-  const columns = Array.from(allColumns).filter(c => !isExcludedColumn(c))
-
+  const columns = dedupeColumns(Array.from(allColumns).filter(c => !isExcludedColumn(c)))
   const data = [columns.map(formatColumnHeader)]
-
   summaryRows.forEach(row => {
     const dataRow = columns.map(col => {
       const value = row[col]
@@ -4948,21 +4401,17 @@ function downloadCalculatedInstrumentsExcel() {
     })
     data.push(dataRow)
   })
-
   const worksheet = XLSX.utils.aoa_to_sheet(data)
-
   const columnWidths = columns.map(col => {
     const isNumeric = col.toLowerCase().includes('value') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('rate') || col.toLowerCase().includes('yield') || col.toLowerCase().includes('price') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest') || col.toLowerCase().includes('discount') || col.toLowerCase().includes('coupon')
     const isDate = col.toLowerCase().includes('date')
     const isName = col.toLowerCase().includes('name') || col.toLowerCase().includes('instrument') || col.toLowerCase().includes('ticker') || col.toLowerCase().includes('worksheet') || col.toLowerCase().includes('workbook')
-
     if (isNumeric) return { wch: 18 }
     if (isDate) return { wch: 14 }
     if (isName) return { wch: 25 }
     return { wch: 20 }
   })
   worksheet['!cols'] = columnWidths
-
   const range = XLSX.utils.decode_range(worksheet['!ref'])
   for (let C = range.s.c; C <= range.e.c; ++C) {
     const cellAddress = XLSX.utils.encode_cell({ r: 0, c: C })
@@ -4973,15 +4422,12 @@ function downloadCalculatedInstrumentsExcel() {
       alignment: { horizontal: "center", vertical: "center" }
     }
   }
-
   for (let R = range.s.r + 1; R <= range.e.r; ++R) {
     for (let C = range.s.c; C <= range.e.c; ++C) {
       const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
       if (!worksheet[cellAddress]) continue
-
       const colName = columns[C]
       const isNumeric = colName.toLowerCase().includes('value') || colName.toLowerCase().includes('amount') || colName.toLowerCase().includes('rate') || colName.toLowerCase().includes('yield') || colName.toLowerCase().includes('price') || colName.toLowerCase().includes('percentage')
-
       worksheet[cellAddress].s = {
         alignment: {
           horizontal: isNumeric ? "right" : "left",
@@ -4990,9 +4436,7 @@ function downloadCalculatedInstrumentsExcel() {
       }
     }
   }
-
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Calculated Instruments')
-
   const suffix = activeValuationDate.value ? `_${activeValuationDate.value}` : ''
   const fileName = `Calculated_Instruments_${activeSession.value?.name || 'Session'}${suffix}.xlsx`
   XLSX.writeFile(workbook, fileName)
@@ -5023,9 +4467,8 @@ function onExcelDataUpdate(data) {
 }
 
 async function continueAfterUpload() {
-  if (!uploadedFile.value) { return }
-  if (!rawData.value.length) { return }
-
+  if (!uploadedFile.value) return
+  if (!rawData.value.length) return
   saveSessionData()
   await nextTick()
   activeTab.value = 'cleaning'
@@ -5053,21 +4496,16 @@ const cleaningOperationsSummary = computed(() => {
 })
 
 function applyCleaning() {
-  if (!rawData.value.length) {
-    return
-  }
-
+  if (!rawData.value.length) return
   try {
     const tableDetection = autoDetectTable(rawData.value)
     let data = JSON.parse(JSON.stringify(rawData.value))
     const operations = []
     const originalLength = data.length
-
     if (tableDetection.type === 'table') {
       data = tableDetection.data
       operations.push('Auto-detected and extracted table data')
     }
-
     if (cleaningOptions.value.removeDuplicates) {
       const before = data.length
       const seen = new Set()
@@ -5121,38 +4559,27 @@ function applyCleaning() {
       data = data.map(row => {
         Object.keys(row).forEach(k => {
           if (k.toLowerCase().includes('date') && row[k]) {
-            const d = new Date(row[k]);
+            const d = new Date(row[k])
             if (!isNaN(d)) {
               const utcDay = String(d.getUTCDate()).padStart(2, '0')
               const utcMonth = String(d.getUTCMonth() + 1).padStart(2, '0')
               const utcYear = d.getUTCFullYear()
               const utcShortYear = utcYear.toString().slice(-2)
-
               let formattedDate = ''
-              if (format === 'YYYY-MM-DD') {
-                formattedDate = `${utcYear}-${utcMonth}-${utcDay}`
-              } else if (format === 'DD-MM-YYYY') {
-                formattedDate = `${utcDay}-${utcMonth}-${utcYear}`
-              } else if (format === 'MM-DD-YYYY') {
-                formattedDate = `${utcMonth}-${utcDay}-${utcYear}`
-              } else if (format === 'DD/MM/YYYY') {
-                formattedDate = `${utcDay}/${utcMonth}/${utcYear}`
-              } else if (format === 'MM/DD/YYYY') {
-                formattedDate = `${utcMonth}/${utcDay}/${utcYear}`
-              } else if (format === 'YYYY/MM/DD') {
-                formattedDate = `${utcYear}/${utcMonth}/${utcDay}`
-              } else if (format === 'DD-MM-YY') {
-                formattedDate = `${utcDay}-${utcMonth}-${utcShortYear}`
-              } else if (format === 'MM-DD-YY') {
-                formattedDate = `${utcMonth}-${utcDay}-${utcShortYear}`
-              } else {
-                formattedDate = `${utcYear}-${utcMonth}-${utcDay}`
-              }
+              if (format === 'YYYY-MM-DD') formattedDate = `${utcYear}-${utcMonth}-${utcDay}`
+              else if (format === 'DD-MM-YYYY') formattedDate = `${utcDay}-${utcMonth}-${utcYear}`
+              else if (format === 'MM-DD-YYYY') formattedDate = `${utcMonth}-${utcDay}-${utcYear}`
+              else if (format === 'DD/MM/YYYY') formattedDate = `${utcDay}/${utcMonth}/${utcYear}`
+              else if (format === 'MM/DD/YYYY') formattedDate = `${utcMonth}/${utcDay}/${utcYear}`
+              else if (format === 'YYYY/MM/DD') formattedDate = `${utcYear}/${utcMonth}/${utcDay}`
+              else if (format === 'DD-MM-YY') formattedDate = `${utcDay}-${utcMonth}-${utcShortYear}`
+              else if (format === 'MM-DD-YY') formattedDate = `${utcMonth}-${utcDay}-${utcShortYear}`
+              else formattedDate = `${utcYear}-${utcMonth}-${utcDay}`
               row[k] = formattedDate
               standardized++
             }
           }
-        });
+        })
         return row
       })
       if (standardized > 0) operations.push(`Standardized ${standardized} date values to ${format}`)
@@ -5217,21 +4644,17 @@ function applyCleaning() {
       for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') { data[i][k] = data[i+1][k]; filled++ } })
       if (filled > 0) operations.push(`Filled ${filled} missing values backward`)
     }
-
     if (excludedDetectedFields.value.size > 0) {
       const excludedCount = excludedDetectedFields.value.size
       data = data.map(row => {
         const newRow = {}
         Object.keys(row).forEach(key => {
-          if (!excludedDetectedFields.value.has(key)) {
-            newRow[key] = row[key]
-          }
+          if (!excludedDetectedFields.value.has(key)) newRow[key] = row[key]
         })
         return newRow
       })
       operations.push(`Removed ${excludedCount} excluded fields from data`)
     }
-
     cleanedData.value = data
     cleaningStats.value = {
       totalRows: originalLength,
@@ -5246,7 +4669,6 @@ function applyCleaning() {
       removedDuplicates: cleaningOptions.value.removeDuplicates ? 1 : 0,
       operationsPerformed: operations
     }
-
     debouncedSave()
     forceUpdate.value++
   } catch (error) {
@@ -5255,25 +4677,18 @@ function applyCleaning() {
 }
 
 async function continueAfterCleaning() {
-  if (!cleanedData.value.length) {
-    return
-  }
-
+  if (!cleanedData.value.length) return
   if (sheetType.value === 'single' && excludedDetectedFields.value.size > 0) {
     const filteredData = cleanedData.value.map(row => {
       const filteredRow = {}
       for (const [key, value] of Object.entries(row)) {
         const isExcluded = excludedDetectedFields.value.has(key)
-        if (!isExcluded) {
-          filteredRow[key] = value
-        }
+        if (!isExcluded) filteredRow[key] = value
       }
       return filteredRow
     })
-
     cleanedData.value = filteredData
   }
-
   activeTab.value = 'calculations'
   await nextTick()
   forceUpdate.value++
@@ -5282,7 +4697,6 @@ async function continueAfterCleaning() {
   if (sid) {
     await markStepCompleted(String(sid), 'cleaning')
   }
-
   calculateMetrics().catch(err => {
     showSnackbar('Error calculating metrics: ' + err.message, 'error')
   })
@@ -5293,13 +4707,8 @@ async function calculateMetrics() {
     showSnackbar('No data available for calculation. Please clean the data first.', 'error')
     return
   }
-
-  if (isCalculating.value) {
-    return
-  }
-
+  if (isCalculating.value) return
   isCalculating.value = true
-
   try {
     const stored = sessionStorage.getItem('excluded_fields')
     if (stored) {
@@ -5307,9 +4716,7 @@ async function calculateMetrics() {
       if (Array.isArray(arr)) arr.forEach(k => excludedDetectedFields.value.add(k))
     }
   } catch (e) { /* ignore */ }
-
   let dataForCalculation = JSON.parse(JSON.stringify(cleanedData.value))
-
   try {
     dataForCalculation = dataForCalculation.map(row => {
       const normalizedRow = {}
@@ -5320,17 +4727,11 @@ async function calculateMetrics() {
           if (normalizedKey === 'coupon_frequency') {
             if (typeof value === 'string') {
               const freqLower = value.toLowerCase()
-              if (freqLower.includes('semi') || freqLower.includes('half')) {
-                normalizedValue = 2
-              } else if (freqLower.includes('quarter')) {
-                normalizedValue = 4
-              } else if (freqLower.includes('month') || freqLower.includes('monthly')) {
-                normalizedValue = 12
-              } else if (freqLower.includes('annual') || freqLower.includes('year')) {
-                normalizedValue = 1
-              } else {
-                normalizedValue = parseFloat(value) || 2
-              }
+              if (freqLower.includes('semi') || freqLower.includes('half')) normalizedValue = 2
+              else if (freqLower.includes('quarter')) normalizedValue = 4
+              else if (freqLower.includes('month') || freqLower.includes('monthly')) normalizedValue = 12
+              else if (freqLower.includes('annual') || freqLower.includes('year')) normalizedValue = 1
+              else normalizedValue = parseFloat(value) || 2
             }
           }
           if (typeof value === 'string' && (normalizedKey.includes('principal') || normalizedKey.includes('face_value') || normalizedKey.includes('price') || normalizedKey.includes('amount') || normalizedKey.includes('value'))) {
@@ -5349,19 +4750,15 @@ async function calculateMetrics() {
   } catch (e) {
     dataForCalculation = JSON.parse(JSON.stringify(cleanedData.value))
   }
-
   if (excludedDetectedFields.value.size > 0) {
     dataForCalculation = dataForCalculation.map(row => {
       const newRow = {}
       Object.keys(row).forEach(key => {
-        if (!excludedDetectedFields.value.has(key)) {
-          newRow[key] = row[key]
-        }
+        if (!excludedDetectedFields.value.has(key)) newRow[key] = row[key]
       })
       return newRow
     })
   }
-
   try {
     const response = await api.calculationsAPI.executeByType(
       instrumentType.value,
@@ -5378,7 +4775,6 @@ async function calculateMetrics() {
       null,
       activeSession.value?.id
     )
-
     if (response?.success) {
       if (response?.is_multi_instrument) {
         if (response?.instrument_summary) {
@@ -5386,26 +4782,17 @@ async function calculateMetrics() {
             const mapped = mapBackendFieldsToDisplayNames(row, instrumentType.value)
             return filterToCalculatedFields(mapped, instrumentType.value)
           }) || []
-
           const currentRowsWithWorkbook = mappedRows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
-
           instrumentSummary.value = {
-            columns: response.instrument_summary.columns,
+            columns: dedupeColumns(response.instrument_summary.columns || []),
             rows: currentRowsWithWorkbook
           }
         }
-
-        if (response?.portfolio_summary) {
-          portfolioSummary.value = response.portfolio_summary
-        }
-
-        // Persist details to the backend so Summary.vue can read them
-        // without depending on the workflow cache. Uses the DETAIL rows
-        // from instrumentSummary, not the aggregate portfolio row.
+        if (response?.portfolio_summary) portfolioSummary.value = response.portfolio_summary
         if (activeSession.value?.id && instrumentSummary.value?.rows?.length) {
           try {
             const firstAgg = response?.aggregate || {}
@@ -5422,75 +4809,18 @@ async function calculateMetrics() {
               aggregate: firstAgg,
               valuation_date: activeValuationDate.value || new Date().toISOString().split('T')[0]
             })
-          } catch (saveError) {
-            console.warn('Multi-instrument saveSummary failed:', saveError)
-          }
+          } catch (saveError) { console.warn('Multi-instrument saveSummary failed:', saveError) }
         }
-
         const results = response?.results || {}
         const firstInstType = Object.keys(results)[0]
         if (firstInstType && results[firstInstType]) {
           calculations.value = results[firstInstType].data
-
           if (response?.aggregate) {
-            const agg = {
-              ...response.aggregate,
-              accruedInterest: response.aggregate.accrued_interest ?? null,
-              annualCoupon: response.aggregate.annual_coupon ?? null,
-              bondEquivalentYield: response.aggregate.bond_equivalent_yield ?? null,
-              couponRate: response.aggregate.coupon_rate ?? null,
-              currentPrice: response.aggregate.current_price ?? null,
-              currentYield: response.aggregate.current_yield ?? null,
-              duration: response.aggregate.duration ?? null,
-              faceValue: response.aggregate.face_value ?? null,
-              frequency: response.aggregate.frequency ?? null,
-              modifiedDuration: response.aggregate.modified_duration ?? null,
-              yearsToMaturity: response.aggregate.years_to_maturity ?? null,
-              yieldToMaturity: response.aggregate.yield_to_maturity ?? null,
-              yieldCurveRate: response.aggregate.yield_curve_rate ?? null,
-              purchasePrice: response.aggregate.purchase_price ?? null,
-              termDays: response.aggregate.term_days ?? null,
-              discountAmount: response.aggregate.discount_amount ?? null,
-              discountYield: response.aggregate.discount_yield ?? null,
-              moneyMarketYield: response.aggregate.money_market_yield ?? null,
-              holdingPeriodYield: response.aggregate.holding_period_yield ?? null,
-              effectiveAnnualYield: response.aggregate.effective_annual_yield ?? null,
-              principal: response.aggregate.principal ?? null,
-              interestRate: response.aggregate.interest_rate ?? null,
-              interestEarned: response.aggregate.interest_earned ?? null,
-              effectiveYield: response.aggregate.effective_yield ?? null
-            }
+            const agg = { ...response.aggregate }
             allCalculations.value = agg
             selectedCalculations.value = agg
           } else if (response?.data?.aggregates) {
-            const aggregates = response.data.aggregates
-            const agg = {
-              ...aggregates,
-              accruedInterest: aggregates.accrued_interest ?? null,
-              annualCoupon: aggregates.annual_coupon ?? null,
-              bondEquivalentYield: aggregates.bond_equivalent_yield ?? null,
-              couponRate: aggregates.coupon_rate ?? null,
-              currentPrice: aggregates.current_price ?? null,
-              currentYield: aggregates.current_yield ?? null,
-              duration: aggregates.duration ?? null,
-              faceValue: aggregates.face_value ?? null,
-              frequency: aggregates.frequency ?? null,
-              modifiedDuration: aggregates.modified_duration ?? null,
-              yearsToMaturity: aggregates.years_to_maturity ?? null,
-              yieldToMaturity: aggregates.yield_to_maturity ?? null,
-              yieldCurveRate: aggregates.yield_curve_rate ?? null,
-              purchasePrice: aggregates.purchase_price ?? null,
-              termDays: aggregates.term_days ?? null,
-              discountAmount: aggregates.discount_amount ?? null,
-              discountYield: aggregates.discount_yield ?? null,
-              moneyMarketYield: aggregates.money_market_yield ?? null,
-              holdingPeriodYield: aggregates.holding_period_yield ?? null,
-              effectiveAnnualYield: aggregates.effective_annual_yield ?? null,
-              principal: aggregates.principal ?? null,
-              interestRate: aggregates.interest_rate ?? null,
-              interestEarned: aggregates.interest_earned ?? null,
-              effectiveYield: aggregates.effective_yield ?? null
-            }
+            const agg = { ...response.data.aggregates }
             allCalculations.value = agg
             selectedCalculations.value = agg
           } else {
@@ -5498,31 +4828,22 @@ async function calculateMetrics() {
             selectedCalculations.value = results[firstInstType].data
           }
         }
-
         isUsingDetectedFields.value = false
       } else if (response?.data) {
         calculations.value = response.data
-
-        if (response.data?.field_detection) {
-          fieldDetectionResults.value = response.data.field_detection
-        }
-
+        if (response.data?.field_detection) fieldDetectionResults.value = response.data.field_detection
         const backendInstrumentNames = response?.instrument_names || []
         const calcArray = response.data.calculations || []
         const backendAggregates = response.data.aggregates || {}
-
         if (calcArray.length === 1) {
           const singleCalc = calcArray[0]
           calculations.value = singleCalc
-
           const agg = buildAggregatesFromBackend(backendAggregates, singleCalc, instrumentType.value)
           agg.instrumentCount = agg.instrumentCount ?? 1
           if (response.data.fred) agg.fred = response.data.fred
-
           const displayable = hasDisplayableCalculation(agg)
           const failedStatuses = ['cannot_calculate', 'error']
           const isFailed = failedStatuses.includes(singleCalc.status) || (!displayable && singleCalc.status !== 'success')
-
           if (singleCalc.status === 'partial' && (singleCalc.error || singleCalc.warning || singleCalc.missing_fields?.length)) {
             const warningMsg = singleCalc.warning || formatCalculationFailureMessage(singleCalc, 'Partial calculation')
             showSnackbar(`Partial calculation: ${warningMsg}`, 'warning', 6000)
@@ -5543,26 +4864,22 @@ async function calculateMetrics() {
             allCalculations.value = agg
             selectedCalculations.value = agg
           }
-
           const row = {
             'Instrument Name': backendInstrumentNames[0] || singleCalc.instrument_name || 'Instrument',
             'Instrument Type': instrumentType.value,
             ...singleCalc,
             'Worksheet': currentSheetName.value || 'Calculated'
           }
-
           const currentCols = new Set()
           const mappedRow = mapBackendFieldsToDisplayNames(row, instrumentType.value)
           const filteredRow = filterToCalculatedFields(mappedRow, instrumentType.value)
-
           const filteredRowWithWorkbook = {
             ...filteredRow,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }
-
           Object.keys(filteredRowWithWorkbook).forEach(k => currentCols.add(k))
-          instrumentSummary.value = { columns: Array.from(currentCols), rows: [filteredRowWithWorkbook] }
+          instrumentSummary.value = { columns: dedupeColumns(Array.from(currentCols)), rows: [filteredRowWithWorkbook] }
         } else if (calcArray.length === 0 && cleanedData.value.length > 0) {
           console.warn('Backend returned empty calculations — running local fallback')
           const rows = cleanedData.value.map((row, idx) => {
@@ -5578,7 +4895,7 @@ async function calculateMetrics() {
           })
           const cols = new Set()
           rows.forEach(r => Object.keys(r).forEach(k => cols.add(k)))
-          instrumentSummary.value = { columns: Array.from(cols), rows }
+          instrumentSummary.value = { columns: dedupeColumns(Array.from(cols)), rows }
           const agg = computeAggregate(rows)
           agg.instrumentCount = rows.length
           allCalculations.value = agg
@@ -5589,7 +4906,6 @@ async function calculateMetrics() {
           const agg = buildAggregatesFromBackend(backendAggregates, null, instrumentType.value)
           agg.instrumentCount = agg.instrumentCount ?? calcArray.length
           if (response.data.fred) agg.fred = response.data.fred
-
           if (!hasDisplayableCalculation(agg) && response.data.status === 'cannot_calculate') {
             const firstFail = calcArray.find(c => c.status !== 'success') || calcArray[0]
             const fullErrorMsg = formatCalculationFailureMessage(firstFail)
@@ -5600,7 +4916,6 @@ async function calculateMetrics() {
             allCalculations.value = agg
             selectedCalculations.value = agg
           }
-
           const rows = calcArray.map((calc, idx) => {
             const mappedCalc = mapBackendFieldsToDisplayNames(calc, instrumentType.value)
             const filteredCalc = filterToCalculatedFields(mappedCalc, instrumentType.value)
@@ -5611,18 +4926,14 @@ async function calculateMetrics() {
               'Worksheet': currentSheetName.value || 'Calculated'
             }
           })
-
           const currentCols = new Set()
           rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
-
           const rowsWithWorkbook = rows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
-
-          instrumentSummary.value = { columns: Array.from(currentCols), rows: rowsWithWorkbook }
-
+          instrumentSummary.value = { columns: dedupeColumns(Array.from(currentCols)), rows: rowsWithWorkbook }
           if (response.data.portfolio_summary) {
             portfolioSummary.value = response.data.portfolio_summary
           } else {
@@ -5640,31 +4951,21 @@ async function calculateMetrics() {
               'Average Days to Maturity': agg.avgDaysToMaturity ?? null,
               'Total Principal': agg.totalPrincipal ?? null
             }
-
             const portfolioCols = new Set()
             Object.keys(portfolioRow).forEach(k => portfolioCols.add(k))
-            portfolioSummary.value = { columns: Array.from(portfolioCols), rows: [portfolioRow] }
-
+            portfolioSummary.value = { columns: dedupeColumns(Array.from(portfolioCols)), rows: [portfolioRow] }
             const existingPortfolioRows = completedPortfolioSummary.value.rows || []
             const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
-
             const allPortfolioCols = new Set()
             mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => allPortfolioCols.add(k)))
-
-            completedPortfolioSummary.value = { columns: Array.from(allPortfolioCols), rows: mergedPortfolioRows }
+            completedPortfolioSummary.value = { columns: dedupeColumns(Array.from(allPortfolioCols)), rows: mergedPortfolioRows }
           }
-
           if (portfolioSummary.value) {
             let existingSnapshot = { instrumentsWithDetails: [] }
             try {
               const existing = await sessionManager.getWorksheetData(activeSession.value?.id, '__portfolio_summary__')
-              if (existing && existing.instrumentsWithDetails) {
-                existingSnapshot = existing
-              }
-            } catch (e) {
-              // no existing snapshot
-            }
-
+              if (existing && existing.instrumentsWithDetails) existingSnapshot = existing
+            } catch (e) { /* no existing */ }
             const existingInstrumentIndex = existingSnapshot.instrumentsWithDetails.findIndex(i => i.id === instrumentType.value)
             const currentInstrumentData = {
               id: instrumentType.value,
@@ -5673,15 +4974,12 @@ async function calculateMetrics() {
               aggregate: agg || {},
               timestamp: Date.now()
             }
-
             if (existingInstrumentIndex >= 0) {
               existingSnapshot.instrumentsWithDetails[existingInstrumentIndex] = currentInstrumentData
             } else {
               existingSnapshot.instrumentsWithDetails.push(currentInstrumentData)
             }
-
             await sessionManager.saveWorksheetData(activeSession.value?.id, '__portfolio_summary__', existingSnapshot)
-
             try {
               await api.portfolioAPI.saveSummary({
                 session_id: activeSession.value?.id,
@@ -5696,9 +4994,7 @@ async function calculateMetrics() {
                 aggregate: agg || {},
                 valuation_date: activeValuationDate.value || new Date().toISOString().split('T')[0]
               })
-            } catch (saveError) {
-              // non-fatal
-            }
+            } catch (saveError) { /* non-fatal */ }
           }
         } else if (calcArray.length) {
           const rows = calcArray.map((calc, idx) => {
@@ -5711,23 +5007,18 @@ async function calculateMetrics() {
               'Worksheet': currentSheetName.value || 'Calculated'
             }
           })
-
           const currentCols = new Set()
           rows.forEach(r => Object.keys(r).forEach(k => currentCols.add(k)))
-
           const rowsWithWorkbook = rows.map(row => ({
             ...row,
             'Workbook': currentWorkbookName.value || 'Unknown',
             'Worksheet': row['Worksheet'] || row['worksheet'] || currentSheetName.value || 'Unknown'
           }))
-
-          instrumentSummary.value = { columns: Array.from(currentCols), rows: rowsWithWorkbook }
-
+          instrumentSummary.value = { columns: dedupeColumns(Array.from(currentCols)), rows: rowsWithWorkbook }
           const agg = buildAggregatesFromBackend(backendAggregates, calcArray[0] || null, instrumentType.value)
           if (response.data.fred) agg.fred = response.data.fred
           allCalculations.value = agg
           selectedCalculations.value = agg
-
           const portfolioRow = {
             'Portfolio Name': currentSheetName.value || 'Current Portfolio',
             'Instrument Type': instrumentType.value,
@@ -5742,32 +5033,24 @@ async function calculateMetrics() {
             'Average Days to Maturity': agg.avgDaysToMaturity ?? null,
             'Total Principal': agg.totalPrincipal ?? null
           }
-
           if (response.data.fred?.benchmark_rate) {
             portfolioRow['FRED Benchmark'] = response.data.fred.benchmark_rate
             portfolioRow['Spread vs Market'] = response.data.fred.spread_vs_market ?? null
           }
-
           const currentPortfolioCols = new Set()
           Object.keys(portfolioRow).forEach(k => currentPortfolioCols.add(k))
-          portfolioSummary.value = { columns: Array.from(currentPortfolioCols), rows: [portfolioRow] }
+          portfolioSummary.value = { columns: dedupeColumns(Array.from(currentPortfolioCols)), rows: [portfolioRow] }
         } else {
           const backendErrors = response.data?.errors || []
           const missingFields = response.data?.missing_fields || []
           const invalidFields = response.data?.invalid_fields || []
-
           let errorMsg = 'Not calculable — required input not detected.'
-          if (backendErrors.length > 0) {
-            errorMsg = backendErrors.map(e => e.message || e).join('; ')
-          }
-          if (missingFields.length > 0) {
-            errorMsg += ` Missing: ${missingFields.join(', ')}`
-          }
+          if (backendErrors.length > 0) errorMsg = backendErrors.map(e => e.message || e).join('; ')
+          if (missingFields.length > 0) errorMsg += ` Missing: ${missingFields.join(', ')}`
           if (invalidFields.length > 0) {
             const invalidMsg = invalidFields.map(f => `${f.field} (${f.reason})`).join(', ')
             errorMsg += ` Invalid: ${invalidMsg}`
           }
-
           showSnackbar(`Calculation failed: ${errorMsg}`, 'error')
           allCalculations.value = {
             status: 'error',
@@ -5778,10 +5061,8 @@ async function calculateMetrics() {
           }
           selectedCalculations.value = allCalculations.value
         }
-
         if (response?.portfolio_summary || response.data?.portfolio_summary) {
           const portfolioData = response?.portfolio_summary || response.data?.portfolio_summary
-
           try {
             await api.portfolioAPI.saveSummary({
               session_id: activeSession.value?.id,
@@ -5796,20 +5077,12 @@ async function calculateMetrics() {
               aggregate: allCalculations.value || {},
               valuation_date: activeValuationDate.value || new Date().toISOString().split('T')[0]
             })
-          } catch (saveError) {
-            // non-fatal
-          }
-
+          } catch (saveError) { /* non-fatal */ }
           let existingSnapshot = { instrumentsWithDetails: [] }
           try {
             const existing = await sessionManager.getWorksheetData(activeSession.value?.id, '__portfolio_summary__')
-            if (existing && existing.instrumentsWithDetails) {
-              existingSnapshot = existing
-            }
-          } catch (e) {
-            // no existing
-          }
-
+            if (existing && existing.instrumentsWithDetails) existingSnapshot = existing
+          } catch (e) { /* no existing */ }
           const existingInstrumentIndex = existingSnapshot.instrumentsWithDetails.findIndex(i => i.id === instrumentType.value)
           const currentInstrumentData = {
             id: instrumentType.value,
@@ -5818,16 +5091,13 @@ async function calculateMetrics() {
             aggregate: portfolioData.aggregate || allCalculations.value || {},
             timestamp: Date.now()
           }
-
           if (existingInstrumentIndex >= 0) {
             existingSnapshot.instrumentsWithDetails[existingInstrumentIndex] = currentInstrumentData
           } else {
             existingSnapshot.instrumentsWithDetails.push(currentInstrumentData)
           }
-
           await sessionManager.saveWorksheetData(activeSession.value?.id, '__portfolio_summary__', existingSnapshot)
         }
-
         if (activeSession.value?.id) {
           await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
             rawData: rawData.value,
@@ -5843,10 +5113,17 @@ async function calculateMetrics() {
             completedInstrumentSummary: completedInstrumentSummary.value,
             completedPortfolioSummary: completedPortfolioSummary.value,
             yieldCurveData: yieldCurveData.value,
-            fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+            fredFilters: {
+              country: effectiveCountry.value,
+              currency: effectiveCurrency.value,
+              maturity: effectiveMaturity.value,
+              maturityMode: maturityMode.value === 'dateRange' ? 'date' : 'tenor',
+              fromDate: yieldCurveStartDate.value,
+              toDate: yieldCurveEndDate.value
+            },
             uploadedFile: uploadedFile.value?.name || null,
-            originalDatasetId: originalDatasetId.value,   // NEW
-            originalFileName: uploadedFile.value?.name || null,   // NEW
+            originalDatasetId: originalDatasetId.value,
+            originalFileName: uploadedFile.value?.name || null,
             cleaningStats: cleaningStats.value,
             sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
             manualInputs: manualInputs.value,
@@ -5863,23 +5140,13 @@ async function calculateMetrics() {
             customCurrency: customCurrency.value
           })
         }
-
         saveSessionData()
       } else {
         const errorMsg = response?.message || response?.error || 'Unknown error'
         showSnackbar('Calculation failed: ' + errorMsg, 'error')
       }
-
       isUsingDetectedFields.value = false
-
-      try {
-        await enrichCalculationsWithFred()
-      } catch (fredError) {
-        // non-fatal
-      }
-
-      // Save synchronously so callers that navigate immediately
-      // (goToPortfolioSummary, goToReportTab) get fresh records.
+      try { await enrichCalculationsWithFred() } catch (fredError) { /* non-fatal */ }
       try { await saveSessionData(true) } catch (e) { console.warn('Post-calc save failed:', e) }
       forceUpdate.value++
     }
@@ -5892,12 +5159,8 @@ async function calculateMetrics() {
 }
 
 async function continueToVisualizations() {
-  if (!hasCleanedData.value) {
-    return
-  }
-  if (!allCalculations.value.totalValue) {
-    await calculateMetrics()
-  }
+  if (!hasCleanedData.value) return
+  if (!allCalculations.value.totalValue) await calculateMetrics()
   await nextTick()
   activeTab.value = 'visualizations'
   await nextTick()
@@ -5910,7 +5173,7 @@ async function continueToVisualizations() {
 }
 
 async function continueFromVisualizations() {
-  if (!hasCleanedData.value) { return }
+  if (!hasCleanedData.value) return
   saveSessionData()
   await nextTick()
   activeTab.value = 'summary'
@@ -5933,10 +5196,17 @@ async function continueFromVisualizations() {
       completedInstrumentSummary: completedInstrumentSummary.value,
       completedPortfolioSummary: completedPortfolioSummary.value,
       yieldCurveData: yieldCurveData.value,
-      fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+      fredFilters: {
+        country: effectiveCountry.value,
+        currency: effectiveCurrency.value,
+        maturity: effectiveMaturity.value,
+        maturityMode: maturityMode.value === 'dateRange' ? 'date' : 'tenor',
+        fromDate: yieldCurveStartDate.value,
+        toDate: yieldCurveEndDate.value
+      },
       uploadedFile: uploadedFile.value?.name || null,
-      originalDatasetId: originalDatasetId.value,   // NEW
-      originalFileName: uploadedFile.value?.name || null,   // NEW
+      originalDatasetId: originalDatasetId.value,
+      originalFileName: uploadedFile.value?.name || null,
       cleaningStats: cleaningStats.value,
       sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
       manualInputs: manualInputs.value,
@@ -5960,7 +5230,6 @@ async function fetchYieldCurve() {
   const currency = effectiveCurrency.value
   const from_date = yieldCurveStartDate.value || null
   const to_date = yieldCurveEndDate.value || null
-
   const normalizedCountry = country === 'USA' ? 'US' :
                             country === 'GBR' ? 'GB' :
                             country === 'JPN' ? 'JP' :
@@ -5984,7 +5253,6 @@ async function fetchYieldCurve() {
                             country === 'ARE' ? 'AE' :
                             country === 'ISR' ? 'IL' :
                             country === 'ZAF' ? 'ZA' : country
-
   const supportedCountries = ['US', 'GB', 'EUR', 'JP', 'CA', 'AU', 'CH', 'NZ', 'NO', 'SE', 'DK', 'BR', 'MX', 'IN', 'CN', 'KR', 'SG', 'HK', 'RU', 'TR', 'SA', 'AE', 'IL', 'ZA']
   if (!supportedCountries.includes(normalizedCountry) && country !== '__custom__') {
     yieldCurveError.value = `Unsupported country: ${country}. Please select a supported country.`
@@ -6007,7 +5275,6 @@ async function fetchYieldCurve() {
     await renderYieldCurveChart()
     return
   }
-
   const cacheKey = `${instrumentType.value}_${normalizedCountry}_${currency}_${maturityMode.value}_${maturityMode.value === 'maturity' ? maturity : from_date + '_' + to_date}`
   const cached = yieldCurveCache.get(cacheKey)
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -6021,33 +5288,50 @@ async function fetchYieldCurve() {
     forceUpdate.value++
     return
   }
-
   yieldCurveLoading.value = true
   yieldCurveError.value = ''
-
   try {
     const payload = {
       instrument_type: instrumentType.value,
       country: normalizedCountry,
       currency: currency
     }
-    if (maturityMode.value === 'maturity') {
-      payload.maturity = maturity
-    } else {
+    if (maturityMode.value === 'maturity') payload.maturity = maturity
+    else {
       payload.from_date = from_date
       payload.to_date = to_date
     }
     const response = await api.fredAPI.getYieldCurve(payload)
-
     if (response?.success && response.data) {
       const curveData = response.data
       if (curveData.maturities && curveData.maturities.length) {
-        const points = curveData.maturities.map((m, idx) => ({
-          maturity: parseFloat(m),
-          maturityLabel: curveData.labels?.[idx] || m,
-          rate: curveData.rates?.[idx] || 0,
-          date: curveData.dates?.[idx] || null
-        }))
+        const isDateMode = maturityMode.value === 'dateRange'
+        const points = curveData.maturities.map((m, idx) => {
+          const dateStr = curveData.dates?.[idx] || null
+          const labelStr = curveData.labels?.[idx] || m
+          
+          if (isDateMode && dateStr) {
+            return {
+              x: new Date(dateStr).getTime(),
+              y: curveData.rates?.[idx] || 0,
+              maturity: null,
+              maturityLabel: dateStr,
+              rate: curveData.rates?.[idx] || 0,
+              date: dateStr,
+              isDate: true
+            }
+          }
+          const matNum = parseFloat(m) || 1.0
+          return {
+            x: matNum,
+            y: curveData.rates?.[idx] || 0,
+            maturity: matNum,
+            maturityLabel: labelStr,
+            rate: curveData.rates?.[idx] || 0,
+            date: dateStr,
+            isDate: false
+          }
+        })
         yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() })
         yieldCurveData.value = points
         chartSeriesLabel.value = `FRED Yield Curve (${curveData.country || normalizedCountry})`
@@ -6071,7 +5355,7 @@ async function fetchYieldCurve() {
     await nextTick()
     await renderYieldCurveChart()
     updateFredBenchmark()
-    debouncedSave()
+    try { await saveSessionData(true) } catch (e) { console.warn('Post-FRED save failed:', e) }
     forceUpdate.value++
   }
 }
@@ -6096,10 +5380,7 @@ async function renderYieldCurveChart() {
     chartInstanceRef.current.destroy()
     chartInstanceRef.current = null
   }
-
-  if (!yieldCurveChart.value || !yieldCurveData.value.length) {
-    return
-  }
+  if (!yieldCurveChart.value || !yieldCurveData.value.length) return
   const rect = yieldCurveChart.value.getBoundingClientRect()
   if (rect.width === 0 || rect.height === 0) {
     setTimeout(() => renderYieldCurveChart(), 200)
@@ -6110,72 +5391,44 @@ async function renderYieldCurveChart() {
     chartInstanceRef.current.destroy()
     chartInstanceRef.current = null
   }
-
   let transformed = []
   let xAxisType = 'linear'
   let xAxisTitle = 'Maturity'
   let xScaleOptions = {}
-
   if (maturityMode.value === 'dateRange') {
     xAxisType = 'time'
     xAxisTitle = 'Date'
-
     const dateFilteredData = yieldCurveData.value
       .filter(d => d.date !== null && d.date !== undefined)
       .sort((a, b) => new Date(a.date) - new Date(b.date))
-
     transformed = dateFilteredData.map(d => {
       const dateObj = new Date(d.date)
-      return {
-        x: dateObj.getTime(),
-        y: d.rate,
-        label: d.date,
-        originalDate: d.date
-      }
+      return { x: dateObj.getTime(), y: d.rate, label: d.date, originalDate: d.date }
     })
-
     xScaleOptions = {
       type: 'time',
-      time: {
-        unit: 'month',
-        displayFormats: {
-          month: 'MMM yyyy'
-        }
-      },
+      time: { unit: 'month', displayFormats: { month: 'MMM yyyy' } },
       title: { display: true, text: xAxisTitle },
-      ticks: {
-        maxRotation: 45,
-        minRotation: 45
-      }
+      ticks: { maxRotation: 45, minRotation: 45 }
     }
   } else {
     const period = effectiveMaturity.value
     let unitLabel = 'Years'
     let maxX = 0
-
     const match = period.match(/^(\d+)([YMW])$/)
     if (match) {
       const num = parseInt(match[1], 10)
       const unit = match[2]
-      if (unit === 'Y') {
-        unitLabel = 'Years'
-        maxX = num + 0.5
-      } else if (unit === 'M') {
-        unitLabel = 'Months'
-        maxX = num + 0.5
-      } else if (unit === 'W') {
-        unitLabel = 'Weeks'
-        maxX = num + 0.5
-      }
+      if (unit === 'Y') { unitLabel = 'Years'; maxX = num + 0.5 }
+      else if (unit === 'M') { unitLabel = 'Months'; maxX = num + 0.5 }
+      else if (unit === 'W') { unitLabel = 'Weeks'; maxX = num + 0.5 }
     } else {
       const num = parseFloat(period) || 10
       unitLabel = 'Years'
       maxX = num + 0.5
     }
-
     const filterYears = parseMaturityToYears(period)
     const filteredData = yieldCurveData.value.filter(d => d.maturity <= filterYears)
-
     if (!filteredData.length) {
       yieldCurveError.value = `No yield curve data available for maturity ${period}`
       if (chartInstanceRef.current) {
@@ -6184,14 +5437,12 @@ async function renderYieldCurveChart() {
       }
       return
     }
-
     transformed = filteredData.map(d => {
       let xVal = d.maturity
       if (unitLabel === 'Months') xVal = d.maturity * 12
       else if (unitLabel === 'Weeks') xVal = d.maturity * 52
       return { x: xVal, y: d.rate, label: d.maturityLabel }
     })
-
     xAxisTitle = unitLabel
     xScaleOptions = {
       type: 'linear',
@@ -6213,7 +5464,6 @@ async function renderYieldCurveChart() {
       }
     }
   }
-
   const ctx = yieldCurveChart.value.getContext('2d')
   chartInstanceRef.current = new Chart(ctx, {
     type: 'line',
@@ -6236,50 +5486,27 @@ async function renderYieldCurveChart() {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            title: (items) => {
-              const pt = items[0]?.raw
-              return pt?.label || ''
-            },
+            title: (items) => items[0]?.raw?.label || '',
             label: (ctx) => `Yield: ${ctx.parsed.y.toFixed(2)}%`
           }
         }
       },
       scales: {
         x: xScaleOptions,
-        y: {
-          title: { display: true, text: 'Yield (%)' },
-          beginAtZero: false
-        }
+        y: { title: { display: true, text: 'Yield (%)' }, beginAtZero: false }
       }
     }
   })
-
   setTimeout(() => {
     if (yieldCurveChart.value) {
-      try {
-        chartImageData.value = yieldCurveChart.value.toDataURL('image/png', 1.0)
-      } catch (e) {
-        // non-fatal
-      }
+      try { chartImageData.value = yieldCurveChart.value.toDataURL('image/png', 1.0) } catch (e) { /* non-fatal */ }
     }
   }, 1000)
 }
 
-function onCustomCountryInput() {
-  selectedCountryOption.value = '__custom__'
-  onFredFilterChange()
-}
-
-function onCustomCurrencyInput() {
-  selectedCurrencyOption.value = '__custom__'
-  onFredFilterChange()
-}
-
-function onCustomMaturityInput() {
-  selectedMaturityOption.value = '__custom__'
-  onFredFilterChange()
-}
-
+function onCustomCountryInput() { selectedCountryOption.value = '__custom__'; onFredFilterChange() }
+function onCustomCurrencyInput() { selectedCurrencyOption.value = '__custom__'; onFredFilterChange() }
+function onCustomMaturityInput() { selectedMaturityOption.value = '__custom__'; onFredFilterChange() }
 function onCountrySelectChange() {
   if (selectedCountryOption.value !== '__custom__') {
     fredFilters.value.country = selectedCountryOption.value
@@ -6288,7 +5515,6 @@ function onCountrySelectChange() {
   }
   onFredFilterChange()
 }
-
 function onCurrencySelectChange() {
   if (selectedCurrencyOption.value !== '__custom__') {
     fredFilters.value.currency = selectedCurrencyOption.value
@@ -6297,7 +5523,6 @@ function onCurrencySelectChange() {
   }
   onFredFilterChange()
 }
-
 function onMaturitySelectChange() {
   if (selectedMaturityOption.value !== '__custom__') {
     fredFilters.value.maturity = selectedMaturityOption.value
@@ -6322,18 +5547,13 @@ async function enrichCalculationsWithFred() {
     const bench = await fetchBenchmark(instrumentType.value)
     if (bench?.benchmark_rate != null) {
       const portfolio = parseFloat(portfolioAvgRate.value) || 0
-      allCalculations.value.fred = {
-        ...bench,
-        spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2)
-      }
+      allCalculations.value.fred = { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2) }
       calculations.value.fred = allCalculations.value.fred
     } else {
       if (allCalculations.value.fred) delete allCalculations.value.fred
       if (calculations.value.fred) delete calculations.value.fred
     }
-  } catch (e) {
-    // non-fatal
-  }
+  } catch (e) { /* non-fatal */ }
 }
 
 async function loadSavedTemplates() {
@@ -6345,15 +5565,13 @@ async function loadSavedTemplates() {
   }
 }
 
-async function saveTemplates() {
-}
+async function saveTemplates() {}
 
 async function saveCurrentMappingAsTemplate() {
   if (!newTemplateName.value || !newTemplateName.value.trim()) {
     showSnackbar('Please enter a template name')
     return
   }
-
   try {
     let result
     if (currentMappingTemplateId.value) {
@@ -6370,11 +5588,8 @@ async function saveCurrentMappingAsTemplate() {
         fileColumns.value
       )
     }
-
     if (result) {
-      if (!currentMappingTemplateId.value) {
-        currentMappingTemplateId.value = result.id
-      }
+      if (!currentMappingTemplateId.value) currentMappingTemplateId.value = result.id
       await loadSavedTemplates()
       newTemplateName.value = ''
       showSnackbar('Mapping saved successfully', 'success')
@@ -6390,14 +5605,9 @@ async function applyTemplate(templateId) {
   if (!templateId) return
   try {
     const template = await mappingTemplateManager.getTemplate(templateId)
-    if (!template) {
-      showSnackbar('Failed to load template')
-      return
-    }
+    if (!template) { showSnackbar('Failed to load template'); return }
     columnMapping.value = { ...template.column_mapping }
-    if (template.file_columns) {
-      fileColumns.value = [...template.file_columns]
-    }
+    if (template.file_columns) fileColumns.value = [...template.file_columns]
     currentMappingTemplateId.value = template.id
     applyCurrentMapping()
     debouncedSave()
@@ -6412,15 +5622,12 @@ async function deleteTemplate(templateId) {
   if (!templateId) return
   const template = savedTemplates.value.find(t => t.id === templateId)
   if (!template) return
-
   if (confirm(`Delete template "${template.name}"?`)) {
     try {
       const success = await mappingTemplateManager.deleteTemplate(templateId)
       if (success) {
         await loadSavedTemplates()
-        if (currentMappingTemplateId.value === templateId) {
-          currentMappingTemplateId.value = null
-        }
+        if (currentMappingTemplateId.value === templateId) currentMappingTemplateId.value = null
         showSnackbar('Mapping deleted successfully', 'success')
       } else {
         showSnackbar('Failed to delete mapping')
@@ -6450,27 +5657,20 @@ function selectInstrumentFromPopup(index) {
   const selectedRow = instrumentSummary.value.rows[index]
   const instrumentName = selectedRow['Instrument Name'] || `Instrument ${index + 1}`
   currentlyViewingInstrument.value = instrumentName
-
   const newCalculations = {}
   Object.keys(selectedRow).forEach(key => {
     const val = parseFloat(selectedRow[key])
-    if (!isNaN(val)) {
-      newCalculations[key] = val
-    }
+    if (!isNaN(val)) newCalculations[key] = val
   })
-
   if (!newCalculations.totalValue) newCalculations.totalValue = parseFloat(selectedRow['Total Value'] || selectedRow['total_value'] || 0)
   if (!newCalculations.instrumentCount) newCalculations.instrumentCount = parseFloat(selectedRow['Instrument Count'] || selectedRow['instrument_count'] || 1)
-
   selectedCalculations.value = newCalculations
   calculations.value = newCalculations
   closeAllCalculationsPopup()
 }
 
 function loadAllInstruments() {
-  if (!instrumentSummary.value.rows.length) {
-    return
-  }
+  if (!instrumentSummary.value.rows.length) return
   if (allCalculations.value.totalValue !== undefined) {
     selectedCalculations.value = allCalculations.value
     calculations.value = allCalculations.value
@@ -6484,45 +5684,29 @@ function loadAllInstruments() {
 
 function formatTableCell(value, column) {
   if (value === null || value === undefined || value === '') return '—'
-
   const isTimeField = column.toLowerCase().includes('day') || column.toLowerCase().includes('maturity') || column.toLowerCase().includes('duration') || column.toLowerCase().includes('term') || column.toLowerCase().includes('month') || column.toLowerCase().includes('year') || column.toLowerCase().includes('week') || column.toLowerCase().includes('time')
-
-  if (isTimeField && typeof value === 'number') {
-    return formatNumber(value, true)
-  }
-
-  if (isPercentageField(column)) {
-    return formatNumber(value) + '%'
-  }
+  if (isTimeField && typeof value === 'number') return formatNumber(value, true)
+  if (isPercentageField(column)) return formatNumber(value) + '%'
   if (column.toLowerCase().includes('value') || column.toLowerCase().includes('amount') || column.toLowerCase().includes('price')) {
     return formatNumber(value)
   }
-  if (column.toLowerCase().includes('date') && typeof value === 'string') {
-    return value
-  }
+  if (column.toLowerCase().includes('date') && typeof value === 'string') return value
   return typeof value === 'number' ? formatNumber(value) : value
 }
 
-function openAllCalculationsPopup() {
-  showAllCalculationsPopup.value = true
-}
-
-function closeAllCalculationsPopup() {
-  showAllCalculationsPopup.value = false
-}
+function openAllCalculationsPopup() { showAllCalculationsPopup.value = true }
+function closeAllCalculationsPopup() { showAllCalculationsPopup.value = false }
 
 function exportAllCalculations() {
   const allData = completedInstrumentSummary.value.rows || instrumentSummary.value.rows
-  if (!allData.length) { return }
-
+  if (!allData.length) return
   const displayCols = getDisplayColumns()
   const data = allData.map(row => {
     const obj = {}
     displayCols.forEach(col => {
       let val = row[col] !== undefined ? row[col] : ''
-      if (isPercentageField(col)) {
-        val = formatForExcel(val, 'percentage', col)
-      } else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
+      if (isPercentageField(col)) val = formatForExcel(val, 'percentage', col)
+      else if (col.toLowerCase().includes('value') || col.toLowerCase().includes('price') || col.toLowerCase().includes('amount') || col.toLowerCase().includes('principal') || col.toLowerCase().includes('interest')) {
         val = formatForExcel(val, 'money', col)
       } else {
         val = formatForExcel(val, 'number', col)
@@ -6531,11 +5715,9 @@ function exportAllCalculations() {
     })
     return obj
   })
-
   const wb = XLSX.utils.book_new()
   const ws = XLSX.utils.json_to_sheet(data)
   XLSX.utils.book_append_sheet(wb, ws, 'Calculated Instruments')
-
   const summaryRows = [
     ['Instrument Summary'],
     ['Total Instruments', allData.length],
@@ -6545,7 +5727,6 @@ function exportAllCalculations() {
   ]
   const summaryWs = XLSX.utils.aoa_to_sheet(summaryRows)
   XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary')
-
   XLSX.writeFile(wb, 'all_instruments_calculations.xlsx')
 }
 
@@ -6559,70 +5740,36 @@ const previousSnapshot = ref(null)
 
 function generateVersionDescription(newSnapshot, oldSnapshot) {
   const changes = []
-
-  if (!oldSnapshot) {
-    return `Initial ${instrumentType.value} workflow setup`
-  }
-
-  if (JSON.stringify(newSnapshot.rawData) !== JSON.stringify(oldSnapshot.rawData)) {
-    changes.push('uploaded new data')
-  }
-
-  if (JSON.stringify(newSnapshot.cleanedData) !== JSON.stringify(oldSnapshot.cleanedData)) {
-    changes.push('cleaned data')
-  }
-
-  if (JSON.stringify(newSnapshot.calculations) !== JSON.stringify(oldSnapshot.calculations)) {
-    changes.push('recalculated metrics')
-  }
-
-  if (JSON.stringify(newSnapshot.columnMapping) !== JSON.stringify(oldSnapshot.columnMapping)) {
-    changes.push('updated column mapping')
-  }
-
-  if (JSON.stringify(newSnapshot.manualInputs) !== JSON.stringify(oldSnapshot.manualInputs)) {
-    changes.push('updated manual inputs')
-  }
-
-  if (JSON.stringify(newSnapshot.formulas) !== JSON.stringify(oldSnapshot.formulas)) {
-    changes.push('updated formulas')
-  }
-
-  if (changes.length === 0) {
-    return `Saved ${instrumentType.value} workflow (no changes)`
-  }
-
+  if (!oldSnapshot) return `Initial ${instrumentType.value} workflow setup`
+  if (JSON.stringify(newSnapshot.rawData) !== JSON.stringify(oldSnapshot.rawData)) changes.push('uploaded new data')
+  if (JSON.stringify(newSnapshot.cleanedData) !== JSON.stringify(oldSnapshot.cleanedData)) changes.push('cleaned data')
+  if (JSON.stringify(newSnapshot.calculations) !== JSON.stringify(oldSnapshot.calculations)) changes.push('recalculated metrics')
+  if (JSON.stringify(newSnapshot.columnMapping) !== JSON.stringify(oldSnapshot.columnMapping)) changes.push('updated column mapping')
+  if (JSON.stringify(newSnapshot.manualInputs) !== JSON.stringify(oldSnapshot.manualInputs)) changes.push('updated manual inputs')
+  if (JSON.stringify(newSnapshot.formulas) !== JSON.stringify(oldSnapshot.formulas)) changes.push('updated formulas')
+  if (changes.length === 0) return `Saved ${instrumentType.value} workflow (no changes)`
   return `${instrumentType.value} — ${changes.join(', ')}`
 }
 
 async function saveToSession() {
-  if (isSavingVersion) {
-    return
-  }
-
+  if (isSavingVersion) return
   isSavingVersion = true
   isSaving.value = true
   skipAutoSave.value = true
-
   if (!activeSession.value || !activeSession.value.id) {
     isSavingVersion = false
     isSaving.value = false
     skipAutoSave.value = false
     return
   }
-
   const sid = activeSession.value.id
   const worksheetName = currentSheetName.value || 'Unknown'
-
   try {
     const currentVersionsRes = await api.versionAPI.getVersions(sid)
     if (currentVersionsRes && currentVersionsRes.success) {
       const actualCount = currentVersionsRes.total || 0
-      if (activeSession.value?.id === sid) {
-        activeSession.value.version_count = actualCount
-      }
+      if (activeSession.value?.id === sid) activeSession.value.version_count = actualCount
     }
-
     const datasetSnapshot = {
       rawData: rawData.value,
       cleanedData: cleanedData.value,
@@ -6635,12 +5782,19 @@ async function saveToSession() {
       instrumentSummary: instrumentSummary.value,
       portfolioSummary: portfolioSummary.value,
       yieldCurveData: yieldCurveData.value,
-      fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+      fredFilters: {
+        country: effectiveCountry.value,
+        currency: effectiveCurrency.value,
+        maturity: effectiveMaturity.value,
+        maturityMode: maturityMode.value === 'dateRange' ? 'date' : 'tenor',
+        fromDate: yieldCurveStartDate.value,
+        toDate: yieldCurveEndDate.value
+      },
       manualInputs: manualInputs.value,
       formulas: formulas.value,
       uploadedFile: uploadedFile.value?.name || null,
-      originalDatasetId: originalDatasetId.value,   // NEW
-      originalFileName: uploadedFile.value?.name || null,   // NEW
+      originalDatasetId: originalDatasetId.value,
+      originalFileName: uploadedFile.value?.name || null,
       cleaningStats: cleaningStats.value,
       sessionSavedAt: new Date().toISOString(),
       instrumentType: instrumentType.value,
@@ -6650,7 +5804,6 @@ async function saveToSession() {
       selectedCurrency: selectedCurrency.value,
       customCurrency: customCurrency.value
     }
-
     const worksheetData = {
       worksheetName,
       workbookName: uploadedFile.value?.name || 'Workbook',
@@ -6667,20 +5820,12 @@ async function saveToSession() {
       timestamp: Date.now()
     }
     await sessionManager.saveWorksheetData(sid, worksheetName, worksheetData)
-
     markWorksheetAsSaved()
-
     await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
-
     const count = sessionManager.countSessionInstruments(sid)
     await sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
-
-    if (activeSession.value?.id === sid) {
-      activeSession.value.instrument_count = Math.min(count, 3)
-    }
-
+    if (activeSession.value?.id === sid) activeSession.value.instrument_count = Math.min(count, 3)
     const versionDescription = generateVersionDescription(datasetSnapshot, previousSnapshot.value)
-
     const versionResponse = await api.versionAPI.create(
       sid,
       instrumentType.value,
@@ -6688,17 +5833,14 @@ async function saveToSession() {
       datasetSnapshot,
       null, null, null, null, null
     )
-
     if (!versionResponse?.success) {
       showSnackbar('Failed to create version', 'error')
     } else {
       previousSnapshot.value = JSON.parse(JSON.stringify(datasetSnapshot))
-
       try {
         const versionsRes = await api.versionAPI.getVersions(sid)
         if (versionsRes && versionsRes.success) {
           const updatedVersionCount = versionsRes.total || 0
-
           const session = sessionManager.sessions.find(s => s.id === sid)
           if (session) {
             session.version_count = updatedVersionCount
@@ -6716,27 +5858,20 @@ async function saveToSession() {
                 fieldsChanged: v.fieldsChanged || []
               }))
             }
-
             if (activeSession.value?.id === sid) {
               activeSession.value.version_count = updatedVersionCount
-              if (versionsRes.data && versionsRes.data.length > 0) {
-                activeSession.value.versions = session.versions
-              }
+              if (versionsRes.data && versionsRes.data.length > 0) activeSession.value.versions = session.versions
             }
           }
         }
-      } catch (fetchError) {
-        // non-fatal
-      }
+      } catch (fetchError) { /* non-fatal */ }
     }
   } catch (err) {
     showSnackbar('Failed to save to session: ' + err.message, 'error')
   } finally {
     isSavingVersion = false
     isSaving.value = false
-    setTimeout(() => {
-      skipAutoSave.value = false
-    }, 3000)
+    setTimeout(() => { skipAutoSave.value = false }, 3000)
   }
 }
 
@@ -6756,9 +5891,7 @@ async function refreshSessionVersionCount(sid) {
     if (updated && updated.id && activeSession.value?.id === sid) {
       activeSession.value = updated
     }
-  } catch (err) {
-    // non-fatal
-  }
+  } catch (err) { /* non-fatal */ }
 }
 
 function saveSessionData(explicitSave = false) {
@@ -6778,10 +5911,17 @@ function saveSessionData(explicitSave = false) {
     completedInstrumentSummary: completedInstrumentSummary.value,
     completedPortfolioSummary: completedPortfolioSummary.value,
     yieldCurveData: yieldCurveData.value,
-    fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+    fredFilters: {
+      country: effectiveCountry.value,
+      currency: effectiveCurrency.value,
+      maturity: effectiveMaturity.value,
+      maturityMode: maturityMode.value === 'dateRange' ? 'date' : 'tenor',
+      fromDate: yieldCurveStartDate.value,
+      toDate: yieldCurveEndDate.value
+    },
     uploadedFile: uploadedFile.value?.name || null,
-    originalDatasetId: originalDatasetId.value,   // NEW
-    originalFileName: uploadedFile.value?.name || null,   // NEW
+    originalDatasetId: originalDatasetId.value,
+    originalFileName: uploadedFile.value?.name || null,
     cleaningStats: cleaningStats.value,
     sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
     manualInputs: manualInputs.value,
@@ -6799,9 +5939,7 @@ function saveSessionData(explicitSave = false) {
     customCurrency: customCurrency.value,
     last_tab: activeTab.value
   }
-
   sessionManager.setActiveSession(activeSession.value)
-
   return sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, datasetSnapshot)
     .then(() => {
       if (explicitSave) {
@@ -6815,12 +5953,27 @@ function saveSessionData(explicitSave = false) {
     })
 }
 
-async function loadSavedData() {
+let _lastLoadSavedSessionId = null
+let _lastLoadSavedAt = 0
+const LOAD_SAVED_THROTTLE_MS = 2000
+
+// ─────────────────────────────────────────────────────────────
+// FIX 6 — loadSavedData restores the FULL filter set including
+// maturityMode, fromDate, toDate. Before, only country/currency/
+// maturity survived a reload, so date-range selections silently
+// reverted to tenor mode in the report.
+// ─────────────────────────────────────────────────────────────
+async function loadSavedData(force = false, prefetchedWorkflow = null) {
   if (!activeSession.value) return false
   const sid = activeSession.value.id
+  if (!prefetchedWorkflow && !force &&
+      sid === _lastLoadSavedSessionId &&
+      Date.now() - _lastLoadSavedAt < LOAD_SAVED_THROTTLE_MS) {
+    return true
+  }
   let loaded = false
   try {
-    const wf = await sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
+    const wf = prefetchedWorkflow || await sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
     if (wf) {
       rawData.value = wf.rawData || []
       cleanedData.value = wf.cleanedData || []
@@ -6834,155 +5987,205 @@ async function loadSavedData() {
       portfolioSummary.value = wf.portfolioSummary || { rows: [], columns: [] }
       completedInstrumentSummary.value = wf.completedInstrumentSummary || { rows: [], columns: [] }
       completedPortfolioSummary.value = wf.completedPortfolioSummary || { rows: [], columns: [] }
-      yieldCurveData.value = wf.yieldCurveData || []
+      if (Array.isArray(wf.yieldCurveData) && wf.yieldCurveData.length) {
+        yieldCurveData.value = wf.yieldCurveData.filter(p =>
+          p && typeof p === 'object' &&
+          p.rate != null && !isNaN(parseFloat(p.rate)) && parseFloat(p.rate) > 0
+        )
+      } else {
+        yieldCurveData.value = []
+      }
       manualInputs.value = wf.manualInputs || {}
       formulas.value = wf.formulas || {}
       isCalculating.value = wf.isCalculating || false
-
       if (wf.sheetType) sheetType.value = wf.sheetType
       if (wf.currentSheetName) currentSheetName.value = wf.currentSheetName
-      if (wf.extractedValues && Object.keys(wf.extractedValues).length) {
-        extractedValues.value = wf.extractedValues
-      }
-
+      if (wf.extractedValues && Object.keys(wf.extractedValues).length) extractedValues.value = wf.extractedValues
       if (wf.fredFilters) {
-        selectedCountryOption.value = wf.fredFilters.country || ''
-        selectedCurrencyOption.value = wf.fredFilters.currency || ''
-        selectedMaturityOption.value = wf.fredFilters.maturity || config.value.defaultMaturity
+        const f = wf.fredFilters
+        selectedCountryOption.value = f.country || ''
+        selectedCurrencyOption.value = f.currency || ''
+        selectedMaturityOption.value = f.maturity || config.value.defaultMaturity
+        maturityMode.value = (f.maturityMode === 'date') ? 'dateRange' : 'maturity'
+        yieldCurveStartDate.value = f.fromDate || ''
+        yieldCurveEndDate.value = f.toDate || ''
+        fredFilters.value.country = f.country || ''
+        fredFilters.value.currency = f.currency || ''
+        fredFilters.value.maturity = f.maturity || config.value.defaultMaturity
+        fredFilters.value.maturityMode = f.maturityMode === 'date' ? 'date' : 'tenor'
+        fredFilters.value.fromDate = f.fromDate || ''
+        fredFilters.value.toDate = f.toDate || ''
       }
-      if (wf.uploadedFile) {
-        uploadedFile.value = { name: wf.uploadedFile, size: 0 }
-      }
-      // NEW — restore the server-side dataset id so "View Excel Workbook"
-      // and "Download Original" work after a reload / reopened session.
-      if (wf.originalDatasetId) {
-        originalDatasetId.value = wf.originalDatasetId
-      }
+      if (wf.uploadedFile) uploadedFile.value = { name: wf.uploadedFile, size: 0 }
+      if (wf.originalDatasetId) originalDatasetId.value = wf.originalDatasetId
       if (wf.cleaningStats) cleaningStats.value = wf.cleaningStats
       if (wf.sessionSavedAt) sessionSavedAt.value = wf.sessionSavedAt
-
-      if (wf.autoDetectedFields) {
-        autoDetectedFields.value = wf.autoDetectedFields
-      }
-      if (wf.autoDetectedFieldsWithMetadata) {
-        autoDetectedFieldsWithMetadata.value = wf.autoDetectedFieldsWithMetadata
-      }
-      if (wf.autoDetectedAdditionalFields) {
-        autoDetectedAdditionalFields.value = wf.autoDetectedAdditionalFields
-      }
-      if (wf.detectedCurrencies) {
-        detectedCurrencies.value = wf.detectedCurrencies
-      }
-      if (wf.excludedDetectedFields && Array.isArray(wf.excludedDetectedFields)) {
-        excludedDetectedFields.value = new Set(wf.excludedDetectedFields)
-      }
-      if (typeof wf.selectedCurrency === 'string') {
-        selectedCurrency.value = wf.selectedCurrency
-      }
-      if (typeof wf.customCurrency === 'string') {
-        customCurrency.value = wf.customCurrency
-      }
-
+      if (wf.autoDetectedFields) autoDetectedFields.value = wf.autoDetectedFields
+      if (wf.autoDetectedFieldsWithMetadata) autoDetectedFieldsWithMetadata.value = wf.autoDetectedFieldsWithMetadata
+      if (wf.autoDetectedAdditionalFields) autoDetectedAdditionalFields.value = wf.autoDetectedAdditionalFields
+      if (wf.detectedCurrencies) detectedCurrencies.value = wf.detectedCurrencies
+      if (wf.excludedDetectedFields && Array.isArray(wf.excludedDetectedFields)) excludedDetectedFields.value = new Set(wf.excludedDetectedFields)
+      if (typeof wf.selectedCurrency === 'string') selectedCurrency.value = wf.selectedCurrency
+      if (typeof wf.customCurrency === 'string') customCurrency.value = wf.customCurrency
       loaded = true
     }
   } catch (err) {
     console.warn('loadSavedData failed:', err)
   }
+  if (loaded) {
+    _lastLoadSavedSessionId = sid
+    _lastLoadSavedAt = Date.now()
+  }
   return loaded
 }
 
-async function loadAllSelectedInstrumentCurves() {
+// ─────────────────────────────────────────────────────────────
+// FIX 7 — loadAllSelectedInstrumentCurves: NO US fallback when
+// ANY saved curve exists. Missing instruments show honest "not
+// saved" state instead of an invented US default curve.
+// ─────────────────────────────────────────────────────────────
+async function loadAllSelectedInstrumentCurves(workflowMap = null) {
   const session = activeSession.value
   if (!session?.id) return []
-
   const meta = [
     { key: 'money-market', label: 'Money Market', color: '#1E88E5', apiType: 'money-market' },
-    { key: 'bonds',        label: 'Bonds',        color: '#4CAF50', apiType: 'bonds' },
-    { key: 'tbills',       label: 'T-Bills',      color: '#FF9800', apiType: 'tbills' }
+    { key: 'bonds', label: 'Bonds', color: '#4CAF50', apiType: 'bonds' },
+    { key: 'tbills', label: 'T-Bills', color: '#FF9800', apiType: 'tbills' }
   ]
+  const neededKeys = meta.filter(m => selectedInstruments.value[m.key]).map(m => m.key)
+  const missingKeys = neededKeys.filter(k => !workflowMap?.[k])
+  const localMap = { ...(workflowMap || {}) }
+  if (missingKeys.length) {
+    const fetched = await Promise.all(missingKeys.map(async k => {
+      try { return [k, await sessionManager.getInstrumentWorkflow(session.id, k)] }
+      catch (e) { console.warn(`[report] workflow load failed for ${k}:`, e); return [k, null] }
+    }))
+    for (const [k, wf] of fetched) if (wf) localMap[k] = wf
+  }
 
-  const result = []
-
+  const stage = []
   for (const m of meta) {
     if (!selectedInstruments.value[m.key]) continue
-
-    let wf = null
-    try {
-      wf = await sessionManager.getInstrumentWorkflow(session.id, m.key)
-    } catch (e) {
-      // ignore
-    }
-
+    const wf = localMap[m.key] || null
     const isCurrent = m.key === instrumentType.value
-
+    const sessionPoints = Array.isArray(wf?.yieldCurveData) ? wf.yieldCurveData : []
+    const sessionFilters = (wf?.fredFilters && wf.fredFilters.country) ? wf.fredFilters : null
     const localPoints = isCurrent ? yieldCurveData.value : null
     const localFilters = isCurrent ? {
-      country: effectiveCountry.value,
-      currency: effectiveCurrency.value,
-      maturity: effectiveMaturity.value,
-      maturityMode: maturityMode.value,
+      country: effectiveCountry.value || 'US',
+      currency: effectiveCurrency.value || 'USD',
+      maturity: effectiveMaturity.value || config.value.defaultMaturity,
+      maturityMode: maturityMode.value === 'dateRange' ? 'date' : 'tenor',
       fromDate: yieldCurveStartDate.value,
       toDate: yieldCurveEndDate.value
     } : null
-
-    let yc = Array.isArray(localPoints) && localPoints.length ? localPoints : (wf?.yieldCurveData || [])
-    let filters = (localFilters && localFilters.country) ? localFilters : (wf?.fredFilters || {})
-    let validPoints = yc.filter(p => p && p.maturity != null && p.rate != null)
-
-    if (isCurrent && validPoints.length >= 2 && (!wf?.yieldCurveData || wf.yieldCurveData.length < 2)) {
-      try {
-        await sessionManager.saveInstrumentWorkflow(session.id, m.key, {
-          ...(wf || {}),
-          yieldCurveData: validPoints,
-          fredFilters: filters
+    const savedPoints = sessionPoints.length ? sessionPoints : (localPoints || [])
+    const savedFilters = sessionFilters || localFilters || {}
+    const filters = {
+      country: savedFilters.country || 'US',
+      currency: savedFilters.currency || 'USD',
+      maturity: savedFilters.maturity || config.value.defaultMaturity,
+      maturityMode: savedFilters.maturityMode || 'tenor',
+      fromDate: savedFilters.fromDate || null,
+      toDate: savedFilters.toDate || null
+    }
+    let normalised = []
+    for (const p of savedPoints) {
+      if (!p || typeof p !== 'object') continue
+      const rate = parseFloat(p.rate ?? p.y ?? p.value)
+      if (isNaN(rate) || rate === 0) continue
+      const rawX = p.x ?? p.maturity
+      let isDate
+      if (typeof p.isDate === 'boolean') {
+        isDate = p.isDate
+      } else {
+        const matNum = parseFloat(rawX)
+        const hasValidTenor = !isNaN(matNum) && matNum > 0 && matNum < 1000
+        isDate = !hasValidTenor && (
+          !!p.date ||
+          (typeof rawX === 'number' && rawX > 9999999999) ||
+          (typeof rawX === 'string' && /^\d{4}-\d{2}-\d{2}/.test(rawX))
+        )
+      }
+      if (isDate) {
+        const dateStr = p.date || (typeof rawX === 'string' ? rawX : new Date(rawX).toISOString().slice(0, 10))
+        const ts = new Date(dateStr).getTime()
+        if (isNaN(ts)) continue
+        normalised.push({ x: ts, y: rate, maturityLabel: dateStr, date: dateStr, isDate: true })
+      } else {
+        const mat = parseFloat(rawX)
+        if (isNaN(mat) || mat <= 0) continue
+        normalised.push({
+          x: mat,
+          y: rate,
+          maturityLabel: p.maturityLabel || String(mat),
+          date: p.date || null,
+          isDate: false
         })
-      } catch (e) {
-        console.warn('Failed to persist current yield curve:', e)
       }
     }
 
-    if (validPoints.length < 2 && filters?.country) {
-      try {
-        const payload = {
-          instrument_type: m.apiType || m.key,
-          country: filters.country,
-          currency: filters.currency || 'USD'
-        }
-        if (filters.maturityMode === 'date' && filters.fromDate && filters.toDate) {
-          payload.from_date = filters.fromDate
-          payload.to_date = filters.toDate
-        } else if (filters.maturity) {
-          payload.maturity = filters.maturity
-        }
-        const res = await api.fredAPI.getYieldCurve(payload)
-        if (res?.success && res.data?.maturities?.length) {
-          const fetched = res.data.maturities.map((mat, idx) => ({
-            maturity: parseFloat(mat),
-            maturityLabel: res.data.labels?.[idx] || String(mat),
-            rate: res.data.rates?.[idx] || 0,
-            date: res.data.dates?.[idx] || null
-          })).filter(p => !isNaN(p.maturity) && !isNaN(p.rate))
-          if (fetched.length >= 2) {
-            validPoints = fetched
-            yc = fetched
-          }
-        }
-      } catch (e) {
-        console.warn('Live FRED fetch for report failed:', m.key, e)
+    // NEW: Truncate the curve to match the Visualisations page selection
+    if (filters.maturityMode !== 'date' && filters.maturity && filters.maturity !== '__custom__') {
+      const filterYears = parseMaturityToYears(filters.maturity)
+      if (filterYears > 0) {
+        normalised = normalised.filter(p => !p.isDate && p.x <= filterYears)
       }
     }
 
-    if (validPoints.length >= 2) {
-      result.push({
-        key: m.key,
-        label: m.label,
-        color: m.color,
-        points: validPoints,
-        filters,
-        svg: buildInstrumentCurveSvg(validPoints, m.label, m.color),
-        status: 'ok'
-      })
-    } else if (validPoints.length === 1) {
+    stage.push({ m, filters, normalised, fromSession: sessionPoints.length > 0, savedAt: wf?.yieldCurveSavedAt })
+  }
+
+  const anySavedCurve = stage.some(s => s.fromSession && s.normalised.length >= 2)
+  const needsFallback = anySavedCurve
+    ? []
+    : stage.filter(s => s.normalised.length < 2)
+
+  const fallbackResults = await Promise.all(needsFallback.map(async job => {
+    const { m, filters } = job
+    try {
+      const payload = {
+        instrument_type: m.apiType || m.key,
+        country: filters.country,
+        currency: filters.currency
+      }
+      if (filters.maturityMode === 'date' && filters.fromDate && filters.toDate) {
+        payload.from_date = filters.fromDate
+        payload.to_date = filters.toDate
+      } else if (filters.maturity) {
+        payload.maturity = filters.maturity
+      }
+      const res = await api.fredAPI.getYieldCurve(payload)
+      return { key: m.key, fetched: extractFredPointsForReport(res), error: null }
+    } catch (e) {
+      return { key: m.key, fetched: [], error: e?.message || String(e) }
+    }
+  }))
+  const fallbackByKey = Object.fromEntries(fallbackResults.map(r => [r.key, r]))
+
+  const result = []
+  for (const job of stage) {
+    const { m, filters, normalised, fromSession, savedAt } = job
+    let validPoints = normalised
+    let dataSource = null
+    let fetchError = null
+
+    if (fromSession && normalised.length >= 2) {
+      dataSource = 'session_visualization'
+    } else if (validPoints.length < 2) {
+      const fb = fallbackByKey[m.key]
+      if (fb && fb.fetched.length >= 2) {
+        validPoints = fb.fetched
+        dataSource = 'fred_api_live'
+      } else if (fb) {
+        fetchError = fb.error ||
+          `FRED returned ${fb.fetched.length} observation(s); a curve requires at least 2.`
+      } else {
+        fetchError = 'No yield curve has been selected for this instrument on the Visualisations page.'
+      }
+    }
+
+    if (validPoints.length < 2) {
       result.push({
         key: m.key,
         label: m.label,
@@ -6990,79 +6193,207 @@ async function loadAllSelectedInstrumentCurves() {
         points: [],
         filters,
         svg: '',
-        status: 'insufficient',
-        message: `Only one valid yield observation was saved for ${m.label}. A yield curve requires at least 2 points across different maturities — no curve will be drawn.`
+        dataSource: null,
+        status: 'unavailable',
+        message: fetchError ||
+          `No yield curve is saved for ${m.label}. Visit Visualisations, select ${m.label} (or "All Instruments"), fetch the curve, then regenerate this report.`
       })
-    } else {
-      result.push({
-        key: m.key,
-        label: m.label,
-        color: m.color,
-        points: [],
-        filters,
-        svg: '',
-        status: 'missing',
-        message: `No saved yield curve data for ${m.label}. Open the Visualizations tab for ${m.label}, refresh the FRED curve and press Save to Session, then regenerate this report.`
+      continue
+    }
+
+    const isDateMode = validPoints.some(p => p.isDate)
+    result.push({
+      key: m.key,
+      label: m.label,
+      color: m.color,
+      points: validPoints,
+      filters,
+      svg: buildInstrumentCurveSvg(validPoints, m.label, m.color, isDateMode, savedAt),
+      dataSource,
+      status: 'ok',
+      isDateMode
+    })
+  }
+
+  if (typeof window !== 'undefined' && window.__DURA_REPORT_DEBUG__) {
+    console.groupCollapsed('[report] curves used by report')
+    for (const c of result) {
+      console.log(c.label, {
+        status: c.status,
+        source: c.dataSource,
+        points: c.points.length,
+        filters: c.filters,
+        firstPoint: c.points[0],
+        lastPoint: c.points[c.points.length - 1]
       })
     }
+    console.groupEnd()
   }
 
   return result
 }
 
-function buildInstrumentCurveSvg(points, title, color) {
-  const valid = points
-    .map(p => ({ x: parseFloat(p.maturity), y: parseFloat(p.rate) }))
-    .filter(p => !isNaN(p.x) && !isNaN(p.y) && p.x >= 0)
+function extractFredPointsForReport(res) {
+  if (!res?.success || !res.data) return []
+  const d = res.data
+  const out = []
+  if (Array.isArray(d.maturities) && Array.isArray(d.rates)) {
+    d.maturities.forEach((m, i) => {
+      const rate = parseFloat(d.rates[i])
+      if (isNaN(rate) || rate === 0) return
+      out.push({
+        x: parseFloat(m),
+        y: rate,
+        maturityLabel: d.labels?.[i] || String(m),
+        date: d.dates?.[i] || null,
+        isDate: false
+      })
+    })
+    return out
+  }
+  if (d.datasets?.[0]?.data?.length) {
+    for (const pt of d.datasets[0].data) {
+      const rate = parseFloat(pt.y ?? pt.rate)
+      if (isNaN(rate) || rate === 0) continue
+      const rawX = pt.x
+      const isDate =
+        (typeof rawX === 'number' && rawX > 9999999999) ||
+        (typeof rawX === 'string' && /^\d{4}-\d{2}-\d{2}/.test(rawX)) ||
+        !!pt.date
+      if (isDate) {
+        const dateStr = pt.date || (typeof rawX === 'string' ? rawX : new Date(rawX).toISOString().slice(0, 10))
+        const ts = new Date(dateStr).getTime()
+        if (isNaN(ts)) continue
+        out.push({ x: ts, y: rate, maturityLabel: dateStr, date: dateStr, isDate: true })
+      } else {
+        const mat = parseFloat(rawX)
+        if (isNaN(mat) || mat <= 0) continue
+        out.push({ x: mat, y: rate, maturityLabel: pt.label || String(mat), date: pt.date || null, isDate: false })
+      }
+    }
+  }
+  return out
+}
 
-  if (valid.length < 2) return ''
+function buildInstrumentCurveSvg(validPoints, title, color, isDateMode = false, savedAt = null) {
+  // Pixel-match the Visualisations page Chart.js config:
+  //   borderColor:          '#0B2044'
+  //   backgroundColor:      'rgba(11,32,68,0.1)'
+  //   tension: 0.3
+  //   fill: true
+  //   white canvas background, x.min = 0, x.max = lastMaturity + 0.5 (tenor mode)
+  // NOTE: dots are intentionally omitted here (report only). The
+  // Visualisations page keeps its blue dots via Chart.js.
+  const LINE_COLOR  = '#0B2044'
+  const FILL_COLOR  = 'rgba(11,32,68,0.1)'
+  const GRID_COLOR  = '#E5E7EB'
+  const AXIS_COLOR  = '#9CA3AF'
+  const LABEL_COLOR = '#6B7280'
 
-  const width = 720
-  const height = 280
-  const pad = { l: 56, r: 24, t: 36, b: 56 }
+  const width  = 800
+  const height = 400
+  const pad = { l: 60, r: 30, t: 34, b: 60 }
   const plotW = width - pad.l - pad.r
   const plotH = height - pad.t - pad.b
 
-  const dataMaxX = Math.max(...valid.map(p => p.x))
-  const plotMinX = 0
-  const plotMaxX = Math.ceil(dataMaxX)
+  const valid = (validPoints || [])
+    .filter(p => p && !isNaN(parseFloat(p.x)) && !isNaN(parseFloat(p.y)))
+    .map(p => ({
+      x: parseFloat(p.x),
+      y: parseFloat(p.y),
+      label: p.maturityLabel || (isDateMode
+        ? new Date(p.x).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+        : String(p.x))
+    }))
+    .sort((a, b) => a.x - b.x)
 
-  const ys = valid.map(p => p.y)
-  const minY = Math.min(...ys)
-  const maxY = Math.max(...ys)
-  const yPad = (maxY - minY) * 0.08 || 0.5
-  const yMin = minY - yPad
-  const yMax = maxY + yPad
-
-  const sx = x => pad.l + ((x - plotMinX) / (plotMaxX - plotMinX || 1)) * plotW
-  const sy = y => pad.t + plotH - ((y - yMin) / (yMax - yMin || 1)) * plotH
-
-  const poly = valid.map(p => `${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join(' ')
-
-  let xLabels = ''
-  const labelCount = plotMaxX - plotMinX + 1
-  const rotate = labelCount > 12
-  for (let yr = plotMinX; yr <= plotMaxX; yr++) {
-    const xPos = sx(yr).toFixed(1)
-    const transform = rotate
-      ? ` transform="rotate(-45 ${xPos} ${height - 14})" text-anchor="end"`
-      : ` text-anchor="middle"`
-    xLabels += `<text x="${xPos}" y="${height - 14}"${transform} font-size="10" fill="#555">${yr}</text>`
+  // No injected origin point — start exactly at the first real observation,
+  // same as the Visualisations page.
+  if (valid.length < 2) {
+    return `<div style="padding:24px;text-align:center;color:#999;font-size:13px;">No live data available for this curve.</div>`
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-    <rect width="100%" height="100%" fill="#fafbff"/>
-    <text x="${pad.l}" y="22" font-size="14" font-weight="600" fill="${color}">${title} — Yield Curve (%)</text>
-    <line x1="${pad.l}" y1="${pad.t + plotH}" x2="${pad.l + plotW}" y2="${pad.t + plotH}" stroke="#ccc"/>
-    <line x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${pad.t + plotH}" stroke="#ccc"/>
-    <text x="12" y="${pad.t + plotH / 2}" font-size="10" fill="#666" transform="rotate(-90 12 ${pad.t + plotH / 2})">Rate (%)</text>
-    <text x="${pad.l + plotW / 2}" y="${height - 2}" text-anchor="middle" font-size="10" fill="#666">Maturity (years)</text>
-    <polyline fill="none" stroke="${color}" stroke-width="2.5" points="${poly}"/>
-    ${valid.map(p => `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="3.5" fill="${color}"/>`).join('')}
-    ${xLabels}
+  // X-axis extents — same as the Visualisations page
+  let axisMinX = Math.min(...valid.map(p => p.x))
+  let axisMaxX = Math.max(...valid.map(p => p.x))
+  if (!isDateMode) {
+    axisMinX = 0
+    axisMaxX = axisMaxX + 0.5
+  } else {
+    const span = (axisMaxX - axisMinX) || 1
+    axisMinX -= span * 0.02
+    axisMaxX += span * 0.02
+  }
+
+  // Y-axis range with ~15 % padding (matches Chart.js auto-padding)
+  const dataMinY = Math.min(...valid.map(p => p.y))
+  const dataMaxY = Math.max(...valid.map(p => p.y))
+  const yPad     = (dataMaxY - dataMinY) * 0.15 || 0.5
+  const axisMinY = Math.max(0, dataMinY - yPad)
+  const axisMaxY = dataMaxY + yPad
+
+  const rangeX = (axisMaxX - axisMinX) || 1
+  const rangeY = (axisMaxY - axisMinY) || 1
+  const sx = x => pad.l + ((x - axisMinX) / rangeX) * plotW
+  const sy = y => pad.t + plotH - ((y - axisMinY) / rangeY) * plotH
+
+  const points = valid.map(p => ({ x: sx(p.x), y: sy(p.y) }))
+
+  // Smooth cardinal spline (tension = 0.3, same as Chart.js `tension`)
+  const tension = 0.3
+  let lineD = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i]
+    const p1 = points[i + 1]
+    const dx   = p1.x - p0.x
+    const cp1x = p0.x + dx * tension
+    const cp2x = p1.x - dx * tension
+    lineD += ` C ${cp1x.toFixed(2)} ${p0.y.toFixed(2)}, ${cp2x.toFixed(2)} ${p1.y.toFixed(2)}, ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`
+  }
+  const areaD =
+    lineD +
+    ` L ${points[points.length - 1].x.toFixed(2)} ${(pad.t + plotH).toFixed(2)}` +
+    ` L ${points[0].x.toFixed(2)} ${(pad.t + plotH).toFixed(2)} Z`
+
+  // Y grid + tick labels
+  const yTickCount = 5
+  let yGridSvg = ''
+  for (let i = 0; i <= yTickCount; i++) {
+    const v   = axisMinY + (axisMaxY - axisMinY) * (i / yTickCount)
+    const yPx = sy(v)
+    yGridSvg += `<line x1="${pad.l}" y1="${yPx.toFixed(2)}" x2="${(pad.l + plotW).toFixed(2)}" y2="${yPx.toFixed(2)}" stroke="${GRID_COLOR}" stroke-width="1" stroke-dasharray="3 3"/>`
+    yGridSvg += `<text x="${(pad.l - 8).toFixed(2)}" y="${(yPx + 4).toFixed(2)}" text-anchor="end" font-size="11" fill="${LABEL_COLOR}">${v.toFixed(2)}</text>`
+  }
+
+  // X labels — thinned to roughly match Chart.js autoSkip
+  const labelEvery = Math.max(1, Math.ceil(valid.length / 10))
+  const xLabelsSvg = valid.map((p, i) =>
+    i % labelEvery === 0
+      ? `<text x="${sx(p.x).toFixed(2)}" y="${(pad.t + plotH + 18).toFixed(2)}" text-anchor="middle" font-size="11" fill="${LABEL_COLOR}">${p.label}</text>`
+      : ''
+  ).join('')
+
+  const xAxisTitle = isDateMode ? 'Date' : 'Years'
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${title} yield curve" style="background:#ffffff;border-radius:8px;display:block;max-width:100%;height:auto;">
+    <rect width="100%" height="100%" fill="#ffffff"/>
+    ${yGridSvg}
+    <path d="${areaD}" fill="${FILL_COLOR}"/>
+    <path d="${lineD}" fill="none" stroke="${LINE_COLOR}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="${pad.l}" y1="${(pad.t + plotH).toFixed(2)}" x2="${(pad.l + plotW).toFixed(2)}" y2="${(pad.t + plotH).toFixed(2)}" stroke="${AXIS_COLOR}" stroke-width="1"/>
+    <line x1="${pad.l}" y1="${pad.t.toFixed(2)}" x2="${pad.l}" y2="${(pad.t + plotH).toFixed(2)}" stroke="${AXIS_COLOR}" stroke-width="1"/>
+    <text x="${(pad.l - 44).toFixed(2)}" y="${(pad.t + plotH / 2).toFixed(2)}" font-size="12" fill="${LABEL_COLOR}" transform="rotate(-90 ${(pad.l - 44).toFixed(2)} ${(pad.t + plotH / 2).toFixed(2)})" text-anchor="middle">Yield (%)</text>
+    <text x="${(pad.l + plotW / 2).toFixed(2)}" y="${(height - 10).toFixed(2)}" text-anchor="middle" font-size="12" fill="${LABEL_COLOR}">${xAxisTitle}</text>
+    ${xLabelsSvg}
+    <text x="${pad.l}" y="${(pad.t - 12).toFixed(2)}" font-size="13" font-weight="600" fill="${LINE_COLOR}">${title} — Yield Curve (%)</text>
   </svg>`
 }
 
+// ─────────────────────────────────────────────────────────────
+// FIX 8 — showFormula prefers backend `derivations`.
+// Echoes parsed dates + identifiers so the popup is complete.
+// Only falls back to manual computation for legacy records.
+// ─────────────────────────────────────────────────────────────
 function showFormula(metricKey) {
   const formulaMap = {
     'Total Portfolio Value': 'Σ (Total Value of each instrument)',
@@ -7122,8 +6453,6 @@ function showFormula(metricKey) {
   const rows = instrumentSummary.value.rows || []
   const firstRow = (cleanedData.value && cleanedData.value[0]) || (rawData.value && rawData.value[0]) || {}
 
-  const details = []
-
   const toSnake = (s) => String(s).replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[\s\-]+/g, '_').toLowerCase()
   const fmtNum = (v, d = 2) => {
     if (v === null || v === undefined || v === '') return 'N/A'
@@ -7163,28 +6492,102 @@ function showFormula(metricKey) {
   }
   const getRowVal = (key) => {
     const v = _variants(key)
-    return (
-      _pickFrom(firstRow, v) ??
-      _pickFrom(instrumentSummary.value?.rows?.[0], v)
-    )
+    return _pickFrom(firstRow, v) ?? _pickFrom(instrumentSummary.value?.rows?.[0], v)
   }
+
+  const derivations =
+    (calculations.value && calculations.value.derivations) ||
+    (selectedCalculations.value && selectedCalculations.value.derivations) ||
+    (allCalculations.value && allCalculations.value.derivations) ||
+    (calc && calc.derivations) ||
+    null
+
+  if (derivations && typeof derivations === 'object') {
+    const dk = derivations[metricKey] ||
+               derivations[toSnake(metricKey)] ||
+               derivations[String(metricKey).replace(/_/g, ' ')] ||
+               derivations[formatColumnHeader(metricKey)]
+    if (dk && typeof dk === 'object') {
+      const details = []
+      const ctx = {}
+      const name = firstRow['Instrument Name'] || firstRow.instrument_name || null
+      if (name) ctx['Instrument Name'] = name
+      const instType = firstRow['Instrument Type'] || firstRow.instrument_type || instrumentType.value
+      if (instType) ctx['Instrument Type'] = instType
+      for (const [label, key] of [
+        ['Valuation Date', 'valuation_date'],
+        ['Maturity Date', 'maturity_date'],
+        ['Issue Date', 'issue_date'],
+        ['Settlement Date', 'settlement_date'],
+        ['Last Coupon Date', 'last_coupon_date']
+      ]) {
+        const v = firstRow[label] ?? firstRow[key] ?? firstRow[toSnake(label)] ?? firstRow[formatColumnHeader(key)]
+        if (v) ctx[label] = v
+      }
+      for (const [k, v] of Object.entries(ctx)) details.push({ label: k, value: v, formula: 'Input' })
+
+      if (dk.from || dk.to) details.push({ label: 'Period', value: `${dk.from || '?'} → ${dk.to || '?'}`, formula: 'Derivation window' })
+      if (dk.formula) details.push({ label: 'Formula', value: dk.formula, formula: 'Backend' })
+      if (dk.inputs && typeof dk.inputs === 'object') {
+        for (const [inKey, inVal] of Object.entries(dk.inputs)) {
+          details.push({
+            label: `Input: ${inKey}`,
+            value: typeof inVal === 'number' ? inVal.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(inVal),
+            formula: 'Backend input'
+          })
+        }
+      }
+      const resultLabel = `✓ ${formatColumnHeader(metricKey)}`
+      const resultValue = (dk.result !== undefined && dk.result !== null)
+        ? (dk.unit === 'percent' ? fmtPct(dk.result, 4)
+           : dk.unit === 'days' ? `${fmtNum(dk.result, 0)} days`
+           : dk.unit === 'years' ? `${fmtNum(dk.result, 4)} years`
+           : dk.unit === 'currency' ? fmtNum(dk.result, 2)
+           : String(dk.result))
+        : '—'
+      details.push({ label: resultLabel, value: resultValue, formula: dk.formula || 'Backend result' })
+      if (dk.unit) details.push({ label: 'Unit', value: dk.unit, formula: 'Backend' })
+      formulaCalculationDetails.value = details
+      showCalculationDetails.value = true
+      showIndividualBreakdown.value = false
+      formulaDialog.value = true
+      return
+    }
+  }
+
+  const details = []
   const pushInput = (label, value) => details.push({ label, value, formula: 'Input' })
   const pushStep = (label, value, formula) => details.push({ label, value, formula })
   const pushAnswer = (label, value, formula) => details.push({ label: '✓ ' + label, value, formula })
 
-  const faceValue     = getRowVal('Face Value') || getRowVal('Principal') || getVal('faceValue') || getVal('principal')
-  const principal     = getRowVal('Principal') || getVal('principal') || faceValue
+  const name = firstRow['Instrument Name'] || firstRow.instrument_name || null
+  if (name) pushInput('Instrument Name', name)
+  const instTypeVal = firstRow['Instrument Type'] || firstRow.instrument_type || instrumentType.value
+  if (instTypeVal) pushInput('Instrument Type', instTypeVal)
+  for (const [label, key] of [
+    ['Valuation Date', 'valuation_date'],
+    ['Maturity Date', 'maturity_date'],
+    ['Issue Date', 'issue_date'],
+    ['Settlement Date', 'settlement_date'],
+    ['Last Coupon Date', 'last_coupon_date']
+  ]) {
+    const v = firstRow[label] ?? firstRow[key] ?? firstRow[toSnake(label)] ?? firstRow[formatColumnHeader(key)]
+    if (v) pushInput(label, v)
+  }
+
+  const faceValue = getRowVal('Face Value') || getRowVal('Principal') || getVal('faceValue') || getVal('principal')
+  const principal = getRowVal('Principal') || getVal('principal') || faceValue
   const purchasePrice = getRowVal('Purchase Price') || getVal('purchasePrice')
-  const currentPrice  = getRowVal('Current Price') || getRowVal('Price') || getVal('currentPrice')
-  const couponRate    = getRowVal('Coupon Rate') || getVal('couponRate')
-  const interestRate  = getRowVal('Interest Rate') || getVal('interestRate')
-  const discountRate  = getRowVal('Discount Rate') || getVal('discountRate')
-  const ytm           = getRowVal('Yield to Maturity') || getVal('yieldToMaturity')
-  const frequency     = getVal('frequency') || getRowVal('Coupon Frequency') || getRowVal('Frequency') || 2
-  const days          = getVal('daysToMaturity') || getVal('termDays') || getRowVal('Days to Maturity') || getRowVal('Term')
-  const dayBasis      = String(getRowVal('Day Count Convention') || 'ACT/360').includes('360') ? 360 : 365
-  const maturityDate  = getRowVal('Maturity Date')
-  const issueDate     = getRowVal('Issue Date')
+  const currentPrice = getRowVal('Current Price') || getRowVal('Price') || getVal('currentPrice')
+  const couponRate = getRowVal('Coupon Rate') || getVal('couponRate')
+  const interestRate = getRowVal('Interest Rate') || getVal('interestRate')
+  const discountRate = getRowVal('Discount Rate') || getVal('discountRate')
+  const ytm = getRowVal('Yield to Maturity') || getVal('yieldToMaturity')
+  const frequency = getVal('frequency') || getRowVal('Coupon Frequency') || getRowVal('Frequency') || 2
+  const days = getVal('daysToMaturity') || getVal('termDays') || getRowVal('Days to Maturity') || getRowVal('Term')
+  const dayBasis = String(getRowVal('Day Count Convention') || 'ACT/360').includes('360') ? 360 : 365
+  const maturityDate = getRowVal('Maturity Date')
+  const issueDate = getRowVal('Issue Date')
   const valuationDate = getRowVal('Valuation Date') || getRowVal('Settlement Date')
 
   const daysBetween = (a, b) => {
@@ -7196,134 +6599,7 @@ function showFormula(metricKey) {
   const computedDays = days || daysBetween(valuationDate || issueDate, maturityDate)
 
   let handled = true
-
   switch (metricKey) {
-    case 'currentYield': {
-      const face = parseFloat(faceValue) || 100
-      const coupon = parseFloat(couponRate) || 0
-      const price = parseFloat(currentPrice) || parseFloat(purchasePrice) || 0
-      const annualCoupon = (face * coupon) / 100
-      const cy = price ? (annualCoupon / price) * 100 : 0
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Coupon Rate', fmtPct(coupon))
-      pushInput('Current Price', fmtNum(price))
-      pushStep('Annual Coupon', `${fmtNum(face)} × (${fmtNum(coupon)} ÷ 100) = ${fmtNum(annualCoupon)}`, 'Face Value × (Coupon Rate ÷ 100)')
-      pushStep('Current Yield', `(${fmtNum(annualCoupon)} ÷ ${fmtNum(price)}) × 100 = ${fmtNum(cy)}%`, '(Annual Coupon ÷ Current Price) × 100')
-      pushAnswer('Current Yield', fmtPct(cy), 'Annual Coupon ÷ Current Price × 100')
-      break
-    }
-    case 'yieldToMaturity':
-    case 'avgYTM': {
-      const y = parseFloat(ytm) || 0
-      pushInput('Yield to Maturity (from backend IRR)', fmtPct(y))
-      if (currentPrice || purchasePrice) pushInput('Current / Purchase Price', fmtNum(currentPrice || purchasePrice))
-      pushStep('Definition', 'YTM is the internal rate of return that equates the present value of all remaining cash flows to the market price.', 'Standard bond pricing identity')
-      pushAnswer('Yield to Maturity', fmtPct(y), 'Backend IRR')
-      break
-    }
-    case 'duration':
-    case 'modifiedDuration': {
-      const mac = parseFloat(getVal('duration')) || 0
-      const y = parseFloat(ytm) || 0
-      const freq = parseFloat(frequency) || 2
-      if (metricKey === 'modifiedDuration') {
-        const mod = mac / (1 + (y / 100) / freq)
-        pushInput('Macaulay Duration', fmtNum(mac) + ' years')
-        pushInput('Yield to Maturity', fmtPct(y))
-        pushInput('Coupon Frequency', String(freq) + ' per year')
-        pushStep('Formula', `${fmtNum(mac)} ÷ (1 + ${(y / 100).toFixed(6)} ÷ ${freq}) = ${fmtNum(mod)} years`, 'Mac ÷ (1 + YTM ÷ Freq)')
-        pushAnswer('Modified Duration', fmtNum(mod) + ' years', 'Price sensitivity')
-      } else {
-        pushInput('Macaulay Duration (from backend)', fmtNum(mac) + ' years')
-        pushStep('Raw sum', 'Σ (t × PV(C_t)) ÷ Price  →  result in coupon periods', 'Period-unit Macaulay')
-        pushInput('Coupon Frequency', String(freq))
-        pushStep('Convert to years', `${fmtNum(mac * freq)} ÷ ${freq} = ${fmtNum(mac)} years`, '(Periods ÷ Frequency = Years)')
-        pushAnswer('Duration', fmtNum(mac) + ' years', 'Macaulay Duration (years)')
-      }
-      break
-    }
-    case 'accruedInterest': {
-      const face = parseFloat(faceValue) || 100
-      const coupon = parseFloat(couponRate) || 0
-      const freq = parseFloat(frequency) || 2
-      const daysAccrued = parseFloat(getVal('daysAccrued')) || 0
-      const couponPerPeriod = (face * coupon) / 100 / freq
-      const daysInPeriod = dayBasis / freq
-      const accrued = daysInPeriod ? couponPerPeriod * (daysAccrued / daysInPeriod) : 0
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Coupon Rate', fmtPct(coupon))
-      pushInput('Frequency', String(freq))
-      pushInput('Days Accrued', fmtNum(daysAccrued, 0))
-      pushStep('Coupon per Period', `${fmtNum(face)} × (${fmtNum(coupon)} ÷ 100) ÷ ${freq} = ${fmtNum(couponPerPeriod)}`, 'Face × Coupon ÷ 100 ÷ Freq')
-      pushStep('Days in Period', `${dayBasis} ÷ ${freq} = ${fmtNum(daysInPeriod, 0)}`, 'Basis ÷ Freq')
-      pushStep('Accrued', `${fmtNum(couponPerPeriod)} × (${fmtNum(daysAccrued, 0)} ÷ ${fmtNum(daysInPeriod, 0)}) = ${fmtNum(accrued)}`, 'Coupon per Period × (Days Accrued ÷ Days in Period)')
-      pushAnswer('Accrued Interest', fmtNum(accrued), 'Accrued coupon')
-      break
-    }
-    case 'pricePer100': {
-      const price = parseFloat(currentPrice) || parseFloat(purchasePrice) || 0
-      const face = parseFloat(faceValue) || 100
-      const p100 = face ? (price / face) * 100 : 0
-      pushInput('Current Price', fmtNum(price))
-      pushInput('Face Value', fmtNum(face))
-      pushStep('Formula', `(${fmtNum(price)} ÷ ${fmtNum(face)}) × 100 = ${fmtNum(p100)}`, '(Price ÷ Face) × 100')
-      pushAnswer('Price per 100', fmtNum(p100), 'Price per 100 face value')
-      break
-    }
-    case 'couponRate': {
-      const c = parseFloat(couponRate) || 0
-      pushInput('Coupon Rate (from cleaned data)', fmtPct(c))
-      pushAnswer('Coupon Rate', fmtPct(c), 'Annual coupon rate')
-      break
-    }
-    case 'discountRate': {
-      const d = parseFloat(discountRate) || 0
-      pushInput('Discount Rate (from cleaned data)', fmtPct(d))
-      pushAnswer('Discount Rate', fmtPct(d), 'Annual discount rate')
-      break
-    }
-    case 'interestRate': {
-      const r = parseFloat(interestRate) || 0
-      pushInput('Interest Rate (from cleaned data)', fmtPct(r))
-      pushAnswer('Interest Rate', fmtPct(r), 'Annual interest rate')
-      break
-    }
-    case 'currentPrice': {
-      const p = parseFloat(currentPrice) || 0
-      pushInput('Current Price (from cleaned data)', fmtNum(p))
-      pushAnswer('Current Price', fmtNum(p), 'Market price')
-      break
-    }
-    case 'frequency': {
-      const f = parseFloat(frequency) || 0
-      pushInput('Coupon Frequency', String(f))
-      pushAnswer('Frequency', String(f), 'Payments per year')
-      break
-    }
-    case 'annualCoupon': {
-      const face = parseFloat(faceValue) || 0
-      const coupon = parseFloat(couponRate) || 0
-      const annual = (face * coupon) / 100
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Coupon Rate', fmtPct(coupon))
-      pushStep('Formula', `${fmtNum(face)} × (${fmtNum(coupon)} ÷ 100) = ${fmtNum(annual)}`, 'Face × Coupon ÷ 100')
-      pushAnswer('Annual Coupon', fmtNum(annual), 'Annual coupon amount')
-      break
-    }
-    case 'couponPerPeriod': {
-      const face = parseFloat(faceValue) || 0
-      const coupon = parseFloat(couponRate) || 0
-      const freq = parseFloat(frequency) || 2
-      const annual = (face * coupon) / 100
-      const perPeriod = annual / freq
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Coupon Rate', fmtPct(coupon))
-      pushInput('Frequency', String(freq))
-      pushStep('Annual Coupon', `${fmtNum(face)} × (${fmtNum(coupon)} ÷ 100) = ${fmtNum(annual)}`, 'Face × Coupon ÷ 100')
-      pushStep('Per Period', `${fmtNum(annual)} ÷ ${freq} = ${fmtNum(perPeriod)}`, 'Annual ÷ Freq')
-      pushAnswer('Coupon per Period', fmtNum(perPeriod), 'Coupon payment per period')
-      break
-    }
     case 'interestEarned':
     case 'totalInterest': {
       const p = parseFloat(principal) || 0
@@ -7336,254 +6612,6 @@ function showFormula(metricKey) {
       pushInput('Day Count Basis', String(dayBasis))
       pushStep('Formula', `${fmtNum(p)} × (${fmtNum(r)} ÷ 100) × (${fmtNum(d, 0)} ÷ ${dayBasis}) = ${fmtNum(interest)}`, 'Principal × Rate ÷ 100 × Days ÷ Basis')
       pushAnswer('Interest Earned', fmtNum(interest), 'Simple interest')
-      break
-    }
-    case 'annualYield': {
-      const p = parseFloat(principal) || 0
-      const i = parseFloat(getVal('interestEarned')) || 0
-      const d = parseFloat(computedDays) || 365
-      const y = p && d ? (i / p) * (365 / d) * 100 : 0
-      pushInput('Principal', fmtNum(p))
-      pushInput('Interest Earned', fmtNum(i))
-      pushInput('Days to Maturity', fmtNum(d, 0))
-      pushStep('Formula', `(${fmtNum(i)} ÷ ${fmtNum(p)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(y)}%`, '(Interest ÷ Principal) × (365 ÷ Days) × 100')
-      pushAnswer('Annual Yield', fmtPct(y), 'Annualised simple yield')
-      break
-    }
-    case 'effectiveAnnualRate': {
-      // Backend: effective_annual_rate == effective_yield == (interest/principal)*(365/days)*100
-      const p = parseFloat(principal) || 0
-      const r = parseFloat(interestRate || couponRate) || 0
-      const d = parseFloat(computedDays) || 0
-      const i = parseFloat(getVal('interestEarned')) || (p * (r / 100) * (d / dayBasis))
-      if (p > 0 && d > 0) {
-        const ear = (i / p) * (365.0 / d) * 100.0
-        pushInput('Principal', fmtNum(p))
-        pushInput('Interest Earned', fmtNum(i))
-        pushInput('Days to Maturity', fmtNum(d, 0))
-        pushStep('Effective Annual Rate', `(${fmtNum(i)} ÷ ${fmtNum(p)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(ear)}%`, '(Interest ÷ Principal) × (365 ÷ Days) × 100')
-        pushAnswer('Effective Annual Rate', fmtPct(ear), 'Annualised simple yield (same as effective_yield in backend)')
-      } else {
-        pushInput('Nominal Rate', fmtPct(r))
-        pushStep('Note', 'Backend sets effective_annual_rate to effective_yield. With no principal/days available, both default to the nominal rate.', 'Backend convention')
-        pushAnswer('Effective Annual Rate', fmtPct(r), 'Equals nominal rate')
-      }
-      break
-    }
-    case 'discountYield': {
-      // Backend: disc_yield = (interest / total_value) * (basis / days) * 100
-      // where total_value = principal + interest, basis = 360 or 365 from day_count.
-      const p = parseFloat(principal) || 0
-      const r = parseFloat(interestRate) || 0
-      const d = parseFloat(computedDays) || 0
-      const i = parseFloat(getVal('interestEarned')) || (p * (r / 100) * (d / dayBasis))
-      const tv = p + i
-      if (tv > 0 && d > 0) {
-        const dy = (i / tv) * (dayBasis / d) * 100
-        pushInput('Principal', fmtNum(p))
-        pushInput('Interest Earned', fmtNum(i))
-        pushInput('Total Value (Principal + Interest)', fmtNum(tv))
-        pushInput('Days to Maturity', fmtNum(d, 0))
-        pushInput('Day Count Basis', String(dayBasis))
-        pushStep('Discount Yield', `(${fmtNum(i)} ÷ ${fmtNum(tv)}) × (${dayBasis} ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(dy)}%`, '(Interest ÷ Total Value) × (Basis ÷ Days) × 100')
-        pushAnswer('Discount Yield', fmtPct(dy), 'Money-market discount yield')
-      } else {
-        pushInput('Discount Yield', 'N/A')
-        pushStep('Note', 'Principal, interest, and days are required to reproduce this calculation.', 'Backend requires principal + interest + days')
-        pushAnswer('Discount Yield', '—', 'Cannot compute')
-      }
-      break
-    }
-    case 'bondEquivalentYield': {
-      const face = parseFloat(faceValue) || 0
-      const purchase = parseFloat(purchasePrice) || 0
-      const d = parseFloat(computedDays) || 0
-      const discount = face - purchase
-      const bey = purchase && d ? (discount / purchase) * (365 / d) * 100 : 0
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Purchase Price', fmtNum(purchase))
-      pushInput('Days to Maturity', fmtNum(d, 0))
-      pushStep('Discount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
-      pushStep('BEY', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(bey)}%`, '(Discount ÷ Purchase) × (365 ÷ Days) × 100')
-      pushAnswer('Bond Equivalent Yield', fmtPct(bey), 'BEY on purchase price')
-      break
-    }
-    case 'moneyMarketYield': {
-      // Backend: mm_yield = (discount / purchase) * (basis / days) * 100
-      // where basis comes from day_count_convention (360 default, 365 for ACT/365).
-      const face = parseFloat(faceValue) || 0
-      const purchase = parseFloat(purchasePrice) || 0
-      const d = parseFloat(computedDays) || 0
-      const discount = face - purchase
-      const basis = dayBasis   // 360 or 365 from day_count_convention
-      const mmy = purchase && d ? (discount / purchase) * (basis / d) * 100 : 0
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Purchase Price', fmtNum(purchase))
-      pushInput('Days to Maturity', fmtNum(d, 0))
-      pushInput('Day Count Basis', String(basis))
-      pushStep('Discount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
-      pushStep('MMY', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (${basis} ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(mmy)}%`, '(Discount ÷ Purchase) × (Basis ÷ Days) × 100')
-      pushAnswer('Money Market Yield', fmtPct(mmy), 'Money market yield')
-      break
-    }
-    case 'holdingPeriodYield': {
-      const face = parseFloat(faceValue) || 0
-      const purchase = parseFloat(purchasePrice) || 0
-      const discount = face - purchase
-      const hpy = purchase ? (discount / purchase) * 100 : 0
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Purchase Price', fmtNum(purchase))
-      pushStep('Discount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
-      pushStep('HPY', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × 100 = ${fmtNum(hpy)}%`, '(Face − Purchase) ÷ Purchase × 100')
-      pushAnswer('Holding Period Yield', fmtPct(hpy), 'Total return (unannualised)')
-      break
-    }
-    case 'effectiveAnnualYield': {
-      const face = parseFloat(faceValue) || 0
-      const purchase = parseFloat(purchasePrice) || 0
-      const d = parseFloat(computedDays) || 0
-      const eay = purchase && d ? (Math.pow(face / purchase, 365 / d) - 1) * 100 : 0
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Purchase Price', fmtNum(purchase))
-      pushInput('Days to Maturity', fmtNum(d, 0))
-      pushStep('EA Yield', `((${fmtNum(face)} ÷ ${fmtNum(purchase)})^(${365} ÷ ${fmtNum(d, 0)}) − 1) × 100 = ${fmtNum(eay)}%`, '(Face ÷ Purchase)^(365/Days) − 1) × 100')
-      pushAnswer('Effective Annual Yield', fmtPct(eay), 'Annualised compound yield')
-      break
-    }
-    case 'annualizedYield': {
-      const face = parseFloat(faceValue) || 0
-      const purchase = parseFloat(purchasePrice) || 0
-      const d = parseFloat(computedDays) || 0
-      const discount = face - purchase
-      const ay = purchase && d ? (discount / purchase) * (365 / d) * 100 : 0
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Purchase Price', fmtNum(purchase))
-      pushInput('Days to Maturity', fmtNum(d, 0))
-      pushStep('Discount', `${fmtNum(face)} − ${fmtNum(purchase)} = ${fmtNum(discount)}`, 'Face − Purchase')
-      pushStep('Annualised', `(${fmtNum(discount)} ÷ ${fmtNum(purchase)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(ay)}%`, '(Discount ÷ Purchase) × (365 ÷ Days) × 100')
-      pushAnswer('Annualized Yield', fmtPct(ay), 'Annualised yield')
-      break
-    }
-    case 'maturityValue': {
-      const p = parseFloat(principal) || parseFloat(faceValue) || 0
-      const r = parseFloat(interestRate || couponRate || discountRate) || 0
-      const d = parseFloat(computedDays) || 0
-      const interest = p * (r / 100) * (d / dayBasis)
-      const mv = p + interest
-      pushInput('Principal', fmtNum(p))
-      pushInput('Rate', fmtPct(r))
-      pushInput('Days', fmtNum(d, 0))
-      pushStep('Interest', `${fmtNum(p)} × (${fmtNum(r)} ÷ 100) × (${fmtNum(d, 0)} ÷ ${dayBasis}) = ${fmtNum(interest)}`, 'Principal × Rate × Days ÷ Basis')
-      pushStep('Total', `${fmtNum(p)} + ${fmtNum(interest)} = ${fmtNum(mv)}`, 'Principal + Interest')
-      pushAnswer('Maturity Value', fmtNum(mv), 'Value at maturity')
-      break
-    }
-    case 'presentValue':
-    case 'fairValue': {
-      const face = parseFloat(faceValue) || parseFloat(principal) || 0
-      const r = parseFloat(interestRate || discountRate) || 0
-      const d = parseFloat(computedDays) || 0
-      const pv = face / (1 + (r / 100) * (d / dayBasis))
-      pushInput('Face Value', fmtNum(face))
-      pushInput('Rate', fmtPct(r))
-      pushInput('Days', fmtNum(d, 0))
-      pushStep('PV', `${fmtNum(face)} ÷ (1 + (${fmtNum(r)} ÷ 100) × (${fmtNum(d, 0)} ÷ ${dayBasis})) = ${fmtNum(pv)}`, 'FV ÷ (1 + r × t)')
-      if (metricKey === 'fairValue') {
-        const purchase = parseFloat(purchasePrice) || 0
-        const fv = pv - purchase
-        pushStep('Fair Value', `${fmtNum(pv)} − ${fmtNum(purchase)} = ${fmtNum(fv)}`, 'PV − Purchase Price')
-        pushAnswer('Fair Value', fmtNum(fv), 'Fair value adjustment')
-      } else {
-        pushAnswer('Present Value', fmtNum(pv), 'Discounted value')
-      }
-      break
-    }
-    case 'effectiveYield': {
-      const face = parseFloat(faceValue) || 0
-      const purchase = parseFloat(purchasePrice) || parseFloat(principal) || 0
-      const d = parseFloat(computedDays) || 0
-      const interest = parseFloat(getVal('interestEarned')) || 0
-      if (purchase > 0 && d > 0) {
-        const ey = (Math.pow(face / purchase, 365 / d) - 1) * 100
-        pushInput('Face Value / Principal', fmtNum(face))
-        pushInput('Purchase Price', fmtNum(purchase))
-        pushInput('Days to Maturity', fmtNum(d, 0))
-        pushStep('Interest Earned', fmtNum(interest), 'Face − Purchase')
-        pushStep(
-          'Effective Yield',
-          `(( ${fmtNum(face)} ÷ ${fmtNum(purchase)} )^(365 ÷ ${fmtNum(d, 0)}) − 1) × 100 = ${fmtNum(ey)}%`,
-          '(Face ÷ Purchase)^(365/Days) − 1) × 100'
-        )
-        pushAnswer('Effective Yield', fmtPct(ey), 'Annualised compound yield')
-      } else {
-        // Backend calculates: eff_yield = (interest / principal) * (365 / days) * 100
-        const p = parseFloat(principal) || 0
-        const r = parseFloat(interestRate) || 0
-        const d = parseFloat(computedDays) || 0
-        const i = parseFloat(getVal('interestEarned')) || (p * (r / 100) * (d / dayBasis))
-        if (p > 0 && d > 0) {
-          const ey = (i / p) * (365.0 / d) * 100.0
-          pushInput('Principal', fmtNum(p))
-          pushInput('Interest Earned', fmtNum(i))
-          pushInput('Days to Maturity', fmtNum(d, 0))
-          pushStep('Effective Yield', `(${fmtNum(i)} ÷ ${fmtNum(p)}) × (365 ÷ ${fmtNum(d, 0)}) × 100 = ${fmtNum(ey)}%`, '(Interest ÷ Principal) × (365 ÷ Days) × 100  — simple annualised')
-          pushAnswer('Effective Yield', fmtPct(ey), 'Simple annualised yield')
-        } else {
-          pushInput('Nominal Interest Rate (from cleaned data)', fmtPct(r))
-          pushStep('Interpretation', 'For a money-market instrument without a purchase price on file, effective yield is reported as equal to the stated interest rate.', '365-day simple-interest convention')
-          pushAnswer('Effective Yield', fmtPct(r), 'Equals stated rate (no discount basis)')
-        }
-      }
-      break
-    }
-    case 'yieldCurveRate': {
-      const bench = parseFloat(agg.fred?.benchmark_rate) || 0
-      pushInput('Source', 'FRED Federal Reserve Economic Data')
-      if (agg.fred?.country) pushInput('Country', agg.fred.country)
-      if (agg.fred?.currency) pushInput('Currency', agg.fred.currency)
-      if (agg.fred?.maturity) pushInput('Maturity', agg.fred.maturity)
-      pushStep('Matched benchmark rate', fmtPct(bench), 'FRED series matched to maturity')
-      pushAnswer('Benchmark Rate', fmtPct(bench), 'FRED reference rate')
-      break
-    }
-    case 'daysAccrued': {
-      const lastCoupon = getRowVal('Last Coupon Date') || getRowVal('Issue Date')
-      const settle = valuationDate || getRowVal('Settlement Date')
-      if (lastCoupon && settle) {
-        const d = daysBetween(lastCoupon, settle)
-        pushInput('Last Coupon Date / Issue Date', String(lastCoupon))
-        pushInput('Settlement / Valuation Date', String(settle))
-        pushStep('Days Accrued', `${settle} − ${lastCoupon} = ${d} days`, 'Settlement − Last Coupon')
-        pushAnswer('Days Accrued', `${d} days`, 'Days since last coupon')
-      } else {
-        const v = parseFloat(getVal('daysAccrued')) || 0
-        pushInput('Days Accrued (from backend)', fmtNum(v, 0))
-        pushStep('Note', 'Last coupon date or settlement date not available in cleaned data — value shown is what the backend returned.', 'Backend derivations')
-        pushAnswer('Days Accrued', `${fmtNum(v, 0)} days`, 'Backend')
-      }
-      break
-    }
-    case 'termDays':
-    case 'daysToMaturity': {
-      if (maturityDate && (valuationDate || issueDate)) {
-        const start = valuationDate || issueDate
-        const d = daysBetween(start, maturityDate)
-        pushInput('Start Date', String(start))
-        pushInput('Maturity Date', String(maturityDate))
-        pushStep('Days', `${maturityDate} − ${start} = ${d} days`, 'Maturity − Start')
-        pushAnswer('Days to Maturity', String(d) + ' days', 'Date difference')
-      } else {
-        pushInput('Days to Maturity', fmtNum(computedDays, 0))
-        pushAnswer('Days to Maturity', fmtNum(computedDays, 0) + ' days', 'From backend')
-      }
-      break
-    }
-    case 'yearsToMaturity': {
-      const d = parseFloat(computedDays) || 0
-      const years = d / 365
-      pushInput('Days to Maturity', fmtNum(d, 0))
-      pushStep('Years', `${fmtNum(d, 0)} ÷ 365 = ${years.toFixed(4)}`, 'Days ÷ 365')
-      pushAnswer('Years to Maturity', years.toFixed(4) + ' years', 'Years from valuation')
       break
     }
     case 'Total Portfolio Value':
@@ -7636,65 +6664,6 @@ function showFormula(metricKey) {
       } else {
         const v = parseFloat(getVal(metricKey)) || 0
         pushAnswer(`Average ${key}`, fmtPct(v), 'From calculation engine')
-      }
-      break
-    }
-    case 'weightedAvgRate':
-    case 'weightedAvgCoupon':
-    case 'weightedAvgDiscount': {
-      const key = metricKey === 'weightedAvgCoupon' ? 'Coupon Rate' : metricKey === 'weightedAvgDiscount' ? 'Discount Rate' : 'Rate'
-      if (rows.length > 0) {
-        let weightedSum = 0, totalWeight = 0
-        rows.forEach((row, idx) => {
-          const r = parseFloat(row[key] || 0) || 0
-          const w = parseFloat(row['Total Value'] || 0) || 0
-          pushInput(row['Instrument Name'] || `Row ${idx + 1}`, `${fmtPct(r)} × ${fmtNum(w)} = ${fmtNum(r * w)}`)
-          weightedSum += r * w
-          totalWeight += w
-        })
-        pushStep('Σ (Rate × Weight)', fmtNum(weightedSum), `Σ (${key} × Total Value)`)
-        pushStep('Σ Weight', fmtNum(totalWeight), 'Σ Total Value')
-        pushStep('Weighted Average', `${fmtNum(weightedSum)} ÷ ${fmtNum(totalWeight)} = ${fmtNum(totalWeight ? weightedSum / totalWeight : 0)}%`, 'Σ (Rate × Weight) ÷ Σ Weight')
-        pushAnswer(`Weighted Average ${key}`, fmtPct(totalWeight ? weightedSum / totalWeight : 0), 'Weighted average')
-      } else {
-        const v = parseFloat(getVal(metricKey)) || 0
-        pushAnswer(`Weighted ${key}`, fmtPct(v), 'From calculation engine')
-      }
-      break
-    }
-    case 'avgDaysToMaturity': {
-      if (rows.length > 0) {
-        let sum = 0, count = 0
-        rows.forEach((row, idx) => {
-          const d = parseFloat(row['Days to Maturity'] || row['days_to_maturity'] || row['Term'] || 0) || 0
-          if (d > 0) {
-            pushInput(row['Instrument Name'] || `Row ${idx + 1}`, `${fmtNum(d, 0)} days`)
-            sum += d
-            count++
-          }
-        })
-        pushStep('Sum', `${fmtNum(sum, 0)} days across ${count} instruments`, 'Σ Days')
-        pushStep('Average', `${fmtNum(sum, 0)} ÷ ${count} = ${fmtNum(sum / count, 1)} days`, 'Sum ÷ Count')
-        pushAnswer('Average Days to Maturity', fmtNum(sum / count, 1) + ' days', 'Simple average')
-      } else {
-        const v = parseFloat(getVal(metricKey)) || 0
-        pushAnswer('Average Days to Maturity', fmtNum(v, 1) + ' days', 'From calculation engine')
-      }
-      break
-    }
-    case 'avgInvestment': {
-      if (rows.length > 0) {
-        let sum = 0
-        rows.forEach((row, idx) => {
-          const v = parseFloat(row['Purchase Price'] || row['purchase_price'] || 0) || 0
-          pushInput(row['Instrument Name'] || `Row ${idx + 1}`, fmtNum(v))
-          sum += v
-        })
-        pushStep('Total', fmtNum(sum), 'Σ Purchase Price')
-        pushStep('Average', `${fmtNum(sum)} ÷ ${rows.length} = ${fmtNum(sum / rows.length)}`, 'Total ÷ Count')
-        pushAnswer('Average Investment', fmtNum(sum / rows.length), 'Average per instrument')
-      } else {
-        pushAnswer('Average Investment', fmtNum(parseFloat(getVal('avgInvestment')) || 0), 'From calculation engine')
       }
       break
     }
@@ -7774,24 +6743,28 @@ const reportPreviewData = computed(() => {
     { key: 'bonds', label: 'Bonds' },
     { key: 'tbills', label: 'T-Bills' }
   ]
-
   for (const type of instrumentTypes) {
     const key = type.key
     const selected = selectedInstruments.value[key]
     if (!selected) continue
-
     const data = getInstrumentData(key)
     if (data && (data.totalValue > 0 || data.instrumentCount > 0)) {
       instrumentsData.push({ name: type.label, calculations: data, id: key })
     }
   }
-
   return {
     session: activeSession.value?.name || 'No session',
     date: new Date().toLocaleString(),
     instruments: instrumentsData,
     chartImage: chartImageData.value,
-    fredFilters: { country: effectiveCountry.value, currency: effectiveCurrency.value, maturity: effectiveMaturity.value },
+    fredFilters: {
+      country: effectiveCountry.value,
+      currency: effectiveCurrency.value,
+      maturity: effectiveMaturity.value,
+      maturityMode: maturityMode.value === 'dateRange' ? 'date' : 'tenor',
+      fromDate: yieldCurveStartDate.value,
+      toDate: yieldCurveEndDate.value
+    },
     yieldCurveData: yieldCurveData.value,
     valuationDate: activeValuationDate.value || ''
   }
@@ -7833,24 +6806,15 @@ async function captureChartImage() {
     setTimeout(() => {
       const canvas = yieldCurveChart.value
       if (canvas && canvas.toDataURL) {
-        try {
-          resolve(canvas.toDataURL('image/png', 1.0))
-          return
-        } catch (e) { /* fallthrough */ }
+        try { resolve(canvas.toDataURL('image/png', 1.0)); return } catch (e) { /* fallthrough */ }
       }
       const canvasEl = document.querySelector('.chart-container--fred canvas')
       if (canvasEl && canvasEl.toDataURL) {
-        try {
-          resolve(canvasEl.toDataURL('image/png', 1.0))
-          return
-        } catch (e) { /* fallthrough */ }
+        try { resolve(canvasEl.toDataURL('image/png', 1.0)); return } catch (e) { /* fallthrough */ }
       }
       const anyCanvas = document.querySelector('canvas')
       if (anyCanvas && anyCanvas.toDataURL) {
-        try {
-          resolve(anyCanvas.toDataURL('image/png', 1.0))
-          return
-        } catch (e) { /* fallthrough */ }
+        try { resolve(anyCanvas.toDataURL('image/png', 1.0)); return } catch (e) { /* fallthrough */ }
       }
       resolve('')
     }, 1000)
@@ -7867,74 +6831,239 @@ function buildMethodologySection(selectedInstrumentNames) {
 
 const backgroundCoverUrl = '/reportbackground.png'
 
-async function generateReportHtml() {
-  await loadSavedData()
-
-  const report = reportPreviewData.value
-  if (report.instruments.length === 0) {
-    return null
+async function loadAllInstrumentWorkflowsForReport(workflowMap = null) {
+  if (!activeSession.value?.id) return
+  const sid = activeSession.value.id
+  const currentType = instrumentType.value
+  const otherTypes = ['money-market', 'bonds', 'tbills'].filter(t => t !== currentType)
+  const allRows = [...(instrumentSummary.value.rows || [])]
+  for (const r of allRows) {
+    if (!r['Instrument Type']) r['Instrument Type'] = currentType
   }
+  const localMap = { ...(workflowMap || {}) }
+  const missing = otherTypes.filter(t => !localMap[t])
+  if (missing.length) {
+    const fetched = await Promise.all(missing.map(async t => {
+      try { return [t, await sessionManager.getInstrumentWorkflow(sid, t)] }
+      catch (e) { console.warn('Report preview: failed to load workflow for', t, e); return [t, null] }
+    }))
+    for (const [t, wf] of fetched) if (wf) localMap[t] = wf
+  }
+  for (const t of otherTypes) {
+    const rows = localMap[t]?.instrumentSummary?.rows || []
+    for (const r of rows) {
+      allRows.push({ ...r, 'Instrument Type': r['Instrument Type'] || t })
+    }
+  }
+  const seen = new Set()
+  const merged = allRows.filter(r => {
+    const key = `${r['Instrument Name'] || ''}|${r['Instrument Type'] || ''}|${r['Worksheet'] || ''}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  instrumentSummary.value = {
+    columns: dedupeColumns(instrumentSummary.value.columns || []),
+    rows: merged
+  }
+}
 
-  const instrumentCurves = await loadAllSelectedInstrumentCurves()
+// ─────────────────────────────────────────────────────────────
+// FIX 9 — prefetchPreviewWorkflows checks singular key first.
+// Previously only `instrumentWorkflows` (plural) candidates
+// existed, which never matched the sessionManager shape
+// `instrumentWorkflow` (singular), forcing slower fallbacks.
+// ─────────────────────────────────────────────────────────────
+async function prefetchPreviewWorkflows(sid) {
+  const map = {}
+  try {
+    const session = await sessionManager.getSession(sid, true)
+    const candidates = [
+      session?.instrumentWorkflow,
+      session?.instrumentWorkflows,
+      session?.payload?.instrumentWorkflow,
+      session?.payload?.instrumentWorkflows,
+      session?.workflows,
+      session?.payload?.workflows
+    ]
+    for (const cand of candidates) {
+      if (cand && typeof cand === 'object' &&
+          (cand['money-market'] || cand['bonds'] || cand['tbills'])) {
+        for (const k of ['money-market', 'bonds', 'tbills']) {
+          if (cand[k]) map[k] = cand[k]
+        }
+        if (Object.keys(map).length === 3) return map
+        break
+      }
+    }
+  } catch (e) {
+    console.warn('[preview] unified session fetch failed, will fall back to per-workflow fetch:', e)
+  }
+  const missing = ['money-market', 'bonds', 'tbills'].filter(k => !map[k])
+  if (missing.length) {
+    const fetched = await Promise.all(missing.map(async k => {
+      try { return [k, await sessionManager.getInstrumentWorkflow(sid, k)] }
+      catch { return [k, null] }
+    }))
+    for (const [k, wf] of fetched) if (wf) map[k] = wf
+  }
+  return map
+}
 
+function resolveAggValue(agg, key) {
+  if (!agg || typeof agg !== 'object') return null
+  if (agg[key] !== undefined && agg[key] !== null && agg[key] !== '') return agg[key]
+  const snake = toSnakeCase(key)
+  if (agg[snake] !== undefined && agg[snake] !== null && agg[snake] !== '') return agg[snake]
+  if (agg.agg && typeof agg.agg === 'object') {
+    if (agg.agg[key] !== undefined && agg.agg[key] !== null && agg.agg[key] !== '') return agg.agg[key]
+    if (agg.agg[snake] !== undefined && agg.agg[snake] !== null && agg.agg[snake] !== '') return agg.agg[snake]
+  }
+  return null
+}
+
+function formatCalcForType(typeKey, key, value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const typeConfig = instrumentConfigs.value[typeKey] || {}
+  const field = (typeConfig.calculationFields || []).find(f => f.key === key)
+  if (typeof value === 'number' && !isNaN(value)) {
+    const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(key.toLowerCase())
+    if (isTimeField) {
+      const rounded = Math.round(value)
+      if (field?.prefix) return field.prefix + rounded.toLocaleString()
+      if (field?.suffix) return rounded.toLocaleString() + field.suffix
+      return rounded.toLocaleString()
+    }
+    const rounded = Math.round(value * 100) / 100
+    if (field?.prefix) return field.prefix + rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    if (field?.suffix) return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + field.suffix
+    return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
+  if (field?.prefix) return field.prefix + value
+  if (field?.suffix) return value + field.suffix
+  return value
+}
+
+async function generateReportHtml() {
+  const sid = activeSession.value?.id
+  const workflows = sid ? await prefetchPreviewWorkflows(sid) : {}
+  await loadSavedData(true, workflows[instrumentType.value] || null)
+  if (typeof loadAllInstrumentWorkflowsForReport === 'function') {
+    await loadAllInstrumentWorkflowsForReport(workflows)
+  }
+  const report = reportPreviewData.value
+  if (report.instruments.length === 0) return null
+  let instrumentCurves = []
+  try {
+    instrumentCurves = await loadAllSelectedInstrumentCurves(workflows)
+  } catch (e) {
+    console.error('[report] loadAllSelectedInstrumentCurves failed:', e)
+    instrumentCurves = []
+  }
   const valuationDate = activeValuationDate.value || ''
-  const totalPortfolioValue = report.instruments.reduce((sum, inst) => sum + (parseFloat(inst.calculations.totalValue) || 0), 0)
-  const totalInstrumentCount = report.instruments.reduce((sum, inst) => sum + (parseInt(inst.calculations.instrumentCount) || 0), 0)
 
+  // Build per-instrument rows that mirror the Calculations-page boxes exactly.
+  const resultsByInstrument = report.instruments.map(inst => {
+    const wf = workflows[inst.id] || null
+    const allCalcs = inst.id === instrumentType.value
+      ? (allCalculations.value || wf?.allCalculations || wf?.calculations || {})
+      : (wf?.allCalculations || wf?.calculations || {})
+    const typeConfig = instrumentConfigs.value[inst.id] || {}
+    const fields = typeConfig.calculationFields || []
+    const calcRows = []
+    for (const f of fields) {
+      const val = resolveAggValue(allCalcs, f.key)
+      if (val === null || val === undefined || val === '') continue
+      calcRows.push({ label: f.label, value: formatCalcForType(inst.id, f.key, val) })
+    }
+    return { ...inst, calcRows, _agg: allCalcs }
+  })
+
+  const totalPortfolioValue = resultsByInstrument.reduce((sum, inst) => {
+    const tv = resolveAggValue(inst._agg, 'totalValue')
+    const tvVal = typeof tv === 'number' ? tv : (parseFloat(tv) || 0)
+    return sum + tvVal
+  }, 0)
+  const totalInstrumentCount = resultsByInstrument.reduce((sum, inst) => {
+    const cnt = resolveAggValue(inst._agg, 'instrumentCount')
+    const cntVal = typeof cnt === 'number' ? cnt : (parseFloat(cnt) || 0)
+    return sum + cntVal
+  }, 0)
   const methodologyHtml = buildMethodologySection(report.instruments.map(i => i.name))
-
+  const okCurves = instrumentCurves.filter(c => c.status === 'ok' && c.points.length > 0)
+  const curveSignature = (curve) => curve.points
+    .map(p => `${Number(p.x).toFixed(4)}:${Number(p.y).toFixed(4)}`)
+    .sort()
+    .join('|')
+  const sigGroups = new Map()
+  for (const c of okCurves) {
+    const sig = curveSignature(c)
+    if (!sigGroups.has(sig)) sigGroups.set(sig, { curves: [], label: '' })
+    sigGroups.get(sig).curves.push(c)
+  }
+  for (const group of sigGroups.values()) {
+    group.label = group.curves.map(c => c.label).join(' · ')
+    group.dataSource = group.curves[0].dataSource
+    group.filters = group.curves[0].filters
+    group.svg = group.curves[0].svg
+  }
   let chartHtml
   if (instrumentCurves.length > 0) {
-    const okCount = instrumentCurves.filter(c => c.status === 'ok').length
-    const intro = okCount > 1
-      ? 'The following yield curves were used as benchmarks, one per selected instrument type:'
-      : 'The following yield curve was used as a benchmark for valuation, sourced from FRED.'
-
-    const blocks = instrumentCurves.map(c => {
-      if (c.status === 'ok') {
-        const country = c.filters?.country || '—'
-        const currency = c.filters?.currency || '—'
-        const maturity = c.filters?.maturity || '—'
-        return `<div class="chart-container" style="margin-bottom:28px;">
-          <h3 style="color:#0B2044;font-size:16px;margin-bottom:6px;">${c.label}</h3>
-          <p style="font-size:12px;color:#666;margin-bottom:10px;">FRED — ${country} / ${currency} / ${maturity}</p>
-          ${c.svg}
-        </div>`
-      }
-      return `<div class="chart-container" style="margin-bottom:28px;padding:16px;background:#fff8f0;border-left:4px solid #FF9800;border-radius:8px;">
-        <h3 style="color:#0B2044;font-size:16px;margin-bottom:6px;">${c.label}</h3>
-        <p style="font-size:13px;color:#666;">${c.message}</p>
+    const unavailableCount = instrumentCurves.length - okCurves.length
+    let intro
+    if (okCurves.length === 0) {
+      intro = 'No live yield-curve data is available for the selected instruments. Open the Visualizations page to fetch a FRED benchmark, save it to the session, then regenerate this report.'
+    } else if (sigGroups.size === 1 && unavailableCount === 0) {
+      const shared = sigGroups.values().next().value
+      intro = shared.curves.length > 1
+        ? `The following benchmark curve was fetched from FRED and used for all selected instruments (${shared.label}):`
+        : 'The following yield curve was fetched from FRED for valuation:'
+    } else {
+      intro = `Live FRED yield curves for ${okCurves.length} of ${instrumentCurves.length} selected instrument types:`
+    }
+    const okBlocks = Array.from(sigGroups.values()).map(g => {
+      const srcLabel = g.dataSource === 'fred_api_live'
+        ? 'Live FRED'
+        : (g.dataSource === 'session_visualization' ? 'Saved from Visualizations' : 'FRED')
+      const country = g.filters?.country || '—'
+      const currency = g.filters?.currency || '—'
+      const maturity = g.filters?.maturity || '—'
+      return `<div class="chart-container" style="margin-bottom:28px;">
+        <h3 style="color:#0B2044;font-size:16px;margin-bottom:6px;">${g.label}</h3>
+        <p style="font-size:12px;color:#666;margin-bottom:10px;">${srcLabel} — ${country} / ${currency} / ${maturity}</p>
+        ${g.svg}
       </div>`
     }).join('')
-
-    chartHtml = `<p>${intro}</p>${blocks}`
+    const unavailableBlocks = instrumentCurves
+      .filter(c => c.status !== 'ok')
+      .map(c => `<div class="chart-container" style="margin-bottom:28px;padding:16px;background:#fff8f0;border-left:4px solid #FF9800;border-radius:8px;">
+        <h3 style="color:#0B2044;font-size:16px;margin-bottom:6px;">${c.label}</h3>
+        <p style="font-size:13px;color:#666;">${c.message}</p>
+      </div>`).join('')
+    chartHtml = `<p>${intro}</p>${okBlocks}${unavailableBlocks}`
   } else {
     chartHtml = '<p>No instruments selected for yield curve display.</p>'
   }
-
-  const okCurves = instrumentCurves.filter(c => c.status === 'ok' && c.points.length > 0)
   let appendixHtml
   if (okCurves.length > 0) {
     appendixHtml = okCurves.map(c => {
       const rows = c.points.map(p => `
         <tr>
-          <td>${p.maturityLabel || p.maturity || ''}</td>
-          <td>${parseFloat(p.maturity).toFixed(4)}</td>
-          <td>${parseFloat(p.rate).toFixed(4)}%</td>
+          <td>${p.maturityLabel || p.date || ''}</td>
+          <td>${c.isDateMode ? '' : parseFloat(p.x).toFixed(4)}</td>
+          <td>${parseFloat(p.y).toFixed(4)}%</td>
         </tr>
       `).join('')
       return `<h3 style="font-size:15px;color:#0B2044;margin-top:20px;">${c.label} — FRED Yield Data</h3>
         <table class="appendix-table">
-          <thead><tr><th>Maturity Label</th><th>Term (Yr)</th><th>Rate (%)</th></tr></thead>
+          <thead><tr><th>Maturity / Date</th><th>Term (Yr)</th><th>Rate (%)</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>`
     }).join('')
   } else {
     appendixHtml = '<p>No yield curve data available for the selected instruments.</p>'
   }
-
   const sessionName = activeSession.value?.name || 'Valuation Report'
-
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -7947,8 +7076,6 @@ async function generateReportHtml() {
     .cover-page { background-color: white; background-image: url('${backgroundCoverUrl}'); background-size: 45%; background-position: right center; background-repeat: no-repeat; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; min-height: 100vh; position: relative; }
     .cover-logo { position: absolute; top: 30px; left: 40px; z-index: 3; }
     .cover-logo img { max-width: 280px; height: auto; background: white; padding: 4px; }
-    .close-button { position: fixed; top: 20px; right: 20px; z-index: 9999; background: #0B2044; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
-    .close-button:hover { background: #1a3a6e; }
     .cover-content { max-width: 70%; position: relative; z-index: 2; color: black; }
     .cover-title { font-size: 48px; font-weight: 700; letter-spacing: 2px; margin-bottom: 20px; color: #000; }
     .cover-subtitle { font-size: 28px; font-weight: 300; opacity: 0.85; margin-bottom: 20px; color: #000; }
@@ -7975,7 +7102,6 @@ async function generateReportHtml() {
   </style>
 </head>
 <body>
-<button class="close-button" onclick="window.close()">×</button>
 
 <div class="page cover-page">
   <div class="cover-logo"><img src="/DuraCapital logo.png" alt="Dura Capital Logo" /></div>
@@ -8049,23 +7175,36 @@ async function generateReportHtml() {
   <h1 class="section-title">Results</h1>
   <p>Below is a summary of the key findings of the valuation for the selected instruments.</p>
   <br>
+  ${resultsByInstrument.map(inst => `
+    <h3 style="color:#0B2044;font-size:16px;margin:20px 0 10px 0;padding-bottom:6px;border-bottom:1px solid #e0e0e0;">${inst.name}</h3>
+    ${inst.calcRows.length
+      ? `<table>
+          <thead><tr><th style="width:65%;">Metric</th><th>Value</th></tr></thead>
+          <tbody>
+            ${inst.calcRows.map(r => `<tr><td>${r.label}</td><td>${r.value}</td></tr>`).join('')}
+          </tbody>
+        </table>`
+      : '<p style="color:#999;font-size:13px;margin:8px 0;">No calculated values available for this instrument.</p>'}
+  `).join('')}
+  <h3 style="color:#0B2044;font-size:16px;margin:30px 0 10px 0;padding-bottom:6px;border-bottom:1px solid #e0e0e0;">Portfolio Total</h3>
   <table>
-    <thead><tr><th>Instrument</th><th>Total Value</th><th>Count</th><th>Avg Rate (%)</th><th>Weighted Avg (%)</th></tr></thead>
+    <thead><tr><th>Instrument</th><th>Total Value</th><th>Count</th></tr></thead>
     <tbody>
-      ${report.instruments.map(inst => `
-        <tr>
+      ${resultsByInstrument.map(inst => {
+        const tv = resolveAggValue(inst._agg, 'totalValue')
+        const tvVal = typeof tv === 'number' ? tv : (parseFloat(tv) || 0)
+        const cnt = resolveAggValue(inst._agg, 'instrumentCount')
+        const cntVal = typeof cnt === 'number' ? cnt : (parseFloat(cnt) || 0)
+        return `<tr>
           <td><strong>${inst.name}</strong></td>
-          <td>${(inst.calculations.totalValue || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-          <td>${inst.calculations.instrumentCount || 0}</td>
-          <td>${inst.calculations.avgRate || inst.calculations.avgCouponRate || inst.calculations.avgDiscountRate || 0}%</td>
-          <td>${inst.calculations.weightedAvgRate || inst.calculations.weightedAvgCoupon || inst.calculations.weightedAvgDiscount || 0}%</td>
-        </tr>
-      `).join('')}
+          <td>${tvVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td>${cntVal}</td>
+        </tr>`
+      }).join('')}
       <tr style="font-weight:700;background:#f0f2f5;">
         <td><strong>Total Portfolio</strong></td>
         <td><strong>${totalPortfolioValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong></td>
         <td><strong>${totalInstrumentCount}</strong></td>
-        <td colspan="2"></td>
       </tr>
     </tbody>
   </table>
@@ -8119,13 +7258,83 @@ async function generateReportHtml() {
   return html
 }
 
+let _previewInFlight = null
+let _previewHtmlCachedAt = 0
+const PREVIEW_HTML_CACHE_MS = 5000
+
+// ─────────────────────────────────────────────────────────────
+// FIX 10 — previewReport invalidates the cache on every explicit
+// request. Previously a 5s cache meant changing filters on
+// Visualisations then reopening the report showed the PREVIOUS
+// curve for up to 5 seconds.
+// ─────────────────────────────────────────────────────────────
 async function previewReport() {
-  await loadSavedData()
-  const html = await generateReportHtml()
-  if (html) {
-    const win = window.open('', '_blank')
-    win.document.write(html)
-    win.document.close()
+  // Force a fresh read of the session BEFORE generating the report
+  await loadSavedData(true)
+  reportPreviewHtml.value = ''
+  _previewHtmlCachedAt = 0
+
+  if (_previewInFlight) {
+    try {
+      const html = await _previewInFlight
+      if (html) {
+        reportPreviewHtml.value = html
+        reportPreviewDialog.value = true
+      }
+    } catch (e) { console.error('previewReport (reused) failed:', e) }
+    return
+  }
+  try {
+    _previewInFlight = generateReportHtml()
+    const html = await _previewInFlight
+    if (html) {
+      reportPreviewHtml.value = html
+      _previewHtmlCachedAt = Date.now()
+      reportPreviewDialog.value = true
+    } else {
+      showSnackbar('Could not generate report — select at least one instrument with completed calculations.', 'warning', 6000)
+    }
+  } catch (e) {
+    console.error('previewReport failed:', e)
+    showSnackbar('Failed to build report preview: ' + (e?.message || e), 'error', 6000)
+  } finally {
+    _previewInFlight = null
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// FIX 11 — diagnostic helper. Call from browser console:
+//   window.__DURA_REPORT_DEBUG__ = true
+//   await window.__diagnoseReportCurves()
+// ─────────────────────────────────────────────────────────────
+if (typeof window !== 'undefined') {
+  window.__diagnoseReportCurves = async () => {
+    const sid = activeSession.value?.id
+    if (!sid) { console.warn('No active session'); return }
+    console.group('[diagnose] Session curves vs Report curves')
+    for (const key of ['money-market', 'bonds', 'tbills']) {
+      const wf = await sessionManager.getInstrumentWorkflow(sid, key)
+      console.log(key, {
+        savedPoints: wf?.yieldCurveData?.length || 0,
+        filters: wf?.fredFilters,
+        firstPoint: wf?.yieldCurveData?.[0],
+        lastPoint: wf?.yieldCurveData?.slice(-1)[0],
+        savedAt: wf?.yieldCurveSavedAt
+      })
+    }
+    const workflows = await prefetchPreviewWorkflows(sid)
+    const curves = await loadAllSelectedInstrumentCurves(workflows)
+    console.log('Report will use:', curves.map(c => ({
+      label: c.label,
+      status: c.status,
+      source: c.dataSource,
+      points: c.points.length,
+      filters: c.filters,
+      first: c.points[0],
+      last: c.points[c.points.length - 1]
+    })))
+    console.groupEnd()
+    return curves
   }
 }
 
@@ -8144,13 +7353,18 @@ async function downloadFromPreview(format) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// FIX 12 — exportToRealExcel dedupes columns per sheet.
+// ─────────────────────────────────────────────────────────────
 async function exportToRealExcel() {
   await loadSavedData()
+  if (typeof loadAllInstrumentWorkflowsForReport === 'function') {
+    await loadAllInstrumentWorkflowsForReport()
+  }
   const report = reportPreviewData.value
-  if (report.instruments.length === 0) { return }
+  if (report.instruments.length === 0) return
   const workbook = XLSX.utils.book_new()
   const valuationDate = activeValuationDate.value || ''
-
   const summaryData = [
     ['', '', ''],
     ['DuraCapital', '', ''],
@@ -8170,7 +7384,6 @@ async function exportToRealExcel() {
   }
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryData)
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
-
   const appendixData = [
     ['APPENDIX – Detailed Instrument Data'],
     ['Valuation Date:', valuationDate],
@@ -8178,18 +7391,13 @@ async function exportToRealExcel() {
     [],
     ['Asset Class', 'Instrument Name', 'BB Ticker', 'Face Value', 'Rate (%)', 'Term (Yrs)', 'Valuation Date']
   ]
-
   const instrumentSheets = []
-
   for (const inst of report.instruments) {
     const instKey = inst.id || (inst.name === 'Money Market' ? 'money-market' : inst.name === 'Bonds' ? 'bonds' : 'tbills')
     const wf = await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instKey)
-
     const calculatedRows = wf?.instrumentSummary?.rows || []
     const cleanedRows = wf?.cleanedData || []
-
     const sourceRows = calculatedRows.length ? calculatedRows : cleanedRows
-
     sourceRows.forEach((item, idx) => {
       const name = item['Instrument Name'] || item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
       const ticker = item['BB Ticker'] || item.BBTicker || item.Ticker || item.Security || ''
@@ -8198,25 +7406,18 @@ async function exportToRealExcel() {
       const term = formatForExcel(parseFloat(item['Days to Maturity'] || item.Term || item['Years to Maturity'] || 0), 'number', 'Term')
       appendixData.push([inst.name, name, ticker, faceValue, rate, term, valuationDate])
     })
-
-    if (calculatedRows.length) {
-      instrumentSheets.push({ name: inst.name.substring(0, 31), rows: calculatedRows })
-    } else if (cleanedRows.length) {
-      instrumentSheets.push({ name: inst.name.substring(0, 31), rows: cleanedRows })
-    }
+    if (calculatedRows.length) instrumentSheets.push({ name: inst.name.substring(0, 31), rows: calculatedRows })
+    else if (cleanedRows.length) instrumentSheets.push({ name: inst.name.substring(0, 31), rows: cleanedRows })
   }
-
   const appendixSheet = XLSX.utils.aoa_to_sheet(appendixData)
   appendixSheet['!cols'] = [{ wch: 18 }, { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 18 }]
   XLSX.utils.book_append_sheet(workbook, appendixSheet, 'Appendix')
-
   for (const sheetData of instrumentSheets) {
     if (!sheetData.rows.length) continue
     const allCols = new Set()
     sheetData.rows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
-    const cols = Array.from(allCols).filter(c => !isExcludedColumn(c))
+    const cols = dedupeColumns(Array.from(allCols).filter(c => !isExcludedColumn(c)))
     if (!cols.length) continue
-
     const headerRow = cols.map(formatColumnHeader)
     const bodyRows = sheetData.rows.map(row => cols.map(col => {
       const val = row[col] !== undefined ? row[col] : ''
@@ -8224,11 +7425,9 @@ async function exportToRealExcel() {
       if (/value|price|amount|principal|interest/i.test(col)) return formatForExcel(val, 'money', col)
       return formatForExcel(val, 'number', col)
     }))
-
     const sheet = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows])
     XLSX.utils.book_append_sheet(workbook, sheet, sheetData.name)
   }
-
   XLSX.writeFile(workbook, `portfolio_report_${Date.now()}.xlsx`)
 }
 
@@ -8237,9 +7436,8 @@ function formatRowForExcel(row) {
   for (const [key, value] of Object.entries(row)) {
     if (isExcludedColumn(key)) continue
     const headerKey = formatColumnHeader(key)
-    if (isPercentageField(key)) {
-      formatted[headerKey] = formatForExcel(value, 'percentage', key)
-    } else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('price') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('principal') || key.toLowerCase().includes('interest')) {
+    if (isPercentageField(key)) formatted[headerKey] = formatForExcel(value, 'percentage', key)
+    else if (key.toLowerCase().includes('value') || key.toLowerCase().includes('price') || key.toLowerCase().includes('amount') || key.toLowerCase().includes('principal') || key.toLowerCase().includes('interest')) {
       formatted[headerKey] = formatForExcel(value, 'money', key)
     } else {
       formatted[headerKey] = formatForExcel(value, 'number', key)
@@ -8248,9 +7446,16 @@ function formatRowForExcel(row) {
   return formatted
 }
 
+// ─────────────────────────────────────────────────────────────
+// FIX 13 — downloadCombinedReport('word') sends
+// include_live_curves: false so the backend does NOT append
+// a second (potentially stale) curve set to the client HTML.
+// ─────────────────────────────────────────────────────────────
 async function downloadCombinedReport(format) {
   if (format === 'excel') { await exportToRealExcel(); return }
-  await loadSavedData()
+  
+  // Force a fresh read of the session BEFORE generating the report
+  await loadSavedData(true)
   const html = await generateReportHtml()
   if (!html) return
   const filename = `combined_report_${Date.now()}`
@@ -8274,12 +7479,10 @@ async function downloadCombinedReport(format) {
     try {
       const session = sessionManager.getActiveSession()
       const sessionId = session?.id || sessionManager.getActiveSessionId() || localStorage.getItem('dura_active_session_id')
-
       if (!sessionId) {
         alert('No active session found')
         return
       }
-
       const response = await fetch(`${API_BASE_URL}/api/report/generate-word`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -8287,24 +7490,21 @@ async function downloadCombinedReport(format) {
           session_id: sessionId,
           report_html: html,
           instrument_type: route.params.type || null,
-          file_name: `Dura-Capital-Combined-Report-${Date.now()}.docx`
+          file_name: `Dura-Capital-Combined-Report-${Date.now()}.docx`,
+          include_live_curves: false
         })
       })
-
       const result = await response.json()
-
       if (!result.success) {
         alert('Failed to generate Word report: ' + (result.message || 'Unknown error'))
         return
       }
-
       const downloadPath = `${API_BASE_URL}/api/report/download-word/${sessionId}`
       const downloadResponse = await fetch(downloadPath)
       if (!downloadResponse.ok) {
         alert('Failed to download the generated report')
         return
       }
-
       const blob = await downloadResponse.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -8331,14 +7531,12 @@ function downloadBlob(content, filename, mimeType) {
 const autoSaveEnabled = ref(false)
 
 watch([rawData, cleanedData], () => {
-  if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion) {
-    return
-  }
+  if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion) return
   debouncedSave()
 }, { deep: true })
 
 watch(() => activeTab.value, async (newTab) => {
-  if (newTab === 'calculations' && hasCleanedData.value) {
+  if (newTab === 'calculations' && hasCleanedData.value && !allCalculations.value?.totalValue && !isCalculating.value) {
     await calculateMetrics()
   }
   if (newTab === 'visualizations' && hasCleanedData.value && !yieldCurveData.value.length && !yieldCurveLoading.value) {
@@ -8372,25 +7570,22 @@ async function checkAndReset() {
       if (currentSessionId) {
         const s = await sessionManager.getSession(String(currentSessionId))
         activeSession.value = s || null
-        if (s) {
-          sessionManager.setActiveSession(s)
-        }
+        if (s) sessionManager.setActiveSession(s)
       } else {
         activeSession.value = null
       }
-      const loaded = await loadSavedData()
+      const loaded = await loadSavedData(true)
       if (!loaded) {
         if (!route.query.tab) activeTab.value = 'upload'
       } else {
         if (!route.query.tab) {
           const savedTab = (await sessionManager.getInstrumentWorkflow(activeSession.value?.id, instrumentType.value))?.last_tab
-          if (savedTab && steps.value.some(s => s.tab === savedTab)) {
-            activeTab.value = savedTab
-          } else {
-            activeTab.value = 'upload'
-          }
+          if (savedTab && steps.value.some(s => s.tab === savedTab)) activeTab.value = savedTab
+          else activeTab.value = 'upload'
         }
-        if (cleanedData.value.length) await calculateMetrics()
+        if (cleanedData.value.length && !allCalculations.value?.totalValue && !isCalculating.value) {
+          await calculateMetrics()
+        }
         if (activeTab.value === 'visualizations' && !yieldCurveData.value.length) {
           if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
           if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
@@ -8409,12 +7604,8 @@ onMounted(async () => {
     if (s) {
       try {
         const versionsRes = await api.versionAPI.getVersions(s.id)
-        if (versionsRes && versionsRes.success) {
-          s.version_count = versionsRes.total || 0
-        }
-      } catch (e) {
-        // non-fatal
-      }
+        if (versionsRes && versionsRes.success) s.version_count = versionsRes.total || 0
+      } catch (e) { /* non-fatal */ }
       activeSession.value = s
       sessionManager.setActiveSession(s)
     }
@@ -8426,12 +7617,8 @@ onMounted(async () => {
       if (refreshed) {
         try {
           const versionsRes = await api.versionAPI.getVersions(refreshed.id)
-          if (versionsRes && versionsRes.success) {
-            refreshed.version_count = versionsRes.total || 0
-          }
-        } catch (e) {
-          // non-fatal
-        }
+          if (versionsRes && versionsRes.success) refreshed.version_count = versionsRes.total || 0
+        } catch (e) { /* non-fatal */ }
         activeSession.value = refreshed
         sessionManager.setActiveSession(refreshed)
       } else {
@@ -8446,12 +7633,8 @@ onMounted(async () => {
         if (s) {
           try {
             const versionsRes = await api.versionAPI.getVersions(s.id)
-            if (versionsRes && versionsRes.success) {
-              s.version_count = versionsRes.total || 0
-            }
-          } catch (e) {
-            // non-fatal
-          }
+            if (versionsRes && versionsRes.success) s.version_count = versionsRes.total || 0
+          } catch (e) { /* non-fatal */ }
           activeSession.value = s
           sessionManager.setActiveSession(s)
         }
@@ -8465,9 +7648,7 @@ onMounted(async () => {
         const parsed = JSON.parse(storedSession)
         activeSession.value = parsed
         sessionManager.setActiveSession(parsed)
-      } catch (e) {
-        // non-fatal
-      }
+      } catch (e) { /* non-fatal */ }
     }
   }
   await checkAndReset()
@@ -8488,7 +7669,7 @@ onMounted(async () => {
 const handleSessionRestored = async (event) => {
   const { sessionId } = event.detail || {}
   if (sessionId && activeSession.value?.id === sessionId) {
-    await loadSavedData()
+    await loadSavedData(true)
     await refreshSessionVersionCount(sessionId)
     forceUpdate.value++
   }
@@ -8498,11 +7679,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('storage', () => checkAndReset())
   window.removeEventListener('session-restored', handleSessionRestored)
   if (saveTimeout) clearTimeout(saveTimeout)
-  try {
-    saveSessionData()
-  } catch (err) {
-    console.error('onBeforeUnmount save failed:', err)
-  }
+  try { saveSessionData() } catch (err) { console.error('onBeforeUnmount save failed:', err) }
 })
 </script>
 
@@ -8580,14 +7757,10 @@ onBeforeUnmount(() => {
 .custom-currency-input-wrapper { position: relative; margin-top: 8px; }
 .custom-currency-field { width: 100%; padding: 10px 12px; padding-right: 50px; border: 2px solid #e8ecf1; border-radius: 8px; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; transition: all 0.3s; }
 .custom-currency-field:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.1); }
-.custom-currency-field::placeholder { text-transform: none; letter-spacing: normal; font-weight: 400; }
 .currency-code-badge { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #999; font-weight: 500; background: #f5f5f5; padding: 2px 6px; border-radius: 4px; }
-.custom-currency-hint { font-size: 11px; color: #666; margin-top: 6px; }
 .detected-values-section { margin-top: 24px; padding: 20px; background: #f8f9ff; border-radius: 12px; border-left: 4px solid #4CAF50; }
 .detected-values-section h3 { font-size: 16px; font-weight: 600; color: #0B2044; margin: 0 0 8px 0; }
 .detected-values-section .section-hint { font-size: 13px; color: #666; margin: 0 0 16px 0; }
-.no-detection-message-cleaning { padding: 20px; background: #fff3cd; border-radius: 8px; border: 1px solid #ffc107; text-align: center; }
-.no-detection-message-cleaning p { margin: 0; color: #856404; font-size: 14px; }
 .detected-values-table { background: white; border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; }
 .detected-values-table .table-header { display: flex; background: #0B2044; color: white; font-weight: 600; font-size: 13px; }
 .detected-values-table .table-header span { padding: 12px 16px; }
@@ -8643,9 +7816,6 @@ onBeforeUnmount(() => {
 .excel-dialog-title-no-logo span { font-weight: 600; font-size: 18px; }
 .btn-work-on-sheet { background: #0B2044; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 12px; }
 .btn-work-on-sheet:hover { background: #1a3a6e; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(11,32,68,0.2); }
-.btn-auto-detect { background: #4CAF50; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 12px; }
-.btn-auto-detect:hover:not(:disabled) { background: #45a049; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76,175,80,0.3); }
-.btn-auto-detect:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-auto-detect-green { background: #4CAF50; color: white; border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; margin-right: 8px; }
 .btn-auto-detect-green:hover:not(:disabled) { background: #45a049; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(76,175,80,0.3); }
 .btn-auto-detect-green:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -8656,9 +7826,7 @@ onBeforeUnmount(() => {
 .currency-selection-section { margin-bottom: 20px; padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
 .currency-label { display: block; font-weight: 600; color: #0B2044; margin-bottom: 12px; font-size: 14px; }
 .currency-select-vuetify { margin-bottom: 12px; }
-.custom-currency-input-wrapper { margin-top: 12px; }
 .custom-currency-field-vuetify { margin-bottom: 8px; }
-.currency-code-badge { font-size: 12px; color: #666; font-weight: 500; }
 .detected-currencies-info { margin-top: 12px; padding: 8px 12px; background: #e8f5e9; border-radius: 6px; font-size: 13px; color: #2E7D32; }
 .selected-currency-info { margin-top: 8px; padding: 8px 12px; background: #e3f2fd; border-radius: 6px; font-size: 13px; color: #1976D2; }
 .detected-fields-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
@@ -8672,13 +7840,6 @@ onBeforeUnmount(() => {
 .no-detection-message { padding: 16px; background: #FFF3E0; border-radius: 8px; border-left: 4px solid #FF9800; text-align: center; }
 .no-detection-message p { margin: 4px 0; color: #E65100; }
 .missing-fields-warning { padding: 12px 16px; background: #FFF3E0; border-radius: 8px; border-left: 4px solid #FF9800; }
-.additional-fields-section { margin-top: 20px; padding: 16px; background: #f0f8ff; border-radius: 8px; border-left: 4px solid #2196F3; }
-.additional-fields-section h4 { margin: 0 0 8px 0; font-size: 14px; color: #1976D2; }
-.additional-fields-section .section-hint { margin: 0 0 12px 0; font-size: 12px; color: #666; }
-.additional-field-item { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-radius: 6px; border-left: 3px solid #2196F3; margin-bottom: 6px; }
-.additional-field-label { font-weight: 600; color: #0B2044; font-size: 13px; margin-right: 8px; }
-.additional-field-value { font-weight: 600; color: #1976D2; font-size: 13px; margin-right: 8px; }
-.additional-field-location { font-size: 10px; color: #999; font-style: italic; margin-left: 8px; }
 .missing-fields-warning p { margin: 0 0 8px 0; font-weight: 600; color: #E65100; font-size: 14px; }
 .missing-fields-warning ul { margin: 0; padding-left: 20px; }
 .missing-fields-warning li { color: #E65100; font-size: 13px; margin-bottom: 4px; }
@@ -8686,7 +7847,6 @@ onBeforeUnmount(() => {
 .multi-instruments-list { display: flex; flex-direction: column; gap: 16px; max-height: 400px; overflow-y: auto; }
 .multi-instrument-item { padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
 .multi-instrument-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e0e0e0; }
-.table-name-badge { background: #0B2044; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; }
 .field-count-badge { background: #4CAF50; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; }
 .multi-instrument-fields { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .multi-detected-field-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: white; border-radius: 6px; border-left: 3px solid #4CAF50; }
@@ -8765,12 +7925,8 @@ onBeforeUnmount(() => {
 .option-checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 8px; border-radius: 4px; transition: background 0.1s; flex-wrap: wrap; }
 .option-checkbox:hover { background: #f0f0f0; }
 .option-checkbox select, .option-checkbox input[type="text"] { margin-left: 4px; padding: 2px 6px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
-.date-format-dropdown { margin-left: 24px; margin-top: 8px; margin-bottom: 8px; display: block; }
-.date-format-select { padding: 6px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; background: white; cursor: pointer; min-width: 200px; display: block; }
 .date-format-select-inline { margin-left: 8px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; background: white; cursor: pointer; min-width: 120px; }
 .date-format-select-inline:disabled { background: #f5f5f5; cursor: not-allowed; opacity: 0.6; }
-.date-format-select:disabled { background: #f5f5f5; cursor: not-allowed; opacity: 0.6; }
-.date-format-select:focus, .date-format-select-inline:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.1); }
 .cleaning-buttons { display: flex; gap: 12px; margin-top: 15px; flex-wrap: wrap; }
 .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin-bottom: 30px; }
 .summary-card { background: linear-gradient(135deg, #1B5E20, #4CAF50); padding: 20px; border-radius: 16px; color: white; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s; }
@@ -8834,21 +7990,16 @@ onBeforeUnmount(() => {
 .excel-table td { border: 1px solid #d4d4d4; padding: 8px 14px; text-align: left; font-size: 13px; font-variant-numeric: tabular-nums; }
 .excel-table tbody tr:nth-child(even) { background: #f9fafc; }
 .excel-table tbody tr:hover { background: #e8f0fe; }
-.excel-table tbody tr.selected-row { background: #bbdefb; font-weight: bold; }
-.excel-table tfoot tr.total-row { background: #0B2044 !important; color: white; font-weight: 700; }
-.excel-table tfoot td { border: 1px solid #1a3a6e; padding: 10px 14px; font-weight: 700; font-size: 14px; }
-.excel-table tfoot td:first-child { text-align: right; padding-right: 20px; }
 .sortable-header { cursor: pointer; transition: background 0.2s; }
 .sortable-header:hover { background: #1a3a6e; }
 .sort-indicator { margin-left: 6px; font-size: 10px; color: #fff; }
 .excel-popup-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 999999 !important; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .excel-popup-content { background: white; border-radius: 12px; max-width: 95%; max-height: 90vh; width: 1400px; display: flex; flex-direction: column; box-shadow: 0 25px 60px rgba(0,0,0,0.3); overflow: hidden; }
 .filters-row { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap; }
-.filter-group label { display: block; font-size: 12px; font-weight: 600; color: #0B2044; margin-bottom: 4px; }
 .filter-group { position: relative; display: flex; align-items: center; flex-wrap: wrap; flex: 1; min-width: 150px; }
+.filter-group label { display: block; font-size: 12px; font-weight: 600; color: #0B2044; margin-bottom: 4px; }
 .filter-select { width: 100%; padding: 10px 32px 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: linear-gradient(to bottom, #ffffff 0%, #f5f7fa 100%); color: #0B2044; font-size: 14px; cursor: pointer; transition: border 0.2s, box-shadow 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 2px rgba(255,255,255,0.8); appearance: none; -webkit-appearance: none; }
 .filter-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.15), 0 4px 8px rgba(0,0,0,0.1); }
-.filter-group .filter-arrow { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 14px; color: #0B2044; font-weight: bold; }
 .filter-custom-input { width: 100%; padding: 8px 12px; margin-top: 4px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; background: white; transition: border 0.2s; }
 .filter-custom-input:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.1); }
 .chart-container--fred { position: relative; height: 400px; width: 100%; background: white; border-radius: 8px; padding: 10px; }
@@ -8884,21 +8035,12 @@ onBeforeUnmount(() => {
 .kpi-value { font-size: 20px; font-weight: 800; color: #0B2044; }
 .kpi-title { font-size: 10px; color: #888; }
 .cleaning-summary-cards { margin-bottom: 24px; }
-.btn-json { background: #607d8b; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-.btn-csv { background: #4caf50; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-.btn-html { background: #ff9800; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-.btn-pdf { background: #f44336; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-.btn-word { background: #2196f3; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-.btn-excel { background: #8bc34a; color: white; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-.empty-state { text-align: center; padding: 60px; color: #999; }
-.empty-state p { margin: 20px 0; }
 .upload-history { margin-top: 20px; padding: 15px; background: #f8f9ff; border-radius: 12px; }
 .history-list { max-height: 200px; overflow-y: auto; }
 .history-item { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s; flex-wrap: wrap; }
 .history-item:hover { background: #e8ecf1; }
 .history-item small { font-size: 11px; color: #666; margin-left: auto; }
 .btn-delete-history { background: none; border: none; cursor: pointer; color: #f44336; font-size: 16px; }
-.excel-viewer-button { margin-bottom: 20px; text-align: right; }
 .formula-dialog-title { background: #0B2044; color: white; }
 .formula-content { padding: 20px; }
 .formula-section { margin-bottom: 20px; }
@@ -8926,21 +8068,24 @@ onBeforeUnmount(() => {
 .excel-preview-section { margin-top: 20px; padding: 16px; background: #fafafa; border-radius: 12px; }
 .preview-section { margin-top: 20px; padding: 16px; background: #fafafa; border-radius: 12px; }
 .excel-scroll-wrapper { overflow-x: auto; }
-.highlight-box { background: #e8f5e9; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
 .fred-meta { display: block; margin-top: 8px; color: #666; font-size: 12px; }
 .chart-footer { margin-top: 10px; text-align: center; color: #666; font-size: 12px; }
 .summary-report { padding: 10px 0; }
-.summary-section { margin-bottom: 30px; }
+.summary-section { margin-bottom: 32px; padding: 20px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; }
 .summary-section h3 { font-size: 18px; color: #0B2044; border-bottom: 2px solid #0B2044; padding-bottom: 8px; margin-bottom: 16px; }
-.summary-grid { display: grid; gap: 12px; }
-.summary-grid.two-col { grid-template-columns: repeat(2, 1fr); }
-.summary-grid.three-col { grid-template-columns: repeat(3, 1fr); }
-.summary-item { background: #f8f9ff; padding: 12px 16px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #e8ecf1; }
-.summary-item .label { font-weight: 600; color: #0B2044; }
-.summary-item .value { font-weight: 500; color: #333; }
-.summary-worksheet-selector { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
-.summary-worksheet-selector label { font-weight: 600; color: #0B2044; }
-.summary-worksheet-selector select { padding: 8px 12px; border-radius: 6px; border: 1px solid #ccc; background: white; font-size: 14px; min-width: 200px; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #e8ecf1; }
+.section-header h3 { display: flex; align-items: center; gap: 10px; margin: 0; color: #0B2044; font-size: 18px; font-weight: 600; }
+.worksheet-badge { background: #4CAF50; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-left: 12px; }
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+.summary-tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 2px solid #e8ecf1; padding-bottom: 16px; }
+.summary-tab { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border: none; background: #f5f5f5; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #666; }
+.summary-tab:hover:not(:disabled) { background: #e8ecf1; color: #0B2044; }
+.summary-tab.active { background: #0B2044; color: white; }
+.summary-tab:disabled { opacity: 0.4; cursor: not-allowed; }
+.tab-count { background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+.summary-tab.active .tab-count { background: rgba(255,255,255,0.3); }
+.analytics-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
+.quality-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
 .field-detection-card { margin-top: 20px; padding: 16px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; }
 .field-detection-header { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #0B2044; margin-bottom: 12px; }
 .btn-toggle-detection { margin-left: auto; background: #0B2044; color: white; border: none; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
@@ -8963,43 +8108,11 @@ onBeforeUnmount(() => {
 .field-type.missing { background: #ffebee; color: #f44336; }
 .field-source { color: #666; font-size: 11px; }
 .field-confidence { font-weight: 600; color: #0B2044; text-align: right; }
-.summary-tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 2px solid #e8ecf1; padding-bottom: 16px; }
-.summary-tab { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border: none; background: #f5f5f5; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #666; }
-.summary-tab:hover:not(:disabled) { background: #e8ecf1; color: #0B2044; }
-.summary-tab.active { background: #0B2044; color: white; }
-.summary-tab:disabled { opacity: 0.4; cursor: not-allowed; }
-.tab-count { background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 12px; }
-.summary-tab.active .tab-count { background: rgba(255,255,255,0.3); }
-.summary-section { margin-bottom: 32px; padding: 20px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; }
-.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #e8ecf1; }
-.section-header h3 { display: flex; align-items: center; gap: 10px; margin: 0; color: #0B2044; font-size: 18px; font-weight: 600; }
-.worksheet-badge { background: #4CAF50; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-left: 12px; }
-.btn-sm { padding: 6px 12px; font-size: 13px; }
-.previous-summaries-list { display: flex; flex-direction: column; gap: 12px; }
-.summary-item-card { background: white; padding: 16px; border-radius: 8px; border: 1px solid #e8ecf1; transition: all 0.2s; }
-.summary-item-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #0B2044; }
-.summary-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.summary-item-name { font-weight: 600; color: #0B2044; font-size: 15px; }
-.summary-item-worksheet { background: #e3f2fd; color: #1976D2; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
-.summary-item-details { display: flex; gap: 20px; flex-wrap: wrap; }
-.summary-detail { display: flex; align-items: center; gap: 6px; }
-.detail-label { font-size: 13px; color: #666; font-weight: 500; }
-.detail-value { font-size: 14px; color: #0B2044; font-weight: 600; }
-.show-more-indicator { text-align: center; padding: 12px; color: #666; font-style: italic; font-size: 13px; }
-.analytics-pills { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; margin: 12px 0; }
-.analytics-pill { flex: 1; min-width: 160px; background: #f8faff; padding: 14px 20px; border-radius: 12px; border: 1px solid #edf0f6; text-align: center; transition: transform 0.2s, box-shadow 0.2s; }
-.analytics-pill:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06); }
-.analytics-pill .pill-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #7a879b; margin-bottom: 4px; }
-.analytics-pill .pill-value { display: block; font-size: 22px; font-weight: 700; color: #0b1e3c; }
-.analytics-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
-.quality-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
 @media (max-width: 768px) {
   .analytics-cards { grid-template-columns: repeat(2, 1fr); }
   .quality-cards { grid-template-columns: repeat(2, 1fr); }
-  .analytics-pills { flex-direction: column; }
-  .analytics-pill { min-width: auto; }
   .page-header { flex-direction: column; align-items: flex-start; gap: 10px; }
-  .summary-cards, .selection-cards, .summary-grid.two-col, .summary-grid.three-col { grid-template-columns: 1fr; }
+  .summary-cards, .selection-cards { grid-template-columns: 1fr; }
   .mapping-row { flex-direction: column; align-items: stretch; }
   .required-label { width: 100%; }
   .progress-steps { flex-wrap: wrap; gap: 8px; }
@@ -9010,16 +8123,6 @@ onBeforeUnmount(() => {
   .header-right { width: 100%; justify-content: flex-start; }
   .btn-save-session { width: 100%; justify-content: center; }
 }
-
-.no-calcs-message {
-  grid-column: 1 / -1;
-  padding: 40px 20px;
-  text-align: center;
-  color: #999;
-  font-size: 14px;
-  background: #f9fafc;
-  border-radius: 12px;
-  border: 1px dashed #ccc;
-}
+.no-calcs-message { grid-column: 1 / -1; padding: 40px 20px; text-align: center; color: #999; font-size: 14px; background: #f9fafc; border-radius: 12px; border: 1px dashed #ccc; }
 .no-calcs-message p { margin: 12px 0 0 0; }
 </style>

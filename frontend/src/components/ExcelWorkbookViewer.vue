@@ -6,7 +6,21 @@
         <img src="/DuraCapital logo.png" alt="DuraCapital" class="logo" />
         <span class="excel-filename">{{ fileName || 'Excel Workbook' }}</span>
       </div>
-      <div class="formula-bar">
+      <div class="view-mode-toggle">
+        <button
+          class="mode-btn"
+          :class="{ active: viewMode === 'grid' }"
+          @click="viewMode = 'grid'"
+        >Table View</button>
+        <button
+          class="mode-btn"
+          :class="{ active: viewMode === 'excel' }"
+          @click="viewMode = 'excel'"
+          :disabled="!datasetId"
+          :title="!datasetId ? 'No dataset id available' : 'Show workbook as it appears in Excel'"
+        >Excel View</button>
+      </div>
+      <div class="formula-bar" v-if="viewMode === 'grid'">
         <div class="formula-bar-label">fx</div>
         <input 
           v-model="selectedCellFormula" 
@@ -16,6 +30,37 @@
         />
       </div>
     </div>
+
+    <!-- Excel View (LibreOffice-rendered HTML) -->
+    <div v-if="viewMode === 'excel'" class="excel-view-wrapper">
+      <div v-if="renderChecking" class="excel-view-empty">
+        <v-icon size="32" class="spin-animation" color="#0B2044">mdi-loading</v-icon>
+        <p>Rendering workbook via LibreOffice…</p>
+      </div>
+      <div v-else-if="renderError" class="excel-view-empty" style="color:#c62828;">
+        <v-icon size="48" color="error">mdi-alert-circle-outline</v-icon>
+        <p><strong>Could not render the workbook</strong></p>
+        <p style="font-size:12px; white-space:pre-wrap; text-align:left; max-width:640px; font-family:monospace;">{{ renderError }}</p>
+        <div style="display:flex; gap:8px; margin-top:12px;">
+          <button class="mode-btn" @click="checkRender">Retry</button>
+        </div>
+      </div>
+      <iframe
+        v-else-if="datasetId"
+        :src="renderUrl"
+        class="excel-view-iframe"
+        frameborder="0"
+        sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+        @load="renderChecking = false"
+      ></iframe>
+      <div v-else class="excel-view-empty">
+        <v-icon size="48" color="#ccc">mdi-alert-circle-outline</v-icon>
+        <p>No dataset id available — cannot render the original workbook.</p>
+      </div>
+    </div>
+
+    <!-- Table View wrapper starts here -->
+    <template v-if="viewMode === 'grid'">
 
     <div class="excel-grid-wrapper">
       <div class="excel-grid-container">
@@ -56,6 +101,7 @@
                   'excel-cell-selected': selectedCell.row === rowIndex && selectedCell.col === colIndex,
                 }"
                 :style="getCellStyle(rowIndex, colIndex)"
+                :title="formatCellValue(cell)"
                 @click="selectCell(rowIndex, colIndex, cell)"
                 @dblclick="editCell(rowIndex, colIndex, cell)"
               >
@@ -130,7 +176,7 @@
         <button class="btn-auto-detect-multi" @click="autoDetectSelectedTables" :disabled="isDetecting">
           <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
           <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
-          {{ isDetecting ? 'Scanning...' : `Auto Detect Selected Tables (${selectedTables.size})` }}
+          {{ isDetecting ? 'Scanning...' : 'Auto Detect' }}
         </button>
         <button class="btn-clear-selection" @click="clearTableSelection">
           <v-icon size="16">mdi-close</v-icon>
@@ -166,12 +212,14 @@
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
+import { API_BASE_URL } from '@/config.js'
 
 let lastParseSig = ''
 
@@ -202,159 +250,57 @@ function extractValuesIntelligently(data, instrumentType) {
   return extracted
 }
 
-function findDensestCluster(sortedPositions, gapThreshold) {
-  if (!sortedPositions || sortedPositions.length === 0) {
-    return { min: -1, max: -1, count: 0 }
-  }
-  if (sortedPositions.length === 1) {
-    return { min: sortedPositions[0], max: sortedPositions[0], count: 1 }
-  }
-
-  let bestStart = 0
-  let bestEnd = 0
-  let bestCount = 1
-  let curStart = 0
-
-  for (let i = 1; i < sortedPositions.length; i++) {
-    if (sortedPositions[i] - sortedPositions[i - 1] > gapThreshold) {
-      const count = i - curStart
-      if (count > bestCount) {
-        bestCount = count
-        bestStart = curStart
-        bestEnd = i - 1
-      }
-      curStart = i
-    }
-  }
-
-  const finalCount = sortedPositions.length - curStart
-  if (finalCount > bestCount) {
-    bestCount = finalCount
-    bestStart = curStart
-    bestEnd = sortedPositions.length - 1
-  }
-
-  return {
-    min: sortedPositions[bestStart],
-    max: sortedPositions[bestEnd],
-    count: bestCount
-  }
-}
-
-function getTrueRange(worksheet) {
-  if (!worksheet) return null
-
-  const declaredRef = worksheet['!ref']
-  const declared = declaredRef ? XLSX.utils.decode_range(declaredRef) : null
-
-  const rowPositions = []
-  const colPositions = []
-  let cellCount = 0
-  let minRow = Infinity, maxRow = -1
-  let minCol = Infinity, maxCol = -1
-
-  for (const addr in worksheet) {
-    if (addr[0] === '!') continue
-    let decoded
-    try { decoded = XLSX.utils.decode_cell(addr) } catch (e) { continue }
-    const cell = worksheet[addr]
-    if (!cell) continue
-    const hasValue = cell.v !== undefined && cell.v !== null && cell.v !== ''
-    const hasFormula = cell.f !== undefined && cell.f !== null && cell.f !== ''
-    if (!hasValue && !hasFormula) continue
-
-    cellCount++
-    rowPositions.push(decoded.r)
-    colPositions.push(decoded.c)
-    if (decoded.r < minRow) minRow = decoded.r
-    if (decoded.r > maxRow) maxRow = decoded.r
-    if (decoded.c < minCol) minCol = decoded.c
-    if (decoded.c > maxCol) maxCol = decoded.c
-  }
-
-  if (maxRow === -1 || maxCol === -1) return declared
-
-  const height = maxRow - minRow + 1
-  const width  = maxCol - minCol + 1
-  const area   = height * width
-
-  if (area > 1_000_000 && cellCount / area < 0.001) {
-    const uniqueRows = [...new Set(rowPositions)].sort((a, b) => a - b)
-    const uniqueCols = [...new Set(colPositions)].sort((a, b) => a - b)
-
-    const ROW_GAP = 50
-    const COL_GAP = 10
-
-    const rowCluster = findDensestCluster(uniqueRows, ROW_GAP)
-    const colCluster = findDensestCluster(uniqueCols, COL_GAP)
-
-    const rowCoverage = uniqueRows.length ? rowCluster.count / uniqueRows.length : 0
-    const colCoverage = uniqueCols.length ? colCluster.count / uniqueCols.length : 0
-
-    if (
-      rowCoverage >= 0.5 &&
-      colCoverage >= 0.5 &&
-      rowCluster.min !== -1 &&
-      colCluster.min !== -1
-    ) {
-      const newMinRow = Math.max(minRow, rowCluster.min)
-      const newMaxRow = Math.min(maxRow, rowCluster.max)
-      const newMinCol = Math.max(minCol, colCluster.min)
-      const newMaxCol = Math.min(maxCol, colCluster.max)
-
-      console.warn(
-        `ExcelWorkbookViewer: phantom range detected on sheet ` +
-        `(declared ${declaredRef || 'n/a'}) — ${area.toLocaleString()} cells claimed, ` +
-        `${cellCount.toLocaleString()} real. Trimming to ` +
-        `${newMaxRow - newMinRow + 1} rows × ${newMaxCol - newMinCol + 1} columns.`
-      )
-
-      return {
-        s: { r: newMinRow, c: newMinCol },
-        e: { r: newMaxRow, c: newMaxCol }
-      }
-    }
-
-    const MAX_CLIPPED_ROWS = 10000
-    const MAX_CLIPPED_COLS = 200
-    const cappedMaxRow = Math.min(maxRow, minRow + MAX_CLIPPED_ROWS - 1)
-    const cappedMaxCol = Math.min(maxCol, minCol + MAX_CLIPPED_COLS - 1)
-
-    console.warn(
-      `ExcelWorkbookViewer: phantom range on sheet (declared ${declaredRef || 'n/a'}) — ` +
-      `${area.toLocaleString()} cells claimed, only ${cellCount.toLocaleString()} real. ` +
-      `Clipping to ${cappedMaxRow - minRow + 1} rows × ${cappedMaxCol - minCol + 1} columns.`
-    )
-
-    return {
-      s: { r: minRow, c: minCol },
-      e: { r: cappedMaxRow, c: cappedMaxCol }
-    }
-  }
-
-  return { s: { r: minRow, c: minCol }, e: { r: maxRow, c: maxCol } }
-}
-
 const props = defineProps({
-  workbookData: {
-    type: Object,
-    required: true
-  },
-  fileName: {
-    type: String,
-    default: ''
-  },
-  instrumentType: {
-    type: String,
-    default: 'money-market'
-  },
-  worksheetStatuses: {
-    type: Object,
-    default: () => ({})
-  }
+  workbookData: { type: Object, required: true },
+  fileName: { type: String, default: '' },
+  instrumentType: { type: String, default: 'money-market' },
+  worksheetStatuses: { type: Object, default: () => ({}) },
+  datasetId: { type: [String, Number], default: null }
 })
 
 const emit = defineEmits(['close', 'sheet-selected', 'single-instrument-extracted', 'table-isolated', 'multi-table-detect', 'workbook-loaded', 'detect-start', 'detect-end'])
+
+// ── View mode toggle ──
+const viewMode = ref('grid')
+const renderUrl = computed(() => {
+  if (!props.datasetId) return ''
+  return `${API_BASE_URL}/api/dataset/${encodeURIComponent(props.datasetId)}/render`
+})
+const renderChecking = ref(false)
+const renderError = ref('')
+
+async function checkRender() {
+  renderError.value = ''
+  renderChecking.value = true
+  try {
+    const res = await fetch(renderUrl.value, {
+      headers: localStorage.getItem('auth_token') ? { Authorization: `Bearer ${localStorage.getItem('auth_token')}` } : {}
+    })
+    const ct = (res.headers.get('Content-Type') || '').toLowerCase()
+    if (!res.ok || ct.includes('application/json')) {
+      let body = ''
+      try { body = await res.text() } catch { /* ignore */ }
+      let msg = `HTTP ${res.status}`
+      try {
+        const j = JSON.parse(body)
+        msg = `${j.stage ? '[' + j.stage + '] ' : ''}${j.message || msg}${j.fix ? '\n→ ' + j.fix : ''}`
+      } catch {
+        msg = `${msg}: ${body.slice(0, 400)}`
+      }
+      renderError.value = msg
+      renderChecking.value = false
+      return
+    }
+    renderChecking.value = false
+  } catch (e) {
+    renderError.value = 'Network error: ' + (e.message || e)
+    renderChecking.value = false
+  }
+}
+
+watch(viewMode, (v) => {
+  if (v === 'excel') checkRender()
+})
 
 const sheets = ref([])
 const activeSheetIndex = ref(0)
@@ -408,11 +354,13 @@ function getColumnHeaders(count) {
 }
 
 function getColumnWidth(index) {
-  return (columnWidths.value[index] || 100) + 'px'
+  const w = columnWidths.value[index]
+  // Use the exact width from Excel. If it's missing, fallback to 100px.
+  return w ? w + 'px' : '100px'
 }
 
 function getRowHeight(index) {
-  return (rowHeights.value[index] || 30) + 'px'
+  return (rowHeights.value[index] || 24) + 'px'
 }
 
 function startColumnResize(colIndex, e) {
@@ -555,16 +503,6 @@ function formatCellValue(cell) {
   return String(cell)
 }
 
-function isMergedCell(row, col) {
-  for (const range of mergedRanges.value) {
-    if (row >= range.min_row && row <= range.max_row &&
-        col >= range.min_col && col <= range.max_col) {
-      return !(row === range.min_row && col === range.min_col)
-    }
-  }
-  return false
-}
-
 function getCellStyle(row, col) {
   const styles = {
     width: getColumnWidth(col),
@@ -572,10 +510,12 @@ function getCellStyle(row, col) {
     textAlign: 'left',
     display: 'flex',
     alignItems: 'center',
-    padding: '2px 6px',
-    borderRight: '1px solid #e0e0e0',
-    borderBottom: '1px solid #e0e0e0',
-    backgroundColor: 'transparent',
+    padding: '0 4px',
+    margin: '0',
+    boxSizing: 'border-box',
+    borderRight: '1px solid #d4d4d4',
+    borderBottom: '1px solid #d4d4d4',
+    backgroundColor: '#ffffff',
     color: '#000',
     fontWeight: 'normal',
     flexShrink: 0,
@@ -583,73 +523,19 @@ function getCellStyle(row, col) {
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    fontSize: '13px'
+    fontSize: '12px',
+    fontFamily: "'Calibri', 'Aptos', 'Segoe UI', sans-serif"
   }
 
-  let headerDepth = -1
-  let isVerticalHeaderCell = false
-
-  const headerKeywords = ['name', 'date', 'rate', 'value', 'amount', 'price', 'yield', 'coupon', 'maturity', 'issue', 'principal', 'face', 'discount', 'interest', 'term', 'tenor', 'frequency', 'currency', 'country', 'instrument', 'bond', 'bill', 'security', 'type', 'status', 'code', 'id', 'number', 'total', 'balance', 'payment', 'period', 'year', 'month', 'day', 'description', 'category', 'account', 'reference', 'transaction', 'debit', 'credit', 'asset', 'liability', 'equity', 'revenue', 'expense', 'income', 'cost', 'profit', 'loss', 'margin', 'ratio', 'percentage', 'quantity', 'unit', 'measure', 'location', 'address', 'contact', 'phone', 'email', 'customer', 'client', 'vendor', 'supplier', 'product', 'service', 'item', 'sku', 'barcode', 'serial', 'batch', 'lot', 'expiry', 'valid', 'active', 'inactive', 'pending', 'complete', 'open', 'closed', 'approved', 'rejected', 'submitted', 'draft', 'final', 'original', 'current', 'previous', 'next', 'first', 'last', 'beginning', 'ending', 'start', 'end', 'min', 'max', 'avg', 'sum', 'count']
-
-  for (const table of detectedTables.value) {
-    if (row < table.startRow || row > table.endRow) continue
-    if (col < table.startCol || col > table.endCol) continue
-
-    const rawValue = activeSheet.value?.fullData?.[row]?.[col]
-    const hasValue = rawValue !== null && rawValue !== undefined && String(rawValue).trim() !== ''
-    if (!hasValue) continue
-
-    const cellText = String(rawValue).trim().toLowerCase()
-    const hasHeaderKeyword = headerKeywords.some(keyword => cellText.includes(keyword))
-    if (!hasHeaderKeyword) continue
-
-    const headerRows = Array.isArray(table.headerRows) && table.headerRows.length
-      ? table.headerRows
-      : (table.headerRow !== undefined ? [table.headerRow] : [])
-    const hIdx = headerRows.indexOf(row)
-
-    if (hIdx !== -1) {
-      headerDepth = hIdx
-      break
-    }
-
-    if (table.type === 'vertical_table' && col === table.startCol) {
-      isVerticalHeaderCell = true
-      break
-    }
-  }
-
-  if (headerDepth === 0) {
-    styles.backgroundColor = 'rgba(227, 242, 253, 0.5)'
-    styles.fontWeight = '700'
-    styles.color = '#0d47a1'
-    styles.borderBottom = '2px solid #0d47a1'
-  } else if (headerDepth > 0) {
-    styles.backgroundColor = 'rgba(227, 242, 253, 0.35)'
-    styles.fontWeight = '600'
-    styles.color = '#1565c0'
-    styles.borderBottom = '1px solid #0d47a1'
-  } else if (isVerticalHeaderCell) {
-    styles.backgroundColor = 'rgba(227, 242, 253, 0.5)'
-    styles.fontWeight = '700'
-    styles.color = '#0d47a1'
-    styles.borderRight = '2px solid #0d47a1'
-  }
-
-  let isInMergedRange = false
+  // 1. Handle Merged Cells
   for (const range of mergedRanges.value) {
     if (row >= range.min_row && row <= range.max_row &&
         col >= range.min_col && col <= range.max_col) {
-      isInMergedRange = true
       if (row === range.min_row && col === range.min_col) {
         const colspan = range.max_col - range.min_col + 1
         const rowspan = range.max_row - range.min_row + 1
         styles.width = `calc(${getColumnWidth(col)} * ${colspan})`
         styles.height = `calc(${getRowHeight(row)} * ${rowspan})`
-        if (!styles.backgroundColor || styles.backgroundColor === 'transparent') {
-          styles.backgroundColor = 'rgba(240, 244, 255, 0.08)'
-        }
-        styles.border = '1px solid rgba(11, 32, 68, 0.15)'
         styles.zIndex = 2
         styles.position = 'relative'
       } else {
@@ -659,58 +545,28 @@ function getCellStyle(row, col) {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // NEW — apply original workbook styles (fonts, fills, borders, alignment)
-  // from the styleMap captured during parsing. cell.w (number formats) is
-  // already rendered through the cell value; this only affects appearance.
-  // ─────────────────────────────────────────────────────────────────────
+  // 2. Apply EXACT original workbook styles from ExcelJS
   const styleKey = `${row}:${col}`
   const s = activeSheet.value?.cellStyles?.get?.(styleKey)
   if (s) {
-    if (s.font) {
-      if (s.font.bold) styles.fontWeight = '700'
-      if (s.font.italic) styles.fontStyle = 'italic'
-      if (s.font.underline) styles.textDecoration = 'underline'
-      if (s.font.sz) styles.fontSize = `${s.font.sz}px`
-      if (s.font.color?.rgb) styles.color = '#' + String(s.font.color.rgb).slice(-6)
-    }
-    if (s.fill?.fgColor?.rgb) {
-      styles.backgroundColor = '#' + String(s.fill.fgColor.rgb).slice(-6)
-    }
-    if (s.alignment) {
-      const a = s.alignment
-      if (a.horizontal) styles.textAlign = a.horizontal
-      if (a.vertical === 'top') styles.alignItems = 'flex-start'
-      else if (a.vertical === 'center') styles.alignItems = 'center'
-      else if (a.vertical === 'bottom') styles.alignItems = 'flex-end'
-      if (a.wrapText) {
-        styles.whiteSpace = 'normal'
-        styles.overflow = 'hidden'
-        styles.textOverflow = 'clip'
-      }
-    }
-    if (s.border) {
-      const borderCss = (edge) => {
-        if (!edge || !edge.style) return null
-        const widths = { thin: '1px', medium: '2px', thick: '3px',
-                         dashed: '1px', dotted: '1px', double: '3px', hair: '1px' }
-        const kind = edge.style === 'dashed' ? 'dashed'
-                   : edge.style === 'dotted' ? 'dotted'
-                   : edge.style === 'double' ? 'double'
-                   : 'solid'
-        const color = edge.color?.rgb ? '#' + String(edge.color.rgb).slice(-6) : '#999'
-        return `${widths[edge.style] || '1px'} ${kind} ${color}`
-      }
-      const t = borderCss(s.border.top);    if (t) styles.borderTop = t
-      const r = borderCss(s.border.right);  if (r) styles.borderRight = r
-      const b = borderCss(s.border.bottom); if (b) styles.borderBottom = b
-      const l = borderCss(s.border.left);   if (l) styles.borderLeft = l
-    }
+    Object.assign(styles, s)
   }
 
+  // 3. Fallback alignment for numbers/currencies ONLY if Excel didn't specify one
   const cellValue = activeSheet.value?.fullData?.[row]?.[col]
-  if (typeof cellValue === 'number') {
-    styles.textAlign = 'right'
+  if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
+    const hasExplicitAlign = s?.textAlign // ExcelJS stores it directly in textAlign
+    
+    if (!hasExplicitAlign) {
+      const strVal = String(cellValue).trim()
+      const isNumeric = /^[-+]?[£$€¥]?\s*[\d,]+(\.\d+)?%?$/.test(strVal)
+      
+      if (typeof cellValue === 'number' || isNumeric) {
+        styles.textAlign = 'right'
+      } else {
+        styles.textAlign = 'left'
+      }
+    }
   }
 
   return styles
@@ -786,7 +642,11 @@ function loadSheetData() {
       columnHeaders.value = getColumnHeaders(colCount)
       mergedRanges.value = sheet.merged_ranges || []
     }
-    
+
+    // Apply original Excel column widths / row heights (empty = fallback to defaults)
+    columnWidths.value = sheet.columnWidths ? { ...sheet.columnWidths } : {}
+    rowHeights.value = sheet.rowHeights ? { ...sheet.rowHeights } : {}
+
     extractFormulas(sheet)
     detectTables()
     
@@ -1521,107 +1381,126 @@ onUnmounted(() => {
   lastParseSig = ''
 })
 
-function loadWorkbookFromFileBuffer(fileBuffer) {
-  if (!fileBuffer) {
-    return
-  }
+async function loadWorkbookFromFileBuffer(fileBuffer) {
+  if (!fileBuffer) return
 
   const t0 = performance.now()
   console.log(`ExcelWorkbookViewer: parse START — ${fileBuffer.byteLength} bytes`)
 
-  const watchdog = setTimeout(() => {
-    console.error('ExcelWorkbookViewer: XLSX.read exceeded 20s — workbook likely has a malformed range')
-  }, 20000)
-
   try {
-    // ───────────────────────────────────────────────────────────────
-    // CHANGED: cellStyles / cellNF now true so formatting & number
-    // formats (currency, %, dates) survive the parse.
-    // ───────────────────────────────────────────────────────────────
-    const workbook = XLSX.read(fileBuffer, {
-      type: 'array',
-      cellDates: true,
-      cellStyles: true,
-      cellNF: true,
-      cellFormula: true,
-      bookVBA: false,
-      bookProps: false
-    })
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(fileBuffer)
 
-    console.log(`ExcelWorkbookViewer: XLSX.read finished in ${(performance.now() - t0).toFixed(0)}ms, ${workbook.SheetNames.length} sheet(s)`)
-    
+    console.log(`ExcelWorkbookViewer: parse finished in ${(performance.now() - t0).toFixed(0)}ms, ${workbook.worksheets.length} sheet(s)`)
+
     const loadedSheets = []
-    for (const sheetName of workbook.SheetNames) {
-      const worksheet = workbook.Sheets[sheetName]
 
-      const trueRange = getTrueRange(worksheet)
-      let fullData = []
-      let totalRows = 0
+    workbook.eachSheet((worksheet) => {
+      let totalRows = worksheet.rowCount
       let totalColumns = 0
       
-      // ───────────────────────────────────────────────────────────────
-      // CHANGED: capture cell.s (styles) into styleMap while we iterate.
-      // ───────────────────────────────────────────────────────────────
-      let styleMap = new Map()
+      // Find max columns
+      worksheet.eachRow((row) => {
+        if (row.cellCount > totalColumns) totalColumns = row.cellCount
+      })
 
-      if (trueRange) {
-        totalRows = trueRange.e.r - trueRange.s.r + 1
-        totalColumns = trueRange.e.c - trueRange.s.c + 1
+      const fullData = []
+      const styleMap = new Map()
 
-        const cellMap = new Map()
-        for (const addr in worksheet) {
-          if (addr[0] === '!') continue
-          let decoded
-          try { decoded = XLSX.utils.decode_cell(addr) } catch (e) { continue }
-          if (decoded.r < trueRange.s.r || decoded.r > trueRange.e.r) continue
-          if (decoded.c < trueRange.s.c || decoded.c > trueRange.e.c) continue
-          const cell = worksheet[addr]
-          if (!cell) continue
-          const rowKey = decoded.r - trueRange.s.r
-          const colKey = decoded.c - trueRange.s.c
-          if (!cellMap.has(rowKey)) {
-            cellMap.set(rowKey, new Map())
+      // Initialize grid
+      for (let r = 0; r < totalRows; r++) {
+        fullData.push(new Array(totalColumns).fill(''))
+      }
+
+      // Parse Cells
+      worksheet.eachRow((row, rowNumber) => {
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          const rIdx = rowNumber - 1
+          const cIdx = colNumber - 1
+          
+          // Value
+          let val = cell.value
+          if (val && typeof val === 'object') {
+            if (val.text) val = val.text // formula result
+            else if (val.result) val = val.result
+            else if (val instanceof Date) val = val.toLocaleDateString()
+            else val = String(val)
           }
-          cellMap.get(rowKey).set(colKey, cell.w ?? cell.v ?? '')
-          if (cell.s && typeof cell.s === 'object') {
-            styleMap.set(`${rowKey}:${colKey}`, cell.s)
-          }
-        }
+          fullData[rIdx][cIdx] = val !== null && val !== undefined ? val : ''
 
-        fullData = []
-        for (let r = 0; r < totalRows; r++) {
-          if (cellMap.has(r)) {
-            const row = new Array(totalColumns).fill('')
-            const rowData = cellMap.get(r)
-            for (const [c, val] of rowData) {
-              row[c] = val
+          // Styles
+          const style = {}
+          if (cell.font) {
+            if (cell.font.bold) style.fontWeight = '700'
+            if (cell.font.color && cell.font.color.argb) style.color = '#' + cell.font.color.argb.slice(-6)
+            if (cell.font.size) style.fontSize = cell.font.size + 'px'
+            if (cell.font.name) style.fontFamily = cell.font.name
+            if (cell.font.italic) style.fontStyle = 'italic'
+          }
+          if (cell.fill && cell.fill.type === 'pattern' && cell.fill.fgColor) {
+            let rgb = cell.fill.fgColor.argb
+            if (rgb && rgb !== 'FF000000' && rgb !== '00000000') { // ignore default black
+              style.backgroundColor = '#' + rgb.slice(-6)
             }
-            fullData.push(row)
-          } else {
-            fullData.push(new Array(totalColumns).fill(''))
           }
-        }
-      }
-      
+          if (cell.alignment) {
+            if (cell.alignment.horizontal) style.textAlign = cell.alignment.horizontal
+            if (cell.alignment.vertical) style.alignItems = cell.alignment.vertical === 'middle' ? 'center' : cell.alignment.vertical
+            if (cell.alignment.wrapText) style.whiteSpace = 'normal'
+          }
+
+          // Borders
+          const borderCss = (edge) => {
+            if (!edge) return null
+            const styleMapBorders = { 1: 'thin', 2: 'medium', 3: 'thick', 4: 'dashed', 5: 'dotted', 6: 'double', 7: 'hair' }
+            const st = styleMapBorders[edge.style] || 'solid'
+            const w = (edge.style === 2 || edge.style === 3 || edge.style === 6) ? '2px' : '1px'
+            const color = edge.color && edge.color.argb ? '#' + edge.color.argb.slice(-6) : '#d4d4d4'
+            return `${w} ${st} ${color}`
+          }
+
+          const t = borderCss(cell.border?.top);    if (t) style.borderTop = t
+          const b = borderCss(cell.border?.bottom); if (b) style.borderBottom = b
+          const l = borderCss(cell.border?.left);   if (l) style.borderLeft = l
+          const r = borderCss(cell.border?.right);  if (r) style.borderRight = r
+
+          if (Object.keys(style).length > 0) {
+            styleMap.set(`${rIdx}:${cIdx}`, style)
+          }
+        })
+      })
+
+      // Merges
       const mergedRanges = []
-      if (worksheet['!merges']) {
-        for (const merge of worksheet['!merges']) {
+      if (worksheet.model && worksheet.model.merges) {
+        worksheet.model.merges.forEach((mergeStr) => {
+          const [start, end] = mergeStr.split(':')
+          const startCell = worksheet.getCell(start)
+          const endCell = worksheet.getCell(end)
           mergedRanges.push({
-            min_row: merge.s.r,
-            max_row: merge.e.r,
-            min_col: merge.s.c,
-            max_col: merge.e.c
+            min_row: startCell.row - 1,
+            max_row: endCell.row - 1,
+            min_col: startCell.col - 1,
+            max_col: endCell.col - 1
           })
-        }
+        })
       }
-      
-      const ANALYSIS_SAMPLE_ROWS = 500
+
+      // Dimensions
+      const sheetColWidths = {}
+      worksheet.columns.forEach((col, idx) => {
+        if (col.width) sheetColWidths[idx] = Math.round(col.width * 7 + 5)
+      })
+      const sheetRowHeights = {}
+      worksheet.eachRow((row, idx) => {
+        if (row.height) sheetRowHeights[idx - 1] = Math.round(row.height * 1.33)
+      })
+
+      // jsonData for Auto Detect
       const jsonData = []
       if (fullData.length > 0) {
-        const headerRow = fullData[0].map((h, i) =>
-          h === '' || h === undefined || h === null ? `Column${i + 1}` : String(h)
-        )
-        const sampleRows = Math.min(ANALYSIS_SAMPLE_ROWS, fullData.length)
+        const headerRow = fullData[0].map((h, i) => h === '' || h === null ? `Column${i + 1}` : String(h))
+        const sampleRows = Math.min(500, fullData.length)
         for (let r = 1; r < sampleRows; r++) {
           const obj = {}
           for (let c = 0; c < headerRow.length; c++) {
@@ -1630,28 +1509,29 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
           jsonData.push(obj)
         }
       }
-      
+
       loadedSheets.push({
-        name: sheetName,
+        name: worksheet.name,
         fullData: fullData,
         data: jsonData,
         total_rows: totalRows,
         total_columns: totalColumns,
         merged_ranges: mergedRanges,
-        cellStyles: styleMap
+        cellStyles: styleMap,
+        columnWidths: sheetColWidths,
+        rowHeights: sheetRowHeights
       })
       
-      console.log(`ExcelWorkbookViewer: Sheet "${sheetName}" loaded with ${fullData.length} rows × ${totalColumns} columns`)
-    }
-    
+      console.log(`ExcelWorkbookViewer: Sheet "${worksheet.name}" loaded with ${fullData.length} rows × ${totalColumns} columns`)
+    })
+
     sheets.value = loadedSheets
     console.log(`ExcelWorkbookViewer: parse DONE in ${(performance.now() - t0).toFixed(0)}ms — ${loadedSheets.length} sheet(s)`)
     emit('workbook-loaded', props.fileName)
     loadSheetData()
+
   } catch (err) {
-    console.error('ExcelWorkbookViewer: parse FAILED after', (performance.now() - t0).toFixed(0), 'ms:', err)
-  } finally {
-    clearTimeout(watchdog)
+    console.error('ExcelWorkbookViewer: parse FAILED', err)
   }
 }
 </script>
@@ -1666,6 +1546,52 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
   font-size: 13px;
   position: relative;
 }
+
+/* ── View-mode toggle ── */
+.view-mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 12px;
+}
+.mode-btn {
+  padding: 4px 12px;
+  border: 1px solid #c0c0c0;
+  background: #f5f5f5;
+  color: #333;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.mode-btn:hover:not(:disabled) { background: #e8e8e8; }
+.mode-btn.active { background: #0B2044; color: #fff; border-color: #0B2044; }
+.mode-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Excel View (LibreOffice render) ── */
+.excel-view-wrapper {
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+  overflow: hidden;
+}
+.excel-view-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.excel-view-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+  padding: 24px;
+  text-align: center;
+}
+.excel-view-empty p { margin: 12px 0 0 0; font-size: 13px; }
 
 .viewer-header {
   display: flex;
@@ -1756,8 +1682,10 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
 
 .excel-row {
   display: flex;
-  min-height: 30px;
-  border-bottom: 1px solid #e0e0e0;
+  min-height: 20px;
+  border-bottom: 1px solid #d4d4d4;
+  margin: 0;
+  padding: 0;
 }
 
 .excel-cells-container {
@@ -1770,7 +1698,7 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
   align-items: center;
   justify-content: center;
   border: 1px solid #c0c0c0;
-  background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
+  background: #f3f3f3;
   font-weight: 600;
   color: #333;
   font-size: 11px;
@@ -1843,9 +1771,13 @@ function loadWorkbookFromFileBuffer(fileBuffer) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 13px;
-  border-right: 1px solid #e0e0e0;
-  border-bottom: 1px solid #e0e0e0;
+  font-size: 12px;
+  border-right: 1px solid #d4d4d4;
+  border-bottom: 1px solid #d4d4d4;
+  background: #ffffff;
+  font-family: 'Calibri', 'Aptos', 'Segoe UI', sans-serif;
+  box-sizing: border-box;
+  margin: 0;
 }
 
 .excel-cell-selected {

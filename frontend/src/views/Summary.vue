@@ -176,7 +176,7 @@
               <table class="excel-table">
                 <thead>
                   <tr>
-                    <th v-for="header in selectedInst?.detailHeaders || []" :key="header">{{ header }}</th>
+                    <th v-for="header in selectedInst?.detailHeaders || []" :key="header">{{ formatColumnHeader(header) }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -273,7 +273,7 @@
                 <table class="excel-table">
                   <thead>
                     <tr>
-                      <th v-for="header in inst.detailHeaders" :key="header">{{ header }}</th>
+                      <th v-for="header in inst.detailHeaders" :key="header">{{ formatColumnHeader(header) }}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -375,11 +375,14 @@ function formatColumnHeader(col) {
 }
 
 function getUniqueHeaders(headers) {
+  if (!Array.isArray(headers)) return []
   const filtered = headers.filter(h => h && !isExcludedColumn(h))
   const seen = new Set()
   return filtered.filter(h => {
-    const base = h.replace(/_\d+$/, '').trim()
-    const key = base.toLowerCase()
+    const base = String(h).replace(/_\d+$/, '').trim()
+    // Normalize whitespace/underscores/dashes so "total_value" and
+    // "Total Value" collapse to one column.
+    const key = base.toLowerCase().replace(/[\s_\-]+/g, '')
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -790,16 +793,18 @@ async function loadSummary() {
     const detailsList = []
     const instrumentResults = []
 
+    // Safe number coercion that handles nulls, empty strings, currency symbols,
+    // percentage signs and thousands separators uniformly.
+    const numOr = (v, fallback = 0) => {
+      if (v === null || v === undefined || v === '') return fallback
+      const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[%,$\s]/g, ''))
+      return isNaN(n) ? fallback : n
+    }
+
     for (const template of templates) {
       const backendSummary = backendSummaries.find(s => s.id === template.id)
 
-      let details = []
-      let detailHeaders = []
-      let totalValue = 0, totalFaceValue = 0, totalRateSum = 0, rateCount = 0
-      let totalFredBench = 0, fredBenchCount = 0
-      let instrumentCount = 0
-
-      // === Always load the workflow: this is the source of truth for instrument rows ===
+      // === Workflow is source of truth (same object the Calculations page reads) ===
       let wfType = null
       try {
         wfType = await sessionManager.getInstrumentWorkflow(sid, template.id)
@@ -810,66 +815,104 @@ async function loadSummary() {
       const instSummary = wfType?.instrumentSummary || { rows: [], columns: [] }
       const aggCalc = wfType?.allCalculations || wfType?.calculations || {}
 
-      // Prefer backend-published details if present AND non-empty, else workflow's instrumentSummary
-      if (backendSummary && Array.isArray(backendSummary.details) && backendSummary.details.length > 0) {
-        details = backendSummary.details
-        detailHeaders = backendSummary.detailHeaders || instSummary.columns || []
-        totalValue = backendSummary.totalValue ?? 0
-        totalFaceValue = backendSummary.faceValue ?? 0
-        instrumentCount = backendSummary.count ?? details.length
-        totalRateSum = backendSummary.avgRate ?? 0
-        rateCount = instrumentCount > 0 ? 1 : 0
-      } else {
-        // The important change: use instrument-level rows, not portfolio-summary rows
-        details = instSummary.rows || []
-        detailHeaders = instSummary.columns || []
+      // === Details: individual instrument rows (what Calculations page shows) ===
+      const details = Array.isArray(instSummary.rows) ? instSummary.rows : []
 
-        totalValue = aggCalc.totalValue ?? aggCalc.total_value ?? 0
-        totalFaceValue = aggCalc.totalPrincipal ?? aggCalc.total_principal
-          ?? aggCalc.totalFaceValue ?? aggCalc.total_face_value ?? 0
-        instrumentCount = aggCalc.instrumentCount ?? aggCalc.instrument_count ?? details.length
-        totalRateSum = aggCalc.avgRate ?? aggCalc.avg_rate
-          ?? aggCalc.weightedAvgRate ?? aggCalc.weighted_avg_rate ?? 0
-        rateCount = totalRateSum ? 1 : 0
+      // Headers MUST come from the actual row keys so `row[header]` resolves.
+      // instSummary.columns holds raw backend keys (total_value, face_value, …)
+      // while rows hold display names (Total Value, Face Value, …) after
+      // mapBackendFieldsToDisplayNames — so using instSummary.columns directly
+      // produced blank cells. Deriving from row keys fixes the mismatch.
+      const rowDerivedHeaders = details.length
+        ? Array.from(new Set(details.flatMap(r => Object.keys(r || {}))))
+        : []
+      const headerSource = rowDerivedHeaders.length
+        ? rowDerivedHeaders
+        : (Array.isArray(instSummary.columns) ? instSummary.columns : [])
+      const detailHeaders = headerSource
 
-        if (aggCalc.fred?.benchmark_rate != null) {
-          totalFredBench = aggCalc.fred.benchmark_rate
-          fredBenchCount = 1
-        }
+      // === Aggregates: primary source is allCalculations ===
+      let totalValue = numOr(aggCalc.totalValue ?? aggCalc.total_value, 0)
+      let totalFaceValue = numOr(
+        aggCalc.totalFaceValue ?? aggCalc.total_face_value
+        ?? aggCalc.totalPrincipal ?? aggCalc.total_principal,
+        0
+      )
+      let instrumentCount = numOr(aggCalc.instrumentCount ?? aggCalc.instrument_count, 0)
 
-        // Fallback if aggregates were not persisted
-        if ((!totalValue || !instrumentCount) && details.length) {
-          totalValue = 0
-          totalFaceValue = 0
-          let rateSum = 0
-          let cnt = 0
-          details.forEach(row => {
-            const v = getVal(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
-            const fv = getVal(row, 'Face Value', 'face_value', 'Amount', 'amount', 'Principal', 'principal', 'Total Principal', 'total_principal')
-            const r = getVal(row, 'Average Rate', 'average_rate', 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate', 'Interest Rate', 'interest_rate')
-            totalValue += v
-            totalFaceValue += fv
-            if (r) { rateSum += r; cnt++ }
-          })
-          if (!instrumentCount) instrumentCount = details.length
-          if (!totalRateSum && cnt) totalRateSum = rateSum / cnt
-        }
+      // === Type-specific primary rate (matches Calculations page boxes) ===
+      let rateValue = null
+      if (template.id === 'money-market') {
+        rateValue = numOr(aggCalc.avgRate ?? aggCalc.avg_rate, null)
+      } else if (template.id === 'bonds') {
+        rateValue = numOr(
+          aggCalc.avgCouponRate ?? aggCalc.avg_coupon_rate
+          ?? aggCalc.weightedAvgCoupon ?? aggCalc.weighted_avg_coupon
+          ?? aggCalc.avgRate ?? aggCalc.avg_rate,
+          null
+        )
+      } else if (template.id === 'tbills') {
+        rateValue = numOr(
+          aggCalc.avgDiscountRate ?? aggCalc.avg_discount_rate
+          ?? aggCalc.weightedAvgDiscount ?? aggCalc.weighted_avg_discount
+          ?? aggCalc.avgRate ?? aggCalc.avg_rate,
+          null
+        )
       }
 
-      // Dedupe by instrument identity so count reflects unique instruments, not spreadsheet rows
-      const dedupedDetails = dedupeInstruments(details)
-      const finalCount = instrumentCount > 0
-        ? Math.min(instrumentCount, dedupedDetails.length || instrumentCount)
-        : dedupedDetails.length
+      // === FRED benchmark from same allCalculations object ===
+      let fredBench = null
+      if (aggCalc.fred && aggCalc.fred.benchmark_rate != null) {
+        fredBench = numOr(aggCalc.fred.benchmark_rate, null)
+      } else if (backendSummary && backendSummary.fredBench != null) {
+        fredBench = numOr(backendSummary.fredBench, null)
+      }
 
-      const avgRate = rateCount > 0 ? totalRateSum : (totalRateSum || null)
-      const avgFredBench = fredBenchCount > 0 ? totalFredBench / fredBenchCount : null
-      const completed = dedupedDetails.length > 0 || totalValue > 0 || finalCount > 0
+      // === Fallback to backend summary only if workflow aggregate is empty ===
+      if (totalValue === 0 && backendSummary?.totalValue) totalValue = numOr(backendSummary.totalValue, 0)
+      if (totalFaceValue === 0 && backendSummary?.faceValue) totalFaceValue = numOr(backendSummary.faceValue, 0)
+      if (instrumentCount === 0 && backendSummary?.count) instrumentCount = numOr(backendSummary.count, 0)
+      if (rateValue === null && backendSummary?.avgRate != null) rateValue = numOr(backendSummary.avgRate, null)
+
+      // === Last resort: derive from details ONLY if aggregate fields are still empty ===
+      if (totalValue === 0 && details.length) {
+        totalValue = details.reduce((s, r) => s + numOr(
+          r['Total Value'] ?? r['total_value'] ?? r['Calculated Value'] ?? r['calculated_value'] ?? r['Value'] ?? r['value'],
+          0
+        ), 0)
+      }
+      if (totalFaceValue === 0 && details.length) {
+        totalFaceValue = details.reduce((s, r) => s + numOr(
+          r['Face Value'] ?? r['face_value'] ?? r['Amount'] ?? r['amount']
+          ?? r['Principal'] ?? r['principal'] ?? r['Total Principal'] ?? r['total_principal'],
+          0
+        ), 0)
+      }
+      if (rateValue === null && details.length) {
+        const rateKeys = template.id === 'bonds'
+          ? ['Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate']
+          : template.id === 'tbills'
+            ? ['Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate']
+            : ['Average Rate', 'average_rate', 'Avg Rate', 'avg_rate', 'Interest Rate', 'interest_rate']
+        const rates = details.map(r => {
+          for (const k of rateKeys) {
+            const v = numOr(r[k], null)
+            if (v !== null) return v
+          }
+          return null
+        }).filter(v => v !== null && v > 0)
+        if (rates.length) rateValue = rates.reduce((a, b) => a + b, 0) / rates.length
+      }
+
+      // === Count: use details length so KPI == table row count exactly ===
+      const finalCount = details.length > 0 ? details.length : instrumentCount
+
+      const completed = details.length > 0 || totalValue > 0 || finalCount > 0
 
       detailsList.push({
         id: template.id,
         name: template.name,
-        details: dedupedDetails,
+        details,
         detailHeaders: detailHeaders.length ? getUniqueHeaders(detailHeaders) : ['No Data']
       })
 
@@ -879,8 +922,8 @@ async function loadSummary() {
         faceValue: totalFaceValue,
         difference: totalFaceValue - totalValue,
         count: finalCount,
-        avgRate: avgRate,
-        fredBench: avgFredBench,
+        avgRate: rateValue,
+        fredBench,
         completed,
         statusClass: completed ? 'completed' : 'pending',
         statusText: completed ? 'Completed' : 'Not started',

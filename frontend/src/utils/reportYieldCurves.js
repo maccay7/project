@@ -406,19 +406,20 @@ export function buildReportYieldCurvesSectionHtml(curves) {
   }
 
   return curves.map(curve => {
-    if (curve.status === 'no_valuation' || curve.status === 'insufficient') {
+    // Any non-ok status renders a clear message, never an empty chart
+    if (curve.status !== 'ok' || !curve.svg || !curve.points?.length) {
       return `<div class="yield-curve-instrument-block" style="margin-bottom:28px;padding:16px;background:#fff8f0;border-left:4px solid #FF9800;border-radius:8px;">
         <h3 style="color:#0B2044;font-size:18px;margin-bottom:8px;">${escapeHtml(curve.label)}</h3>
-        <p style="color:#666;font-size:14px;">${escapeHtml(curve.message)}</p>
+        <p style="color:#666;font-size:14px;">${escapeHtml(curve.message || 'No live yield-curve data available for this instrument.')}</p>
       </div>`
     }
 
-    const src = SOURCE_LABELS[curve.dataSource] || 'Session data'
+    const src = SOURCE_LABELS[curve.dataSource] || 'Live FRED'
     return `<div class="yield-curve-instrument-block" style="margin-bottom:32px;">
       <h3 style="color:#0B2044;font-size:18px;margin-bottom:6px;">${escapeHtml(curve.label)}</h3>
       <p style="font-size:13px;color:#555;margin-bottom:4px;"><strong>Benchmark source:</strong> ${escapeHtml(src)}</p>
       <p style="font-size:13px;color:#555;margin-bottom:12px;"><strong>Market filters:</strong> ${escapeHtml(formatFilters(curve.fredFilters))}</p>
-      <div class="chart-container">${curve.svg || ''}</div>
+      <div class="chart-container">${curve.svg}</div>
     </div>`
   }).join('')
 }
