@@ -22,8 +22,8 @@
       </div>
       <div class="formula-bar" v-if="viewMode === 'grid'">
         <div class="formula-bar-label">fx</div>
-        <input 
-          v-model="selectedCellFormula" 
+        <input
+          v-model="selectedCellFormula"
           class="formula-bar-input"
           placeholder="Formula or value"
           readonly
@@ -46,13 +46,18 @@
         </div>
       </div>
       <iframe
-        v-else-if="datasetId"
-        :src="renderUrl"
+        v-else-if="datasetId && renderHtml"
+        :srcdoc="renderHtml"
         class="excel-view-iframe"
         frameborder="0"
-        sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+        sandbox="allow-same-origin allow-scripts"
         @load="renderChecking = false"
       ></iframe>
+      <div v-else-if="datasetId" class="excel-view-empty">
+        <v-icon size="48" color="#ccc">mdi-file-question-outline</v-icon>
+        <p>The render endpoint returned no content.</p>
+        <button class="mode-btn" @click="checkRender" style="margin-top:12px;">Retry</button>
+      </div>
       <div v-else class="excel-view-empty">
         <v-icon size="48" color="#ccc">mdi-alert-circle-outline</v-icon>
         <p>No dataset id available — cannot render the original workbook.</p>
@@ -136,15 +141,15 @@
         <span>Detected Tables, Sections & Values ({{ detectedTables.length }})</span>
       </div>
       <div class="table-mode-toggle">
-        <button 
-          class="mode-toggle-btn" 
+        <button
+          class="mode-toggle-btn"
           :class="{ active: !isMultiTableMode }"
           @click="isMultiTableMode = false"
         >
           Single Table
         </button>
-        <button 
-          class="mode-toggle-btn" 
+        <button
+          class="mode-toggle-btn"
           :class="{ active: isMultiTableMode }"
           @click="isMultiTableMode = true"
         >
@@ -156,7 +161,7 @@
           v-for="(table, index) in detectedTables"
           :key="index"
           class="table-select-btn"
-          :class="{ 
+          :class="{
             'table-selected': isMultiTableMode && selectedTables.has(index),
             'table-isolated': !isMultiTableMode && selectedTable === table
           }"
@@ -221,8 +226,6 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import ExcelJS from 'exceljs'
 import { API_BASE_URL } from '@/config.js'
 
-let lastParseSig = ''
-
 import {
   detectSheetType,
   extractSingleInstrumentValues,
@@ -268,9 +271,11 @@ const renderUrl = computed(() => {
 })
 const renderChecking = ref(false)
 const renderError = ref('')
+const renderHtml = ref('')
 
 async function checkRender() {
   renderError.value = ''
+  renderHtml.value = ''
   renderChecking.value = true
   try {
     const res = await fetch(renderUrl.value, {
@@ -291,6 +296,7 @@ async function checkRender() {
       renderChecking.value = false
       return
     }
+    renderHtml.value = await res.text()
     renderChecking.value = false
   } catch (e) {
     renderError.value = 'Network error: ' + (e.message || e)
@@ -300,7 +306,7 @@ async function checkRender() {
 
 watch(viewMode, (v) => {
   if (v === 'excel') checkRender()
-})
+}, { immediate: true })
 
 const sheets = ref([])
 const activeSheetIndex = ref(0)
@@ -355,7 +361,6 @@ function getColumnHeaders(count) {
 
 function getColumnWidth(index) {
   const w = columnWidths.value[index]
-  // Use the exact width from Excel. If it's missing, fallback to 100px.
   return w ? w + 'px' : '100px'
 }
 
@@ -411,7 +416,7 @@ function stopRowResize() {
 
 function handleRowClick(rowIndex) {
   if (!isRowSelectionMode.value) return
-  
+
   if (selectedRowRange.value.start === -1) {
     selectedRowRange.value.start = rowIndex
     selectedRowRange.value.end = rowIndex
@@ -441,12 +446,12 @@ function createCustomTableFromRows() {
     alert('Please select rows first')
     return
   }
-  
+
   const startRow = Math.min(selectedRowRange.value.start, selectedRowRange.value.end)
   const endRow = Math.max(selectedRowRange.value.start, selectedRowRange.value.end)
-  
+
   if (!activeSheet.value || !activeSheet.value.fullData) return
-  
+
   const customTable = {
     startRow: startRow,
     endRow: endRow,
@@ -459,7 +464,7 @@ function createCustomTableFromRows() {
     type: 'custom',
     name: `Custom Table (Rows ${startRow + 1} - ${endRow + 1})`
   }
-  
+
   selectTable(customTable)
   clearRowSelection()
   isRowSelectionMode.value = false
@@ -467,11 +472,11 @@ function createCustomTableFromRows() {
 
 function formatCellValue(cell) {
   if (cell === null || cell === undefined || cell === '') return ''
-  
+
   if (cell instanceof Date) {
     return cell.toLocaleDateString()
   }
-  
+
   if (typeof cell === 'string') {
     const datePatterns = [
       /^\d{4}-\d{2}-\d{2}$/,
@@ -488,7 +493,7 @@ function formatCellValue(cell) {
       }
     }
   }
-  
+
   if (typeof cell === 'number') {
     if (cell > 1 && cell < 2958465 && Number.isInteger(cell)) {
       const excelDate = new Date((cell - 25569) * 86400 * 1000)
@@ -499,7 +504,7 @@ function formatCellValue(cell) {
     if (Number.isInteger(cell)) return cell.toString()
     return cell.toFixed(2)
   }
-  
+
   return String(cell)
 }
 
@@ -555,12 +560,12 @@ function getCellStyle(row, col) {
   // 3. Fallback alignment for numbers/currencies ONLY if Excel didn't specify one
   const cellValue = activeSheet.value?.fullData?.[row]?.[col]
   if (cellValue !== undefined && cellValue !== null && cellValue !== '') {
-    const hasExplicitAlign = s?.textAlign // ExcelJS stores it directly in textAlign
-    
+    const hasExplicitAlign = s?.textAlign
+
     if (!hasExplicitAlign) {
       const strVal = String(cellValue).trim()
       const isNumeric = /^[-+]?[£$€¥]?\s*[\d,]+(\.\d+)?%?$/.test(strVal)
-      
+
       if (typeof cellValue === 'number' || isNumeric) {
         styles.textAlign = 'right'
       } else {
@@ -575,9 +580,9 @@ function getCellStyle(row, col) {
 function selectCell(rowIndex, colIndex, cell) {
   selectedCell.value = { row: rowIndex, col: colIndex }
   selectedCellValue.value = formatCellValue(cell)
-  
+
   const cellRef = getCellReference(rowIndex, colIndex)
-  
+
   if (cellFormulas.value.has(cellRef)) {
     selectedCellFormula.value = cellFormulas.value.get(cellRef)
   } else {
@@ -643,17 +648,16 @@ function loadSheetData() {
       mergedRanges.value = sheet.merged_ranges || []
     }
 
-    // Apply original Excel column widths / row heights (empty = fallback to defaults)
     columnWidths.value = sheet.columnWidths ? { ...sheet.columnWidths } : {}
     rowHeights.value = sheet.rowHeights ? { ...sheet.rowHeights } : {}
 
     extractFormulas(sheet)
     detectTables()
-    
+
     if (sheet.data && sheet.data.length > 0) {
       const detection = detectSheetType(sheet.data, props.instrumentType)
       isSingleInstrumentSheet.value = detection.type === 'single'
-      
+
       if (isSingleInstrumentSheet.value) {
         const extracted = extractValuesIntelligently(sheet.data, props.instrumentType)
         extractedPreviewValues.value = extracted
@@ -681,7 +685,7 @@ function loadSheetData() {
 
 function extractFormulas(sheet) {
   cellFormulas.value.clear()
-  
+
   if (sheet.formulas && typeof sheet.formulas === 'object') {
     for (const [cellRef, formula] of Object.entries(sheet.formulas)) {
       if (formula && typeof formula === 'string' && formula.startsWith('=')) {
@@ -689,12 +693,12 @@ function extractFormulas(sheet) {
       }
     }
   }
-  
+
   if (sheet.fullData && sheet.fullData.length > 0) {
     for (let row = 0; row < sheet.fullData.length; row++) {
       const rowData = sheet.fullData[row]
       if (!rowData) continue
-      
+
       for (let col = 0; col < rowData.length; col++) {
         const cell = rowData[col]
         if (cell && typeof cell === 'object' && cell.f) {
@@ -735,7 +739,7 @@ function detectTables() {
   if (!data || data.length === 0) return
 
   const structures = analyzeWorksheetStructure(data)
-  
+
   structures.forEach(structure => {
     detectedTables.value.push({
       startRow: structure.startRow,
@@ -763,7 +767,7 @@ function analyzeWorksheetStructure(data) {
 
 function analyzeCellContent(data) {
   const analysis = []
-  
+
   for (let row = 0; row < data.length; row++) {
     const rowAnalysis = []
     for (let col = 0; col < (data[row]?.length || 0); col++) {
@@ -772,7 +776,7 @@ function analyzeCellContent(data) {
     }
     analysis.push(rowAnalysis)
   }
-  
+
   return analysis
 }
 
@@ -780,22 +784,22 @@ function classifyCellContent(cell, row, col) {
   if (cell === null || cell === undefined || cell === '') {
     return { type: 'empty', isHeader: false, isLabel: false, isData: false }
   }
-  
+
   const text = String(cell).trim()
   const isNumeric = /^[\d\,\.\-\$%]+$/.test(text)
   const isDate = /^\d{4}-\d{2}-\d{2}/.test(text) || /^\d{2}\/\d{2}\/\d{4}/.test(text) || /^\d{2}-\d{2}-\d{4}/.test(text)
   const isPercentage = /%$/.test(text)
-  
+
   const headerKeywords = ['name', 'date', 'rate', 'value', 'amount', 'price', 'yield', 'coupon', 'maturity', 'issue', 'principal', 'face', 'discount', 'interest', 'term', 'tenor', 'frequency', 'currency', 'country', 'instrument', 'bond', 'bill', 'security', 'type', 'status', 'code', 'id', 'number', 'total', 'balance', 'payment', 'period', 'year', 'month', 'day', 'description', 'category', 'account', 'reference', 'transaction', 'debit', 'credit', 'asset', 'liability', 'equity', 'revenue', 'expense', 'income', 'cost', 'profit', 'loss', 'margin', 'ratio', 'percentage', 'quantity', 'unit', 'measure', 'location', 'address', 'contact', 'phone', 'email', 'customer', 'client', 'vendor', 'supplier', 'product', 'service', 'item', 'sku', 'barcode', 'serial', 'batch', 'lot', 'expiry', 'valid', 'active', 'inactive', 'pending', 'complete', 'open', 'closed', 'approved', 'rejected', 'submitted', 'draft', 'final', 'original', 'current', 'previous', 'next', 'first', 'last', 'beginning', 'ending', 'start', 'end', 'min', 'max', 'avg', 'sum', 'count']
   const isHeaderKeyword = headerKeywords.some(keyword => text.toLowerCase().includes(keyword))
   const isShortText = text.length < 100 && !isNumeric && !isDate
   const isHeader = isShortText && (isHeaderKeyword || /^[A-Z]/.test(text) || text.length > 0)
-  
+
   const labelPatterns = [/^(.+?)\s*[:=]\s*$/, /^(.+?)\s*$/]
   const isLabel = isShortText && (labelPatterns.some(pattern => pattern.test(text)) || isHeaderKeyword)
-  
+
   const isData = isNumeric || isDate || isPercentage || (!isHeader && !isLabel && text.length > 0)
-  
+
   return {
     type: isNumeric ? 'numeric' : isDate ? 'date' : isPercentage ? 'percentage' : 'text',
     isHeader,
@@ -1008,20 +1012,20 @@ function detectContentBasedTables(data, cellAnalysis) {
 
 function detectContentSections(data, cellAnalysis) {
   const sections = []
-  
+
   let inSection = false
   let sectionStartRow = -1
   let sectionStartCol = -1
   let sectionEndRow = -1
   let sectionEndCol = -1
   let sectionColumnCount = 0
-  
+
   for (let row = 0; row < data.length; row++) {
     let hasContent = false
     let firstNonEmptyCol = -1
     let lastNonEmptyCol = -1
     let rowColumnCount = 0
-    
+
     for (let col = 0; col < (data[row]?.length || 0); col++) {
       if (cellAnalysis[row][col].type !== 'empty') {
         hasContent = true
@@ -1030,7 +1034,7 @@ function detectContentSections(data, cellAnalysis) {
         lastNonEmptyCol = col
       }
     }
-    
+
     if (hasContent) {
       if (!inSection) {
         inSection = true
@@ -1048,7 +1052,7 @@ function detectContentSections(data, cellAnalysis) {
               .join(' - ')
               .substring(0, 40)
             const sectionName = firstRowContent || `Section ${sections.length + 1}`
-            
+
             sections.push({
               startRow: sectionStartRow,
               endRow: sectionEndRow,
@@ -1081,7 +1085,7 @@ function detectContentSections(data, cellAnalysis) {
             .join(' - ')
             .substring(0, 40)
           const sectionName = firstRowContent || `Section ${sections.length + 1}`
-          
+
           sections.push({
             startRow: sectionStartRow,
             endRow: sectionEndRow,
@@ -1099,14 +1103,14 @@ function detectContentSections(data, cellAnalysis) {
       }
     }
   }
-  
+
   if (inSection && sectionEndRow - sectionStartRow >= 0) {
     const firstRowContent = data[sectionStartRow].slice(sectionStartCol, sectionEndCol + 1)
       .filter(cell => cell && String(cell).trim() !== '')
       .join(' - ')
       .substring(0, 40)
     const sectionName = firstRowContent || `Section ${sections.length + 1}`
-    
+
     sections.push({
       startRow: sectionStartRow,
       endRow: sectionEndRow,
@@ -1119,27 +1123,27 @@ function detectContentSections(data, cellAnalysis) {
       name: sectionName
     })
   }
-  
+
   return sections
 }
 
 function mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data) {
   const allStructures = [...labelValuePairs, ...tables, ...sections]
-  
+
   allStructures.sort((a, b) => {
     const aSize = (a.endRow - a.startRow + 1) * (a.endCol - a.startCol + 1)
     const bSize = (b.endRow - b.startRow + 1) * (b.endCol - b.startCol + 1)
     return bSize - aSize
   })
-  
+
   const nonOverlapping = []
   const occupied = new Set()
-  
+
   for (const structure of allStructures) {
     let overlaps = false
     let overlapCount = 0
     let totalCells = 0
-    
+
     for (let row = structure.startRow; row <= structure.endRow; row++) {
       for (let col = structure.startCol; col <= structure.endCol; col++) {
         totalCells++
@@ -1149,11 +1153,11 @@ function mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data) {
         }
       }
     }
-    
+
     if (totalCells > 0 && overlapCount / totalCells > 0.8) {
       overlaps = true
     }
-    
+
     if (!overlaps) {
       nonOverlapping.push(structure)
       for (let row = structure.startRow; row <= structure.endRow; row++) {
@@ -1163,62 +1167,41 @@ function mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data) {
       }
     }
   }
-  
+
   nonOverlapping.sort((a, b) => a.startRow - b.startRow)
-  
+
   return nonOverlapping
 }
 
 function selectTable(table) {
   selectedTable.value = table
   isTableIsolationMode.value = true
-  
+
   if (activeSheet.value && activeSheet.value.fullData) {
-    const isolatedData = []
-    const headers = []
-    
-    const headerRows = Array.isArray(table.headerRows) && table.headerRows.length
-      ? table.headerRows
-      : [table.headerRow !== undefined ? table.headerRow : table.startRow]
-    const headerRowEnd = headerRows[headerRows.length - 1]
-    
-    for (let col = table.startCol; col <= table.endCol; col++) {
-      const parts = []
-      for (const hr of headerRows) {
-        const v = activeSheet.value.fullData[hr]?.[col]
-        if (v !== undefined && v !== null && String(v).trim() !== '') {
-          parts.push(String(v).trim())
-        }
-      }
-      headers.push(parts.join(' ') || `Column ${col}`)
-    }
-    
-    for (let row = headerRowEnd + 1; row <= table.endRow; row++) {
-      const rowData = {}
-      for (let col = table.startCol; col <= table.endCol; col++) {
-        const cellValue = activeSheet.value.fullData[row]?.[col]
-        rowData[headers[col - table.startCol]] = cellValue !== undefined ? cellValue : ''
-      }
-      if (Object.values(rowData).some(v => v !== '')) {
-        isolatedData.push(rowData)
+    const table2D = []
+    for (let r = table.startRow; r <= table.endRow; r++) {
+      if (activeSheet.value.fullData[r]) {
+        table2D.push(activeSheet.value.fullData[r].slice(table.startCol, table.endCol + 1))
+      } else {
+        table2D.push([])
       }
     }
+    
+    const defaultHeaderIdx = table.headerRow !== undefined ? table.headerRow - table.startRow : 0
     
     emit('table-isolated', {
       sheetName: activeSheet.value.name,
       tableName: table.name,
       type: table.type || 'table',
-      data: isolatedData,
-      headers: headers,
-      headerRows: [...headerRows],
-      headerRowCount: headerRows.length,
+      rawTableData: table2D,
+      headerRowIndex: defaultHeaderIdx,
       tableRange: {
         startRow: table.startRow,
         endRow: table.endRow,
         startCol: table.startCol,
         endCol: table.endCol,
-        headerRow: headerRows[0],
-        headerRowEnd: headerRowEnd
+        headerRow: table.headerRow,
+        headerRowEnd: table.headerRowEnd
       }
     })
   }
@@ -1344,30 +1327,24 @@ function closeViewer() {
   emit('close')
 }
 
+let isParsing = false
+
 watch(() => props.workbookData, (newData) => {
-  if (!newData || !newData.sheets) return
+  if (!newData || isParsing) return
 
-  const sig = (props.fileName || '') + '|' +
-              (newData.fileBuffer ? newData.fileBuffer.byteLength : 0) + '|' +
-              (newData.sheets?.length || 0)
-
-  if (sig === lastParseSig && sheets.value.length > 0) return
-  lastParseSig = sig
-
-  selectedTables.value.clear()
-  selectedTable.value = null
-  isTableIsolationMode.value = false
-
-  const hasFullData = newData.sheets.some(s => s.fullData && s.fullData.length > 0)
+  const hasFullData = newData.sheets && newData.sheets.some(s => s.fullData && s.fullData.length > 0)
 
   if (hasFullData) {
     sheets.value = newData.sheets
     loadSheetData()
     nextTick(() => emit('workbook-loaded', props.fileName))
-  } else if (newData.fileBuffer) {
-    sheets.value = []
-    nextTick(() => loadWorkbookFromFileBuffer(newData.fileBuffer))
-  } else {
+  } else if (newData.fileBuffer && sheets.value.length === 0) {
+    isParsing = true
+    nextTick(async () => {
+      await loadWorkbookFromFileBuffer(newData.fileBuffer)
+      isParsing = false
+    })
+  } else if (newData.sheets && newData.sheets.length > 0 && sheets.value.length === 0) {
     sheets.value = newData.sheets
     loadSheetData()
     nextTick(() => emit('workbook-loaded', props.fileName))
@@ -1378,7 +1355,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  lastParseSig = ''
+  isParsing = false
 })
 
 async function loadWorkbookFromFileBuffer(fileBuffer) {
@@ -1396,39 +1373,67 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
     const loadedSheets = []
 
     workbook.eachSheet((worksheet) => {
-      let totalRows = worksheet.rowCount
-      let totalColumns = 0
+      const HARD_ROW_LIMIT = 5000
+      const HARD_COL_LIMIT = 100
       
-      // Find max columns
-      worksheet.eachRow((row) => {
-        if (row.cellCount > totalColumns) totalColumns = row.cellCount
-      })
+      let maxRow = 0
+      let maxCol = 0
+      
+      // 1. Find the TRUE visual range (values + styles) up to the hard cap
+      for (let r = 1; r <= HARD_ROW_LIMIT; r++) {
+        const row = worksheet.getRow(r)
+        for (let c = 1; c <= HARD_COL_LIMIT; c++) {
+          const cell = row.getCell(c)
+          if (!cell) continue
+          
+          const hasValue = cell.value !== null && cell.value !== undefined && cell.value !== ''
+          const hasFill = cell.fill && cell.fill.type === 'pattern' && cell.fill.fgColor && cell.fill.fgColor.argb && cell.fill.fgColor.argb !== 'FFFFFFFF'
+          const hasBorder = cell.border && (cell.border.top || cell.border.bottom || cell.border.left || cell.border.right)
+          const hasFont = cell.font && (cell.font.bold || cell.font.italic || (cell.font.color && cell.font.color.argb && cell.font.color.argb !== 'FF000000'))
+          
+          if (hasValue || hasFill || hasBorder || hasFont) {
+            if (r > maxRow) maxRow = r
+            if (c > maxCol) maxCol = c
+          }
+        }
+      }
+
+      if (maxRow === 0 || maxCol === 0) {
+        loadedSheets.push({
+          name: worksheet.name, fullData: [], data: [], total_rows: 0, total_columns: 0, merged_ranges: [], cellStyles: new Map(), columnWidths: {}, rowHeights: {}
+        })
+        return
+      }
 
       const fullData = []
       const styleMap = new Map()
 
       // Initialize grid
-      for (let r = 0; r < totalRows; r++) {
-        fullData.push(new Array(totalColumns).fill(''))
+      for (let r = 0; r < maxRow; r++) {
+        fullData.push(new Array(maxCol).fill(''))
       }
 
-      // Parse Cells
-      worksheet.eachRow((row, rowNumber) => {
-        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-          const rIdx = rowNumber - 1
-          const cIdx = colNumber - 1
+      // 2. Parse Cells (Values + Styles) based on the bounded range
+      for (let r = 1; r <= maxRow; r++) {
+        const row = worksheet.getRow(r)
+        for (let c = 1; c <= maxCol; c++) {
+          const cell = row.getCell(c)
+          if (!cell) continue
           
-          // Value
+          const rIdx = r - 1
+          const cIdx = c - 1
+
+          // Extract Value
           let val = cell.value
           if (val && typeof val === 'object') {
-            if (val.text) val = val.text // formula result
+            if (val.text) val = val.text
             else if (val.result) val = val.result
             else if (val instanceof Date) val = val.toLocaleDateString()
             else val = String(val)
           }
           fullData[rIdx][cIdx] = val !== null && val !== undefined ? val : ''
 
-          // Styles
+          // Extract Style
           const style = {}
           if (cell.font) {
             if (cell.font.bold) style.fontWeight = '700'
@@ -1439,7 +1444,7 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
           }
           if (cell.fill && cell.fill.type === 'pattern' && cell.fill.fgColor) {
             let rgb = cell.fill.fgColor.argb
-            if (rgb && rgb !== 'FF000000' && rgb !== '00000000') { // ignore default black
+            if (rgb && rgb !== 'FF000000' && rgb !== '00000000') {
               style.backgroundColor = '#' + rgb.slice(-6)
             }
           }
@@ -1449,7 +1454,6 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
             if (cell.alignment.wrapText) style.whiteSpace = 'normal'
           }
 
-          // Borders
           const borderCss = (edge) => {
             if (!edge) return null
             const styleMapBorders = { 1: 'thin', 2: 'medium', 3: 'thick', 4: 'dashed', 5: 'dotted', 6: 'double', 7: 'hair' }
@@ -1462,41 +1466,48 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
           const t = borderCss(cell.border?.top);    if (t) style.borderTop = t
           const b = borderCss(cell.border?.bottom); if (b) style.borderBottom = b
           const l = borderCss(cell.border?.left);   if (l) style.borderLeft = l
-          const r = borderCss(cell.border?.right);  if (r) style.borderRight = r
+          const rr = borderCss(cell.border?.right);  if (rr) style.borderRight = rr
 
           if (Object.keys(style).length > 0) {
             styleMap.set(`${rIdx}:${cIdx}`, style)
           }
-        })
-      })
+        }
+      }
 
-      // Merges
+      // 3. Parse Merges
       const mergedRanges = []
       if (worksheet.model && worksheet.model.merges) {
         worksheet.model.merges.forEach((mergeStr) => {
           const [start, end] = mergeStr.split(':')
           const startCell = worksheet.getCell(start)
           const endCell = worksheet.getCell(end)
+          
           mergedRanges.push({
-            min_row: startCell.row - 1,
-            max_row: endCell.row - 1,
-            min_col: startCell.col - 1,
-            max_col: endCell.col - 1
+            min_row: Math.max(0, startCell.row - 1),
+            max_row: Math.min(maxRow - 1, endCell.row - 1),
+            min_col: Math.max(0, startCell.col - 1),
+            max_col: Math.min(maxCol - 1, endCell.col - 1)
           })
         })
       }
 
-      // Dimensions
+      // 4. Dimensions
       const sheetColWidths = {}
       worksheet.columns.forEach((col, idx) => {
-        if (col.width) sheetColWidths[idx] = Math.round(col.width * 7 + 5)
+        if (idx < maxCol && col.width) {
+          sheetColWidths[idx] = Math.round(col.width * 7 + 5)
+        }
       })
+      
       const sheetRowHeights = {}
-      worksheet.eachRow((row, idx) => {
-        if (row.height) sheetRowHeights[idx - 1] = Math.round(row.height * 1.33)
+      worksheet.eachRow({ includeEmpty: false }, (row, idx) => {
+        const rIdx = idx - 1
+        if (rIdx >= 0 && rIdx < maxRow && row.height) {
+          sheetRowHeights[rIdx] = Math.round(row.height * 1.33)
+        }
       })
 
-      // jsonData for Auto Detect
+      // 5. jsonData for Auto Detect
       const jsonData = []
       if (fullData.length > 0) {
         const headerRow = fullData[0].map((h, i) => h === '' || h === null ? `Column${i + 1}` : String(h))
@@ -1514,21 +1525,28 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
         name: worksheet.name,
         fullData: fullData,
         data: jsonData,
-        total_rows: totalRows,
-        total_columns: totalColumns,
+        total_rows: maxRow,
+        total_columns: maxCol,
         merged_ranges: mergedRanges,
         cellStyles: styleMap,
         columnWidths: sheetColWidths,
         rowHeights: sheetRowHeights
       })
       
-      console.log(`ExcelWorkbookViewer: Sheet "${worksheet.name}" loaded with ${fullData.length} rows × ${totalColumns} columns`)
+      console.log(`ExcelWorkbookViewer: Sheet "${worksheet.name}" loaded with ${maxRow} rows × ${maxCol} columns`)
     })
 
     sheets.value = loadedSheets
+    activeSheetIndex.value = 0
     console.log(`ExcelWorkbookViewer: parse DONE in ${(performance.now() - t0).toFixed(0)}ms — ${loadedSheets.length} sheet(s)`)
     emit('workbook-loaded', props.fileName)
-    loadSheetData()
+    
+    nextTick(() => {
+      if (loadedSheets.length > 0) {
+        emit('sheet-selected', loadedSheets[0].name)
+      }
+      loadSheetData()
+    })
 
   } catch (err) {
     console.error('ExcelWorkbookViewer: parse FAILED', err)
@@ -1547,549 +1565,82 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
   position: relative;
 }
 
-/* ── View-mode toggle ── */
-.view-mode-toggle {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-  margin-right: 12px;
-}
-.mode-btn {
-  padding: 4px 12px;
-  border: 1px solid #c0c0c0;
-  background: #f5f5f5;
-  color: #333;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
+.view-mode-toggle { display: flex; gap: 4px; margin-left: auto; margin-right: 12px; }
+.mode-btn { padding: 4px 12px; border: 1px solid #c0c0c0; background: #f5f5f5; color: #333; border-radius: 4px; font-size: 12px; cursor: pointer; transition: all 0.15s; }
 .mode-btn:hover:not(:disabled) { background: #e8e8e8; }
 .mode-btn.active { background: #0B2044; color: #fff; border-color: #0B2044; }
 .mode-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ── Excel View (LibreOffice render) ── */
-.excel-view-wrapper {
-  flex: 1;
-  min-height: 0;
-  background: #fff;
-  overflow: hidden;
-}
-.excel-view-iframe {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  display: block;
-}
-.excel-view-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #999;
-  padding: 24px;
-  text-align: center;
-}
+.excel-view-wrapper { flex: 1; min-height: 0; background: #fff; overflow: hidden; }
+.excel-view-iframe { width: 100%; height: 100%; border: 0; display: block; }
+.excel-view-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #999; padding: 24px; text-align: center; }
 .excel-view-empty p { margin: 12px 0 0 0; font-size: 13px; }
 
-.viewer-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 16px;
-  background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
-  border-bottom: 1px solid #d0d0d0;
-  flex-shrink: 0;
-  gap: 16px;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.formula-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  background: #fff;
-  border: 1px solid #c0c0c0;
-  border-radius: 3px;
-  padding: 4px 8px;
-}
-
-.formula-bar-label {
-  font-style: italic;
-  font-family: 'Times New Roman', serif;
-  font-weight: bold;
-  color: #666;
-  font-size: 14px;
-}
-
-.formula-bar-input {
-  flex: 1;
-  border: none;
-  outline: none;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  font-size: 13px;
-  color: #333;
-  background: transparent;
-}
-
-.logo {
-  height: 32px;
-  width: auto;
-  object-fit: contain;
-}
-
-.excel-filename {
-  font-weight: 600;
-  color: #0B2044;
-  font-size: 14px;
-}
-
-.excel-grid-wrapper {
-  flex: 1;
-  overflow: auto;
-  position: relative;
-}
-
-.excel-grid-container {
-  display: grid;
-  grid-template-rows: 30px 1fr;
-  min-width: 100%;
-  min-height: 100%;
-}
-
-.excel-column-headers {
-  display: flex;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
-  border-bottom: 1px solid #d0d0d0;
-  min-height: 30px;
-}
-
-.excel-rows-container {
-  display: flex;
-  flex-direction: column;
-}
-
-.excel-row {
-  display: flex;
-  min-height: 20px;
-  border-bottom: 1px solid #d4d4d4;
-  margin: 0;
-  padding: 0;
-}
-
-.excel-cells-container {
-  display: flex;
-  flex: 1;
-}
-
-.excel-header-cell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #c0c0c0;
-  background: #f3f3f3;
-  font-weight: 600;
-  color: #333;
-  font-size: 11px;
-  user-select: none;
-  flex-shrink: 0;
-}
-
-.excel-corner-cell {
-  width: 40px;
-  border-right: 1px solid #c0c0c0;
-}
-
-.excel-column-header {
-  flex-shrink: 0;
-  border-right: 1px solid #c0c0c0;
-  position: relative;
-}
-
-.column-resize-handle {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  cursor: col-resize;
-  background: transparent;
-}
-
-.column-resize-handle:hover {
-  background: rgba(0, 0, 0, 0.1);
-}
-
-.excel-row-header {
-  width: 40px;
-  flex-shrink: 0;
-  border-right: 1px solid #c0c0c0;
-  border-bottom: 1px solid #e0e0e0;
-  position: relative;
-}
-
-.row-resize-handle {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  cursor: row-resize;
-  background: transparent;
-}
-
-.row-resize-handle:hover {
-  background: rgba(0, 0, 0, 0.1);
-}
-
-.row-selected {
-  background-color: rgba(227, 242, 253, 0.3) !important;
-}
-
-.row-selecting {
-  cursor: pointer;
-}
-
-.row-selecting:hover {
-  background-color: rgba(227, 242, 253, 0.15);
-}
-
-.excel-cell {
-  flex-shrink: 0;
-  cursor: cell;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  border-right: 1px solid #d4d4d4;
-  border-bottom: 1px solid #d4d4d4;
-  background: #ffffff;
-  font-family: 'Calibri', 'Aptos', 'Segoe UI', sans-serif;
-  box-sizing: border-box;
-  margin: 0;
-}
-
-.excel-cell-selected {
-  outline: 2px solid #0B2044;
-  outline-offset: -2px;
-  background: #e8f0fe !important;
-}
-
-.excel-sheet-tabs {
-  display: flex;
-  padding: 4px 12px;
-  background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%);
-  border-top: 1px solid #d0d0d0;
-  gap: 2px;
-  overflow-x: auto;
-  flex-shrink: 0;
-}
-
-.excel-sheet-tab {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 14px;
-  background: #e0e0e0;
-  border: 1px solid #c0c0c0;
-  border-radius: 3px 3px 0 0;
-  cursor: pointer;
-  color: #333;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.excel-sheet-tab:hover {
-  background: #d0d0d0;
-}
-
-.excel-sheet-tab-active {
-  background: #fff;
-  border-bottom: 1px solid #fff;
-  margin-bottom: -1px;
-}
-
-.sheet-row-count {
-  color: #999;
-  font-size: 10px;
-  margin-left: 4px;
-}
-
-.sheet-status-badge {
-  margin-left: 6px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.sheet-status-badge.saved {
-  background-color: #4CAF50;
-  color: white;
-}
-
-.table-detection-panel {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 12px;
-  background: #f8f9fa;
-  border-top: 1px solid #e0e0e0;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.table-detection-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  color: #0B2044;
-  font-size: 12px;
-}
-
-.table-icon {
-  color: #0B2044;
-}
-
-.table-mode-toggle {
-  display: flex;
-  gap: 4px;
-}
-
-.mode-toggle-btn {
-  flex: 1;
-  padding: 6px 12px;
-  background: #e0e0e0;
-  border: 1px solid #c0c0c0;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 11px;
-  color: #333;
-  transition: all 0.2s;
-}
-
-.mode-toggle-btn:hover {
-  background: #d0d0d0;
-}
-
-.mode-toggle-btn.active {
-  background: #0B2044;
-  color: white;
-  border-color: #0B2044;
-}
-
-.table-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.table-select-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: white;
-  border: 1px solid #c0c0c0;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 11px;
-  color: #333;
-  transition: all 0.2s;
-}
-
-.table-select-btn:hover {
-  background: #f0f0f0;
-  border-color: #0B2044;
-}
-
-.table-select-btn.table-selected {
-  background: #e8f0fe;
-  border-color: #0B2044;
-  color: #0B2044;
-  font-weight: 500;
-}
-
-.table-select-btn.table-isolated {
-  background: #d4edda;
-  border-color: #28a745;
-  color: #155724;
-}
-
-.table-checkbox {
-  font-weight: bold;
-  color: #0B2044;
-}
-
-.multi-table-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.btn-auto-detect-multi {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: #0B2044;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  transition: background 0.2s;
-}
-
-.btn-auto-detect-multi:hover:not(:disabled) {
-  background: #1a3a6e;
-}
-
-.btn-auto-detect-multi:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.spin-animation {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.btn-clear-selection {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: #f0f0f0;
-  color: #666;
-  border: 1px solid #c0c0c0;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.2s;
-}
-
-.btn-clear-selection:hover {
-  background: #e0e0e0;
-}
-
-.table-isolation-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: #e3f2fd;
-  border-top: 1px solid #0B2044;
-  flex-shrink: 0;
-}
-
-.isolation-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  color: #0d47a1;
-  font-size: 12px;
-}
-
-.exit-isolation-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 12px;
-  background: #fff;
-  border: 1px solid #dc3545;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 11px;
-  color: #dc3545;
-  transition: all 0.2s;
-}
-
-.exit-isolation-btn:hover {
-  background: #dc3545;
-  color: #fff;
-}
-
-.single-instrument-preview {
-  display: flex;
-  flex-direction: column;
-  padding: 12px;
-  background: #e8f5e9;
-  border-top: 1px solid #4caf50;
-  flex-shrink: 0;
-}
-
-.preview-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  color: #2e7d32;
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-
-.preview-icon {
-  color: #4caf50;
-}
-
-.preview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
-}
-
-.preview-item {
-  display: flex;
-  flex-direction: column;
-  padding: 6px 8px;
-  background: #fff;
-  border: 1px solid #c8e6c9;
-  border-radius: 4px;
-}
-
-.preview-label {
-  font-size: 10px;
-  color: #666;
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-
-.preview-value {
-  font-size: 12px;
-  color: #333;
-}
-
-.resize-handle {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 8px;
-  background: linear-gradient(to bottom, transparent, #e0e0e0);
-  cursor: ns-resize;
-  border-top: 1px solid #d0d0d0;
-  z-index: 100;
-}
-
-.resize-handle:hover {
-  background: linear-gradient(to bottom, transparent, #c0c0c0);
-}
+.viewer-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%); border-bottom: 1px solid #d0d0d0; flex-shrink: 0; gap: 16px; }
+.header-left { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.formula-bar { display: flex; align-items: center; gap: 8px; flex: 1; background: #fff; border: 1px solid #c0c0c0; border-radius: 3px; padding: 4px 8px; }
+.formula-bar-label { font-style: italic; font-family: 'Times New Roman', serif; font-weight: bold; color: #666; font-size: 14px; }
+.formula-bar-input { flex: 1; border: none; outline: none; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 13px; color: #333; background: transparent; }
+.logo { height: 32px; width: auto; object-fit: contain; }
+.excel-filename { font-weight: 600; color: #0B2044; font-size: 14px; }
+.excel-grid-wrapper { flex: 1; overflow: auto; position: relative; }
+.excel-grid-container { display: grid; grid-template-rows: 30px 1fr; min-width: 100%; min-height: 100%; }
+.excel-column-headers { display: flex; position: sticky; top: 0; z-index: 10; background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%); border-bottom: 1px solid #d0d0d0; min-height: 30px; }
+.excel-rows-container { display: flex; flex-direction: column; }
+.excel-row { display: flex; min-height: 20px; border-bottom: 1px solid #d4d4d4; margin: 0; padding: 0; }
+.excel-cells-container { display: flex; flex: 1; }
+.excel-header-cell { display: flex; align-items: center; justify-content: center; border: 1px solid #c0c0c0; background: #f3f3f3; font-weight: 600; color: #333; font-size: 11px; user-select: none; flex-shrink: 0; }
+.excel-corner-cell { width: 40px; border-right: 1px solid #c0c0c0; }
+.excel-column-header { flex-shrink: 0; border-right: 1px solid #c0c0c0; position: relative; }
+.column-resize-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: transparent; }
+.column-resize-handle:hover { background: rgba(0, 0, 0, 0.1); }
+.excel-row-header { width: 40px; flex-shrink: 0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #e0e0e0; position: relative; }
+.row-resize-handle { position: absolute; bottom: 0; left: 0; right: 0; height: 4px; cursor: row-resize; background: transparent; }
+.row-resize-handle:hover { background: rgba(0, 0, 0, 0.1); }
+.row-selected { background-color: rgba(227, 242, 253, 0.3) !important; }
+.row-selecting { cursor: pointer; }
+.row-selecting:hover { background-color: rgba(227, 242, 253, 0.15); }
+.excel-cell { flex-shrink: 0; cursor: cell; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; border-right: 1px solid #d4d4d4; border-bottom: 1px solid #d4d4d4; background: #ffffff; font-family: 'Calibri', 'Aptos', 'Segoe UI', sans-serif; box-sizing: border-box; margin: 0; }
+.excel-cell-selected { outline: 2px solid #0B2044; outline-offset: -2px; background: #e8f0fe !important; }
+.excel-sheet-tabs { display: flex; padding: 4px 12px; background: linear-gradient(180deg, #f5f5f5 0%, #e8e8e8 100%); border-top: 1px solid #d0d0d0; gap: 2px; overflow-x: auto; flex-shrink: 0; }
+.excel-sheet-tab { display: flex; align-items: center; gap: 4px; padding: 4px 14px; background: #e0e0e0; border: 1px solid #c0c0c0; border-radius: 3px 3px 0 0; cursor: pointer; color: #333; font-size: 12px; white-space: nowrap; }
+.excel-sheet-tab:hover { background: #d0d0d0; }
+.excel-sheet-tab-active { background: #fff; border-bottom: 1px solid #fff; margin-bottom: -1px; }
+.sheet-row-count { color: #999; font-size: 10px; margin-left: 4px; }
+.sheet-status-badge { margin-left: 6px; padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+.sheet-status-badge.saved { background-color: #4CAF50; color: white; }
+.table-detection-panel { display: flex; flex-direction: column; padding: 8px 12px; background: #f8f9fa; border-top: 1px solid #e0e0e0; gap: 8px; flex-shrink: 0; }
+.table-detection-header { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #0B2044; font-size: 12px; }
+.table-icon { color: #0B2044; }
+.table-mode-toggle { display: flex; gap: 4px; }
+.mode-toggle-btn { flex: 1; padding: 6px 12px; background: #e0e0e0; border: 1px solid #c0c0c0; border-radius: 4px; cursor: pointer; font-size: 11px; color: #333; transition: all 0.2s; }
+.mode-toggle-btn:hover { background: #d0d0d0; }
+.mode-toggle-btn.active { background: #0B2044; color: white; border-color: #0B2044; }
+.table-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.table-select-btn { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: white; border: 1px solid #c0c0c0; border-radius: 4px; cursor: pointer; font-size: 11px; color: #333; transition: all 0.2s; }
+.table-select-btn:hover { background: #f0f0f0; border-color: #0B2044; }
+.table-select-btn.table-selected { background: #e8f0fe; border-color: #0B2044; color: #0B2044; font-weight: 500; }
+.table-select-btn.table-isolated { background: #d4edda; border-color: #28a745; color: #155724; }
+.table-checkbox { font-weight: bold; color: #0B2044; }
+.multi-table-actions { display: flex; gap: 8px; margin-top: 4px; }
+.btn-auto-detect-multi { display: flex; align-items: center; gap: 6px; padding: 8px 16px; background: #0B2044; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; transition: background 0.2s; }
+.btn-auto-detect-multi:hover:not(:disabled) { background: #1a3a6e; }
+.btn-auto-detect-multi:disabled { opacity: 0.6; cursor: not-allowed; }
+.spin-animation { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.btn-clear-selection { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: #f0f0f0; color: #666; border: 1px solid #c0c0c0; border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.2s; }
+.btn-clear-selection:hover { background: #e0e0e0; }
+.table-isolation-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #e3f2fd; border-top: 1px solid #0B2044; flex-shrink: 0; }
+.isolation-info { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #0d47a1; font-size: 12px; }
+.exit-isolation-btn { display: flex; align-items: center; gap: 4px; padding: 4px 12px; background: #fff; border: 1px solid #dc3545; border-radius: 4px; cursor: pointer; font-size: 11px; color: #dc3545; transition: all 0.2s; }
+.exit-isolation-btn:hover { background: #dc3545; color: #fff; }
+.single-instrument-preview { display: flex; flex-direction: column; padding: 12px; background: #e8f5e9; border-top: 1px solid #4caf50; flex-shrink: 0; }
+.preview-header { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #2e7d32; font-size: 12px; margin-bottom: 8px; }
+.preview-icon { color: #4caf50; }
+.preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.preview-item { display: flex; flex-direction: column; padding: 6px 8px; background: #fff; border: 1px solid #c8e6c9; border-radius: 4px; }
+.preview-label { font-size: 10px; color: #666; font-weight: 600; margin-bottom: 2px; }
+.preview-value { font-size: 12px; color: #333; }
+.resize-handle { position: absolute; bottom: 0; left: 0; right: 0; height: 8px; background: linear-gradient(to bottom, transparent, #e0e0e0); cursor: ns-resize; border-top: 1px solid #d0d0d0; z-index: 100; }
+.resize-handle:hover { background: linear-gradient(to bottom, transparent, #c0c0c0); }
 </style>

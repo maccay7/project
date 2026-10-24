@@ -166,6 +166,22 @@
                     <span class="mapping-count">{{ requiredColumns.length }} required fields</span>
                   </v-card-title>
                   <v-card-text class="mapping-dialog-body">
+                    <!-- [NEW] Header Row Selection -->
+                    <div v-if="isolatedTableData && isolatedTableData.rawTableData" class="header-selection-section" style="margin-bottom: 24px; padding: 16px; background: #f0f8ff; border-radius: 8px; border-left: 4px solid #2196F3;">
+                      <label style="font-weight: 600; color: #0B2044; margin-bottom: 8px; display: block; font-size: 14px;">
+                        <v-icon size="16" style="margin-right: 4px; vertical-align: middle;">mdi-format-line-spacing</v-icon>
+                        Select Header Row for Mapping
+                      </label>
+                      <select v-model="selectedHeaderRowIndex" @change="updateIsolatedTableData" class="mapping-select" style="width: 100%;">
+                        <option v-for="(row, idx) in isolatedTableData.rawTableData" :key="idx" :value="idx">
+                          Row {{ idx + 1 }}: {{ row.filter(c => c !== null && String(c).trim() !== '').slice(0, 5).join(' | ') }}{{ row.filter(c => c !== null && String(c).trim() !== '').length > 5 ? ' ...' : '' }}
+                        </option>
+                      </select>
+                      <p style="font-size: 12px; color: #666; margin-top: 8px;">
+                        If the detected column headers below are incorrect, choose the correct row from the dropdown above. The mapping will update automatically.
+                      </p>
+                    </div>
+
                     <div class="mapping-grid">
                       <div v-for="reqCol in requiredColumns" :key="reqCol" class="mapping-row">
                         <label class="required-label">{{ reqCol }}</label>
@@ -304,6 +320,18 @@
                             <span class="multi-detected-field-label">{{ field }}:</span>
                             <span class="multi-detected-field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
                             <span v-if="instrument.fieldsWithMetadata?.[field]?.location" class="multi-detected-field-location">@ {{ instrument.fieldsWithMetadata[field].location }}</span>
+                            <!-- [FIX-MULTICURRENCY] per-field currency selector inside the multi-table popup -->
+                            <div v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1" class="currency-variant-selector">
+                              <select
+                                :value="value.selectedCurrency"
+                                @change="updateMultiTableCurrency(instrument, field, $event.target.value)"
+                                class="currency-select"
+                              >
+                                <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
+                                  {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
+                                </option>
+                              </select>
+                            </div>
                           </div>
                         </div>
                         <div v-if="instrument.missingFields.length > 0" class="multi-missing-fields">
@@ -1770,13 +1798,18 @@ function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, req
     }
     if (!matchedCanonical) matchedCanonical = rawKey
     if (usedCanonical.has(matchedCanonical)) continue
-    const actualValue = rawValue && typeof rawValue === 'object' && 'value' in rawValue
-      ? rawValue.value
-      : rawValue
-    if (semantic !== 'generic' && !isPlausibleValue(matchedCanonical, actualValue)) {
+    // [FIX-MULTICURRENCY] Preserve currencyVariants for multi-currency fields.
+    const isObjectValue = rawValue && typeof rawValue === 'object' && 'value' in rawValue
+    const scalarValue = isObjectValue ? rawValue.value : rawValue
+    const hasMultiCurrency =
+      isObjectValue &&
+      rawValue.currencyVariants &&
+      Object.keys(rawValue.currencyVariants).length > 1
+    const storedValue = hasMultiCurrency ? { ...rawValue } : scalarValue
+    if (semantic !== 'generic' && !isPlausibleValue(matchedCanonical, scalarValue)) {
       continue
     }
-    normalised[matchedCanonical] = actualValue
+    normalised[matchedCanonical] = storedValue
     usedCanonical.add(matchedCanonical)
     const meta = fieldsWithMetadata ? fieldsWithMetadata[rawKey] : null
     const metaCopy = meta && typeof meta === 'object' ? { ...meta } : {}
@@ -1796,8 +1829,10 @@ function deriveDaysToMaturity(fields, metadata) {
   for (const [k, v] of Object.entries(fields)) {
     normalized[normalizeKeyForMatch(k)] = v
   }
-  const startDate = normalized['valuationdate'] || normalized['settlementdate'] || normalized['issuedate']
-  const maturityDate = normalized['maturitydate']
+  // [FIX-MULTICURRENCY] unwrap object values before using them as dates
+  const _unwrap = (v) => (v && typeof v === 'object' && 'value' in v) ? v.value : v
+  const startDate = _unwrap(normalized['valuationdate']) || _unwrap(normalized['settlementdate']) || _unwrap(normalized['issuedate'])
+  const maturityDate = _unwrap(normalized['maturitydate'])
   if (!startDate || !maturityDate) return
   const start = new Date(startDate)
   const maturity = new Date(maturityDate)
@@ -2150,6 +2185,7 @@ const currentSheetName = ref('')
 const selectedSectionId = ref('')
 const singleInstrumentExtractedValues = ref({})
 const isolatedTableData = ref(null)
+const selectedHeaderRowIndex = ref(0) // [NEW] Track header row selection
 const autoDetectedFields = ref({})
 const autoDetectedFieldsWithMetadata = ref({})
 const autoDetectedAdditionalFields = ref({})
@@ -3228,22 +3264,69 @@ function handleSingleInstrumentExtracted({ sheetName, extractedValues }) {
   singleInstrumentExtractedValues.value = extractedValues
 }
 
-function handleTableIsolated({ sheetName, tableName, data, headers, tableRange }) {
+// [NEW] Handle header row selection & re-mapping
+function handleTableIsolated({ sheetName, tableName, rawTableData, headerRowIndex, tableRange }) {
   currentSheetName.value = sheetName
   clearActiveCache(true)
-  isolatedTableData.value = { sheetName, tableName, data, headers, tableRange }
+  
+  // Store the raw 2D data so the user can switch header rows
+  isolatedTableData.value = { sheetName, tableName, rawTableData, tableRange }
+  selectedHeaderRowIndex.value = headerRowIndex !== undefined ? headerRowIndex : 0
+  
   showWorkbookViewer.value = false
-  rawData.value = data
-  originalRawData.value = JSON.parse(JSON.stringify(data))
-  fileColumns.value = headers
-  originalFileColumns.value = [...headers]
   currentMappingTemplateId.value = null
   showMappingDialog.value = true
   mappingApplied.value = false
-  columnMapping.value = autoMatchColumns(headers, requiredColumns.value, columnVariations.value)
-  applyCurrentMapping()
+  
+  // Generate headers and map fields based on the default header row
+  updateIsolatedTableData()
+  
   worksheetSelected.value = true
   showPreview.value = true
+}
+
+// [NEW] Recalculate mapping when the user changes the header row
+function updateIsolatedTableData() {
+  if (!isolatedTableData.value || !isolatedTableData.value.rawTableData) return
+  
+  const raw = isolatedTableData.value.rawTableData
+  const hIdx = selectedHeaderRowIndex.value
+  if (hIdx < 0 || hIdx >= raw.length) return
+  
+  // Extract headers from the chosen row
+  const headers = raw[hIdx].map((h, i) => 
+    h !== null && h !== undefined && String(h).trim() !== '' ? String(h).trim() : `Column ${i + 1}`
+  )
+  
+  // Handle duplicate headers to prevent mapping overwrites
+  const seen = new Set()
+  const uniqueHeaders = headers.map(h => {
+    let base = h
+    let n = 2
+    while (seen.has(h)) { h = `${base} (${n++})` }
+    seen.add(h)
+    return h
+  })
+  
+  // Extract data rows (everything below the selected header row)
+  const dataRows = []
+  for (let r = hIdx + 1; r < raw.length; r++) {
+    const obj = {}
+    for (let c = 0; c < uniqueHeaders.length; c++) {
+      obj[uniqueHeaders[c]] = raw[r][c] !== undefined ? raw[r][c] : ''
+    }
+    dataRows.push(obj)
+  }
+  
+  // Update the live state
+  rawData.value = dataRows
+  originalRawData.value = JSON.parse(JSON.stringify(dataRows))
+  fileColumns.value = uniqueHeaders
+  originalFileColumns.value = [...uniqueHeaders]
+  
+  // Instantly re-run auto-matching so the UI updates
+  columnMapping.value = autoMatchColumns(uniqueHeaders, requiredColumns.value, columnVariations.value)
+  applyCurrentMapping()
 }
 
 async function handleAutoDetectSheet(sheetName) {
@@ -3755,34 +3838,54 @@ async function handleMultiTableDetect(event) {
   }
 }
 
+// [FIX-MULTICURRENCY] Preserve multi-currency fields (with currencyVariants)
+// in autoDetectedFields while still committing the currently-selected scalar
+// values into rawData / cleanedData / extractedValues.
 function useMultiTableDetectedFields() {
   showMultiTableDetectionSuccess.value = false
   showWorkbookViewer.value = false
-  const combinedFields = {}
+
+  const fullFields = {}    // preserve object shape when >1 currency
+  const displayFields = {} // scalar snapshot for rawData / cleanedData
+
   for (const instrument of multiTableDetectionResults.value) {
     for (const [key, fieldObj] of Object.entries(instrument.fields)) {
-      const actualValue = typeof fieldObj === 'object' && fieldObj !== null ? fieldObj.value : fieldObj
-      if (!(key in combinedFields)) {
-        combinedFields[key] = actualValue
+      if (key in fullFields) continue
+      const isMulti =
+        typeof fieldObj === 'object' && fieldObj !== null &&
+        fieldObj.currencyVariants &&
+        Object.keys(fieldObj.currencyVariants).length > 1
+      if (isMulti) {
+        fullFields[key] = { ...fieldObj }
+        const cur = fieldObj.selectedCurrency || Object.keys(fieldObj.currencyVariants)[0]
+        displayFields[key] = fieldObj.currencyVariants[cur]
+      } else {
+        const scalar = typeof fieldObj === 'object' && fieldObj !== null ? fieldObj.value : fieldObj
+        fullFields[key] = scalar
+        displayFields[key] = scalar
       }
     }
   }
-  if (!combinedFields.InstrumentName && multiTableDetectionResults.value.length > 0) {
-    combinedFields.InstrumentName = multiTableDetectionResults.value[0].instrumentName || ''
+
+  if (!displayFields.InstrumentName && multiTableDetectionResults.value.length > 0) {
+    const fallback = multiTableDetectionResults.value[0].instrumentName || ''
+    displayFields.InstrumentName = fallback
+    fullFields.InstrumentName = fullFields.InstrumentName || fallback
   }
-  const tabularData = [combinedFields]
+
+  const tabularData = [displayFields]
   rawData.value = tabularData
   originalRawData.value = JSON.parse(JSON.stringify(tabularData))
   cleanedData.value = JSON.parse(JSON.stringify(tabularData))
-  const headers = Object.keys(combinedFields)
+  const headers = Object.keys(displayFields)
   fileColumns.value = headers
   originalFileColumns.value = [...headers]
   worksheetSelected.value = true
   showPreview.value = true
   sheetType.value = 'single'
   mappingApplied.value = true
-  extractedValues.value = combinedFields
-  autoDetectedFields.value = combinedFields
+  extractedValues.value = { ...displayFields }
+  autoDetectedFields.value = fullFields
   activeTab.value = 'cleaning'
 }
 
@@ -3811,14 +3914,62 @@ function formatDetectedValue(field, value) {
   return String(value)
 }
 
+// [FIX-MULTICURRENCY] Full propagation. Previously this function did nothing
+// because it accessed autoDetectedFields[fieldName] (the Ref object) instead
+// of autoDetectedFields.value[fieldName] (the actual field). This version
+// also mirrors the new value into Cleaning / Calculations / Summary, then
+// saves and re-runs calculations so every downstream page updates.
 function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
-  const targetFields = isAdditional ? autoDetectedAdditionalFields : autoDetectedFields
+  const targetRef = isAdditional ? autoDetectedAdditionalFields : autoDetectedFields
+  const targetFields = targetRef.value || {}
   const fieldData = targetFields[fieldName]
-  if (fieldData && fieldData.currencyVariants && fieldData.currencyVariants[currency]) {
-    fieldData.selectedCurrency = currency
-    fieldData.value = fieldData.currencyVariants[currency]
-    fieldData.currency = currency
+  if (!fieldData || !fieldData.currencyVariants || fieldData.currencyVariants[currency] === undefined) return
+
+  const newValue = fieldData.currencyVariants[currency]
+
+  // 1. update the field object itself
+  fieldData.selectedCurrency = currency
+  fieldData.value = newValue
+  fieldData.currency = currency
+
+  // 2. mirror into the other bucket if the same field name exists there
+  const otherRef = isAdditional ? autoDetectedFields : autoDetectedAdditionalFields
+  const otherFields = otherRef.value || {}
+  if (otherFields[fieldName] && otherFields[fieldName] !== fieldData) {
+    otherFields[fieldName].selectedCurrency = currency
+    otherFields[fieldName].value = newValue
+    otherFields[fieldName].currency = currency
   }
+
+  // 3. metadata
+  if (autoDetectedFieldsWithMetadata.value[fieldName]) {
+    autoDetectedFieldsWithMetadata.value[fieldName].selectedCurrency = currency
+    autoDetectedFieldsWithMetadata.value[fieldName].value = newValue
+  }
+
+  // 4. live data stores (single-row instruments)
+  if (extractedValues.value) extractedValues.value[fieldName] = newValue
+  if (rawData.value.length > 0 && fieldName in rawData.value[0]) rawData.value[0][fieldName] = newValue
+  if (originalRawData.value.length > 0 && fieldName in originalRawData.value[0]) originalRawData.value[0][fieldName] = newValue
+  if (cleanedData.value.length > 0 && fieldName in cleanedData.value[0]) cleanedData.value[0][fieldName] = newValue
+
+  // 5. persist + recalc so Calculations / Summary / Portfolio Summary reflect it
+  debouncedSave()
+  if (cleanedData.value.length > 0) {
+    calculateMetrics().catch(() => { /* non-fatal */ })
+  }
+  forceUpdate.value++
+}
+
+// [FIX-MULTICURRENCY] Per-field currency change inside the multi-table popup.
+function updateMultiTableCurrency(instrument, fieldName, currency) {
+  const fieldData = instrument.fields[fieldName]
+  if (!fieldData || !fieldData.currencyVariants || fieldData.currencyVariants[currency] === undefined) return
+  fieldData.selectedCurrency = currency
+  fieldData.value = fieldData.currencyVariants[currency]
+  fieldData.currency = currency
+  // reactive nudge so the popup re-renders with the new selected value
+  multiTableDetectionResults.value = [...multiTableDetectionResults.value]
 }
 
 async function handleCustomCurrencyInput() {
