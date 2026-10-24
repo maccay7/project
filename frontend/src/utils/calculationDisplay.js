@@ -96,7 +96,12 @@ export function buildAggregatesFromBackend (aggregates = {}, rowCalc = null, ins
       yearsToMaturity: fromSources(aggregates, row, ['years_to_maturity'], ['yearsToMaturity']),
       frequency: fromSources(aggregates, row, ['coupon_frequency', 'frequency'], ['frequency']),
       daysAccrued: fromSources(aggregates, row, ['days_accrued'], ['daysAccrued']),
-      yieldCurveRate: fromSources(aggregates, row, ['yield_curve_rate'], ['yieldCurveRate'])
+      yieldCurveRate: fromSources(aggregates, row, ['yield_curve_rate'], ['yieldCurveRate']),
+      convexity: fromSources(aggregates, row, ['convexity'], ['convexity']),
+      dv01: fromSources(aggregates, row, ['dv01'], ['dv01']),
+      presentValue: fromSources(aggregates, row, ['present_value'], ['presentValue']),
+      fairValue: fromSources(aggregates, row, ['fair_value'], ['fairValue']),
+      ytmInput: fromSources(aggregates, row, ['ytm_input'], ['ytmInput'])
     }
   }
 
@@ -121,7 +126,10 @@ export function buildAggregatesFromBackend (aggregates = {}, rowCalc = null, ins
     discountAmount: fromSources(aggregates, row, ['discount_amount'], ['discountAmount']),
     avgInvestment: fromSources(aggregates, row, ['avg_investment'], ['avgInvestment']),
     annualizedYield: fromSources(aggregates, row, ['annualized_yield'], ['annualizedYield']),
-    yieldCurveRate: fromSources(aggregates, row, ['yield_curve_rate'], ['yieldCurveRate'])
+    yieldCurveRate: fromSources(aggregates, row, ['yield_curve_rate'], ['yieldCurveRate']),
+    maturityValue: fromSources(aggregates, row, ['maturity_value'], ['maturityValue']),
+    presentValue: fromSources(aggregates, row, ['present_value'], ['presentValue']),
+    fairValue: fromSources(aggregates, row, ['fair_value'], ['fairValue'])
   }
 }
 

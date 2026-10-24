@@ -1934,25 +1934,15 @@ const instrumentConfigs = ref({
     weightedRateKey: 'weightedAvgRate',
     fredDefault: '1Y',
     calculationFields: [
-      { key: 'totalValue', label: 'Total Value (Maturity)' },
-      { key: 'totalPrincipal', label: 'Total Principal' },
-      { key: 'interestEarned', label: 'Interest Earned' },
-      { key: 'totalInterest', label: 'Total Interest' },
-      { key: 'interestRate', label: 'Interest Rate', suffix: '%' },
-      { key: 'avgRate', label: 'Average Rate', suffix: '%' },
-      { key: 'weightedAvgRate', label: 'Weighted Average Rate', suffix: '%' },
-      { key: 'effectiveYield', label: 'Effective Yield', suffix: '%' },
+      { key: 'totalValue',          label: 'Total Value (Maturity)' },
+      { key: 'totalPrincipal',      label: 'Total Principal' },
+      { key: 'totalInterest',       label: 'Total Interest' },
+      { key: 'avgRate',             label: 'Average Rate', suffix: '%' },
+      { key: 'weightedAvgRate',     label: 'Weighted Average Rate', suffix: '%' },
       { key: 'effectiveAnnualRate', label: 'Effective Annual Rate', suffix: '%' },
-      { key: 'bondEquivalentYield', label: 'Bond Equivalent Yield', suffix: '%' },
-      { key: 'discountYield', label: 'Discount Yield', suffix: '%' },
-      { key: 'avgDaysToMaturity', label: 'Average Days to Maturity', suffix: ' days' },
-      { key: 'termDays', label: 'Term Days' },
-      { key: 'daysToMaturity', label: 'Days to Maturity' },
-      { key: 'maturityValue', label: 'Maturity Value' },
-      { key: 'presentValue', label: 'Present Value' },
-      { key: 'fairValue', label: 'Fair Value' },
-      { key: 'yieldCurveRate', label: 'Benchmark Rate', suffix: '%' },
-      { key: 'annualYield', label: 'Annual Yield', suffix: '%' }
+      { key: 'discountYield',       label: 'Discount Yield', suffix: '%' },
+      { key: 'avgDaysToMaturity',   label: 'Average Days to Maturity', suffix: ' days' },
+      { key: 'yieldCurveRate',      label: 'Benchmark Rate', suffix: '%' }
     ],
     summaryMetrics: [
       { key: 'totalValue', label: 'Total Portfolio Value' },
@@ -1976,29 +1966,22 @@ const instrumentConfigs = ref({
     weightedRateKey: 'weightedAvgCoupon',
     fredDefault: '10Y',
     calculationFields: [
-      { key: 'totalValue', label: 'Total Market Value' },
-      { key: 'totalFaceValue', label: 'Total Face Value' },
-      { key: 'totalMarketValue', label: 'Total Market Value' },
-      { key: 'currentPrice', label: 'Current Price' },
-      { key: 'pricePer100', label: 'Price per 100' },
-      { key: 'couponRate', label: 'Coupon Rate', suffix: '%' },
-      { key: 'avgCouponRate', label: 'Average Coupon Rate', suffix: '%' },
+      { key: 'totalValue',        label: 'Total Market Value' },
+      { key: 'totalFaceValue',    label: 'Total Face Value' },
+      { key: 'pricePer100',       label: 'Price per 100' },
+      { key: 'avgCouponRate',     label: 'Average Coupon Rate', suffix: '%' },
       { key: 'weightedAvgCoupon', label: 'Weighted Average Coupon', suffix: '%' },
       { key: 'totalAnnualIncome', label: 'Total Annual Coupon Income' },
-      { key: 'annualCoupon', label: 'Annual Coupon' },
-      { key: 'couponPerPeriod', label: 'Coupon per Period' },
-      { key: 'yieldToMaturity', label: 'Yield to Maturity', suffix: '%' },
-      { key: 'avgYTM', label: 'Average YTM', suffix: '%' },
-      { key: 'currentYield', label: 'Current Yield', suffix: '%' },
-      { key: 'duration', label: 'Macaulay Duration (years)' },
-      { key: 'modifiedDuration', label: 'Modified Duration (years)' },
-      { key: 'accruedInterest', label: 'Accrued Interest' },
-      { key: 'presentValue', label: 'Present Value' },
-      { key: 'fairValue', label: 'Fair Value' },
-      { key: 'yearsToMaturity', label: 'Years to Maturity' },
-      { key: 'frequency', label: 'Coupon Frequency' },
-      { key: 'daysAccrued', label: 'Days Accrued' },
-      { key: 'yieldCurveRate', label: 'Benchmark Rate', suffix: '%' }
+      { key: 'couponPerPeriod',   label: 'Coupon per Period' },
+      { key: 'avgYTM',            label: 'Average YTM', suffix: '%' },
+      { key: 'currentYield',      label: 'Current Yield', suffix: '%' },
+      { key: 'duration',          label: 'Macaulay Duration (years)' },
+      { key: 'modifiedDuration',  label: 'Modified Duration (years)' },
+      { key: 'convexity',         label: 'Convexity' },
+      { key: 'dv01',              label: 'DV01' },
+      { key: 'accruedInterest',   label: 'Accrued Interest' },
+      { key: 'yearsToMaturity',   label: 'Years to Maturity' },
+      { key: 'yieldCurveRate',    label: 'Benchmark Rate', suffix: '%' }
     ],
     summaryMetrics: [
       { key: 'totalValue', label: 'Total Portfolio Value' },
@@ -2024,27 +2007,17 @@ const instrumentConfigs = ref({
     weightedRateKey: 'weightedAvgDiscount',
     fredDefault: '13W',
     calculationFields: [
-      { key: 'totalValue', label: 'Total Value (Face Value)' },
-      { key: 'totalFaceValue', label: 'Total Face Value' },
-      { key: 'totalPurchasePrice', label: 'Total Purchase Price' },
-      { key: 'totalDiscount', label: 'Total Discount Amount' },
-      { key: 'discountRate', label: 'Discount Rate', suffix: '%' },
-      { key: 'avgDiscountRate', label: 'Average Discount Rate', suffix: '%' },
-      { key: 'weightedAvgDiscount', label: 'Weighted Average Discount', suffix: '%' },
-      { key: 'discountYield', label: 'Discount Yield', suffix: '%' },
-      { key: 'moneyMarketYield', label: 'Money Market Yield', suffix: '%' },
-      { key: 'bondEquivalentYield', label: 'Bond Equivalent Yield', suffix: '%' },
-      { key: 'holdingPeriodYield', label: 'Holding Period Yield', suffix: '%' },
-      { key: 'effectiveAnnualYield', label: 'Effective Annual Yield', suffix: '%' },
-      { key: 'avgDaysToMaturity', label: 'Average Days to Maturity', suffix: ' days' },
-      { key: 'termDays', label: 'Term Days' },
-      { key: 'daysToMaturity', label: 'Days to Maturity' },
-      { key: 'maturityValue', label: 'Maturity Value' },
-      { key: 'presentValue', label: 'Present Value' },
-      { key: 'fairValue', label: 'Fair Value' },
-      { key: 'yieldCurveRate', label: 'Benchmark Rate', suffix: '%' },
-      { key: 'avgInvestment', label: 'Average Investment' },
-      { key: 'annualizedYield', label: 'Annualized Yield', suffix: '%' }
+      { key: 'totalFaceValue',        label: 'Total Face Value' },
+      { key: 'totalPurchasePrice',    label: 'Total Purchase Price' },
+      { key: 'totalDiscount',         label: 'Total Discount Amount' },
+      { key: 'avgDiscountRate',       label: 'Average Discount Rate', suffix: '%' },
+      { key: 'weightedAvgDiscount',   label: 'Weighted Average Discount', suffix: '%' },
+      { key: 'moneyMarketYield',      label: 'Money Market Yield', suffix: '%' },
+      { key: 'bondEquivalentYield',   label: 'Bond Equivalent Yield', suffix: '%' },
+      { key: 'holdingPeriodYield',    label: 'Holding Period Yield', suffix: '%' },
+      { key: 'effectiveAnnualYield',  label: 'Effective Annual Yield', suffix: '%' },
+      { key: 'avgDaysToMaturity',     label: 'Average Days to Maturity', suffix: ' days' },
+      { key: 'yieldCurveRate',        label: 'Benchmark Rate', suffix: '%' }
     ],
     summaryMetrics: [
       { key: 'totalValue', label: 'Total Portfolio Value' },
@@ -2491,7 +2464,20 @@ const benchmarkYield = computed(() => {
 
 const EXCLUDED_COLUMNS = new Set([
   '_raw', '_source', 'index', '__v',
-  '_row_index', 'valuationtype'
+  '_row_index', 'valuationtype',
+  'workbook', 'worksheet',                       // ids, not results
+  'currency', 'currencycode', 'ccy', 'currency_code',   // metadata
+  'calculationerrors', 'calculation_errors',     // step-level error array
+  'missingprerequisites', 'missing_prerequisites',       // error array
+  'ytminput', 'ytm_input',                       // helper fields
+  'ytmsource', 'ytm_source',
+  'instrument_name', 'instrumentname',           // ids
+  'instrument_type', 'instrumenttype',
+  'valuation_date', 'valuationdate',
+  'maturity_date', 'maturitydate',
+  'issue_date', 'issuedate',
+  'settlement_date', 'settlementdate',
+  'last_coupon_date', 'lastcoupondate'
 ].map(s => s.toLowerCase().replace(/[_\s\-]+/g, '')))
 
 function isExcludedColumn(col) {
@@ -2624,20 +2610,85 @@ const calculationFields = computed(() => {
   const fields = config.value.calculationFields || []
   const allCalc = allCalculations.value || {}
   const selectedCalc = selectedCalculations.value || {}
-  return fields
-    .map(field => {
-      let value = selectedCalc[field.key] !== undefined ? selectedCalc[field.key] :
-                  allCalc[field.key] !== undefined ? allCalc[field.key] :
-                  selectedCalc[toSnakeCase(field.key)] !== undefined ? selectedCalc[toSnakeCase(field.key)] :
-                  allCalc[toSnakeCase(field.key)] !== undefined ? allCalc[toSnakeCase(field.key)] : null
-      if (value === null || value === undefined) {
-        const agg = allCalc.agg || selectedCalc.agg || {}
-        value = agg[field.key] !== undefined ? agg[field.key] :
-                agg[toSnakeCase(field.key)] !== undefined ? agg[toSnakeCase(field.key)] : null
-      }
-      return { ...field, value }
+  
+  const result = fields.map(field => {
+    let value = selectedCalc[field.key] !== undefined ? selectedCalc[field.key] :
+                allCalc[field.key] !== undefined ? allCalc[field.key] :
+                selectedCalc[toSnakeCase(field.key)] !== undefined ? selectedCalc[toSnakeCase(field.key)] :
+                allCalc[toSnakeCase(field.key)] !== undefined ? allCalc[toSnakeCase(field.key)] : null
+    if (value === null || value === undefined) {
+      const agg = allCalc.agg || selectedCalc.agg || {}
+      value = agg[field.key] !== undefined ? agg[field.key] :
+              agg[toSnakeCase(field.key)] !== undefined ? agg[toSnakeCase(field.key)] : null
+    }
+    return { ...field, value }
+  })
+  
+  // Add any dynamically calculated fields that aren't in the hardcoded config
+  const knownKeys = new Set(result.map(f => f.key))
+  const knownSnakeKeys = new Set(result.map(f => toSnakeCase(f.key)))
+  
+  // Fields that must NEVER be added dynamically as KPI cards, even if they
+  // are present in the backend aggregate. Either they duplicate a static
+  // card (maturityValue/fairValue/presentValue ≡ totalValue/principal), or
+  // they are metadata (currency, error arrays, dates, ids) that belong in
+  // the audit trail — not in the KPI grid.
+  const DYNAMIC_BLOCK = new Set([
+    'agg', 'derivations', 'fred',
+    'instrumentCount', 'instrument_count',
+    'totalValue', 'total_value',
+    'avgRate', 'avg_rate',
+    'status', 'error', 'message',
+    'missing_fields', 'invalid_fields',
+    // duplicates of totalValue / principal
+    'maturityValue', 'maturity_value',
+    'fairValue', 'fair_value',
+    'presentValue', 'present_value',
+    // metadata / non-KPI
+    'currency', 'currencyCode', 'ccy', 'currency_code',
+    'calculationErrors', 'calculation_errors',
+    'missingPrerequisites', 'missing_prerequisites',
+    'warning',
+    'ytmInput', 'ytm_input',
+    'ytmSource', 'ytm_source',
+    'instrument_name', 'instrumentName',
+    'instrument_type', 'instrumentType',
+    'valuation_date', 'valuationDate',
+    'maturity_date', 'maturityDate',
+    'issue_date', 'issueDate',
+    'settlement_date', 'settlementDate',
+    'last_coupon_date', 'lastCouponDate',
+    'worksheet', 'workbook',
+    // inputs already shown by static cards
+    'principal', 'faceValue', 'face_value',
+    'couponRate', 'coupon_rate',
+    'interestRate', 'interest_rate',
+    'discountRate', 'discount_rate'
+  ])
+
+  for (const key of Object.keys(allCalc)) {
+    if (knownKeys.has(key) || knownSnakeKeys.has(toSnakeCase(key))) continue
+    if (DYNAMIC_BLOCK.has(key)) continue
+
+    let label = formatColumnHeader(key)
+    if (label === 'Dv01') label = 'DV01'
+    if (label === 'Ytm') label = 'YTM'
+    if (label === 'Ytm Input') label = 'YTM Input'
+
+    result.push({
+      key: key,
+      label: label,
+      value: allCalc[key]
     })
-    .filter(field => field.value !== null && field.value !== undefined && field.value !== '')
+  }
+  
+  // Filter out boxes that have no genuine value (null, undefined, empty, NaN, Infinity)
+  return result.filter(field => {
+    if (field.value === null || field.value === undefined || field.value === '') return false
+    if (typeof field.value === 'number' && (isNaN(field.value) || !isFinite(field.value))) return false
+    if (typeof field.value === 'string' && ['nan', 'infinity', '-infinity'].includes(field.value.toLowerCase())) return false
+    return true
+  })
 })
 
 function toSnakeCase(str) {
@@ -2695,17 +2746,31 @@ function normalizeFieldName(fieldName) {
 }
 
 function formatCalcValue(key, value) {
-  if (value === null || value === undefined) return '—'
-  const field = config.value.calculationFields.find(f => f.key === key)
-  if (!field) return value
-  if (typeof value === 'number' && !isNaN(value)) {
-    const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(key.toLowerCase())
-    if (isTimeField) {
+  if (value === null || value === undefined || value === '') return '—'
+  if (typeof value === 'number' && (isNaN(value) || !isFinite(value))) return '—'
+  if (typeof value === 'string' && ['nan', 'infinity', '-infinity'].includes(value.toLowerCase())) return '—'
+
+  const field = config.value.calculationFields.find(f => f.key === key) || {}
+  const lc = key.toLowerCase()
+
+  if (typeof value === 'number') {
+    // Only exact whole-day keys round to integers. Value keys (maturityValue,
+    // presentValue, fairValue) and duration/years keys that need decimal
+    // precision are NOT in this list, so `maturityValue: 59,855,497.04` keeps
+    // its decimals and `yearsToMaturity: 4.50` stays decimal.
+    const isDayCountKey =
+      lc === 'termdays' || lc === 'term_days' ||
+      lc === 'daystomaturity' || lc === 'days_to_maturity' ||
+      lc === 'avgdaystomaturity' || lc === 'avg_days_to_maturity' ||
+      lc === 'daysaccrued' || lc === 'days_accrued' ||
+      lc === 'dayssinceissue' || lc === 'days_since_issue'
+    if (isDayCountKey) {
       const rounded = Math.round(value)
       if (field.prefix) return field.prefix + rounded.toLocaleString()
       if (field.suffix) return rounded.toLocaleString() + field.suffix
       return rounded.toLocaleString()
     }
+
     const rounded = Math.round(value * 100) / 100
     if (field.prefix) return field.prefix + rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     if (field.suffix) return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + field.suffix
@@ -7040,19 +7105,39 @@ function showFormula(metricKey) {
   if (!handled) {
     const value = getVal(metricKey)
     const label = (config.value.calculationFields.find(f => f.key === metricKey) || {}).label || metricKey
+    
+    // Check if there's a specific error or missing field diagnostic from the backend
+    const backendError = allCalculations.value?.error || allCalculations.value?.message
+    const backendMissing = allCalculations.value?.missing_fields || []
+    const backendInvalid = allCalculations.value?.invalid_fields || []
+    
     if (value !== null && value !== undefined) {
       const numeric = parseFloat(value)
       pushInput('Reported value', !isNaN(numeric) ? fmtNum(numeric) : String(value))
       pushInput('Source', 'Calculation engine (aggregate)')
       pushStep('Note', `No dedicated step-by-step breakdown is implemented for "${label}" — the raw aggregate value returned by the backend is shown above.`, 'Generic fallback')
-    } else {
+    } else if (backendError || backendMissing.length > 0 || backendInvalid.length > 0) {
       pushInput('Metric key', metricKey)
-      pushInput('Inputs detected', Object.keys(firstRow).join(', ') || 'none')
+      if (backendError) details.push({ label: '⚠ Backend Error', value: backendError, formula: 'Error state' })
+      if (backendMissing.length) details.push({ label: '⚠ Missing Inputs', value: backendMissing.join(', '), formula: 'Validation' })
+      if (backendInvalid.length) details.push({ label: '⚠ Invalid Inputs', value: backendInvalid.map(f => typeof f === 'object' ? f.field : f).join(', '), formula: 'Validation' })
+    } else {
+      // Determine why it's missing based on the actual cleaned data
+      const availableInputs = Object.keys(firstRow).filter(k => firstRow[k] !== null && firstRow[k] !== undefined && firstRow[k] !== '')
+      
       details.push({
-        label: '⚠ Not calculated',
-        value: `The backend did not return a value for "${label}". Likely causes: (1) a required input field was missing or excluded during cleaning, (2) validation rejected the row, or (3) this metric is not calculated for the current instrument type.`,
+        label: '⚠ Not Calculated',
+        value: `The backend did not return a value for "${label}". The required inputs for this formula were either not present in the cleaned data, or the calculation resulted in an undefined or infinite value.`,
         formula: 'Diagnostic'
       })
+      
+      if (availableInputs.length > 0) {
+        details.push({
+          label: 'Inputs available during calculation',
+          value: availableInputs.join(', '),
+          formula: 'Diagnostic'
+        })
+      }
     }
   }
 
