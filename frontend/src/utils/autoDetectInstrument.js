@@ -379,6 +379,14 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     contextPatterns: ['yield', 'ytm', 'yield to maturity'],
     typicalRange: [0, 100]
   },
+  instrument_name: {
+    semanticConcept: 'instrument or security name',
+    valueTypes: ['text'],
+    keywords: SPECIFIC_ALIASES.instrument_name,
+    excludeKeywords: ['%', '0.00', '0.0', 'rate', 'yield', 'discount', 'coupon', 'interest'],
+    contextPatterns: ['name', 'security', 'instrument', 'issuer', 'counterparty'],
+    rejectPatterns: ['^\\d+\\.\\d+%$', '^\\d+%$', '^0+$']
+  },
   country_risk_premium: {
     semanticConcept: 'country risk premium',
     valueTypes: ['percentage'],
@@ -497,7 +505,7 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     valueTypes: ['text'],
     keywords: ['name', 'bond', 'instrument', 'security'],
     contextPatterns: ['bond name', 'instrument name', 'security name']
-  }
+  },
 }
 
 // ============================================================================
@@ -605,6 +613,15 @@ function calculateSemanticMatchScore(label, value, fieldDef, context) {
   const labelLower = String(label || '').toLowerCase()
   const valueStr = String(value || '').trim()
   const valueType = getValueType(value)
+  
+  if (fieldDef.rejectPatterns) {
+    for (const pattern of fieldDef.rejectPatterns) {
+      const regex = new RegExp(pattern, 'i')
+      if (regex.test(valueStr) || regex.test(labelLower)) {
+        return 0
+      }
+    }
+  }
   
   if (fieldDef.valueTypes && fieldDef.valueTypes.length > 0) {
     if (fieldDef.valueTypes.includes(valueType)) {
@@ -1326,6 +1343,21 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   }
   console.log('Detected currencies:', currencies)
 
+  const dateValidationWarnings = []
+  const valuationDate = primaryFields['Valuation Date'] || primaryFields['valuation_date'] || additionalFields['valuation_date']
+  const maturityDate = primaryFields['Maturity Date'] || primaryFields['maturity_date'] || additionalFields['maturity_date']
+  const issueDate = primaryFields['Issue Date'] || primaryFields['issue_date'] || additionalFields['issue_date']
+
+  if (valuationDate && maturityDate) {
+    const vDate = new Date(valuationDate)
+    const mDate = new Date(maturityDate)
+    if (!isNaN(vDate.getTime()) && !isNaN(mDate.getTime())) {
+      if (mDate < vDate) {
+        dateValidationWarnings.push(`Maturity date (${maturityDate}) is before valuation date (${valuationDate})`)
+      }
+    }
+  }
+
   const missingFields = requiredColumns.filter(col => !primaryFields[col])
 
   console.log('=== Final Detection Result ===')
@@ -1338,7 +1370,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     fieldsWithMetadata: primaryFieldsWithMetadata,
     currencies,
     missingFields,
-    additionalFields
+    additionalFields,
+    warnings: dateValidationWarnings
   }
 }
 

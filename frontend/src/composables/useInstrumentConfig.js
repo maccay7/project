@@ -54,15 +54,14 @@ const STATIC_CONFIGS = {
   'tbills': {
     required_columns: [
       'TBillName', 'FaceValue', 'DiscountRate',
-      'Auction Date', 'Maturity Date', 'Days to Maturity'
+      'Valuation Date', 'Maturity Date'
     ],
     column_variations: {
-      'TBillName': ['TBillName', 'T-Bill', 'Security', 'Name', 'Description', 'Issuer'],
+      'TBillName': ['TBillName', 'T-Bill', 'Security', 'Name', 'Description', 'Issuer', 'Counterparty'],
       'FaceValue': ['FaceValue', 'Amount', 'Principal', 'Value', 'Notional', 'Nominal', 'Par Value'],
-      'DiscountRate': ['DiscountRate', 'Rate', 'Discount', 'Yield'],
-      'DaysToMaturity': ['DaysToMaturity', 'Term', 'Maturity', 'Tenor', 'Period'],
-      'Auction Date': ['Auction Date', 'Trade Date', 'Settlement Date'],
-      'Maturity Date': ['Maturity Date', 'End Date', 'Redemption Date']
+      'DiscountRate': ['DiscountRate', 'Rate', 'Discount', 'Yield', 'Discount rate'],
+      'Valuation Date': ['Valuation Date', 'Auction Date', 'Trade Date', 'Settlement Date', 'Issue Date'],
+      'Maturity Date': ['Maturity Date', 'End Date', 'Redemption Date', 'Due Date']
     },
     workflow_steps: [
       { tab: 'upload', name: 'Upload', order: 1 },

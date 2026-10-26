@@ -845,15 +845,26 @@
                     <v-icon size="48" color="#999">mdi-calculator-variant-outline</v-icon>
                     <p>No calculated values available. Ensure the required inputs are present in the cleaned data.</p>
                   </div>
-                  <div v-else class="calculations-grid">
-                    <div
-                      v-for="calc in calculationFields"
-                      :key="calc.key"
-                      class="calculation-card"
-                      @click="showFormula(calc.key)"
-                    >
-                      <div class="calc-name">{{ calc.label }}</div>
-                      <div class="calc-value">{{ formatCalcValue(calc.key, calc.value) }}</div>
+                  <div v-else>
+                    <div v-if="allCalculations.missing_fields?.length || allCalculations.invalid_fields?.length || allCalculations.status === 'partial'" class="calc-warning-banner">
+                      <v-icon size="20" color="#e65100">mdi-alert</v-icon>
+                      <span>
+                        <strong>Partial calculation:</strong>
+                        <span v-if="allCalculations.missing_fields?.length"> Missing: {{ allCalculations.missing_fields.join(', ') }}</span>
+                        <span v-if="allCalculations.invalid_fields?.length"> Invalid: {{ allCalculations.invalid_fields.map(f => typeof f === 'object' ? f.field : f).join(', ') }}</span>
+                        <span v-if="allCalculations.status === 'error'"> {{ allCalculations.message }}</span>
+                      </span>
+                    </div>
+                    <div class="calculations-grid">
+                      <div
+                        v-for="calc in calculationFields"
+                        :key="calc.key"
+                        class="calculation-card"
+                        @click="showFormula(calc.key)"
+                      >
+                        <div class="calc-name">{{ calc.label }}</div>
+                        <div class="calc-value">{{ formatCalcValue(calc.key, calc.value) }}</div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2230,6 +2241,7 @@ const detectedCurrencies = ref([])
 const detectedInstrumentType = ref('')
 const selectedCurrency = ref('')
 const isDetecting = ref(false)
+const detectionWarnings = ref([])
 const detectionStatus = ref('idle')
 const isCalculating = ref(false)
 
@@ -2611,6 +2623,10 @@ const calculationFields = computed(() => {
   const allCalc = allCalculations.value || {}
   const selectedCalc = selectedCalculations.value || {}
   
+  const missingFields = allCalc.missing_fields || allCalc.missingPrerequisites || []
+  const invalidFields = allCalc.invalid_fields || []
+  const calcStatus = allCalc.status || selectedCalc.status || 'unknown'
+  
   const result = fields.map(field => {
     let value = selectedCalc[field.key] !== undefined ? selectedCalc[field.key] :
                 allCalc[field.key] !== undefined ? allCalc[field.key] :
@@ -2621,74 +2637,20 @@ const calculationFields = computed(() => {
       value = agg[field.key] !== undefined ? agg[field.key] :
               agg[toSnakeCase(field.key)] !== undefined ? agg[toSnakeCase(field.key)] : null
     }
-    return { ...field, value }
+    
+    let unavailableReason = null
+    if (calcStatus === 'error' || calcStatus === 'cannot_calculate') {
+      unavailableReason = allCalc.message || selectedCalc.message || 'Calculation failed'
+    } else if (calcStatus === 'partial' && (value === null || value === undefined)) {
+      unavailableReason = `Missing inputs: ${missingFields.join(', ')}`
+    } else if (value === null || value === undefined) {
+      unavailableReason = 'Cannot calculate — missing/invalid input'
+    }
+    
+    return { ...field, value, unavailableReason }
   })
   
-  // Add any dynamically calculated fields that aren't in the hardcoded config
-  const knownKeys = new Set(result.map(f => f.key))
-  const knownSnakeKeys = new Set(result.map(f => toSnakeCase(f.key)))
-  
-  // Fields that must NEVER be added dynamically as KPI cards, even if they
-  // are present in the backend aggregate. Either they duplicate a static
-  // card (maturityValue/fairValue/presentValue ≡ totalValue/principal), or
-  // they are metadata (currency, error arrays, dates, ids) that belong in
-  // the audit trail — not in the KPI grid.
-  const DYNAMIC_BLOCK = new Set([
-    'agg', 'derivations', 'fred',
-    'instrumentCount', 'instrument_count',
-    'totalValue', 'total_value',
-    'avgRate', 'avg_rate',
-    'status', 'error', 'message',
-    'missing_fields', 'invalid_fields',
-    // duplicates of totalValue / principal
-    'maturityValue', 'maturity_value',
-    'fairValue', 'fair_value',
-    'presentValue', 'present_value',
-    // metadata / non-KPI
-    'currency', 'currencyCode', 'ccy', 'currency_code',
-    'calculationErrors', 'calculation_errors',
-    'missingPrerequisites', 'missing_prerequisites',
-    'warning',
-    'ytmInput', 'ytm_input',
-    'ytmSource', 'ytm_source',
-    'instrument_name', 'instrumentName',
-    'instrument_type', 'instrumentType',
-    'valuation_date', 'valuationDate',
-    'maturity_date', 'maturityDate',
-    'issue_date', 'issueDate',
-    'settlement_date', 'settlementDate',
-    'last_coupon_date', 'lastCouponDate',
-    'worksheet', 'workbook',
-    // inputs already shown by static cards
-    'principal', 'faceValue', 'face_value',
-    'couponRate', 'coupon_rate',
-    'interestRate', 'interest_rate',
-    'discountRate', 'discount_rate'
-  ])
-
-  for (const key of Object.keys(allCalc)) {
-    if (knownKeys.has(key) || knownSnakeKeys.has(toSnakeCase(key))) continue
-    if (DYNAMIC_BLOCK.has(key)) continue
-
-    let label = formatColumnHeader(key)
-    if (label === 'Dv01') label = 'DV01'
-    if (label === 'Ytm') label = 'YTM'
-    if (label === 'Ytm Input') label = 'YTM Input'
-
-    result.push({
-      key: key,
-      label: label,
-      value: allCalc[key]
-    })
-  }
-  
-  // Filter out boxes that have no genuine value (null, undefined, empty, NaN, Infinity)
-  return result.filter(field => {
-    if (field.value === null || field.value === undefined || field.value === '') return false
-    if (typeof field.value === 'number' && (isNaN(field.value) || !isFinite(field.value))) return false
-    if (typeof field.value === 'string' && ['nan', 'infinity', '-infinity'].includes(field.value.toLowerCase())) return false
-    return true
-  })
+  return result.filter(field => !field.unavailableReason)
 })
 
 function toSnakeCase(str) {
@@ -3961,6 +3923,7 @@ async function autoDetectSingleInstrument() {
     autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
     detectedCurrencies.value = detectionResult?.currencies || []
     detectedInstrumentType.value = instrumentType.value
+    detectionWarnings.value = detectionResult?.warnings || []
     await nextTick()
     if (!selectedCurrency.value) {
       if (detectedCurrencies.value.length === 1) {
@@ -3968,6 +3931,9 @@ async function autoDetectSingleInstrument() {
       } else if (detectedCurrencies.value.length > 1) {
         selectedCurrency.value = ''
       }
+    }
+    if (detectionWarnings.value.length > 0) {
+      showSnackbar('Detection completed with warnings: ' + detectionWarnings.value.join('; '), 'warning')
     }
     showDetectionSuccess.value = true
   } catch (error) {
@@ -6873,7 +6839,7 @@ function showFormula(metricKey) {
   const agg = allCalculations.value || {}
   const calc = calculations.value || {}
   const rows = instrumentSummary.value.rows || []
-  const firstRow = (cleanedData.value && cleanedData.value[0]) || (rawData.value && rawData.value[0]) || {}
+  const firstRow = (cleanedData.value && cleanedData.value[0]) || {}
 
   const toSnake = (s) => String(s).replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[\s\-]+/g, '_').toLowerCase()
   const fmtNum = (v, d = 2) => {
@@ -6890,7 +6856,7 @@ function showFormula(metricKey) {
   }
   const _variants = (key) => {
     const set = new Set([key])
-    try { set.add(toSnake(key)) } catch (e) { /* ignore */ }
+    try { set.add(toSnakeCase(key)) } catch (e) { /* ignore */ }
     try { set.add(formatColumnHeader(key)) } catch (e) { /* ignore */ }
     set.add(String(key).replace(/_/g, ' '))
     return [...set]
@@ -6926,16 +6892,23 @@ function showFormula(metricKey) {
 
   if (derivations && typeof derivations === 'object') {
     const dk = derivations[metricKey] ||
-               derivations[toSnake(metricKey)] ||
+               derivations[toSnakeCase(metricKey)] ||
                derivations[String(metricKey).replace(/_/g, ' ')] ||
                derivations[formatColumnHeader(metricKey)]
     if (dk && typeof dk === 'object') {
       const details = []
-      const ctx = {}
-      const name = firstRow['Instrument Name'] || firstRow.instrument_name || null
-      if (name) ctx['Instrument Name'] = name
+      
+      const metricLabel = formatColumnHeader(metricKey)
+      details.push({ label: 'Calculation', value: metricLabel, formula: 'Metric' })
+      
+      const name = firstRow['Instrument Name'] || firstRow.instrument_name || firstRow['TBillName'] || firstRow.tbills_name || null
+      if (name) details.push({ label: 'Instrument', value: name, formula: 'Input' })
+      
       const instType = firstRow['Instrument Type'] || firstRow.instrument_type || instrumentType.value
-      if (instType) ctx['Instrument Type'] = instType
+      if (instType) details.push({ label: 'Instrument Type', value: instType, formula: 'Input' })
+      
+      details.push({ label: 'Data Source', value: 'Cleaned Data', formula: 'Source' })
+      
       for (const [label, key] of [
         ['Valuation Date', 'valuation_date'],
         ['Maturity Date', 'maturity_date'],
@@ -6943,32 +6916,155 @@ function showFormula(metricKey) {
         ['Settlement Date', 'settlement_date'],
         ['Last Coupon Date', 'last_coupon_date']
       ]) {
-        const v = firstRow[label] ?? firstRow[key] ?? firstRow[toSnake(label)] ?? firstRow[formatColumnHeader(key)]
-        if (v) ctx[label] = v
+        const v = firstRow[label] ?? firstRow[key] ?? firstRow[toSnakeCase(label)] ?? firstRow[formatColumnHeader(key)]
+        if (v) details.push({ label, value: v, formula: 'Input' })
       }
-      for (const [k, v] of Object.entries(ctx)) details.push({ label: k, value: v, formula: 'Input' })
 
-      if (dk.from || dk.to) details.push({ label: 'Period', value: `${dk.from || '?'} → ${dk.to || '?'}`, formula: 'Derivation window' })
-      if (dk.formula) details.push({ label: 'Formula', value: dk.formula, formula: 'Backend' })
-      if (dk.inputs && typeof dk.inputs === 'object') {
+      if (dk.status) {
+        const statusIcon = dk.status === 'ok' ? '✓' : dk.status === 'skipped' ? '⚠' : '✗'
+        details.push({ label: 'Validation Status', value: `${statusIcon} ${dk.status}`, formula: 'Status' })
+      }
+      
+      if (dk.error) {
+        details.push({ label: 'Error', value: dk.error, formula: 'Error' })
+      }
+
+      if (dk.formula) {
+        details.push({ label: 'Formula', value: dk.formula, formula: 'Backend formula' })
+      }
+
+      if (dk.inputs && typeof dk.inputs === 'object' && Object.keys(dk.inputs).length > 0) {
+        details.push({ label: 'Input Values', value: '—', formula: 'Inputs used' })
+        
+        // Separate original inputs from intermediate calculated values
+        const derivationKeys = new Set(Object.keys(derivations))
+        
         for (const [inKey, inVal] of Object.entries(dk.inputs)) {
+          const displayVal = typeof inVal === 'number' 
+            ? inVal.toLocaleString(undefined, { maximumFractionDigits: 6 }) 
+            : String(inVal)
+          
+          const isIntermediate = derivationKeys.has(inKey)
+          const sourceLabel = isIntermediate ? 'Intermediate calculation' : 'Original input'
+          
           details.push({
-            label: `Input: ${inKey}`,
-            value: typeof inVal === 'number' ? inVal.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(inVal),
-            formula: 'Backend input'
+            label: `  ${inKey}`,
+            value: displayVal,
+            formula: sourceLabel
           })
         }
+        
+        let substitution = dk.formula
+        for (const [inKey, inVal] of Object.entries(dk.inputs)) {
+          const displayVal = typeof inVal === 'number' 
+            ? inVal.toLocaleString(undefined, { maximumFractionDigits: 6 }) 
+            : String(inVal)
+          substitution = substitution.replace(new RegExp(`\\b${inKey}\\b`, 'gi'), displayVal)
+        }
+        if (substitution !== dk.formula) {
+          details.push({ label: 'Formula Substitution', value: substitution, formula: 'Values plugged in' })
+        }
       }
-      const resultLabel = `✓ ${formatColumnHeader(metricKey)}`
-      const resultValue = (dk.result !== undefined && dk.result !== null)
-        ? (dk.unit === 'percent' ? fmtPct(dk.result, 4)
-           : dk.unit === 'days' ? `${fmtNum(dk.result, 0)} days`
-           : dk.unit === 'years' ? `${fmtNum(dk.result, 4)} years`
-           : dk.unit === 'currency' ? fmtNum(dk.result, 2)
-           : String(dk.result))
-        : '—'
-      details.push({ label: resultLabel, value: resultValue, formula: dk.formula || 'Backend result' })
-      if (dk.unit) details.push({ label: 'Unit', value: dk.unit, formula: 'Backend' })
+
+      if (dk.dependencies && dk.dependencies.length > 0) {
+        const derivationKeys = new Set(Object.keys(derivations))
+        const deps = dk.dependencies.map(dep => {
+          const isIntermediate = derivationKeys.has(dep)
+          return isIntermediate ? `${dep} (calculated)` : dep
+        })
+        details.push({ label: 'Dependencies', value: deps.join(', '), formula: 'Prerequisites (calculated values marked)' })
+        
+        // Show intermediate calculation breakdowns
+        const intermediateDeps = dk.dependencies.filter(dep => derivationKeys.has(dep))
+        
+        if (intermediateDeps.length > 0) {
+          details.push({ label: 'Intermediate Calculations', value: '—', formula: 'Step-by-step breakdown' })
+          
+          for (const dep of intermediateDeps) {
+            const depDerivation = derivations[dep]
+            if (depDerivation && typeof depDerivation === 'object') {
+              const depLabel = formatColumnHeader(dep)
+              const depValue = depDerivation.result !== undefined && depDerivation.result !== null
+                ? (depDerivation.unit === 'percent' ? fmtPct(depDerivation.result, 4)
+                  : depDerivation.unit === 'days' ? `${fmtNum(depDerivation.result, 0)} days`
+                  : depDerivation.unit === 'years' ? `${fmtNum(depDerivation.result, 4)} years`
+                  : depDerivation.unit === 'currency' ? fmtNum(depDerivation.result, 2)
+                  : String(depDerivation.result))
+                : 'N/A'
+              
+              details.push({
+                label: `  ${depLabel}`,
+                value: depValue,
+                formula: depDerivation.formula || 'Calculated value'
+              })
+            }
+          }
+        }
+      }
+
+      if (dk.result_raw !== undefined && dk.result_raw !== null) {
+        const rawDisplay = dk.unit === 'percent' ? fmtPct(dk.result_raw, 6)
+          : dk.unit === 'days' ? `${fmtNum(dk.result_raw, 2)} days`
+          : dk.unit === 'years' ? `${fmtNum(dk.result_raw, 6)} years`
+          : dk.unit === 'currency' ? fmtNum(dk.result_raw, 6)
+          : String(dk.result_raw)
+        details.push({ label: 'Unrounded Result', value: rawDisplay, formula: 'Raw calculation' })
+      }
+
+      if (dk.result !== undefined && dk.result !== null) {
+        const roundedDisplay = dk.unit === 'percent' ? fmtPct(dk.result, 4)
+          : dk.unit === 'days' ? `${fmtNum(dk.result, 0)} days`
+          : dk.unit === 'years' ? `${fmtNum(dk.result, 4)} years`
+          : dk.unit === 'currency' ? fmtNum(dk.result, 2)
+          : String(dk.result)
+        details.push({ label: `✓ ${metricLabel} (Rounded)`, value: roundedDisplay, formula: 'Final result' })
+      }
+
+      if (dk.unit) {
+        details.push({ label: 'Unit', value: dk.unit, formula: 'Unit of measure' })
+      }
+
+      const explanations = {
+        'days_to_maturity': 'Number of days from valuation (or issue) date to maturity date',
+        'years_to_maturity': 'Time to maturity expressed in years',
+        'interest_earned': 'Interest accrued over the investment period',
+        'total_value': 'Principal plus accrued interest',
+        'discount_yield': 'Annualized discount rate based on face value',
+        'money_market_yield': 'Equivalent bond yield based on purchase price',
+        'bond_equivalent_yield': 'Bond-equivalent yield using 365-day year',
+        'holding_period_yield': 'Total return over the holding period',
+        'effective_annual_yield': 'Effective annual rate with compounding',
+        'effective_annual_rate': 'Effective annual rate with compounding',
+        'present_value': 'Current value of future cash flows discounted',
+        'fair_value': 'Estimated market value considering risk factors',
+        'discount_amount': 'Difference between face value and purchase price',
+        'purchase_price': 'Price paid to acquire the instrument',
+        'annual_coupon': 'Total annual coupon payment',
+        'coupon_payment': 'Coupon payment per period',
+        'current_price': 'Present value of all future cash flows',
+        'yield_to_maturity': 'Internal rate of return to maturity',
+        'current_yield': 'Annual coupon divided by current price',
+        'accrued_interest': 'Interest earned since last coupon date',
+        'macaulay_duration': 'Weighted average time to receive cash flows',
+        'modified_duration': 'Price sensitivity to yield changes',
+        'convexity': 'Rate of change of duration with respect to yield',
+        'dv01': 'Dollar value of a 1 basis point yield change'
+      }
+      
+      const explanation = explanations[toSnakeCase(metricKey)] || explanations[metricKey]
+      if (explanation) {
+        details.push({ label: 'Explanation', value: explanation, formula: 'Financial meaning' })
+      }
+
+      formulaCalculationDetails.value = details
+      showCalculationDetails.value = true
+      showIndividualBreakdown.value = false
+      formulaDialog.value = true
+      return
+    } else {
+      const details = []
+      details.push({ label: '⚠ Calculation Not Found', value: `No derivation record found for "${formatColumnHeader(metricKey)}" in the backend calculation chain.`, formula: 'Diagnostic' })
+      details.push({ label: 'Available Metrics', value: Object.keys(derivations).join(', '), formula: 'Backend provided' })
       formulaCalculationDetails.value = details
       showCalculationDetails.value = true
       showIndividualBreakdown.value = false
@@ -6978,167 +7074,20 @@ function showFormula(metricKey) {
   }
 
   const details = []
-  const pushInput = (label, value) => details.push({ label, value, formula: 'Input' })
-  const pushStep = (label, value, formula) => details.push({ label, value, formula })
-  const pushAnswer = (label, value, formula) => details.push({ label: '✓ ' + label, value, formula })
-
-  const name = firstRow['Instrument Name'] || firstRow.instrument_name || null
-  if (name) pushInput('Instrument Name', name)
-  const instTypeVal = firstRow['Instrument Type'] || firstRow.instrument_type || instrumentType.value
-  if (instTypeVal) pushInput('Instrument Type', instTypeVal)
-  for (const [label, key] of [
-    ['Valuation Date', 'valuation_date'],
-    ['Maturity Date', 'maturity_date'],
-    ['Issue Date', 'issue_date'],
-    ['Settlement Date', 'settlement_date'],
-    ['Last Coupon Date', 'last_coupon_date']
-  ]) {
-    const v = firstRow[label] ?? firstRow[key] ?? firstRow[toSnake(label)] ?? firstRow[formatColumnHeader(key)]
-    if (v) pushInput(label, v)
+  const metricLabel = formatColumnHeader(metricKey)
+  
+  details.push({ label: '⚠ Calculation Not Found', value: `No derivation record found for "${metricLabel}" in the backend calculation chain.`, formula: 'Diagnostic' })
+  
+  if (derivations && typeof derivations === 'object') {
+    details.push({ label: 'Available Metrics', value: Object.keys(derivations).join(', '), formula: 'Backend provided' })
+  } else {
+    details.push({ label: 'Note', value: 'Backend derivations object not available. Check if calculations completed successfully.', formula: 'Diagnostic' })
   }
-
-  const faceValue = getRowVal('Face Value') || getRowVal('Principal') || getVal('faceValue') || getVal('principal')
-  const principal = getRowVal('Principal') || getVal('principal') || faceValue
-  const purchasePrice = getRowVal('Purchase Price') || getVal('purchasePrice')
-  const currentPrice = getRowVal('Current Price') || getRowVal('Price') || getVal('currentPrice')
-  const couponRate = getRowVal('Coupon Rate') || getVal('couponRate')
-  const interestRate = getRowVal('Interest Rate') || getVal('interestRate')
-  const discountRate = getRowVal('Discount Rate') || getVal('discountRate')
-  const ytm = getRowVal('Yield to Maturity') || getVal('yieldToMaturity')
-  const frequency = getVal('frequency') || getRowVal('Coupon Frequency') || getRowVal('Frequency') || 2
-  const days = getVal('daysToMaturity') || getVal('termDays') || getRowVal('Days to Maturity') || getRowVal('Term')
-  const dayBasis = String(getRowVal('Day Count Convention') || 'ACT/360').includes('360') ? 360 : 365
-  const maturityDate = getRowVal('Maturity Date')
-  const issueDate = getRowVal('Issue Date')
-  const valuationDate = getRowVal('Valuation Date') || getRowVal('Settlement Date')
-
-  const daysBetween = (a, b) => {
-    if (!a || !b) return null
-    const d1 = new Date(a), d2 = new Date(b)
-    if (isNaN(d1) || isNaN(d2)) return null
-    return Math.ceil((d2 - d1) / 86400000)
-  }
-  const computedDays = days || daysBetween(valuationDate || issueDate, maturityDate)
-
-  let handled = true
-  switch (metricKey) {
-    case 'interestEarned':
-    case 'totalInterest': {
-      const p = parseFloat(principal) || 0
-      const r = parseFloat(interestRate || couponRate || discountRate) || 0
-      const d = parseFloat(computedDays) || 0
-      const interest = p * (r / 100) * (d / dayBasis)
-      pushInput('Principal', fmtNum(p))
-      pushInput('Rate', fmtPct(r))
-      pushInput('Days to Maturity', fmtNum(d, 0))
-      pushInput('Day Count Basis', String(dayBasis))
-      pushStep('Formula', `${fmtNum(p)} × (${fmtNum(r)} ÷ 100) × (${fmtNum(d, 0)} ÷ ${dayBasis}) = ${fmtNum(interest)}`, 'Principal × Rate ÷ 100 × Days ÷ Basis')
-      pushAnswer('Interest Earned', fmtNum(interest), 'Simple interest')
-      break
-    }
-    case 'Total Portfolio Value':
-    case 'totalValue':
-    case 'totalPrincipal':
-    case 'totalFaceValue':
-    case 'totalDiscount':
-    case 'totalPurchasePrice':
-    case 'totalAnnualIncome':
-    case 'totalMarketValue': {
-      const columnKey =
-        metricKey === 'totalPrincipal' ? 'Principal' :
-        metricKey === 'totalFaceValue' ? 'Face Value' :
-        metricKey === 'totalDiscount' ? 'Discount' :
-        metricKey === 'totalPurchasePrice' ? 'Purchase Price' :
-        metricKey === 'totalAnnualIncome' ? 'Annual Coupon' :
-        metricKey === 'totalMarketValue' ? 'Market Value' :
-        'Total Value'
-      if (rows.length > 0) {
-        let sum = 0
-        rows.forEach((row, idx) => {
-          const v = parseFloat(row[columnKey] || row[toSnake(columnKey)] || 0) || 0
-          pushInput(row['Instrument Name'] || `Row ${idx + 1}`, fmtNum(v))
-          sum += v
-        })
-        pushStep('Sum', `Σ (${columnKey}) = ${fmtNum(sum)}`, `Add up ${columnKey} across all rows`)
-        pushAnswer(metricKey === 'Total Portfolio Value' || metricKey === 'totalValue' ? 'Total Portfolio Value' : columnKey, fmtNum(sum), 'Sum of all rows')
-      } else {
-        const v = parseFloat(getVal(metricKey)) || 0
-        pushAnswer('Total', fmtNum(v), 'From calculation engine')
-      }
-      break
-    }
-    case 'Average Rate':
-    case 'avgRate':
-    case 'avgCouponRate':
-    case 'avgDiscountRate': {
-      const key = metricKey === 'avgCouponRate' ? 'Coupon Rate' : metricKey === 'avgDiscountRate' ? 'Discount Rate' : 'Rate'
-      if (rows.length > 0) {
-        let sum = 0, count = 0
-        rows.forEach((row, idx) => {
-          const r = parseFloat(row[key] || row[toSnake(key)] || 0) || 0
-          pushInput(row['Instrument Name'] || `Row ${idx + 1}`, fmtPct(r))
-          sum += r
-          count++
-        })
-        pushStep('Sum', `Σ ${key} = ${fmtPct(sum)}`, `Add up ${key}`)
-        pushStep('Average', `${fmtPct(sum)} ÷ ${count} = ${fmtNum(sum / count)}%`, 'Sum ÷ Count')
-        pushAnswer(`Average ${key}`, fmtPct(sum / count), 'Simple average')
-      } else {
-        const v = parseFloat(getVal(metricKey)) || 0
-        pushAnswer(`Average ${key}`, fmtPct(v), 'From calculation engine')
-      }
-      break
-    }
-    case 'Number of Instruments':
-    case 'instrumentCount': {
-      const count = rows.length || parseInt(agg.instrumentCount) || 0
-      if (rows.length > 0) {
-        rows.forEach((row, idx) => pushInput(row['Instrument Name'] || `Row ${idx + 1}`, 'counted'))
-      }
-      pushAnswer('Number of Instruments', String(count), 'Count of all rows')
-      break
-    }
-    default:
-      handled = false
-  }
-
-  if (!handled) {
-    const value = getVal(metricKey)
-    const label = (config.value.calculationFields.find(f => f.key === metricKey) || {}).label || metricKey
-    
-    // Check if there's a specific error or missing field diagnostic from the backend
-    const backendError = allCalculations.value?.error || allCalculations.value?.message
-    const backendMissing = allCalculations.value?.missing_fields || []
-    const backendInvalid = allCalculations.value?.invalid_fields || []
-    
-    if (value !== null && value !== undefined) {
-      const numeric = parseFloat(value)
-      pushInput('Reported value', !isNaN(numeric) ? fmtNum(numeric) : String(value))
-      pushInput('Source', 'Calculation engine (aggregate)')
-      pushStep('Note', `No dedicated step-by-step breakdown is implemented for "${label}" — the raw aggregate value returned by the backend is shown above.`, 'Generic fallback')
-    } else if (backendError || backendMissing.length > 0 || backendInvalid.length > 0) {
-      pushInput('Metric key', metricKey)
-      if (backendError) details.push({ label: '⚠ Backend Error', value: backendError, formula: 'Error state' })
-      if (backendMissing.length) details.push({ label: '⚠ Missing Inputs', value: backendMissing.join(', '), formula: 'Validation' })
-      if (backendInvalid.length) details.push({ label: '⚠ Invalid Inputs', value: backendInvalid.map(f => typeof f === 'object' ? f.field : f).join(', '), formula: 'Validation' })
-    } else {
-      // Determine why it's missing based on the actual cleaned data
-      const availableInputs = Object.keys(firstRow).filter(k => firstRow[k] !== null && firstRow[k] !== undefined && firstRow[k] !== '')
-      
-      details.push({
-        label: '⚠ Not Calculated',
-        value: `The backend did not return a value for "${label}". The required inputs for this formula were either not present in the cleaned data, or the calculation resulted in an undefined or infinite value.`,
-        formula: 'Diagnostic'
-      })
-      
-      if (availableInputs.length > 0) {
-        details.push({
-          label: 'Inputs available during calculation',
-          value: availableInputs.join(', '),
-          formula: 'Diagnostic'
-        })
-      }
-    }
+  
+  const value = getVal(metricKey)
+  if (value !== null && value !== undefined) {
+    const numeric = parseFloat(value)
+    details.push({ label: 'Aggregate Value', value: !isNaN(numeric) ? fmtNum(numeric) : String(value), formula: 'From backend aggregate' })
   }
 
   formulaCalculationDetails.value = details
@@ -8374,11 +8323,16 @@ onBeforeUnmount(() => {
 .card-value { font-size: 28px; font-weight: 700; }
 .calculations-section { margin-top: 10px; }
 .calculations-section h3 { color: #0B2044; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #0B2044; }
+.calc-error-banner { background: #ffebee; border: 1px solid #ffcdd2; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; color: #c62828; }
+.calc-warning-banner { background: #fff3e0; border: 1px solid #ffcc80; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; color: #e65100; }
+.calc-warning-banner v-icon { flex-shrink: 0; }
 .calculations-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 30px; }
 .calculation-card { padding: 16px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; text-align: center; transition: transform 0.2s; cursor: pointer; min-height: 100px; display: flex; flex-direction: column; justify-content: center; }
 .calculation-card:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
 .calc-name { font-size: 13px; color: #666; margin-bottom: 8px; }
 .calc-value { font-size: 22px; font-weight: 700; color: #0B2044; }
+.calc-warning-banner { background: #fff3e0; border: 1px solid #ffcc80; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; color: #e65100; }
+.calc-warning-banner v-icon { flex-shrink: 0; }
 .comparison-card { background: linear-gradient(135deg, #f8f9ff, #eef2ff); border-radius: 12px; padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 15px; }
 .comparison-item { text-align: center; }
 .comparison-label { font-size: 13px; color: #666; display: block; }

@@ -193,7 +193,7 @@ export default {
 
     const scrollLeft = ref(0)
 
-    const pageSize = ref(100)
+    const pageSize = ref(200)
     const currentPage = ref(1)
 
     function getUniqueHeaders(headers) {
