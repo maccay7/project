@@ -16,9 +16,12 @@ Architectural rules enforced here:
      rounded result, unit and status. This is the full audit trail consumed
      by the frontend formula popup.
 
-Public API is unchanged: validate_row, normalize_row, calc_single,
-calculate_data, calculate_treasury_bill, calculate_bond,
-calculate_money_market.
+Alias handling note (fix):
+  normalize_row() is now idempotent AND non-destructive. A single source
+  column such as "Face Value" satisfies BOTH `face_value` and `principal`
+  so money-market never reports `principal` missing when the workbook
+  only had a "Face Value" heading. Every calculator reads via _canonical()
+  which returns the first non-empty candidate, never inventing values.
 """
 
 import math
@@ -109,8 +112,13 @@ def parse_frequency(value: Any) -> Optional[int]:
     value = _unwrap_cell(value)
     if value is None or value == "":
         return None
+    if isinstance(value, bool):
+        return None
     if isinstance(value, (int, float)):
-        return int(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
     if isinstance(value, str):
         v = value.strip().lower()
         frequency_map = {
@@ -287,6 +295,8 @@ class CalcStep:
         "percent"  → 4 dp half-up
         "days"     → whole number, half-up
         "number"   → left as returned
+    - `display_label` is the human-readable name shown in the breakdown popup.
+    - `display_inputs` maps internal dep names to display labels.
     """
     name: str
     formula: str
@@ -294,6 +304,8 @@ class CalcStep:
     compute: Callable[[Dict[str, Any]], Any]
     unit: str = "number"
     extra_inputs: Dict[str, Any] = dc_field(default_factory=dict)
+    display_label: Optional[str] = None
+    display_inputs: Optional[Dict[str, str]] = None
 
 
 def _round_for_unit(value: Any, unit: str) -> Any:
@@ -312,6 +324,63 @@ def _display_input(value: Any) -> Any:
     if isinstance(value, (int, float)):
         return float(value)
     return value
+
+
+_INPUT_LABELS = {
+    "principal": "Principal",
+    "face_value": "Face Value",
+    "interest_rate": "Interest Rate (%)",
+    "coupon_rate": "Coupon Rate (%)",
+    "discount_rate": "Discount Rate (%)",
+    "current_price": "Current Price",
+    "purchase_price": "Purchase Price",
+    "annual_coupon": "Annual Coupon",
+    "coupon_payment": "Coupon per Period",
+    "days_to_maturity": "Days to Maturity",
+    "term_days": "Term (days)",
+    "total_value": "Total Value",
+    "interest_earned": "Interest Earned",
+    "discount_amount": "Discount Amount",
+    "discount_yield": "Discount Yield (%)",
+    "effective_annual_rate": "Effective Annual Rate (%)",
+    "effective_yield": "Effective Yield (%)",
+    "bond_equivalent_yield": "Bond Equivalent Yield (%)",
+    "money_market_yield": "Money-Market Yield (%)",
+    "holding_period_yield": "Holding Period Yield (%)",
+    "effective_annual_yield": "Effective Annual Yield (%)",
+    "yield_to_maturity": "Yield to Maturity (%)",
+    "current_yield": "Current Yield (%)",
+    "price_per_100": "Price per 100",
+    "days_accrued": "Days Accrued",
+    "accrued_interest": "Accrued Interest",
+    "macaulay_duration": "Macaulay Duration",
+    "modified_duration": "Modified Duration",
+    "convexity": "Convexity",
+    "dv01": "DV01",
+    "present_value": "Present Value",
+    "fair_value": "Fair Value",
+    "yield_curve_rate": "Yield Curve Rate (%)",
+    "divisor": "Day Count Divisor",
+    "discount_basis": "Day Count Basis",
+    "frequency": "Coupon Frequency",
+    "basis": "Day Count Basis",
+    "period_start": "Period Start",
+    "maturity_date": "Maturity Date",
+    "valuation_date": "Valuation Date",
+    "last_coupon_date": "Last Coupon Date",
+    "day_count_convention": "Day Count Convention",
+}
+
+
+def _friendly_inputs(step: CalcStep,
+                     inputs_for_compute: Dict[str, Any]) -> Dict[str, Any]:
+    """Return {label: value} pairs for the breakdown popup."""
+    overrides = step.display_inputs or {}
+    out: Dict[str, Any] = {}
+    for k, v in inputs_for_compute.items():
+        label = overrides.get(k) or _INPUT_LABELS.get(k, k)
+        out[label] = _display_input(v)
+    return out
 
 
 def _detect_cycles(steps: List[CalcStep]) -> List[str]:
@@ -339,6 +408,7 @@ def _detect_cycles(steps: List[CalcStep]) -> List[str]:
     for n in graph:
         if color[n] == WHITE:
             dfs(n, [n])
+
     return sorted(in_cycle)
 
 
@@ -346,16 +416,15 @@ def execute_chain(steps: List[CalcStep],
                   available_inputs: Dict[str, Any]) -> Dict[str, Any]:
     """
     Execute the chain in the order given (caller must supply a topologically
-    ordered list). Returns:
+    ordered list). Every step produces:
 
-    {
-      "values":      {step_name: raw_unrounded_result, ...},
-      "derivations": {step_name: {
-                          formula, dependencies, inputs,
-                          result_raw, result, unit, status, error?
-                      }, ...},
-      "errors":      [{step, reason, ...}, ...],
+    derivations[name] = {
+      formula, dependencies, inputs (internal keys), display_inputs (labels),
+      result_raw, result, unit, status, error?
     }
+
+    Failures are LOCAL: a divide-by-zero in `discount_yield` does not poison
+    `bond_equivalent_yield` if the latter doesn't depend on the former.
     """
     cycle = _detect_cycles(steps)
     if cycle:
@@ -363,8 +432,8 @@ def execute_chain(steps: List[CalcStep],
             "values": {},
             "derivations": {name: {
                 "formula": "", "dependencies": [], "inputs": {},
-                "result_raw": None, "result": None, "unit": "number",
-                "status": "failed",
+                "display_inputs": {}, "result_raw": None, "result": None,
+                "unit": "number", "status": "failed",
                 "error": f"Circular dependency: {cycle}",
             } for name in cycle},
             "errors": [{"step": c, "reason": "circular_dependency"} for c in cycle],
@@ -382,6 +451,7 @@ def execute_chain(steps: List[CalcStep],
                 "formula": step.formula,
                 "dependencies": step.dependencies,
                 "inputs": {},
+                "display_inputs": {},
                 "result_raw": None,
                 "result": None,
                 "unit": step.unit,
@@ -410,6 +480,7 @@ def execute_chain(steps: List[CalcStep],
                 "formula": step.formula,
                 "dependencies": step.dependencies,
                 "inputs": {},
+                "display_inputs": {},
                 "result_raw": None,
                 "result": None,
                 "unit": step.unit,
@@ -432,6 +503,7 @@ def execute_chain(steps: List[CalcStep],
                 "formula": step.formula,
                 "dependencies": step.dependencies,
                 "inputs": {k: _display_input(v) for k, v in inputs_for_compute.items()},
+                "display_inputs": _friendly_inputs(step, inputs_for_compute),
                 "result_raw": None,
                 "result": None,
                 "unit": step.unit,
@@ -447,6 +519,7 @@ def execute_chain(steps: List[CalcStep],
                 "formula": step.formula,
                 "dependencies": step.dependencies,
                 "inputs": {k: _display_input(v) for k, v in inputs_for_compute.items()},
+                "display_inputs": _friendly_inputs(step, inputs_for_compute),
                 "result_raw": None,
                 "result": None,
                 "unit": step.unit,
@@ -461,6 +534,7 @@ def execute_chain(steps: List[CalcStep],
                 "formula": step.formula,
                 "dependencies": step.dependencies,
                 "inputs": {k: _display_input(v) for k, v in inputs_for_compute.items()},
+                "display_inputs": _friendly_inputs(step, inputs_for_compute),
                 "result_raw": None,
                 "result": None,
                 "unit": step.unit,
@@ -472,14 +546,12 @@ def execute_chain(steps: List[CalcStep],
             failed_steps.add(step.name)
             continue
 
-        # A compute() that silently returns None must be treated as a skip —
-        # otherwise downstream sees values[dep] is None and cascades as
-        # "missing" with no trail of *why* this step produced nothing.
         if raw_result is None:
             derivations[step.name] = {
                 "formula": step.formula,
                 "dependencies": step.dependencies,
                 "inputs": {k: _display_input(v) for k, v in inputs_for_compute.items()},
+                "display_inputs": _friendly_inputs(step, inputs_for_compute),
                 "result_raw": None,
                 "result": None,
                 "unit": step.unit,
@@ -496,6 +568,7 @@ def execute_chain(steps: List[CalcStep],
             "formula": step.formula,
             "dependencies": step.dependencies,
             "inputs": {k: _display_input(v) for k, v in inputs_for_compute.items()},
+            "display_inputs": _friendly_inputs(step, inputs_for_compute),
             "result_raw": (float(raw_result)
                            if isinstance(raw_result, (int, float))
                            else raw_result),
@@ -687,24 +760,31 @@ def _tokenize(s: str) -> set:
 
 
 def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Idempotent alias expansion.
+
+    Every source key is mapped to ALL canonical targets it satisfies.
+    No source key is 'consumed' — a single 'Face Value' column can
+    legitimately satisfy both `face_value` and `principal`. This is the
+    core fix: previously the first matching alias won and burned the
+    column, so `principal` (required by money-market) was reported
+    missing even though the data was present.
+    """
     if not isinstance(row, dict):
         return {}
     normalized: Dict[str, Any] = {}
-    consumed: set = set()
 
+    # First pass: exact (case-insensitive) matches.
     for target, aliases in SPECIFIC_ALIASES.items():
-        for alias in aliases:
-            alias_l = alias.lower().strip()
-            for src_key in row.keys():
-                if src_key in consumed:
-                    continue
-                if str(src_key).lower().strip() == alias_l:
-                    normalized[target] = _unwrap_cell(row[src_key])
-                    consumed.add(src_key)
-                    break
-            if target in normalized:
-                break
+        alias_set = {a.lower().strip() for a in aliases}
+        for src_key, src_val in row.items():
+            sk = str(src_key).lower().strip()
+            if sk in alias_set:
+                unwrapped = _unwrap_cell(src_val)
+                if unwrapped is not None:
+                    normalized[target] = unwrapped
+                break  # stop at first match per target; do not consume src_key
 
+    # Second pass: token-subset matches for multi-token aliases.
     for target, aliases in SPECIFIC_ALIASES.items():
         if target in normalized:
             continue
@@ -712,23 +792,53 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
             alias_tokens = _tokenize(alias)
             if len(alias_tokens) < 2:
                 continue
-            for src_key in row.keys():
-                if src_key in consumed:
-                    continue
+            for src_key, src_val in row.items():
                 if alias_tokens.issubset(_tokenize(src_key)):
-                    normalized[target] = _unwrap_cell(row[src_key])
-                    consumed.add(src_key)
-                    break
+                    unwrapped = _unwrap_cell(src_val)
+                    if unwrapped is not None:
+                        normalized[target] = unwrapped
+                        break
             if target in normalized:
                 break
 
+    # Third pass: carry through unmapped originals (for display + source tracking).
     for key, value in row.items():
-        if key not in consumed and key not in normalized:
-            unwrapped = _unwrap_cell(value)
-            if unwrapped is not None:
-                normalized[key] = unwrapped
-
+        unwrapped = _unwrap_cell(value)
+        if unwrapped is not None and key not in normalized:
+            normalized[key] = unwrapped
     return normalized
+
+
+def _canonical(row: Dict[str, Any], *candidates, as_float=False):
+    """Read the first non-empty value among *candidates* from an
+    already-normalized row. Never invents a value; returns None if
+    every candidate is truly absent/empty."""
+    for key in candidates:
+        if key not in row:
+            continue
+        raw = row.get(key)
+        if raw is None or raw == "":
+            continue
+        if as_float:
+            v = safe_float(raw)
+            if v is not None:
+                return v
+            continue
+        return raw
+    return None
+
+
+def _canonical_pct(row: Dict[str, Any], *candidates):
+    for key in candidates:
+        if key not in row:
+            continue
+        raw = row.get(key)
+        if raw is None or raw == "":
+            continue
+        v = parse_percentage(raw)
+        if v is not None:
+            return v
+    return None
 
 
 def _extract_instrument_name(row: Dict[str, Any]) -> Optional[str]:
@@ -757,9 +867,6 @@ def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
                 "invalid_fields": [], "detected_fields": {},
                 "normalized_row": {}, "all_source_keys": []}
 
-    raw_coupon_frequency = (row.get('Coupon Frequency') or row.get('coupon_frequency')
-                            or row.get('frequency') or row.get('instrument_type'))
-
     norm = normalize_row(row)
     missing: List[str] = []
     invalid: List[tuple] = []
@@ -770,123 +877,116 @@ def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
             detected[field] = norm.get(field)
 
     if instrument_type == "bonds":
-        face = safe_float(norm.get("face_value")) or safe_float(norm.get("principal"))
+        face = _canonical(norm, "face_value", "principal", as_float=True)
         note("face_value"); note("principal")
         if face is None:
             missing.append("face_value (aliases: Face Value, Principal, Par Value, Notional, Amount)")
 
-        cr = parse_percentage(norm.get("coupon_rate")) or parse_percentage(norm.get("interest_rate"))
+        cr = _canonical_pct(norm, "coupon_rate", "interest_rate")
         note("coupon_rate"); note("interest_rate")
         if cr is None:
             missing.append("coupon_rate (aliases: Coupon Rate, Coupon, Interest Rate, Rate)")
 
-        price = (safe_float(norm.get("price"))
-                 or safe_float(norm.get("purchase_price"))
-                 or safe_float(norm.get("current_price")))
-        ytm = parse_percentage(norm.get("yield")) or parse_percentage(norm.get("yield_to_maturity"))
+        price = _canonical(norm, "price", "purchase_price", "current_price", as_float=True)
+        ytm = _canonical_pct(norm, "yield", "yield_to_maturity")
         note("price"); note("purchase_price"); note("current_price")
         note("yield"); note("yield_to_maturity")
         if price is None and ytm is None:
             missing.append("price or yield_to_maturity")
 
-        years = safe_float(norm.get("years_to_maturity"))
+        years = _canonical(norm, "years_to_maturity", as_float=True)
         note("years_to_maturity"); note("valuation_date"); note("maturity_date"); note("issue_date")
         if years is None:
-            period_start = (parse_date(norm.get("valuation_date"))
-                            or parse_date(norm.get("issue_date")))
-            mat_d = parse_date(norm.get("maturity_date"))
+            period_start = (parse_date(_canonical(norm, "valuation_date"))
+                            or parse_date(_canonical(norm, "issue_date")))
+            mat_d = parse_date(_canonical(norm, "maturity_date"))
             if period_start and mat_d and mat_d >= period_start:
                 years = (mat_d - period_start).days / 365.0
             else:
-                d2m = safe_float(norm.get("days_to_maturity"))
+                d2m = _canonical(norm, "days_to_maturity", "term_days", as_float=True)
                 if d2m is not None:
                     years = d2m / 365.0
         if years is None or years <= 0:
             missing.append("years_to_maturity (or Valuation Date + Maturity Date)")
 
-        note("coupon_frequency"); note("frequency"); note("Coupon Frequency")
+        note("coupon_frequency"); note("frequency")
 
         if face is not None and face <= 0:
             invalid.append(("face_value", "must be > 0"))
 
-        val_d = parse_date(norm.get("valuation_date"))
-        mat_d = parse_date(norm.get("maturity_date"))
-        iss_d = parse_date(norm.get("issue_date"))
+        val_d = parse_date(_canonical(norm, "valuation_date"))
+        mat_d = parse_date(_canonical(norm, "maturity_date"))
+        iss_d = parse_date(_canonical(norm, "issue_date"))
         if val_d and mat_d and val_d > mat_d:
             invalid.append(("valuation_date", "must be on or before maturity_date"))
         if iss_d and mat_d and iss_d > mat_d:
             invalid.append(("issue_date", "must be on or before maturity_date"))
 
     elif instrument_type == "money-market":
-        principal = (safe_float(norm.get("principal"))
-                     or safe_float(norm.get("face_value"))
-                     or safe_float(norm.get("amount")))
+        principal = _canonical(norm, "principal", "face_value", "amount", as_float=True)
         note("principal"); note("face_value"); note("amount")
         if principal is None:
             missing.append("principal (aliases: Principal, Principle, Face Value, Amount, Notional)")
         elif principal <= 0:
             invalid.append(("principal", "must be > 0"))
 
-        rate = (parse_percentage(norm.get("interest_rate"))
-                or parse_percentage(norm.get("rate")))
+        rate = _canonical_pct(norm, "interest_rate", "rate", "coupon_rate")
         note("interest_rate"); note("rate")
         if rate is None:
             missing.append("interest_rate (aliases: Interest Rate, Rate, Coupon, Yield)")
         elif rate < 0:
             invalid.append(("interest_rate", "must be >= 0"))
 
-        days = safe_float(norm.get("term_days")) or safe_float(norm.get("days_to_maturity"))
+        days = _canonical(norm, "term_days", "days_to_maturity", as_float=True)
         note("term_days"); note("days_to_maturity")
         note("valuation_date"); note("maturity_date"); note("issue_date")
         if days is None:
-            val_d = parse_date(norm.get("valuation_date"))
-            mat_d = parse_date(norm.get("maturity_date"))
+            val_d = parse_date(_canonical(norm, "valuation_date"))
+            mat_d = parse_date(_canonical(norm, "maturity_date"))
             if val_d and mat_d and mat_d >= val_d:
                 days = (mat_d - val_d).days
         if days is None:
-            iss_d = parse_date(norm.get("issue_date"))
-            mat_d = parse_date(norm.get("maturity_date"))
+            iss_d = parse_date(_canonical(norm, "issue_date"))
+            mat_d = parse_date(_canonical(norm, "maturity_date"))
             if iss_d and mat_d and mat_d >= iss_d:
                 days = (mat_d - iss_d).days
         if days is None or days <= 0:
             missing.append("term_days (or Valuation Date + Maturity Date)")
 
-        val_d = parse_date(norm.get("valuation_date"))
-        mat_d = parse_date(norm.get("maturity_date"))
-        iss_d = parse_date(norm.get("issue_date"))
+        val_d = parse_date(_canonical(norm, "valuation_date"))
+        mat_d = parse_date(_canonical(norm, "maturity_date"))
+        iss_d = parse_date(_canonical(norm, "issue_date"))
         if val_d and mat_d and val_d > mat_d:
             invalid.append(("valuation_date", "must be on or before maturity_date"))
         if iss_d and mat_d and iss_d > mat_d:
             invalid.append(("issue_date", "must be on or before maturity_date"))
 
     else:  # tbills
-        face = safe_float(norm.get("face_value")) or safe_float(norm.get("principal"))
+        face = _canonical(norm, "face_value", "principal", as_float=True)
         note("face_value"); note("principal")
         if face is None:
             missing.append("face_value (aliases: Face Value, Principal, Par Value, Amount, Notional)")
         elif face <= 0:
             invalid.append(("face_value", "must be > 0"))
 
-        days = safe_float(norm.get("term_days")) or safe_float(norm.get("days_to_maturity"))
+        days = _canonical(norm, "term_days", "days_to_maturity", as_float=True)
         note("term_days"); note("days_to_maturity")
         note("valuation_date"); note("maturity_date"); note("issue_date")
         if days is None:
-            val_d = parse_date(norm.get("valuation_date"))
-            mat_d = parse_date(norm.get("maturity_date"))
+            val_d = parse_date(_canonical(norm, "valuation_date"))
+            mat_d = parse_date(_canonical(norm, "maturity_date"))
             if val_d and mat_d and mat_d >= val_d:
                 days = (mat_d - val_d).days
         if days is None:
-            iss_d = parse_date(norm.get("issue_date"))
-            mat_d = parse_date(norm.get("maturity_date"))
+            iss_d = parse_date(_canonical(norm, "issue_date"))
+            mat_d = parse_date(_canonical(norm, "maturity_date"))
             if iss_d and mat_d and mat_d >= iss_d:
                 days = (mat_d - iss_d).days
         if days is None or days <= 0:
             missing.append("term_days (or Valuation Date + Maturity Date)")
 
-        price = (safe_float(norm.get("purchase_price"))
-                 or safe_float(norm.get("price"))
-                 or safe_float(norm.get("current_price")))
-        disc = parse_percentage(norm.get("discount_rate"))
+        price = _canonical(norm, "purchase_price", "price", "current_price", as_float=True)
+        disc = _canonical_pct(norm, "discount_rate")
         note("purchase_price"); note("price"); note("current_price"); note("discount_rate")
         if price is None and disc is None:
             missing.append("purchase_price or discount_rate")
@@ -896,9 +996,9 @@ def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
         if disc is not None and disc < 0:
             invalid.append(("discount_rate", "must be >= 0"))
 
-        val_d = parse_date(norm.get("valuation_date"))
-        mat_d = parse_date(norm.get("maturity_date"))
-        iss_d = parse_date(norm.get("issue_date"))
+        val_d = parse_date(_canonical(norm, "valuation_date"))
+        mat_d = parse_date(_canonical(norm, "maturity_date"))
+        iss_d = parse_date(_canonical(norm, "issue_date"))
         if val_d and mat_d and val_d > mat_d:
             invalid.append(("valuation_date", "must be on or before maturity_date"))
         if iss_d and mat_d and iss_d > mat_d:
@@ -967,7 +1067,9 @@ def _price_from_ytm(face, coupon_rate, ytm, years, frequency):
 
 
 def _parse_bond_price(item, face):
-    raw = item.get("price") or item.get("purchase_price") or item.get("current_price")
+    raw = (item.get("price")
+           or item.get("purchase_price")
+           or item.get("current_price"))
     if raw is None:
         return None
     s = str(raw).strip()
@@ -1051,25 +1153,21 @@ def calculate_money_market(item: Dict[str, Any],
                            benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     item = normalize_row(item)
 
-    principal = (safe_float(item.get("principal"))
-                 or safe_float(item.get("face_value"))
-                 or safe_float(item.get("amount")))
-    rate_frac = (parse_percentage(item.get("interest_rate"))
-                 or parse_percentage(item.get("rate")))
-    currency = item.get("currency") or item.get("ccy") or item.get("currency_code")
+    principal = _canonical(item, "principal", "face_value", "amount", as_float=True)
+    rate_frac = _canonical_pct(item, "interest_rate", "rate", "coupon_rate")
+    currency = _canonical(item, "currency", "ccy", "currency_code")
 
-    day_count = str(item.get("day_count_convention")
-                    or item.get("day_count") or "ACT/360").upper()
+    day_count = str(_canonical(item, "day_count_convention", "day_count") or "ACT/360").upper()
     divisor = 365.0 if "365" in day_count else 360.0
 
-    val_d = parse_date(item.get("valuation_date"))
-    mat_d = parse_date(item.get("maturity_date"))
-    period_start = val_d or parse_date(item.get("issue_date"))
+    val_d = parse_date(_canonical(item, "valuation_date"))
+    mat_d = parse_date(_canonical(item, "maturity_date"))
+    period_start = val_d or parse_date(_canonical(item, "issue_date"))
 
-    raw_days = (safe_float(item.get("term_days"))
-                or safe_float(item.get("days_to_maturity")))
+    raw_days = _canonical(item, "term_days", "days_to_maturity", as_float=True)
+    if raw_days is None and period_start and mat_d and mat_d >= period_start:
+        raw_days = float((mat_d - period_start).days)
 
-    # capture rate as percent (5.0) for both display and downstream division
     rate_pct = (rate_frac * 100.0) if rate_frac is not None else None
 
     result: Dict[str, Any] = {
@@ -1084,7 +1182,6 @@ def calculate_money_market(item: Dict[str, Any],
         result["instrument_name"] = name
     _add_input_dates(result, val_d, mat_d, item)
 
-    # ── Step definitions ──
     if raw_days is not None:
         days_deps = []
         days_compute = (lambda inp, _raw=raw_days: round_time(_raw))
@@ -1107,6 +1204,8 @@ def calculate_money_market(item: Dict[str, Any],
         return inp["principal"] + inp["interest_earned"]
 
     def _calc_discount_yield(inp):
+        if inp["total_value"] == 0:
+            raise ValueError("total_value is zero")
         return ((inp["interest_earned"] / inp["total_value"])
                 * (divisor / inp["days_to_maturity"]) * 100.0)
 
@@ -1122,6 +1221,7 @@ def calculate_money_market(item: Dict[str, Any],
             compute=days_compute,
             unit="days",
             extra_inputs={"day_count_convention": day_count},
+            display_label="Days to Maturity",
         ),
         CalcStep(
             name="interest_earned",
@@ -1129,7 +1229,8 @@ def calculate_money_market(item: Dict[str, Any],
             dependencies=["principal", "interest_rate", "days_to_maturity"],
             compute=_calc_interest,
             unit="currency",
-            extra_inputs={"divisor": divisor, "day_count_convention": day_count},
+            extra_inputs={"divisor": divisor},
+            display_label="Interest Earned",
         ),
         CalcStep(
             name="total_value",
@@ -1137,6 +1238,7 @@ def calculate_money_market(item: Dict[str, Any],
             dependencies=["principal", "interest_earned"],
             compute=_calc_total,
             unit="currency",
+            display_label="Total Value / Maturity Value",
         ),
         CalcStep(
             name="discount_yield",
@@ -1145,6 +1247,7 @@ def calculate_money_market(item: Dict[str, Any],
             compute=_calc_discount_yield,
             unit="percent",
             extra_inputs={"divisor": divisor},
+            display_label="Discount Yield",
         ),
         CalcStep(
             name="effective_annual_rate",
@@ -1152,6 +1255,7 @@ def calculate_money_market(item: Dict[str, Any],
             dependencies=["interest_earned", "principal", "days_to_maturity"],
             compute=_calc_eff_annual,
             unit="percent",
+            display_label="Effective Annual Rate",
         ),
         CalcStep(
             name="bond_equivalent_yield",
@@ -1159,6 +1263,7 @@ def calculate_money_market(item: Dict[str, Any],
             dependencies=["interest_earned", "principal", "days_to_maturity"],
             compute=_calc_eff_annual,
             unit="percent",
+            display_label="Bond Equivalent Yield",
         ),
         CalcStep(
             name="effective_yield",
@@ -1166,6 +1271,7 @@ def calculate_money_market(item: Dict[str, Any],
             dependencies=["interest_earned", "principal", "days_to_maturity"],
             compute=_calc_eff_annual,
             unit="percent",
+            display_label="Effective Yield",
         ),
         CalcStep(
             name="present_value",
@@ -1173,6 +1279,7 @@ def calculate_money_market(item: Dict[str, Any],
             dependencies=["principal"],
             compute=lambda inp: inp["principal"],
             unit="currency",
+            display_label="Present Value",
         ),
         CalcStep(
             name="fair_value",
@@ -1180,6 +1287,7 @@ def calculate_money_market(item: Dict[str, Any],
             dependencies=["principal", "interest_earned"],
             compute=_calc_total,
             unit="currency",
+            display_label="Fair Value",
         ),
     ]
 
@@ -1198,7 +1306,6 @@ def calculate_money_market(item: Dict[str, Any],
                                         "compute_error",
                                         "division_by_zero")]
 
-    # ── Flat fields ──
     if "days_to_maturity" in values:
         result["term_days"] = round_time(values["days_to_maturity"])
     if "interest_earned" in values:
@@ -1217,6 +1324,10 @@ def calculate_money_market(item: Dict[str, Any],
     if "present_value" in values:
         result["present_value"] = round_money(values["present_value"])
     result["yield_curve_rate"] = _benchmark_to_percent(benchmark_yield)
+
+    # Expose avg_rate on single rows so the KPI card always finds one.
+    if result.get("interest_rate") is not None:
+        result["avg_rate"] = result["interest_rate"]
 
     if hard_failures:
         result["status"] = "partial"
@@ -1239,21 +1350,19 @@ def calculate_treasury_bill(item: Dict[str, Any],
                             benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     item = normalize_row(item)
 
-    face = safe_float(item.get("face_value")) or safe_float(item.get("principal"))
-    purchase_price_in = (safe_float(item.get("purchase_price"))
-                         or safe_float(item.get("current_price"))
-                         or safe_float(item.get("price")))
-    discount_rate_in_frac = parse_percentage(item.get("discount_rate"))
-    currency = item.get("currency") or item.get("ccy") or item.get("currency_code")
-    day_count = str(item.get("day_count_convention")
-                    or item.get("day_count") or "ACT/360").upper()
+    face = _canonical(item, "face_value", "principal", as_float=True)
+    purchase_price_in = _canonical(item, "purchase_price", "current_price", "price", as_float=True)
+    discount_rate_in_frac = _canonical_pct(item, "discount_rate")
+    currency = _canonical(item, "currency", "ccy", "currency_code")
+    day_count = str(_canonical(item, "day_count_convention", "day_count") or "ACT/360").upper()
     discount_basis = 365.0 if "365" in day_count else 360.0
 
-    val_d = parse_date(item.get("valuation_date"))
-    mat_d = parse_date(item.get("maturity_date"))
-    period_start = val_d or parse_date(item.get("issue_date"))
-    raw_days = (safe_float(item.get("term_days"))
-                or safe_float(item.get("days_to_maturity")))
+    val_d = parse_date(_canonical(item, "valuation_date"))
+    mat_d = parse_date(_canonical(item, "maturity_date"))
+    period_start = val_d or parse_date(_canonical(item, "issue_date"))
+    raw_days = _canonical(item, "term_days", "days_to_maturity", as_float=True)
+    if raw_days is None and period_start and mat_d and mat_d >= period_start:
+        raw_days = float((mat_d - period_start).days)
 
     discount_rate_pct_in = (discount_rate_in_frac * 100.0
                             if discount_rate_in_frac is not None else None)
@@ -1282,7 +1391,6 @@ def calculate_treasury_bill(item: Dict[str, Any],
                 "purchase_price takes precedence."
             )
 
-    # ── Chain ──
     if raw_days is not None:
         days_deps = []
         days_compute = (lambda inp, _raw=raw_days: round_time(_raw))
@@ -1313,26 +1421,29 @@ def calculate_treasury_bill(item: Dict[str, Any],
                 / inp["face_value"]
                 * (discount_basis / inp["days_to_maturity"]) * 100.0)
 
-    def _discount_yield(inp):
-        return ((inp["face_value"] - inp["purchase_price"])
-                / inp["face_value"]
-                * (discount_basis / inp["days_to_maturity"]) * 100.0)
-
     def _mm_yield(inp):
+        if inp["purchase_price"] == 0:
+            raise ValueError("purchase_price is zero")
         return ((inp["face_value"] - inp["purchase_price"])
                 / inp["purchase_price"]
                 * (discount_basis / inp["days_to_maturity"]) * 100.0)
 
     def _be_yield(inp):
+        if inp["purchase_price"] == 0:
+            raise ValueError("purchase_price is zero")
         return ((inp["face_value"] - inp["purchase_price"])
                 / inp["purchase_price"]
                 * (365.0 / inp["days_to_maturity"]) * 100.0)
 
     def _hp_yield(inp):
+        if inp["purchase_price"] == 0:
+            raise ValueError("purchase_price is zero")
         return ((inp["face_value"] - inp["purchase_price"])
                 / inp["purchase_price"] * 100.0)
 
     def _eff_annual_yield(inp):
+        if inp["purchase_price"] <= 0:
+            raise ValueError("purchase_price must be > 0")
         return ((inp["face_value"] / inp["purchase_price"])
                 ** (365.0 / inp["days_to_maturity"]) - 1.0) * 100.0
 
@@ -1348,7 +1459,7 @@ def calculate_treasury_bill(item: Dict[str, Any],
             dependencies=days_deps,
             compute=days_compute,
             unit="days",
-            extra_inputs={"day_count_convention": day_count},
+            display_label="Days to Maturity",
         ),
         CalcStep(
             name="purchase_price",
@@ -1356,11 +1467,7 @@ def calculate_treasury_bill(item: Dict[str, Any],
             dependencies=["face_value", "days_to_maturity"],
             compute=_establish_price,
             unit="currency",
-            extra_inputs={
-                "input_price": purchase_price_in,
-                "input_discount_rate_pct": discount_rate_pct_in,
-                "discount_basis": discount_basis,
-            },
+            display_label="Purchase Price",
         ),
         CalcStep(
             name="discount_amount",
@@ -1368,6 +1475,7 @@ def calculate_treasury_bill(item: Dict[str, Any],
             dependencies=["face_value", "purchase_price"],
             compute=_discount_amount,
             unit="currency",
+            display_label="Discount Amount",
         ),
         CalcStep(
             name="discount_rate",
@@ -1376,14 +1484,16 @@ def calculate_treasury_bill(item: Dict[str, Any],
             compute=_discount_rate_from_price,
             unit="percent",
             extra_inputs={"discount_basis": discount_basis},
+            display_label="Discount Rate",
         ),
         CalcStep(
             name="discount_yield",
             formula="((face_value − purchase_price) / face_value) × (basis / days) × 100",
             dependencies=["face_value", "purchase_price", "days_to_maturity"],
-            compute=_discount_yield,
+            compute=_discount_rate_from_price,
             unit="percent",
             extra_inputs={"discount_basis": discount_basis},
+            display_label="Discount Yield",
         ),
         CalcStep(
             name="money_market_yield",
@@ -1392,6 +1502,7 @@ def calculate_treasury_bill(item: Dict[str, Any],
             compute=_mm_yield,
             unit="percent",
             extra_inputs={"discount_basis": discount_basis},
+            display_label="Money-Market Yield",
         ),
         CalcStep(
             name="bond_equivalent_yield",
@@ -1399,6 +1510,7 @@ def calculate_treasury_bill(item: Dict[str, Any],
             dependencies=["face_value", "purchase_price", "days_to_maturity"],
             compute=_be_yield,
             unit="percent",
+            display_label="Bond Equivalent Yield",
         ),
         CalcStep(
             name="holding_period_yield",
@@ -1406,6 +1518,7 @@ def calculate_treasury_bill(item: Dict[str, Any],
             dependencies=["face_value", "purchase_price"],
             compute=_hp_yield,
             unit="percent",
+            display_label="Holding Period Yield",
         ),
         CalcStep(
             name="effective_annual_yield",
@@ -1413,6 +1526,7 @@ def calculate_treasury_bill(item: Dict[str, Any],
             dependencies=["face_value", "purchase_price", "days_to_maturity"],
             compute=_eff_annual_yield,
             unit="percent",
+            display_label="Effective Annual Yield",
         ),
         CalcStep(
             name="present_value",
@@ -1421,6 +1535,7 @@ def calculate_treasury_bill(item: Dict[str, Any],
             compute=_present_value,
             unit="currency",
             extra_inputs={"discount_basis": discount_basis},
+            display_label="Present Value",
         ),
     ]
 
@@ -1428,7 +1543,6 @@ def calculate_treasury_bill(item: Dict[str, Any],
         "face_value": face,
         "period_start": period_start,
         "maturity_date": mat_d,
-        "discount_rate_input_frac": discount_rate_in_frac,
     }
     chain = execute_chain(steps, available)
     values = chain["values"]
@@ -1438,7 +1552,6 @@ def calculate_treasury_bill(item: Dict[str, Any],
                                         "compute_error",
                                         "division_by_zero")]
 
-    # ── Flat fields ──
     if "days_to_maturity" in values:
         result["term_days"] = round_time(values["days_to_maturity"])
     for k in ("purchase_price", "discount_amount",
@@ -1463,6 +1576,12 @@ def calculate_treasury_bill(item: Dict[str, Any],
         result["avg_investment"] = result["purchase_price"]
     result["yield_curve_rate"] = _benchmark_to_percent(benchmark_yield)
 
+    # KPI fallback: expose avg_rate from discount or BEY.
+    if result.get("discount_rate") is not None:
+        result["avg_rate"] = result["discount_rate"]
+    elif result.get("bond_equivalent_yield") is not None:
+        result["avg_rate"] = result["bond_equivalent_yield"]
+
     if hard_failures:
         result["status"] = "partial"
         result["missing_prerequisites"] = [
@@ -1482,40 +1601,36 @@ def calculate_treasury_bill(item: Dict[str, Any],
 # ─────────────────────────────────────────────────────────────
 def calculate_bond(item: Dict[str, Any],
                    benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
-    raw_freq = (item.get("Coupon Frequency") or item.get("coupon_frequency")
-                or item.get("frequency"))
+    raw_freq = _canonical(item, "Coupon Frequency", "coupon_frequency", "frequency")
     item = normalize_row(item)
 
-    face = safe_float(item.get("face_value")) or safe_float(item.get("principal"))
-    coupon_rate_frac = (parse_percentage(item.get("coupon_rate"))
-                        or parse_percentage(item.get("interest_rate")))
-    currency = item.get("currency") or item.get("ccy") or item.get("currency_code")
+    face = _canonical(item, "face_value", "principal", as_float=True)
+    coupon_rate_frac = _canonical_pct(item, "coupon_rate", "interest_rate")
+    currency = _canonical(item, "currency", "ccy", "currency_code")
 
     price_in = _parse_bond_price(item, face)
-    ytm_input_frac = (parse_percentage(item.get("yield"))
-                      or parse_percentage(item.get("yield_to_maturity")))
+    ytm_input_frac = _canonical_pct(item, "yield", "yield_to_maturity")
 
-    day_count = str(item.get("day_count_convention")
-                    or item.get("day_count") or "ACT/365").upper()
+    day_count = str(_canonical(item, "day_count_convention", "day_count") or "ACT/365").upper()
 
-    val_d = parse_date(item.get("valuation_date"))
-    mat_d = parse_date(item.get("maturity_date"))
+    val_d = parse_date(_canonical(item, "valuation_date"))
+    mat_d = parse_date(_canonical(item, "maturity_date"))
 
-    years = safe_float(item.get("years_to_maturity"))
+    years = _canonical(item, "years_to_maturity", as_float=True)
     years_source = "input" if years is not None else None
     if years is None:
-        period_start = val_d or parse_date(item.get("issue_date"))
+        period_start = val_d or parse_date(_canonical(item, "issue_date"))
         if period_start and mat_d and mat_d >= period_start:
             years = (mat_d - period_start).days / 365.0
             years_source = "derived_from_dates"
     if years is None:
-        d2m = safe_float(item.get("days_to_maturity"))
+        d2m = _canonical(item, "days_to_maturity", "term_days", as_float=True)
         if d2m is not None and d2m > 0:
             years = d2m / 365.0
             years_source = "derived_from_days"
 
-    frequency = (parse_frequency(item.get("frequency"))
-                 or parse_frequency(item.get("coupon_frequency"))
+    frequency = (parse_frequency(_canonical(item, "frequency"))
+                 or parse_frequency(_canonical(item, "coupon_frequency"))
                  or parse_frequency(raw_freq))
     defaulted_freq = False
     if frequency is None or frequency <= 0 or frequency > 365:
@@ -1580,6 +1695,8 @@ def calculate_bond(item: Dict[str, Any],
         return solved * 100.0
 
     def _current_yield(inp):
+        if inp["current_price"] == 0:
+            raise ValueError("current_price is zero")
         return (inp["annual_coupon"] / inp["current_price"]) * 100.0
 
     def _price_per_100(inp):
@@ -1644,6 +1761,7 @@ def calculate_bond(item: Dict[str, Any],
             dependencies=["face_value", "coupon_rate"],
             compute=_annual_coupon,
             unit="currency",
+            display_label="Annual Coupon",
         ),
         CalcStep(
             name="coupon_payment",
@@ -1652,6 +1770,7 @@ def calculate_bond(item: Dict[str, Any],
             compute=_coupon_payment,
             unit="currency",
             extra_inputs={"frequency": frequency},
+            display_label="Coupon per Period",
         ),
         CalcStep(
             name="current_price",
@@ -1660,6 +1779,7 @@ def calculate_bond(item: Dict[str, Any],
             compute=_current_price,
             unit="currency",
             extra_inputs={"input_price": price_in, "frequency": frequency},
+            display_label="Current Price",
         ),
         CalcStep(
             name="yield_to_maturity",
@@ -1669,6 +1789,7 @@ def calculate_bond(item: Dict[str, Any],
             compute=_yield_to_maturity,
             unit="percent",
             extra_inputs={"frequency": frequency},
+            display_label="Yield to Maturity",
         ),
         CalcStep(
             name="current_yield",
@@ -1676,6 +1797,7 @@ def calculate_bond(item: Dict[str, Any],
             dependencies=["annual_coupon", "current_price"],
             compute=_current_yield,
             unit="percent",
+            display_label="Current Yield",
         ),
         CalcStep(
             name="price_per_100",
@@ -1683,6 +1805,7 @@ def calculate_bond(item: Dict[str, Any],
             dependencies=["current_price", "face_value"],
             compute=_price_per_100,
             unit="number",
+            display_label="Price per 100",
         ),
         CalcStep(
             name="days_accrued",
@@ -1690,6 +1813,7 @@ def calculate_bond(item: Dict[str, Any],
             dependencies=["valuation_date", "last_coupon_date"],
             compute=_days_accrued,
             unit="days",
+            display_label="Days Accrued",
         ),
         CalcStep(
             name="accrued_interest",
@@ -1698,6 +1822,7 @@ def calculate_bond(item: Dict[str, Any],
             compute=_accrued_interest,
             unit="currency",
             extra_inputs={"basis": basis, "frequency": frequency},
+            display_label="Accrued Interest",
         ),
         CalcStep(
             name="macaulay_duration",
@@ -1707,6 +1832,7 @@ def calculate_bond(item: Dict[str, Any],
             compute=_macaulay,
             unit="number",
             extra_inputs={"frequency": frequency},
+            display_label="Macaulay Duration",
         ),
         CalcStep(
             name="modified_duration",
@@ -1716,6 +1842,7 @@ def calculate_bond(item: Dict[str, Any],
             compute=_modified,
             unit="number",
             extra_inputs={"frequency": frequency},
+            display_label="Modified Duration",
         ),
         CalcStep(
             name="convexity",
@@ -1725,6 +1852,7 @@ def calculate_bond(item: Dict[str, Any],
             compute=_convexity,
             unit="number",
             extra_inputs={"frequency": frequency},
+            display_label="Convexity",
         ),
         CalcStep(
             name="dv01",
@@ -1732,6 +1860,7 @@ def calculate_bond(item: Dict[str, Any],
             dependencies=["current_price", "modified_duration"],
             compute=_dv01,
             unit="currency",
+            display_label="DV01",
         ),
     ]
 
@@ -1741,8 +1870,7 @@ def calculate_bond(item: Dict[str, Any],
         "years_to_maturity": years,
         "valuation_date": val_d,
         "maturity_date": mat_d,
-        "last_coupon_date": parse_date(item.get("last_coupon_date")),
-        "yield_to_maturity_input_pct": ytm_input_pct,
+        "last_coupon_date": parse_date(_canonical(item, "last_coupon_date")),
     }
     chain = execute_chain(steps, available)
     values = chain["values"]
@@ -1794,6 +1922,12 @@ def calculate_bond(item: Dict[str, Any],
                     f"price={price_in:.2f} imply different YTMs "
                     f"(price implies {solved_pct * 100:.4f}%). Input YTM wins.")
             result["warning"] = ((result.get("warning") or "") + " " + warn).strip()
+
+    # Expose avg_rate for the primary KPI card.
+    if result.get("yield_to_maturity") is not None:
+        result["avg_rate"] = result["yield_to_maturity"]
+    elif result.get("coupon_rate") is not None:
+        result["avg_rate"] = result["coupon_rate"]
 
     if hard_failures:
         result["status"] = "partial"
@@ -1919,6 +2053,8 @@ def calculate_data(data: List[Dict],
                 or (calc.get("principal") or 0) > 0
                 or (calc.get("current_price") or 0) > 0
                 or (calc.get("total_value") or 0) > 0
+                or (calc.get("interest_earned") is not None
+                    and calc.get("interest_rate") is not None)
             )
             (successful if has_data else failed).append(calc)
         else:
@@ -2026,6 +2162,11 @@ def calculate_data(data: List[Dict],
                 round(_mean("yield_curve_rate"), 4)
                 if _mean("yield_curve_rate") is not None else None
             )
+            # KPI fallback: if avg_rate never set, derive from discount.
+            if aggregates.get("avg_rate") is None and aggregates.get("discount_rate") is not None:
+                aggregates["avg_rate"] = aggregates["discount_rate"]
+            elif aggregates.get("avg_rate") is None and aggregates.get("bond_equivalent_yield") is not None:
+                aggregates["avg_rate"] = aggregates["bond_equivalent_yield"]
 
         elif instrument_type == "bonds":
             aggregates["total_face_value"] = round_money(_sum("face_value"))
@@ -2075,6 +2216,14 @@ def calculate_data(data: List[Dict],
                 round(_mean("yield_curve_rate"), 4)
                 if _mean("yield_curve_rate") is not None else None
             )
+            # KPI fallback for bonds.
+            if aggregates.get("avg_rate") is None:
+                if aggregates.get("weighted_avg_coupon") is not None:
+                    aggregates["avg_rate"] = aggregates["weighted_avg_coupon"]
+                elif aggregates.get("avg_ytm") is not None:
+                    aggregates["avg_rate"] = aggregates["avg_ytm"]
+                elif aggregates.get("avg_coupon_rate") is not None:
+                    aggregates["avg_rate"] = aggregates["avg_coupon_rate"]
 
     camel_map = {
         "instrumentCount": "instrument_count",
@@ -2106,6 +2255,8 @@ def calculate_data(data: List[Dict],
             aggregates["avgRate"] = aggregates["weighted_avg_coupon"]
         elif "weighted_avg_rate" in aggregates:
             aggregates["avgRate"] = aggregates["weighted_avg_rate"]
+        elif "avg_rate" in aggregates:
+            aggregates["avgRate"] = aggregates["avg_rate"]
 
     mode = "single" if unique_instrument_count == 1 else "multiple"
 

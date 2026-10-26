@@ -113,25 +113,40 @@ def _instrument_identity(result_row):
 
 
 def _unique_instrument_count(individual_results, backend_count=0):
+    """Count distinct instruments.
+
+    Partial rows (e.g. bond with defaulted frequency) count as real
+    instruments. Rows with no identity get counted individually so we
+    never silently under-count a workbook.
+    """
     if isinstance(backend_count, int) and backend_count > 0:
         return backend_count
     if not individual_results:
         return 0
-    success_rows = [r for r in (individual_results or [])
-                    if isinstance(r, dict) and r.get('status') == 'success']
-    if not success_rows:
+    counted = [r for r in (individual_results or [])
+               if isinstance(r, dict)
+               and r.get('status') in ('success', 'partial')]
+    if not counted:
         return 0
     seen = set()
-    for r in success_rows:
+    unnamed = 0
+    for r in counted:
         key = _instrument_identity(r)
         if key:
             seen.add(key)
-    if seen:
-        return len(seen)
-    return len(success_rows)
+        else:
+            unnamed += 1
+    return len(seen) + unnamed
 
 
 def _resolve_instrument_name(rows, sheet_name):
+    """Only inject sheet_name when the row has no usable name.
+
+    Checks every alias that could carry an instrument identity, so a row
+    that already had 'Instrument Name' (or ISIN / Ticker / etc.) is left
+    untouched. Prevents sheet_name from clobbering a genuine instrument
+    name downstream.
+    """
     if not sheet_name:
         return rows
     name = str(sheet_name).strip()
@@ -141,7 +156,12 @@ def _resolve_instrument_name(rows, sheet_name):
     def _row_has_name(row):
         if not isinstance(row, dict):
             return False
-        for key in ('instrument_name', 'Instrument Name', 'instrumentName'):
+        for key in ('instrument_name', 'Instrument Name', 'instrumentName',
+                    'instrument', 'Instrument', 'security', 'Security',
+                    'name', 'Name', 'bondname', 'BondName',
+                    'tbillname', 'TBillName', 'Security Name',
+                    'Instrument ID', 'ISIN', 'isin', 'Ticker', 'ticker',
+                    'Symbol', 'symbol'):
             v = row.get(key)
             if v is None:
                 continue
@@ -363,6 +383,62 @@ def _fix_instrument_count(result):
     return unique_count
 
 
+_DERIVATION_LABELS = {
+    'days_to_maturity': 'Days to Maturity',
+    'interest_earned': 'Interest Earned',
+    'total_value': 'Total Value / Maturity Value',
+    'discount_yield': 'Discount Yield',
+    'effective_annual_rate': 'Effective Annual Rate',
+    'bond_equivalent_yield': 'Bond Equivalent Yield',
+    'effective_yield': 'Effective Yield',
+    'present_value': 'Present Value',
+    'fair_value': 'Fair Value',
+    'purchase_price': 'Purchase Price',
+    'discount_amount': 'Discount Amount',
+    'discount_rate': 'Discount Rate',
+    'money_market_yield': 'Money-Market Yield',
+    'holding_period_yield': 'Holding Period Yield',
+    'effective_annual_yield': 'Effective Annual Yield',
+    'annual_coupon': 'Annual Coupon',
+    'coupon_payment': 'Coupon per Period',
+    'current_price': 'Current Price',
+    'yield_to_maturity': 'Yield to Maturity',
+    'current_yield': 'Current Yield',
+    'price_per_100': 'Price per 100',
+    'days_accrued': 'Days Accrued',
+    'accrued_interest': 'Accrued Interest',
+    'macaulay_duration': 'Macaulay Duration',
+    'modified_duration': 'Modified Duration',
+    'convexity': 'Convexity',
+    'dv01': 'DV01',
+}
+
+
+def _build_display_derivations(calc):
+    """Flatten backend derivations into an ordered, label-friendly list
+    that the frontend breakdown popup can render directly."""
+    derivations = (calc or {}).get('derivations') or {}
+    if not isinstance(derivations, dict):
+        return []
+    out = []
+    for name, d in derivations.items():
+        if not isinstance(d, dict):
+            continue
+        out.append({
+            'name': name,
+            'label': d.get('display_label') or _DERIVATION_LABELS.get(name, name),
+            'formula': d.get('formula', ''),
+            'inputs': d.get('display_inputs') or d.get('inputs') or {},
+            'result': d.get('result'),
+            'raw': d.get('result_raw'),
+            'unit': d.get('unit', 'number'),
+            'status': d.get('status', 'unknown'),
+            'error': d.get('error'),
+            'dependencies': d.get('dependencies', []),
+        })
+    return out
+
+
 def calculations_routes(app):
 
     @app.route('/api/calculations/validate', methods=['POST', 'OPTIONS'])
@@ -443,6 +519,7 @@ def calculations_routes(app):
             'inputs': result['inputs'],
             'calculation': result['calculation'],
             'derivations': (result['calculation'] or {}).get('derivations', {}),
+            'display_derivations': _build_display_derivations(result['calculation']),
             'valuation': result['valuation'],
             'methodology': f'{inst_type}-v1',
             'sourceData': row,
@@ -515,6 +592,7 @@ def calculations_routes(app):
                 'sourceData': src,
                 'calculation': calc,
                 'derivations': calc.get('derivations', {}),
+                'display_derivations': _build_display_derivations(calc),
                 'validation_errors': calc.get('validation_errors', []),
                 'valuation': {
                     'total_value': calc.get('total_value'),
@@ -582,15 +660,19 @@ def calculations_routes(app):
         by_type = {}
         for itype, res in per_type.items():
             agg = (res or {}).get('aggregates', {}) or {}
-            tv = agg.get('total_value') or agg.get('total_market_value') or agg.get('total_face_value') or 0
+            tv = (agg.get('total_value')
+                  or agg.get('total_market_value')
+                  or agg.get('total_face_value') or 0)
             ic = agg.get('instrument_count') or 0
             fc = agg.get('failed_count') or 0
             total += float(tv or 0)
             count += int(ic or 0)
             failed += int(fc or 0)
-            by_type[itype] = {'total_value': tv, 'instrument_count': ic, 'failed_count': fc}
+            by_type[itype] = {'total_value': tv, 'instrument_count': ic,
+                              'failed_count': fc}
         return jsonify({'status': 'success', 'portfolio_total': total,
-                        'total_instrument_count': count, 'total_failed_count': failed,
+                        'total_instrument_count': count,
+                        'total_failed_count': failed,
                         'by_type': by_type, 'currency': currency})
 
     @app.route('/api/calculations/<calculation_id>', methods=['GET', 'OPTIONS'])
@@ -618,7 +700,8 @@ def calculations_routes(app):
                 'status': 'success',
                 'calculationId': row.get('calculation_id'),
                 'instrumentType': row.get('instrument_type'),
-                'createdAt': row.get('created_at').isoformat() if row.get('created_at') else None,
+                'createdAt': (row.get('created_at').isoformat()
+                              if row.get('created_at') else None),
                 'inputData': _load_json(row.get('input_data')),
                 'resultData': _load_json(row.get('result_data')),
             })
@@ -830,7 +913,8 @@ def calculations_routes(app):
                 'id': r['id'], 'instrument_type': r['instrument_type'],
                 'dataset_id': r['dataset_id'], 'session_id': r['session_id'],
                 'status': r['calculation_status'],
-                'created_at': r['created_at'].isoformat() if r['created_at'] else None,
+                'created_at': (r['created_at'].isoformat()
+                               if r['created_at'] else None),
             } for r in rows]})
 
     @app.route('/api/calculations/latest', methods=['GET', 'OPTIONS'])
@@ -861,7 +945,8 @@ def calculations_routes(app):
                 'instrument_type': row.get('instrument_type'),
                 'result_data': _load_json(row.get('result_data')),
                 'status': row.get('calculation_status'),
-                'created_at': row.get('created_at').isoformat() if row.get('created_at') else None,
+                'created_at': (row.get('created_at').isoformat()
+                               if row.get('created_at') else None),
             }})
 
     @app.route('/api/calculations/instrument-summary', methods=['POST', 'OPTIONS'])
@@ -884,17 +969,19 @@ def calculations_routes(app):
             summary_rows = []
             for row in rows:
                 result_data = _load_json(row.get('result_data'))
-                calcs = result_data.get('calculations') or result_data.get('results') or []
+                calcs = (result_data.get('calculations')
+                         or result_data.get('results') or [])
                 if isinstance(calcs, list):
                     for c in calcs:
                         if not isinstance(c, dict):
                             continue
                         summary_rows.append({
-                            'Instrument Name': c.get('instrument_name') or c.get('instrumentId') or 'Instrument',
+                            'Instrument Name': (c.get('instrument_name')
+                                                or c.get('instrumentId')
+                                                or 'Instrument'),
                             'Instrument Type': row.get('instrument_type'),
                             **c,
                         })
-            # Preserve insertion order, then drop camelCase duplicates.
             cols = []
             seen = set()
             for r in summary_rows:
@@ -914,7 +1001,8 @@ def calculations_routes(app):
         session_id = payload.get('session_id')
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id required'}), 400
-        empty = {'columns': [], 'rows': [], 'portfolio_total': 0, 'instrument_counts': {}}
+        empty = {'columns': [], 'rows': [], 'portfolio_total': 0,
+                 'instrument_counts': {}}
         with _db() as (conn, cursor):
             if not conn:
                 return jsonify({'success': True, 'data': empty})
@@ -935,15 +1023,19 @@ def calculations_routes(app):
                 seen.add(cid)
                 result_data = _load_json(row.get('result_data'))
                 agg = result_data.get('aggregates', {}) or {}
-                tv = agg.get('total_value') or agg.get('total_market_value') or agg.get('total_face_value') or 0
+                tv = (agg.get('total_value')
+                      or agg.get('total_market_value')
+                      or agg.get('total_face_value') or 0)
                 portfolio_total += float(tv or 0)
 
                 stored_count = agg.get('instrument_count') or 0
-                stored_results = result_data.get('results') or result_data.get('calculations') or []
+                stored_results = (result_data.get('results')
+                                  or result_data.get('calculations') or [])
                 unique_count = _unique_instrument_count(stored_results, stored_count)
 
                 itype = row.get('instrument_type')
-                instrument_counts[itype] = instrument_counts.get(itype, 0) + int(unique_count or 0)
+                instrument_counts[itype] = (instrument_counts.get(itype, 0)
+                                            + int(unique_count or 0))
                 portfolio_rows.append({
                     'Instrument Type': itype, 'Total Value': tv,
                     'Instrument Count': unique_count,
@@ -976,10 +1068,12 @@ def calculations_routes(app):
                 'instrument_type': r.get('instrument_type'),
                 'result_data': _load_json(r.get('result_data')),
                 'status': r.get('calculation_status'),
-                'created_at': r.get('created_at').isoformat() if r.get('created_at') else None,
+                'created_at': (r.get('created_at').isoformat()
+                               if r.get('created_at') else None),
             } for r in rows]})
 
-    @app.route('/api/calculations/session-workflows/<session_id>', methods=['GET', 'OPTIONS'])
+    @app.route('/api/calculations/session-workflows/<session_id>',
+               methods=['GET', 'OPTIONS'])
     def session_workflows(session_id):
         if request.method == 'OPTIONS':
             return '', 200
@@ -987,8 +1081,8 @@ def calculations_routes(app):
             if not conn:
                 return jsonify({'success': True, 'data': {}})
             try:
-                cursor.execute("SELECT instrument_workflows FROM ui_sessions WHERE session_id = %s",
-                               (session_id,))
+                cursor.execute("SELECT instrument_workflows FROM ui_sessions "
+                               "WHERE session_id = %s", (session_id,))
                 row = cursor.fetchone()
             except Exception:
                 return jsonify({'success': True, 'data': {}})
