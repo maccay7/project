@@ -23,22 +23,46 @@ function fromSources (aggregates, row, snakeKeys, camelKeys = []) {
   return null
 }
 
+const RATE_KEYS = [
+  'avg_rate', 'avgRate',
+  'weighted_avg_rate', 'weightedAvgRate',
+  'weighted_avg_coupon', 'weightedAvgCoupon',
+  'avg_coupon_rate', 'avgCouponRate',
+  'weighted_avg_discount', 'weightedAvgDiscount',
+  'avg_discount_rate', 'avgDiscountRate',
+  'avg_ytm', 'avgYTM',
+  'interest_rate', 'interestRate',
+  'coupon_rate', 'couponRate',
+  'discount_rate', 'discountRate',
+  'yield_to_maturity', 'yieldToMaturity',
+  'bond_equivalent_yield', 'bondEquivalentYield',
+  'effective_annual_rate', 'effectiveAnnualRate'
+]
+
 export function buildAggregatesFromBackend (aggregates = {}, rowCalc = null, instrumentType) {
   const row = rowCalc && typeof rowCalc === 'object' ? rowCalc : null
   const count = fromSources(aggregates, row, ['instrument_count'], ['instrumentCount'])
     ?? (row ? 1 : null)
 
-  // FIXED: avgRate is resolved for ALL instrument types via a broad fallback
-  // chain so the primary rate KPI card always shows a value when one exists.
-  const avgRateValue = firstDefined(
-    fromSources(aggregates, row, ['avg_rate'], ['avgRate']),
-    fromSources(aggregates, row, ['weighted_avg_rate'], ['weightedAvgRate']),
-    fromSources(aggregates, row, ['weighted_avg_coupon'], ['weightedAvgCoupon']),
-    fromSources(aggregates, row, ['avg_coupon_rate'], ['avgCouponRate']),
-    fromSources(aggregates, row, ['weighted_avg_discount'], ['weightedAvgDiscount']),
-    fromSources(aggregates, row, ['avg_discount_rate'], ['avgDiscountRate']),
-    fromSources(aggregates, row, ['avg_ytm'], ['avgYTM'])
-  )
+  // Rate resolution: walk the full set of candidate keys so the KPI card
+  // is never blank when any rate field exists on either the aggregate or
+  // the per-row calculation.
+  let avgRateValue = null
+  for (const k of RATE_KEYS) {
+    if (aggregates && aggregates[k] !== undefined && aggregates[k] !== null && aggregates[k] !== '') {
+      avgRateValue = aggregates[k]; break
+    }
+    if (row && row[k] !== undefined && row[k] !== null && row[k] !== '') {
+      avgRateValue = row[k]; break
+    }
+  }
+  if (avgRateValue === null) {
+    avgRateValue = firstDefined(
+      fromSources(aggregates, row, ['avg_rate'], ['avgRate']),
+      fromSources(aggregates, row, ['weighted_avg_rate'], ['weightedAvgRate']),
+      fromSources(aggregates, row, ['weighted_avg_coupon'], ['weightedAvgCoupon'])
+    )
+  }
 
   const base = {
     totalValue: fromSources(aggregates, row, ['total_value'], ['totalValue']),
