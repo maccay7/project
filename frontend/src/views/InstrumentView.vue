@@ -2625,7 +2625,6 @@ const calculationFields = computed(() => {
   const selectedCalc = selectedCalculations.value || {}
   
   const missingFields = allCalc.missing_fields || allCalc.missingPrerequisites || []
-  const invalidFields = allCalc.invalid_fields || []
   const calcStatus = allCalc.status || selectedCalc.status || 'unknown'
   
   const result = fields.map(field => {
@@ -2639,13 +2638,19 @@ const calculationFields = computed(() => {
               agg[toSnakeCase(field.key)] !== undefined ? agg[toSnakeCase(field.key)] : null
     }
     
+    // A card is only dropped when the whole calculation errored or the
+    // field is genuinely absent. Partial results keep every card so the
+    // user sees each value that was computed, and the ones that failed
+    // show their actual reason. Zero is a valid value and is kept.
     let unavailableReason = null
     if (calcStatus === 'error' || calcStatus === 'cannot_calculate') {
       unavailableReason = allCalc.message || selectedCalc.message || 'Calculation failed'
-    } else if (calcStatus === 'partial' && (value === null || value === undefined)) {
-      unavailableReason = `Missing inputs: ${missingFields.join(', ')}`
     } else if (value === null || value === undefined) {
-      unavailableReason = 'Cannot calculate — missing/invalid input'
+      if (calcStatus === 'partial' && missingFields.length) {
+        unavailableReason = `Missing inputs: ${missingFields.join(', ')}`
+      } else {
+        unavailableReason = 'Cannot calculate — missing/invalid input'
+      }
     }
     
     return { ...field, value, unavailableReason }
@@ -2705,6 +2710,8 @@ function normalizeFieldName(fieldName) {
 }
 
 function formatCalcValue(key, value) {
+  // Never render 0 when the value is genuinely null/undefined — the
+  // card must show '—' so it's obvious nothing was returned.
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'number' && (isNaN(value) || !isFinite(value))) return '—'
   if (typeof value === 'string' && ['nan', 'infinity', '-infinity'].includes(value.toLowerCase())) return '—'
@@ -5529,6 +5536,9 @@ async function calculateMetrics() {
           const agg = buildAggregatesFromBackend(backendAggregates, singleCalc, instrumentType.value)
           agg.instrumentCount = agg.instrumentCount ?? 1
           if (response.data.fred) agg.fred = response.data.fred
+          if (Array.isArray(singleCalc.display_derivations)) {
+            agg.display_derivations = singleCalc.display_derivations
+          }
           const displayable = hasDisplayableCalculation(agg)
           const failedStatuses = ['cannot_calculate', 'error']
           const isFailed = failedStatuses.includes(singleCalc.status) || (!displayable && singleCalc.status !== 'success')
@@ -5545,6 +5555,10 @@ async function calculateMetrics() {
               error: singleCalc.error,
               missing_fields: singleCalc.missing_fields || [],
               invalid_fields: singleCalc.invalid_fields || [],
+              display_derivations: Array.isArray(singleCalc.display_derivations)
+                ? singleCalc.display_derivations
+                : (Array.isArray(agg.display_derivations) ? agg.display_derivations : []),
+              derivations: singleCalc.derivations || agg.derivations || null,
               ...agg
             }
             selectedCalculations.value = allCalculations.value
@@ -5594,6 +5608,12 @@ async function calculateMetrics() {
           const agg = buildAggregatesFromBackend(backendAggregates, null, instrumentType.value)
           agg.instrumentCount = agg.instrumentCount ?? calcArray.length
           if (response.data.fred) agg.fred = response.data.fred
+          // Attach the ordered breakdown array from the first calc row so
+          // the KPI popup can render it. For multiple rows each row also
+          // carries its own display_derivations in instrumentSummary.
+          if (Array.isArray(calcArray[0]?.display_derivations)) {
+            agg.display_derivations = calcArray[0].display_derivations
+          }
           if (!hasDisplayableCalculation(agg) && response.data.status === 'cannot_calculate') {
             const firstFail = calcArray.find(c => c.status !== 'success') || calcArray[0]
             const fullErrorMsg = formatCalculationFailureMessage(firstFail)
