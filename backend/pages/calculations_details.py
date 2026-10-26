@@ -625,7 +625,6 @@ SPECIFIC_ALIASES: Dict[str, List[str]] = {
         "short name", "shortname",
         "description",
         "name", "ticker", "symbol",
-        "tbillname", "TBillName",
     ],
     "counterparty": [
         "counterparty", "counter party", "counter-party", "cp",
@@ -818,7 +817,7 @@ def validate_row(row: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
         if iss_d and mat_d and iss_d > mat_d:
             invalid.append(("issue_date", "must be on or before maturity_date"))
 
-    elif instrument_type == "money-market" or instrument_type == "money_market":
+    elif instrument_type == "money-market":
         principal = (safe_float(norm.get("principal"))
                      or safe_float(norm.get("face_value"))
                      or safe_float(norm.get("amount")))
@@ -1079,7 +1078,6 @@ def calculate_money_market(item: Dict[str, Any],
         "interest_rate": _rate(rate_pct) if rate_pct is not None else None,
         "day_count_convention": day_count,
         "currency": currency,
-        "status": "success"
     }
     name = _extract_instrument_name(item)
     if name:
@@ -1265,21 +1263,11 @@ def calculate_treasury_bill(item: Dict[str, Any],
         "face_value": round_money(face),
         "day_count_convention": day_count,
         "currency": currency,
-        "status": "success"
     }
     name = _extract_instrument_name(item)
     if name:
         result["instrument_name"] = name
     _add_input_dates(result, val_d, mat_d, item)
-
-    # Date validation
-    if val_d and mat_d:
-        if mat_d < val_d:
-            result["error"] = f"Maturity date ({mat_d.isoformat()}) is before valuation date ({val_d.isoformat()}). Days calculation requires maturity after valuation."
-            result["status"] = "validation_failed"
-            result["invalid_fields"] = [{"field": "maturity_date", "reason": "must be after valuation_date"}]
-            result["derivations"] = {}
-            return _add_camel_aliases(result)
 
     # Conflicting-input detection (price wins)
     if (purchase_price_in is not None and discount_rate_in_frac is not None
@@ -1303,8 +1291,6 @@ def calculate_treasury_bill(item: Dict[str, Any],
         def days_compute(inp):
             v = parse_date(inp["period_start"])
             m = parse_date(inp["maturity_date"])
-            if v is None or m is None:
-                raise ValueError("Both period_start and maturity_date are required for days calculation")
             d = (m - v).days
             if d <= 0:
                 raise ValueError(f"Maturity date must be after period start (got {d} days)")
@@ -1351,9 +1337,8 @@ def calculate_treasury_bill(item: Dict[str, Any],
                 ** (365.0 / inp["days_to_maturity"]) - 1.0) * 100.0
 
     def _present_value(inp):
-        dr = inp.get("discount_rate", discount_rate_in_frac * 100.0 if discount_rate_in_frac else 0)
         return (inp["face_value"]
-                * (1.0 - (dr / 100.0)
+                * (1.0 - (inp["discount_rate"] / 100.0)
                    * inp["days_to_maturity"] / discount_basis))
 
     steps = [
@@ -1432,10 +1417,10 @@ def calculate_treasury_bill(item: Dict[str, Any],
         CalcStep(
             name="present_value",
             formula="face × (1 − discount_rate/100 × days / basis)",
-            dependencies=["face_value", "days_to_maturity"],
+            dependencies=["face_value", "discount_rate", "days_to_maturity"],
             compute=_present_value,
             unit="currency",
-            extra_inputs={"discount_basis": discount_basis, "discount_rate": discount_rate_pct_in},
+            extra_inputs={"discount_basis": discount_basis},
         ),
     ]
 
@@ -1551,7 +1536,6 @@ def calculate_bond(item: Dict[str, Any],
         "coupon_frequency": frequency,
         "day_count_convention": day_count,
         "currency": currency,
-        "status": "success"
     }
     name = _extract_instrument_name(item)
     if name:
@@ -1912,24 +1896,6 @@ def calculate_data(data: List[Dict],
         if valuation_date:
             row = {**row, "valuation_date": valuation_date}
         row = normalize_row(row)
-
-        # Validate once before calculation
-        validation = validate_row(row, instrument_type)
-        if not validation["can_calculate"]:
-            calc = {
-                "instrument_type": instrument_type,
-                "status": "validation_failed",
-                "missing_fields": validation["missing_fields"],
-                "invalid_fields": validation["invalid_fields"],
-                "message": f"Cannot calculate: missing {len(validation['missing_fields'])} fields, {len(validation['invalid_fields'])} invalid",
-                "derivations": {}
-            }
-            name = _extract_instrument_name(row)
-            if name:
-                calc["instrument_name"] = name
-            instrument_results.append(calc)
-            failed.append(calc)
-            continue
 
         name = _extract_instrument_name(row)
 
