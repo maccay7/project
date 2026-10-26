@@ -1,371 +1,244 @@
-// [MODIFIED] autoDetectInstrument.js
+// [FINAL] autoDetectInstrument.js
 import * as XLSX from 'xlsx'
 
-// ============================================================================
-// Currency constants
-// ============================================================================
+const MAX_DETECT_ROWS = 500
+const MAX_LOOKAHEAD = 6
+
 const CURRENCY_SYMBOLS = {
-  USD: ['$', 'US$', 'USD$'],
-  EUR: ['€'],
-  GBP: ['£'],
-  JPY: ['¥', 'JP¥'],
-  CNY: ['¥', 'CN¥', 'RMB', '元'],
-  INR: ['₹'],
-  ZAR: ['R'],
-  ZWL: ['Z$', 'ZWL$'],
-  ZWG: ['ZWG$', 'ZiG'],
-  AUD: ['A$', 'AU$'],
-  CAD: ['C$', 'CA$'],
-  CHF: ['CHF', 'Fr'],
-  NZD: ['NZ$'],
-  HKD: ['HK$'],
-  SGD: ['S$'],
-  ZMW: ['ZK'],
-  BWP: ['P'],
-  NGN: ['₦'],
-  KES: ['KSh'],
-  EGP: ['E£'],
-  AED: ['د.إ'],
-  SAR: ['﷼'],
-  TRY: ['₺'],
-  RUB: ['₽'],
-  BRL: ['R$'],
-  KRW: ['₩'],
-  THB: ['฿'],
-  VND: ['₫'],
-  PHP: ['₱'],
-  IDR: ['Rp'],
-  MYR: ['RM']
+  USD: ['$', 'US$', 'USD$'], EUR: ['€'], GBP: ['£'], JPY: ['¥', 'JP¥'],
+  CNY: ['¥', 'CN¥', 'RMB', '元'], INR: ['₹'], ZAR: ['R'], ZWL: ['Z$', 'ZWL$'],
+  ZWG: ['ZWG$', 'ZiG'], AUD: ['A$', 'AU$'], CAD: ['C$', 'CA$'],
+  CHF: ['CHF', 'Fr'], NZD: ['NZ$'], HKD: ['HK$'], SGD: ['S$'], ZMW: ['ZK'],
+  BWP: ['P'], NGN: ['₦'], KES: ['KSh'], EGP: ['E£'], AED: ['د.إ'],
+  SAR: ['﷼'], TRY: ['₺'], RUB: ['₽'], BRL: ['R$'], KRW: ['₩'], THB: ['฿'],
+  VND: ['₫'], PHP: ['₱'], IDR: ['Rp'], MYR: ['RM'],
 }
 
 const CURRENCY_NAMES = {
   USD: ['dollar', 'us dollar', 'united states dollar', 'american dollar'],
-  EUR: ['euro', 'euros'],
-  GBP: ['pound', 'pounds', 'british pound', 'sterling'],
-  JPY: ['yen', 'japanese yen'],
-  CNY: ['yuan', 'renminbi', 'chinese yuan'],
+  EUR: ['euro', 'euros'], GBP: ['pound', 'pounds', 'british pound', 'sterling'],
+  JPY: ['yen', 'japanese yen'], CNY: ['yuan', 'renminbi', 'chinese yuan'],
   INR: ['rupee', 'indian rupee', 'rupees'],
   ZAR: ['rand', 'south african rand'],
   ZWL: ['zimbabwe dollar', 'zimbabwean dollar'],
-  ZWG: ['zimbabwe gold', 'zig'],
-  AUD: ['australian dollar'],
-  CAD: ['canadian dollar'],
-  CHF: ['swiss franc', 'franc'],
-  NZD: ['new zealand dollar'],
-  HKD: ['hong kong dollar'],
-  SGD: ['singapore dollar'],
-  NGN: ['naira'],
-  KES: ['kenyan shilling', 'shilling'],
-  BWP: ['pula'],
-  EGP: ['egyptian pound'],
-  AED: ['dirham', 'uae dirham'],
-  SAR: ['riyal', 'saudi riyal'],
-  TRY: ['lira', 'turkish lira'],
-  RUB: ['ruble', 'russian ruble'],
-  BRL: ['real', 'brazilian real'],
-  KRW: ['won', 'korean won'],
-  THB: ['baht', 'thai baht'],
-  VND: ['dong', 'vietnamese dong'],
-  PHP: ['peso', 'philippine peso'],
-  IDR: ['rupiah', 'indonesian rupiah'],
-  MYR: ['ringgit', 'malaysian ringgit']
+  ZWG: ['zimbabwe gold', 'zig'], AUD: ['australian dollar'],
+  CAD: ['canadian dollar'], CHF: ['swiss franc', 'franc'],
+  NZD: ['new zealand dollar'], HKD: ['hong kong dollar'],
+  SGD: ['singapore dollar'], NGN: ['naira'],
+  KES: ['kenyan shilling', 'shilling'], BWP: ['pula'],
+  EGP: ['egyptian pound'], AED: ['dirham', 'uae dirham'],
+  SAR: ['riyal', 'saudi riyal'], TRY: ['lira', 'turkish lira'],
+  RUB: ['ruble', 'russian ruble'], BRL: ['real', 'brazilian real'],
+  KRW: ['won', 'korean won'], THB: ['baht', 'thai baht'],
+  VND: ['dong', 'vietnamese dong'], PHP: ['peso', 'philippine peso'],
+  IDR: ['rupiah', 'indonesian rupiah'], MYR: ['ringgit', 'malaysian ringgit'],
 }
 
 const KNOWN_ISO_CODES = new Set([
-  'USD','EUR','GBP','JPY','CNY','INR','AUD','CAD','CHF','MXN',
-  'BRL','KRW','RUB','ZAR','TRY','SGD','HKD','NOK','SEK','DKK',
-  'PLN','THB','IDR','MYR','PHP','VND','CZK','HUF','RON','ILS',
-  'CLP','COP','PEN','ARS','UYU','BOB','PYG','CRC','GTQ','HNL',
-  'NIO','PAB','DOP','JMD','TTD','BBD','XCD','BZD','GYD','SRD',
-  'AWG','ANG','CUP','HTG','XAF','XOF','XPF','CDF','BIF','DJF',
-  'ERN','ETB','KES','MGF','MWK','MZN','RWF','SOS','TZS','UGX',
-  'ZMW','BWP','SZL','LSL','NAD','AOA','BGN','HRK','CYP','EEK',
-  'LTL','LVL','MKD','RSD','SKK','SIT','UAH','ALL','BYN','MDL',
-  'AMD','AZN','GEL','KZT','KGS','TJS','TMT','UZS','AFN','IRR',
-  'IQD','JOD','KWD','LBP','OMR','QAR','SAR','SYP','AED','YER',
-  'BHD','DZD','EGP','LYD','MAD','MRU','SDG','TND','MVR','NPR',
-  'PKR','LKR','BDT','BTN','MMK','BND','KHR','LAK','MOP','TWD',
-  'MNT','KPW','FJD','PGK','SBD','VUV','WST','NZD','TOP','ISK',
-  'SVC','VEF','ZWL','ZWG'
+  'USD','EUR','GBP','JPY','CNY','INR','AUD','CAD','CHF','MXN','BRL','KRW',
+  'RUB','ZAR','TRY','SGD','HKD','NOK','SEK','DKK','PLN','THB','IDR','MYR',
+  'PHP','VND','CZK','HUF','RON','ILS','CLP','COP','PEN','ARS','UYU','BOB',
+  'PYG','CRC','GTQ','HNL','NIO','PAB','DOP','JMD','TTD','BBD','XCD','BZD',
+  'GYD','SRD','AWG','ANG','CUP','HTG','XAF','XOF','XPF','CDF','BIF','DJF',
+  'ERN','ETB','KES','MGF','MWK','MZN','RWF','SOS','TZS','UGX','ZMW','BWP',
+  'SZL','LSL','NAD','AOA','BGN','HRK','CYP','EEK','LTL','LVL','MKD','RSD',
+  'SKK','SIT','UAH','ALL','BYN','MDL','AMD','AZN','GEL','KZT','KGS','TJS',
+  'TMT','UZS','AFN','IRR','IQD','JOD','KWD','LBP','OMR','QAR','SAR','SYP',
+  'AED','YER','BHD','DZD','EGP','LYD','MAD','MRU','SDG','TND','MVR','NPR',
+  'PKR','LKR','BDT','BTN','MMK','BND','KHR','LAK','MOP','TWD','MNT','KPW',
+  'FJD','PGK','SBD','VUV','WST','NZD','TOP','ISK','SVC','VEF','ZWL','ZWG',
 ])
 
 const NON_CURRENCY_WORDS = new Set([
-  'AND','BUT','FOR','NOR','NOT','NOW','OUT','PUT','SET','SHE','THE',
-  'TWO','USE','VIA','YES','YOU','ALL','ANY','ARE','BIG','CAN','DAY',
-  'END','EYE','FEW','GET','HAS','HER','HIS','HOW','ITS','LET','MAN',
-  'MAY','NEW','OFF','OLD','ONE','OUR','OWN','RUN','SAW','SAY','SEE',
-  'SIR','SIT','SIX','SON','SUN','TEN','TOO','TRY','WAR','WAY','WHO',
-  'WHY','WIN','WON','YET'
+  'AND','BUT','FOR','NOR','NOT','NOW','OUT','PUT','SET','SHE','THE','TWO',
+  'USE','VIA','YES','YOU','ALL','ANY','ARE','BIG','CAN','DAY','END','EYE',
+  'FEW','GET','HAS','HER','HIS','HOW','ITS','LET','MAN','MAY','NEW','OFF',
+  'OLD','ONE','OUR','OWN','RUN','SAW','SAY','SEE','SIR','SIT','SIX','SON',
+  'SUN','TEN','TOO','TRY','WAR','WAY','WHO','WHY','WIN','WON','YET',
 ])
 
-// ============================================================================
-// Instrument Schema - Source of Truth for Required Fields
-// ============================================================================
-const INSTRUMENT_SCHEMA = {
-  'Money Market': {
-    required: ['principal', 'interest_rate'],
-    valueType: {
-      principal: 'currency',
-      interest_rate: 'percentage'
-    }
-  },
-  'T-Bills': {
-    required: ['face_value', 'discount_rate'],
-    valueType: {
-      face_value: 'currency',
-      discount_rate: 'percentage'
-    }
-  },
-  'Bonds': {
-    required: ['face_value', 'coupon_rate', 'yield_to_maturity'],
-    valueType: {
-      face_value: 'currency',
-      coupon_rate: 'percentage',
-      yield_to_maturity: 'percentage'
-    }
-  }
-}
-
-// ============================================================================
-// Backend SPECIFIC_ALIASES - Source of Truth for Field Mapping
-// Must match backend/pages/calculations_details.py exactly
-// ============================================================================
 const SPECIFIC_ALIASES = {
-  "principal": [
-    "principal", "principle", "principal amount", "principle amount",
-    "face value", "facevalue", "face_value", "face amount",
-    "par value", "parvalue", "par amount",
-    "nominal", "nominal amount", "nominal value",
-    "notional", "notional amount",
-    "investment amount", "initial investment", "initial amount",
-    "starting balance", "opening balance", "deposit amount",
-    "capital", "total cost", "purchase cost", "cost", "amount", "value",
-    "outstanding principal", "current principal",
+  principal: [
+    'principal', 'principle', 'principal amount', 'principle amount',
+    'amount invested', 'investment amount', 'initial investment', 'initial amount',
+    'deposit amount', 'starting balance', 'opening balance',
+    'capital', 'total cost', 'purchase cost', 'cost',
+    'outstanding principal', 'current principal',
   ],
-  "interest_rate": [
-    "interest rate", "interestrate", "interest_rate",
-    "annual rate", "annual interest rate",
-    "nominal rate", "stated rate", "effective rate",
-    "apr", "coupon", "coupon rate",
-    "rate %", "rate%", "rate",
+  face_value: [
+    'balance', 'balance amount', 'balance_amount',
+    'principal balance', 'principal_balance',
+    'outstanding balance', 'outstanding_balance',
+    'loan balance', 'loan_balance', 'current balance', 'current_balance',
+    'face balance', 'face_balance',
+    'amount outstanding', 'amount_outstanding',
+    'face value', 'facevalue', 'face_value',
+    'par value', 'parvalue', 'par_value',
+    'redemption value', 'redemptionvalue', 'redemption_value',
+    'maturity value', 'maturityvalue', 'maturity_value',
+    'nominal value', 'nominalvalue', 'nominal_value',
+    'nominal amount', 'notional amount', 'face amount', 'par amount',
+    'value', 'amount',
   ],
-  "days_to_maturity": [
-    "days to maturity", "daystomaturity", "days_to_maturity",
-    "maturity days", "duration days", "contract days",
-    "term days", "term_days", "termdays", "term in days",
-    "tenor", "term", "days", "period",
+  interest_rate: [
+    'interest rate', 'interestrate', 'interest_rate', 'annual rate',
+    'annual interest rate', 'nominal rate', 'stated rate', 'effective rate',
+    'apr', 'coupon', 'coupon rate', 'rate %', 'rate%', 'rate',
   ],
-  "issue_date": [
-    "issue date", "issuedate", "issue_date",
-    "start date", "startdate", "start_date",
-    "effective date", "effectivedate", "effective_date",
-    "settlement date", "settlementdate", "settlement_date",
-    "origination date", "value date", "valuedate", "value_date",
-    "trade date", "tradedate", "trade_date",
+  days_to_maturity: [
+    'days to maturity', 'daystomaturity', 'days_to_maturity', 'maturity days',
+    'duration days', 'contract days', 'term days', 'term_days', 'termdays',
+    'term in days', 'tenor', 'term', 'days', 'period',
   ],
-  "maturity_date": [
-    "maturity date", "maturitydate", "maturity_date",
-    "end date", "enddate", "end_date",
-    "due date", "duedate", "due_date",
-    "redemption date", "redemptiondate", "redemption_date",
-    "expiry date", "expirydate", "expiry_date",
-    "termination date",
+  issue_date: [
+    'issue date', 'issuedate', 'issue_date', 'start date', 'startdate',
+    'start_date', 'effective date', 'effectivedate', 'effective_date',
+    'settlement date', 'settlementdate', 'settlement_date',
+    'origination date', 'value date', 'valuedate', 'value_date',
+    'trade date', 'tradedate', 'trade_date',
   ],
-  "valuation_date": [
-    "valuation", "valuation date", "valuationdate", "valuation_date",
-    "portfolio date", "portfoliodate", "portfolio_date",
-    "report date", "reportdate", "report_date",
-    "as of date", "asofdate", "as_of_date",
-    "date pfolio", "datepfolio",
+  maturity_date: [
+    'maturity date', 'maturitydate', 'maturity_date', 'end date', 'enddate',
+    'end_date', 'due date', 'duedate', 'due_date', 'redemption date',
+    'redemptiondate', 'redemption_date', 'expiry date', 'expirydate',
+    'expiry_date', 'termination date',
   ],
-  "purchase_price": [
-    "purchase price", "purchaseprice", "purchase_price",
-    "buy price", "buyprice", "buy_price",
-    "acquisition price", "entry price",
-    "price paid", "pricepaid", "price_paid",
-    "issue price", "issueprice", "issue_price",
-    "price",
+  valuation_date: [
+    'valuation', 'valuation date', 'valuationdate', 'valuation_date',
+    'portfolio date', 'portfoliodate', 'portfolio_date', 'report date',
+    'reportdate', 'report_date', 'as of date', 'asofdate', 'as_of_date',
+    'date pfolio', 'datepfolio',
   ],
-  "current_price": ["current price", "currentprice", "current_price"],
-  "settlement_amount": [
-    "settlement amount", "settlementamount",
-    "settlement value", "cash flow", "proceeds",
+  purchase_price: [
+    'purchase price', 'purchaseprice', 'purchase_price', 'buy price',
+    'buyprice', 'buy_price', 'acquisition price', 'entry price',
+    'price paid', 'pricepaid', 'price_paid', 'issue price', 'issueprice',
+    'issue_price', 'price',
   ],
-  "market_value": [
-    "market value", "marketvalue", "market_value",
-    "current value", "currentvalue",
-    "fair value", "fairvalue",
-    "present value", "presentvalue",
-    "total value", "totalvalue",
+  current_price: ['current price', 'currentprice', 'current_price'],
+  settlement_amount: [
+    'settlement amount', 'settlementamount', 'settlement value',
+    'cash flow', 'proceeds',
   ],
-  "portfolio_name": ["portfolio name", "pfolio name", "portfolio"],
-  "security": [
-    "security", "security id", "securityid",
-    "instrument id", "instrumentid", "isin", "ticker",
+  market_value: [
+    'market value', 'marketvalue', 'market_value', 'current value',
+    'currentvalue', 'fair value', 'fairvalue', 'present value',
+    'presentvalue', 'total value', 'totalvalue',
   ],
-  "instrument_name": [
-    "parent company name", "parent company",
-    "issuer", "company", "entity",
-    "short name", "shortname",
-    "instrument name", "instrumentname", "instrument_name",
-    "instrument", "description", "counterparty",
-    "bond name", "bondname", "bond_name", "bond",
-    "t-bill name", "tbill name", "tbillname", "tbill_name",
-    "tbill", "t-bill", "treasury bill name",
-    "security name", "securityname",
-    "name", "ticker", "symbol",
+  portfolio_name: ['portfolio name', 'pfolio name', 'portfolio'],
+  security: [
+    'security', 'security id', 'securityid', 'instrument id',
+    'instrumentid', 'isin', 'ticker',
   ],
-  "classification": ["classification", "category", "asset class", "type"],
-  "currency": ["currency", "ccy", "iso code", "currency code"],
-  "country": ["country", "jurisdiction", "domicile"],
-  "sector": ["sector", "industry", "industry group"],
-  "rating": ["credit rating", "rating", "moody", "s&p", "fitch"],
-  "face_value": [
-    "face value", "facevalue", "face_value",
-    "par value", "parvalue", "par_value",
-    "redemption value", "redemptionvalue", "redemption_value",
-    "maturity value", "maturityvalue", "maturity_value",
-    "nominal value", "nominalvalue", "nominal_value",
+  instrument_name: [
+    'instrument name', 'instrumentname', 'instrument_name',
+    'bond name', 'bondname', 'bond_name',
+    't-bill name', 'tbill name', 'tbillname', 'tbill_name',
+    'treasury bill name', 'security name', 'securityname',
+    'issuer', 'parent company name', 'parent company',
+    'company', 'entity', 'short name', 'shortname', 'description',
+    'name', 'ticker', 'symbol',
   ],
-  "discount_rate": [
-    "discount rate", "discountrate", "discount_rate",
-    "bank discount", "bankdiscount",
-    "discount yield", "discountyield",
-    "t-bill rate", "tbillrate",
-    "auction rate", "auctionrate",
-    "discount",
+  counterparty: [
+    'counterparty', 'counter party', 'counter-party', 'cp',
+    'account name', 'client name',
   ],
-  "term_days": [
-    "term days", "termdays", "term_days",
-    "days to maturity", "daystomaturity",
-    "maturity days", "maturitydays",
-    "tenor", "term", "days",
+  classification: ['classification', 'category', 'asset class', 'type'],
+  currency: ['currency', 'ccy', 'iso code', 'currency code'],
+  country: ['country', 'jurisdiction', 'domicile'],
+  sector: ['sector', 'industry', 'industry group'],
+  rating: ['credit rating', 'rating', 'moody', 's&p', 'fitch'],
+  discount_rate: [
+    'discount rate', 'discountrate', 'discount_rate', 'bank discount',
+    'bankdiscount', 'discount yield', 'discountyield', 't-bill rate',
+    'tbillrate', 'auction rate', 'auctionrate', 'discount',
   ],
-  "auction_date": ["auction date", "auctiondate", "issue date", "settlement date"],
-  "coupon_rate": [
-    "coupon rate", "couponrate", "coupon_rate",
-    "coupon", "annual coupon", "annualcoupon",
-    "fixed rate", "fixedrate",
-    "nominal rate", "nominalrate",
-    "stated rate", "statedrate",
-    "interest rate", "interestrate",
+  term_days: [
+    'term days', 'termdays', 'term_days', 'days to maturity',
+    'daystomaturity', 'maturity days', 'maturitydays', 'tenor', 'term', 'days',
   ],
-  "coupon_frequency": [
-    "coupon frequency", "couponfrequency", "coupon_frequency",
-    "payment frequency", "paymentfrequency",
-    "frequency", "coupon period", "payments per year",
+  auction_date: ['auction date', 'auctiondate', 'issue date', 'settlement date'],
+  coupon_rate: [
+    'coupon rate', 'couponrate', 'coupon_rate', 'coupon', 'annual coupon',
+    'annualcoupon', 'fixed rate', 'fixedrate', 'nominal rate', 'nominalrate',
+    'stated rate', 'statedrate', 'interest rate', 'interestrate',
   ],
-  "years_to_maturity": [
-    "years to maturity", "yearstomaturity", "years_to_maturity",
-    "maturity years", "maturityyears",
-    "term years", "termyears",
-    "duration years", "durationyears",
-    "time to maturity", "timetomaturity",
-    "years", "year",
+  coupon_frequency: [
+    'coupon frequency', 'couponfrequency', 'coupon_frequency',
+    'payment frequency', 'paymentfrequency', 'frequency', 'coupon period',
+    'payments per year',
   ],
-  "yield": [
-    "yield to maturity", "yieldtomaturity", "yield_to_maturity",
-    "ytm", "market yield", "marketyield",
-    "required return", "requiredreturn",
-    "redemption yield", "redemptionyield",
-    "yield",
+  years_to_maturity: [
+    'years to maturity', 'yearstomaturity', 'years_to_maturity',
+    'maturity years', 'maturityyears', 'term years', 'termyears',
+    'duration years', 'durationyears', 'time to maturity',
+    'timetomaturity', 'years', 'year',
   ],
-  "call_date": ["call date", "calldate", "first call date"],
-  "call_price": ["call price", "callprice", "call premium", "redemption price"],
-  "put_date": ["put date", "putdate", "puttable date"],
-  "put_price": ["put price", "putprice", "put premium"],
+  yield: [
+    'yield to maturity', 'yieldtomaturity', 'yield_to_maturity', 'ytm',
+    'market yield', 'marketyield', 'required return', 'requiredreturn',
+    'redemption yield', 'redemptionyield', 'yield',
+  ],
+  call_date: ['call date', 'calldate', 'first call date'],
+  call_price: ['call price', 'callprice', 'call premium', 'redemption price'],
+  put_date: ['put date', 'putdate', 'puttable date'],
+  put_price: ['put price', 'putprice', 'put premium'],
 }
 
-// ============================================================================
-// Semantic Field Definitions - Meaning-based, not name-based
-// ============================================================================
 const SEMANTIC_FIELD_DEFINITIONS = {
+  face_value: {
+    semanticConcept: 'face value of security',
+    valueTypes: ['currency'],
+    keywords: [
+      'balance', 'balance amount', 'principal balance', 'principal_balance',
+      'outstanding balance', 'outstanding_balance', 'loan balance',
+      'face balance', 'amount outstanding',
+      ...SPECIFIC_ALIASES.face_value,
+    ],
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$',
+      '^\\d{1,4}[/\\-.]\\d{1,2}[/\\-.]\\d{1,4}$', '^\\.{3}$', '^-$'],
+    excludeKeywords: ['rate', 'yield', 'coupon', 'risk', 'premium', 'specific', 'spread'],
+    units: ['$', '€', '£', '¥', 'R'],
+    contextPatterns: ['face', 'par', 'redemption', 'maturity value', 'balance'],
+    minValue: 1000, typicalRange: [1000, 1000000000]
+  },
   principal: {
     semanticConcept: 'monetary principal amount',
     valueTypes: ['currency'],
     keywords: SPECIFIC_ALIASES.principal,
-    units: ['$', '€', '£', '¥', 'R', 'USD', 'EUR', 'GBP', 'ZAR', 'BWP', 'ZWG'],
-    contextPatterns: ['value', 'amount', 'principal', 'face', 'par'],
-    minValue: 1000,
-    typicalRange: [1000, 1000000000]
-  },
-  face_value: {
-    semanticConcept: 'face value of security',
-    valueTypes: ['currency'],
-    keywords: SPECIFIC_ALIASES.face_value,
-    units: ['$', '€', '£', '¥', 'R', 'USD', 'EUR', 'GBP', 'ZAR', 'BWP', 'ZWG'],
-    contextPatterns: ['face', 'par', 'redemption', 'maturity value'],
-    minValue: 1000,
-    typicalRange: [1000, 1000000000]
-  },
-  price: {
-    semanticConcept: 'price of security',
-    valueTypes: ['currency', 'percentage'],
-    keywords: SPECIFIC_ALIASES.purchase_price,
-    units: ['$', '€', '£', '¥', 'R', 'USD', 'EUR', 'GBP', 'ZAR', '%'],
-    contextPatterns: ['price', 'market price', 'clean price', 'dirty price'],
-    minValue: 0,
-    typicalRange: [0, 1000000000]
-  },
-  accrued_interest: {
-    semanticConcept: 'accrued interest',
-    valueTypes: ['currency'],
-    keywords: ['accrued', 'interest', 'accrual'],
-    units: ['$', '€', '£', '¥', 'R', 'USD', 'EUR', 'GBP', 'ZAR', 'BWP', 'ZWG'],
-    contextPatterns: ['accrued interest', 'interest accrued'],
-    minValue: 0,
-    typicalRange: [0, 100000000]
-  },
-  present_value: {
-    semanticConcept: 'present value',
-    valueTypes: ['currency'],
-    keywords: ['present', 'pv', 'current'],
-    units: ['$', '€', '£', '¥', 'R', 'USD', 'EUR', 'GBP', 'ZAR', 'BWP', 'ZWG'],
-    contextPatterns: ['present value', 'pv', 'current value'],
-    minValue: 0,
-    typicalRange: [0, 1000000000]
-  },
-  carrying_value: {
-    semanticConcept: 'carrying value',
-    valueTypes: ['currency'],
-    keywords: ['carrying', 'book', 'balance'],
-    units: ['$', '€', '£', '¥', 'R', 'USD', 'EUR', 'GBP', 'ZAR', 'BWP', 'ZWG'],
-    contextPatterns: ['carrying value', 'book value', 'balance'],
-    minValue: 0,
-    typicalRange: [0, 1000000000]
-  },
-  fair_value: {
-    semanticConcept: 'fair value',
-    valueTypes: ['currency'],
-    keywords: ['fair', 'market'],
-    units: ['$', '€', '£', '¥', 'R', 'USD', 'EUR', 'GBP', 'ZAR', 'BWP', 'ZWG'],
-    contextPatterns: ['fair value', 'market value'],
-    minValue: 0,
-    typicalRange: [0, 1000000000]
-  },
-  interest_rate: {
-    semanticConcept: 'interest rate for money market',
-    valueTypes: ['percentage'],
-    keywords: SPECIFIC_ALIASES.interest_rate,
-    excludeKeywords: ['coupon', 'yield', 'discount', 'spread', 'margin'],
-    units: ['%', 'percent', 'bps', 'basis points'],
-    contextPatterns: ['interest rate', 'annual rate'],
-    typicalRange: [0, 100]
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$',
+      '^\\d{1,4}[/\\-.]\\d{1,2}[/\\-.]\\d{1,4}$', '^\\.{3}$', '^-$'],
+    excludeKeywords: ['rate', 'yield', 'coupon', 'risk', 'premium', 'specific', 'spread', 'balance'],
+    units: ['$', '€', '£', '¥', 'R'],
+    contextPatterns: ['principal amount', 'invested amount', 'capital'],
+    minValue: 1000, typicalRange: [1000, 1000000000]
   },
   discount_rate: {
     semanticConcept: 'discount rate for t-bills',
     valueTypes: ['percentage'],
     keywords: SPECIFIC_ALIASES.discount_rate,
-    excludeKeywords: ['yield', 'coupon', 'interest', 'spread'],
+    rejectPatterns: ['^[A-Z]{3}$'],
+    excludeKeywords: ['risk', 'premium', 'specific', 'collateral', 'spread', 'coupon'],
     units: ['%', 'percent', 'bps'],
     contextPatterns: ['discount rate', 'discount yield'],
+    typicalRange: [0, 100]
+  },
+  interest_rate: {
+    semanticConcept: 'interest rate',
+    valueTypes: ['percentage'],
+    keywords: SPECIFIC_ALIASES.interest_rate,
+    rejectPatterns: ['^[A-Z]{3}$'],
+    excludeKeywords: ['risk', 'premium', 'specific', 'collateral', 'pmt', 'payment frequency'],
+    units: ['%', 'percent', 'bps'],
+    contextPatterns: ['interest rate', 'annual rate'],
     typicalRange: [0, 100]
   },
   coupon_rate: {
     semanticConcept: 'coupon rate for bonds',
     valueTypes: ['percentage'],
     keywords: SPECIFIC_ALIASES.coupon_rate,
-    excludeKeywords: ['yield', 'discount', 'interest'],
+    rejectPatterns: ['^[A-Z]{3}$'],
+    excludeKeywords: ['risk', 'premium', 'specific', 'collateral', 'discount'],
     units: ['%', 'percent', 'bps'],
     contextPatterns: ['coupon rate', 'coupon'],
     typicalRange: [0, 100]
@@ -374,161 +247,190 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     semanticConcept: 'yield to maturity',
     valueTypes: ['percentage'],
     keywords: SPECIFIC_ALIASES.yield,
-    excludeKeywords: ['coupon', 'discount', 'interest'],
+    rejectPatterns: ['^[A-Z]{3}$'],
+    excludeKeywords: ['risk', 'premium', 'specific', 'collateral', 'discount'],
     units: ['%', 'percent', 'bps'],
-    contextPatterns: ['yield', 'ytm', 'yield to maturity'],
+    contextPatterns: ['yield to maturity', 'ytm'],
     typicalRange: [0, 100]
   },
   instrument_name: {
     semanticConcept: 'instrument or security name',
     valueTypes: ['text'],
-    keywords: SPECIFIC_ALIASES.instrument_name,
-    excludeKeywords: ['%', '0.00', '0.0', 'rate', 'yield', 'discount', 'coupon', 'interest'],
-    contextPatterns: ['name', 'security', 'instrument', 'issuer', 'counterparty'],
-    rejectPatterns: ['^\\d+\\.\\d+%$', '^\\d+%$', '^0+$']
-  },
-  country_risk_premium: {
-    semanticConcept: 'country risk premium',
-    valueTypes: ['percentage'],
-    keywords: ['country', 'risk', 'premium', 'crp'],
-    units: ['%', 'percent', 'bps'],
-    contextPatterns: ['country risk premium', 'crp', 'risk premium'],
-    typicalRange: [0, 50]
-  },
-  spread: {
-    semanticConcept: 'spread over benchmark',
-    valueTypes: ['percentage', 'number'],
-    keywords: ['spread', 'margin', 'over'],
-    units: ['%', 'percent', 'bps', 'basis points'],
-    contextPatterns: ['spread', 'margin over', 'spread over'],
-    typicalRange: [0, 20]
+    keywords: [
+      ...SPECIFIC_ALIASES.instrument_name,
+      'parent company name', 'parent company', 'counterparty',
+    ],
+    rejectPatterns: ['^\\d+\\.\\d+\\s*%$', '^\\d+\\s*%$', '^0+$',
+      '^-?\\d+(?:\\.\\d+)?$',
+      '^\\d{1,4}[/\\-.]\\d{1,2}[/\\-.]\\d{1,4}$',
+      '^[A-Z]{3}$', '^\\.{3}$', '^-$'],
+    excludeKeywords: ['%', 'pvif', 'cf', 'rate', 'yield', 'discount',
+      'coupon', 'interest', 'risk', 'premium'],
+    contextPatterns: ['name', 'security', 'instrument', 'issuer',
+      'counterparty', 'company'],
   },
   valuation_date: {
     semanticConcept: 'valuation date',
     valueTypes: ['date'],
-    keywords: SPECIFIC_ALIASES.valuation_date,
-    contextPatterns: ['valuation date', 'as of date', 'pricing date', 'reporting date']
-  },
-  issue_date: {
-    semanticConcept: 'issue date',
-    valueTypes: ['date'],
-    keywords: SPECIFIC_ALIASES.issue_date,
-    contextPatterns: ['issue date', 'issuance date', 'start date', 'trade date', 'purchase date']
+    keywords: [...SPECIFIC_ALIASES.valuation_date, 'date', 'as of'],
+    rejectPatterns: ['^\\d+(?:\\.\\d+)?\\s*%$', '^-?\\d+(?:\\.\\d+)?$', '^[A-Z]{3}$'],
+    contextPatterns: ['valuation date', 'as of date', 'pricing date', 'reporting date'],
   },
   maturity_date: {
     semanticConcept: 'maturity date',
     valueTypes: ['date'],
     keywords: SPECIFIC_ALIASES.maturity_date,
-    contextPatterns: ['maturity date', 'redemption date', 'due date', 'expiry date']
+    rejectPatterns: ['^\\d+(?:\\.\\d+)?\\s*%$', '^-?\\d+(?:\\.\\d+)?$', '^[A-Z]{3}$'],
+    contextPatterns: ['maturity date', 'redemption date', 'due date', 'expiry date'],
+  },
+  issue_date: {
+    semanticConcept: 'issue date',
+    valueTypes: ['date'],
+    keywords: SPECIFIC_ALIASES.issue_date,
+    rejectPatterns: ['^\\d+(?:\\.\\d+)?\\s*%$', '^-?\\d+(?:\\.\\d+)?$', '^[A-Z]{3}$'],
+    contextPatterns: ['issue date', 'issuance date', 'start date'],
   },
   settlement_date: {
     semanticConcept: 'settlement date',
     valueTypes: ['date'],
     keywords: SPECIFIC_ALIASES.issue_date,
-    contextPatterns: ['settlement date', 'effective date']
+    rejectPatterns: ['^\\d+(?:\\.\\d+)?\\s*%$', '^-?\\d+(?:\\.\\d+)?$', '^[A-Z]{3}$'],
+    contextPatterns: ['settlement date', 'effective date'],
   },
   next_coupon_date: {
     semanticConcept: 'next coupon payment date',
     valueTypes: ['date'],
     keywords: ['next', 'coupon', 'payment'],
-    contextPatterns: ['next coupon', 'next payment', 'coupon payment date']
+    rejectPatterns: ['^\\d+(?:\\.\\d+)?\\s*%$', '^-?\\d+(?:\\.\\d+)?$', '^[A-Z]{3}$'],
+    contextPatterns: ['next coupon', 'next payment', 'coupon payment date'],
   },
   call_date: {
-    semanticConcept: 'call date',
-    valueTypes: ['date'],
+    semanticConcept: 'call date', valueTypes: ['date'],
     keywords: SPECIFIC_ALIASES.call_date,
-    contextPatterns: ['call date', 'redemption date']
+    rejectPatterns: ['^\\d+(?:\\.\\d+)?\\s*%$', '^-?\\d+(?:\\.\\d+)?$'],
+    contextPatterns: ['call date', 'redemption date'],
   },
   put_date: {
-    semanticConcept: 'put date',
-    valueTypes: ['date'],
+    semanticConcept: 'put date', valueTypes: ['date'],
     keywords: SPECIFIC_ALIASES.put_date,
-    contextPatterns: ['put date']
+    rejectPatterns: ['^\\d+(?:\\.\\d+)?\\s*%$', '^-?\\d+(?:\\.\\d+)?$'],
+    contextPatterns: ['put date'],
   },
   coupon_frequency: {
     semanticConcept: 'coupon payment frequency',
     valueTypes: ['text'],
     keywords: SPECIFIC_ALIASES.coupon_frequency,
-    contextPatterns: ['coupon frequency', 'payment frequency', 'interest frequency', 'frequency'],
-    allowedValues: ['annually', 'semi-annually', 'quarterly', 'monthly', 'annual', 'semiannual', 'quarterly', 'monthly', '1', '2', '4', '12']
+    contextPatterns: ['coupon frequency', 'payment frequency',
+      'interest frequency', 'interest pmt frequency'],
+    allowedValues: ['annually', 'semi-annually', 'quarterly', 'monthly',
+      'annual', 'semiannual', '1', '2', '4', '12', 'bullet'],
   },
   day_count_convention: {
     semanticConcept: 'day count convention',
     valueTypes: ['text'],
     keywords: ['day', 'count', 'convention', 'basis'],
     contextPatterns: ['day count', 'day count convention', 'basis'],
-    allowedValues: ['30/360', 'actual/360', 'actual/365', 'actual/actual', '30E/360']
+    allowedValues: ['30/360', 'actual/360', 'actual/365', 'actual/actual', '30E/360'],
   },
   tenor: {
-    semanticConcept: 'tenor or term',
-    valueTypes: ['text', 'number'],
-    keywords: SPECIFIC_ALIASES.term_days,
-    contextPatterns: ['tenor', 'term', 'duration', 'maturity']
+    semanticConcept: 'tenor or term', valueTypes: ['text'],
+    keywords: [...SPECIFIC_ALIASES.term_days, 'bullet'],
+    contextPatterns: ['tenor', 'term', 'bullet'],
+    allowedValues: ['bullet', 'at maturity', '1', '2', '3', '5', '7', '10'],
   },
   days_to_maturity: {
-    semanticConcept: 'days to maturity',
-    valueTypes: ['number'],
+    semanticConcept: 'days to maturity', valueTypes: ['number'],
     keywords: SPECIFIC_ALIASES.days_to_maturity,
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$'],
     contextPatterns: ['days to maturity', 'days remaining', 'tenor days'],
-    minValue: 0,
-    typicalRange: [0, 36500]
+    minValue: 0, typicalRange: [0, 36500],
   },
   years_to_maturity: {
-    semanticConcept: 'years to maturity',
-    valueTypes: ['number'],
+    semanticConcept: 'years to maturity', valueTypes: ['number'],
     keywords: SPECIFIC_ALIASES.years_to_maturity,
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$'],
     contextPatterns: ['years to maturity', 'maturity years', 'term years'],
-    minValue: 0,
-    typicalRange: [0, 100]
+    minValue: 0, typicalRange: [0, 100],
   },
   currency: {
-    semanticConcept: 'currency',
-    valueTypes: ['text'],
+    semanticConcept: 'currency', valueTypes: ['text'],
     keywords: SPECIFIC_ALIASES.currency,
     contextPatterns: ['currency', 'denomination', 'iso code'],
-    allowedValues: ['USD', 'EUR', 'GBP', 'ZAR', 'BWP', 'ZWG', 'CHF', 'JPY', 'CNY', 'INR', 'AUD', 'CAD', 'SGD', 'HKD', 'NZD']
+  },
+  price: {
+    semanticConcept: 'price of security', valueTypes: ['currency', 'percentage'],
+    keywords: [...SPECIFIC_ALIASES.purchase_price, 'clean price', 'dirty price'],
+    rejectPatterns: ['^[A-Z]{3}$'], units: ['$', '€', '£', '¥', 'R', '%'],
+    contextPatterns: ['price', 'market price', 'clean price', 'dirty price'],
+    minValue: 0, typicalRange: [0, 1000000000],
+  },
+  accrued_interest: {
+    semanticConcept: 'accrued interest', valueTypes: ['currency'],
+    keywords: ['accrued', 'interest accrued'],
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$'],
+    units: ['$', '€', '£', '¥', 'R'],
+    contextPatterns: ['accrued interest', 'interest accrued'],
+    minValue: 0, typicalRange: [0, 100000000],
+  },
+  present_value: {
+    semanticConcept: 'present value', valueTypes: ['currency'],
+    keywords: ['present', 'pv', 'current value'],
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$'],
+    units: ['$', '€', '£', '¥', 'R'],
+    contextPatterns: ['present value', 'pv', 'current value'],
+    minValue: 0, typicalRange: [0, 1000000000],
+  },
+  carrying_value: {
+    semanticConcept: 'carrying value', valueTypes: ['currency'],
+    keywords: ['carrying', 'book'],
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$'],
+    units: ['$', '€', '£', '¥', 'R'],
+    contextPatterns: ['carrying value', 'book value'],
+    minValue: 0, typicalRange: [0, 1000000000],
+  },
+  fair_value: {
+    semanticConcept: 'fair value', valueTypes: ['currency'],
+    keywords: ['fair'],
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$'],
+    units: ['$', '€', '£', '¥', 'R'],
+    contextPatterns: ['fair value', 'market value'],
+    minValue: 0, typicalRange: [0, 1000000000],
+  },
+  country_risk_premium: {
+    semanticConcept: 'country risk premium', valueTypes: ['percentage'],
+    keywords: ['country risk premium', 'crp', 'country risk'],
+    rejectPatterns: ['^[A-Z]{3}$'], units: ['%', 'percent'],
+    contextPatterns: ['country risk premium', 'crp'],
+    typicalRange: [0, 50],
+  },
+  spread: {
+    semanticConcept: 'spread over benchmark', valueTypes: ['percentage'],
+    keywords: ['spread', 'margin over'],
+    rejectPatterns: ['^[A-Z]{3}$'], units: ['%', 'percent', 'bps'],
+    contextPatterns: ['spread', 'margin over', 'spread over'],
+    typicalRange: [0, 20],
   },
   instrument_type: {
-    semanticConcept: 'instrument type',
-    valueTypes: ['text'],
-    keywords: ['instrument', 'type', 'security', 'bond', 'bill', 'note'],
-    contextPatterns: ['instrument type', 'security type', 'type']
-  },
-  issuer: {
-    semanticConcept: 'issuer name',
-    valueTypes: ['text'],
-    keywords: ['issuer', 'borrower', 'entity', 'company'],
-    contextPatterns: ['issuer', 'borrower', 'issuing entity']
-  },
-  bond_name: {
-    semanticConcept: 'bond or instrument name',
-    valueTypes: ['text'],
-    keywords: ['name', 'bond', 'instrument', 'security'],
-    contextPatterns: ['bond name', 'instrument name', 'security name']
+    semanticConcept: 'instrument type', valueTypes: ['text'],
+    keywords: ['instrument type', 'security type', 'type'],
+    contextPatterns: ['instrument type', 'security type'],
+    allowedValues: ['treasury bill', 't-bill', 'tbill', 'bond', 'money market', 'note'],
   },
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
 function normalizeCurrencyToCode(input) {
   if (!input) return null
   const raw = String(input).trim()
   if (!raw) return null
   const upper = raw.toUpperCase()
-
   if (/^[A-Z]{3}$/.test(upper)) return upper
-
   for (const [code, syms] of Object.entries(CURRENCY_SYMBOLS)) {
     if (syms.some(s => s === raw)) return code
   }
-
   const lower = raw.toLowerCase()
   for (const [code, names] of Object.entries(CURRENCY_NAMES)) {
     if (names.some(n => lower === n || lower.includes(n))) return code
   }
-
-  if (/^[A-Z]{3}$/i.test(raw)) return upper
   return null
 }
 
@@ -541,16 +443,14 @@ function isNumeric(value) {
 function isDateLike(value) {
   if (!value || value === '') return false
   const str = String(value).trim()
-  const datePatterns = [
-    /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/,
-    /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/,
-    /^[A-Za-z]{3}[-/]\d{1,2}[-/]\d{2,4}$/,
-    /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/,
-    /^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/
+  const patterns = [
+    /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/, /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/,
+    /^[A-Za-z]{3}[-/]\d{1,2}[-/]\d{2,4}$/, /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/,
+    /^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/, /^\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4}$/,
   ]
-  if (datePatterns.some(pattern => pattern.test(str))) return true
-  const date = new Date(str)
-  if (!isNaN(date.getTime())) { if (!/^\d{4}$/.test(str)) return true }
+  if (patterns.some(p => p.test(str))) return true
+  const d = new Date(str)
+  if (!isNaN(d.getTime()) && !/^\d{4}$/.test(str)) return true
   return false
 }
 
@@ -560,7 +460,7 @@ function isPercentage(value) {
   if (str.includes('%')) return true
   if (isNumeric(str)) {
     const num = parseFloat(str.replace(/[%,\s]/g, ''))
-    return num >= 0 && num <= 100
+    return num >= 0 && num <= 100 && /^[\d.,\s%]+$/.test(str)
   }
   return false
 }
@@ -568,30 +468,25 @@ function isPercentage(value) {
 function isCurrency(value) {
   if (!value) return false
   const str = String(value).trim()
-  
   for (const symbols of Object.values(CURRENCY_SYMBOLS)) {
     for (const sym of symbols) {
       if (str.includes(sym)) return true
     }
   }
-  
   if (isNumeric(str)) {
     const num = parseFloat(str.replace(/[%,\s$€£¥₹R]/g, ''))
     return num >= 1000
   }
-  
   return false
 }
 
 function getValueType(value) {
-  if (!value) return 'unknown'
+  if (value === null || value === undefined || value === '') return 'empty'
   const str = String(value).trim()
-  
   if (isDateLike(str)) return 'date'
   if (isPercentage(str)) return 'percentage'
   if (isCurrency(str)) return 'currency'
   if (isNumeric(str)) return 'numeric'
-  
   return 'text'
 }
 
@@ -605,785 +500,315 @@ function rowColToCellRef(row, col) {
   return colLetters.join('') + (row + 1)
 }
 
-// ============================================================================
-// Semantic Field Matching
-// ============================================================================
-function calculateSemanticMatchScore(label, value, fieldDef, context) {
-  let score = 0
-  const labelLower = String(label || '').toLowerCase()
-  const valueStr = String(value || '').trim()
-  const valueType = getValueType(value)
-  
-  if (fieldDef.rejectPatterns) {
-    for (const pattern of fieldDef.rejectPatterns) {
-      const regex = new RegExp(pattern, 'i')
-      if (regex.test(valueStr) || regex.test(labelLower)) {
-        return 0
-      }
-    }
-  }
-  
-  if (fieldDef.valueTypes && fieldDef.valueTypes.length > 0) {
-    if (fieldDef.valueTypes.includes(valueType)) {
-      score += 0.4
-    } else {
-      return 0
-    }
-  }
-  
-  if (fieldDef.keywords) {
-    for (const keyword of fieldDef.keywords) {
-      if (labelLower.includes(keyword)) {
-        score += 0.3
-        if (labelLower === keyword || labelLower === keyword + ' rate' || labelLower === keyword + ' value') {
-          score += 0.2
-        }
-      }
-    }
-  }
-  
-  if (fieldDef.excludeKeywords) {
-    for (const exclude of fieldDef.excludeKeywords) {
-      if (labelLower.includes(exclude)) {
-        score -= 0.5
-      }
-    }
-  }
-  
-  if (fieldDef.contextPatterns && context) {
-    const contextLower = context.toLowerCase()
-    for (const pattern of fieldDef.contextPatterns) {
-      if (contextLower.includes(pattern)) {
-        score += 0.2
-      }
-    }
-  }
-  
-  if (fieldDef.typicalRange && isNumeric(valueStr)) {
-    const num = parseFloat(valueStr.replace(/[%,\s$€£¥₹R]/g, ''))
-    const [min, max] = fieldDef.typicalRange
-    if (num >= min && num <= max) {
-      score += 0.1
-    } else if (fieldDef.minValue && num < fieldDef.minValue) {
-      score -= 0.3
-    }
-  }
-  
-  if (fieldDef.units) {
-    for (const unit of fieldDef.units) {
-      if (valueStr.includes(unit) || labelLower.includes(unit.toLowerCase())) {
-        score += 0.1
-      }
-    }
-  }
-  
-  return Math.max(0, Math.min(score, 1.0))
-}
-
 function getContextualClues(data, row, col, maxDistance = 3) {
   const clues = []
-  
   for (let dr = -maxDistance; dr <= maxDistance; dr++) {
     for (let dc = -maxDistance; dc <= maxDistance; dc++) {
       if (dr === 0 && dc === 0) continue
-      
       const r = row + dr
       const c = col + dc
-      
       if (r >= 0 && r < data.length && c >= 0 && c < data[r].length) {
         const cell = data[r][c]
-        if (cell && String(cell).trim() !== '') {
-          clues.push(String(cell).trim())
-        }
+        if (cell && String(cell).trim() !== '') clues.push(String(cell).trim())
       }
     }
   }
-  
   return clues.join(' ')
 }
 
-// ============================================================================
-// Worksheet Structure Analysis
-// ============================================================================
-function detectWorksheetStructure(data) {
-  const structure = {
-    hasHorizontalHeaders: false,
-    hasVerticalHeaders: false,
-    hasKeyValuePairs: false,
-    sections: [],
-    tables: []
-  }
-  
-  if (!data || data.length === 0) return structure
-  
-  const firstRow = data[0] || []
-  const textInFirstRow = firstRow.filter(cell => 
-    cell && !isNumeric(cell) && !isDateLike(cell) && String(cell).trim().length > 0
-  ).length
-  
-  if (textInFirstRow >= 2) {
-    structure.hasHorizontalHeaders = true
-  }
-  
-  let textInFirstCol = 0
-  for (let r = 0; r < data.length; r++) {
-    const cell = data[r] && data[r][0]
-    if (cell && !isNumeric(cell) && !isDateLike(cell) && String(cell).trim().length > 0) {
-      textInFirstCol++
-    }
-  }
-  
-  if (textInFirstCol >= 2) {
-    structure.hasVerticalHeaders = true
-  }
-  
-  let kvPairs = 0
-  for (let r = 0; r < data.length; r++) {
-    for (let c = 0; c < (data[r]?.length || 0) - 1; c++) {
-      const cell = data[r][c]
-      const nextCell = data[r][c + 1]
-      
-      if (cell && nextCell) {
-        const cellStr = String(cell).trim()
-        const nextStr = String(nextCell).trim()
-        
-        if (!isNumeric(cellStr) && !isDateLike(cellStr) && 
-            (isNumeric(nextStr) || isDateLike(nextStr) || isCurrency(nextStr) || isPercentage(nextStr))) {
-          kvPairs++
-        }
-      }
-    }
-  }
-  
-  if (kvPairs >= 2) {
-    structure.hasKeyValuePairs = true
-  }
-  
-  for (let r = 0; r < data.length; r++) {
-    const row = data[r] || []
-    const nonEmpty = row.filter(c => c !== null && c !== undefined && String(c).trim() !== '')
-    
-    if (nonEmpty.length === 1) {
-      const text = String(nonEmpty[0]).trim()
-      if (!isNumeric(text) && !isDateLike(text) && text.length > 0 && text.length < 60) {
-        structure.sections.push({ row: r, title: text })
-      }
-    }
-  }
-  
-  return structure
-}
-
-// ============================================================================
-// Currency Detection
-// ============================================================================
-function detectCurrencies(data) {
-  const currencies = new Set()
-  
-  for (let r = 0; r < data.length; r++) {
-    for (let c = 0; c < (data[r]?.length || 0); c++) {
-      const cell = data[r][c]
-      if (!cell) continue
-      
-      const str = String(cell).trim()
-      
-      for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
-        for (const sym of symbols) {
-          if (str.includes(sym)) {
-            currencies.add(code)
-          }
-        }
-      }
-      
-      if (/^[A-Z]{3}$/.test(str.toUpperCase())) {
-        const code = str.toUpperCase()
-        if (KNOWN_ISO_CODES.has(code) && !NON_CURRENCY_WORDS.has(code)) {
-          currencies.add(code)
-        }
-      }
-    }
-  }
-  
-  return Array.from(currencies)
-}
-
-// ============================================================================
-// Main Detection Function
-// ============================================================================
-export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumns, instrumentType, tableRange = null, tableData = null, customCurrency = null, statusCallback = null) {
-  console.log('=== autoDetectInstrumentFields Started ===')
-  console.log('Sheet Name:', sheetName, '| Instrument:', instrumentType)
-  console.log('Required Columns:', requiredColumns)
-  console.log('Table Range:', tableRange, '| Table Data Provided:', !!tableData)
-  console.log('Custom Currency Filter:', customCurrency)
-
-  const updateStatus = (status) => {
-    if (statusCallback) statusCallback(status)
-  }
-
-  if (!fileBuffer || !sheetName) {
-    throw new Error('File buffer and sheet name are required')
-  }
-
-  updateStatus('scanning')
-
-  let data = []
-  let actualUsedRange = null
-
-  if (tableData && Array.isArray(tableData) && tableData.length > 0) {
-    data = tableData
-    console.log('Using provided table data (selected section mode)')
-  } else {
-    const workbook = XLSX.read(fileBuffer, { 
-      type: 'array', 
-      cellStyles: true, 
-      cellFormula: true, 
-      cellDates: true, 
-      cellNF: true 
-    })
-    const worksheet = workbook.Sheets[sheetName]
-
-    if (!worksheet) {
-      return {
-        fields: {},
-        fieldsWithMetadata: {},
-        currencies: [],
-        missingFields: requiredColumns,
-        additionalFields: {}
-      }
-    }
-
-    let range = worksheet['!ref']
-      ? XLSX.utils.decode_range(worksheet['!ref'])
-      : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } }
-
-    let maxRow = 0, maxCol = 0
-    for (const cellAddress in worksheet) {
-      if (cellAddress.startsWith('!')) continue
-      const cellRef = XLSX.utils.decode_cell(cellAddress)
-      if (cellRef.r > maxRow) maxRow = cellRef.r
-      if (cellRef.c > maxCol) maxCol = cellRef.c
-    }
-    
-    if (maxRow > range.e.r) range.e.r = maxRow
-    if (maxCol > range.e.c) range.e.c = maxCol
-    
-    actualUsedRange = range
-
-    for (let R = range.s.r; R <= range.e.r; R++) {
-      const row = []
-      for (let C = range.s.c; C <= range.e.c; C++) {
-        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C })
-        const cell = worksheet[cellAddress]
-        row.push(cell ? (cell.w ?? cell.v ?? '') : '')
-      }
-      data.push(row)
-    }
-    
-    console.log(`Read worksheet: ${range.e.r + 1} rows x ${range.e.c + 1} cols (actual used range)`)
-  }
-
-  updateStatus('analyzing')
-
-  let currencyFilterCode = null
-  if (customCurrency) {
-    currencyFilterCode = normalizeCurrencyToCode(customCurrency)
-    if (currencyFilterCode) {
-      console.log('Currency filter applied:', currencyFilterCode)
-    }
-  }
-
-  let boundaries
-  if (tableRange && tableData) {
-    boundaries = {
-      startRow: 0,
-      endRow: data.length - 1,
-      startCol: 0,
-      endCol: data[0]?.length - 1 || 0
-    }
-    console.log('=== MODE: SELECTED SECTION SCAN ===')
-  } else if (tableRange) {
-    boundaries = {
-      startRow: tableRange.startRow,
-      endRow: tableRange.endRow,
-      startCol: tableRange.startCol,
-      endCol: tableRange.endCol
-    }
-    console.log('=== MODE: PROVIDED RANGE SCAN ===')
-  } else {
-    boundaries = {
-      startRow: 0,
-      endRow: data.length - 1,
-      startCol: 0,
-      endCol: Math.max(...data.map(row => row?.length || 0)) - 1
-    }
-    console.log('=== MODE: WHOLE WORKSHEET SCAN ===')
-  }
-
-  const structure = detectWorksheetStructure(data)
-  console.log('Worksheet structure:', structure)
-
-  const semanticFieldMap = new Map()
-
-  for (const [semanticKey, def] of Object.entries(SEMANTIC_FIELD_DEFINITIONS)) {
-    semanticFieldMap.set(semanticKey, {
-      semanticKey,
-      definition: def,
-      isRequired: requiredColumns.includes(semanticKey) || requiredColumns.some(col => col.toLowerCase().replace(/[-_\s]/g, '') === semanticKey.toLowerCase().replace(/[-_\s]/g, ''))
-    })
-  }
-
-  // FIX: Normalize key names so a required column like 'FaceValue' doesn't
-  // get added again as a naive fallback when 'face_value' already exists in
-  // the semantic map. Previously this produced two competing entries for the
-  // same field: the semantic one (with type validation that correctly rejected
-  // "RBZ" as a face value) and a naive one (with no type validation that
-  // wrongly accepted "RBZ" as a face value). The naive entry won when it scored
-  // higher against short text labels.
-  // Additionally, naive fallbacks now restrict accepted value types to
-  // currency/percentage/number/date so they can't match arbitrary text labels
-  // like a "Yield" column containing the word "Bullet".
-  const normalizedSemanticKeys = new Set(
-    Array.from(semanticFieldMap.keys()).map(k => k.toLowerCase().replace(/[-_\s]/g, ''))
-  )
-  for (const col of requiredColumns) {
-    const normalizedCol = col.toLowerCase().replace(/[-_\s]/g, '')
-    if (!normalizedSemanticKeys.has(normalizedCol)) {
-      semanticFieldMap.set(col, {
-        semanticKey: col,
-        definition: {
-          valueTypes: ['currency', 'percentage', 'number', 'date'],
-          keywords: splitIntoWords(col),
-          contextPatterns: []
-        },
-        isRequired: true
-      })
-      normalizedSemanticKeys.add(normalizedCol)
-    }
-  }
-
-  console.log('Semantic field map (all fields):', Array.from(semanticFieldMap.keys()))
-  console.log('Required columns:', requiredColumns)
-
-  updateStatus('detecting')
-
-  console.log('=== TWO-PHASE DETECTION START ===')
-
-  const detectedFields = {}
-  const detectedFieldsWithMetadata = {}
-  const usedLabelValuePairs = new Set()
-  const processedCells = new Set()
-
-  let allRequiredFound = false
-  const requiredFieldNames = Array.from(semanticFieldMap.entries())
-    .filter(([_, { isRequired }]) => isRequired)
-    .map(([name]) => name)
-
-  console.log('Required fields to find:', requiredFieldNames)
-
-  for (let R = boundaries.startRow; R <= boundaries.endRow && !allRequiredFound; R++) {
-    for (let C = boundaries.startCol; C <= boundaries.endCol && !allRequiredFound; C++) {
-      const cellKey = `${R}_${C}`
-      if (processedCells.has(cellKey)) continue
-
-      const label = data[R]?.[C]
-      if (!label || String(label).trim() === '') continue
-
-      const labelStr = String(label).trim()
-      const labelLower = labelStr.toLowerCase()
-
-      const isPureNumeric = isNumeric(labelStr)
-      const isPureDate = isDateLike(labelStr)
-      const isPureCurrency = isCurrency(labelStr) && labelStr.length < 10
-      const isPurePercentage = isPercentage(labelStr)
-
-      const isTextTerm = /^[A-Z]{3}$/.test(labelStr.toUpperCase()) ||
-                          /^(annually|semi-annually|quarterly|monthly|annual|semiannual|daily)$/i.test(labelStr) ||
-                          /^(30\/360|actual\/360|actual\/365|actual\/actual|30E\/360)$/i.test(labelStr) ||
-                          /^(bond|bill|note|money market)$/i.test(labelStr)
-
-      if ((isPureNumeric || isPureDate || isPureCurrency || isPurePercentage) && !isTextTerm) {
-        continue
-      }
-
-      const context = getContextualClues(data, R, C, 2)
-
-      let contextCurrency = null
-      const contextForCurrency = getContextualClues(data, R, C, 3)
-      for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
-        for (const sym of symbols) {
-          if (contextForCurrency.includes(sym)) {
-            contextCurrency = code
-            break
-          }
-        }
-        if (contextCurrency) break
-      }
-
-      let valueHit = null
-      let valueLocation = null
-      let direction = null
-
-      for (let offset = 1; offset <= 5 && C + offset <= boundaries.endCol; offset++) {
-        const val = data[R]?.[C + offset]
-        if (val && String(val).trim() !== '') {
-          valueHit = val
-          valueLocation = { row: R, col: C + offset }
-          direction = 'horizontal'
-          processedCells.add(`${R}_${C + offset}`)
-          break
-        }
-      }
-
-      if (!valueHit) {
-        for (let offset = 1; offset <= 5 && R + offset <= boundaries.endRow; offset++) {
-          const val = data[R + offset]?.[C]
-          if (val && String(val).trim() !== '') {
-            valueHit = val
-            valueLocation = { row: R + offset, col: C }
-            direction = 'vertical'
-            processedCells.add(`${R + offset}_${C}`)
-            break
-          }
-        }
-      }
-
-      if (!valueHit) continue
-
-      let bestMatch = null
-      let bestScore = 0
-
-      for (const [colName, { semanticKey, definition, isRequired }] of semanticFieldMap) {
-        if (!isRequired) continue
-        if (detectedFields[colName]) continue
-
-        const score = calculateSemanticMatchScore(labelStr, valueHit, definition, context)
-
-        if (score > 0.35) {
-          console.log(`[Phase 1] Score for "${colName}": ${score.toFixed(2)} (label: "${labelStr}", value: "${valueHit}")`)
-        }
-
-        if (score > bestScore && score > 0.35) {
-          bestScore = score
-          bestMatch = { colName, semanticKey, score, isRequired }
-        }
-      }
-
-      if (bestMatch) {
-        const pairKey = `${labelStr}_${valueHit}_${R}_${C}`
-        if (!usedLabelValuePairs.has(pairKey)) {
-          const location = valueLocation ? rowColToCellRef(valueLocation.row, valueLocation.col) : rowColToCellRef(R, C + 1)
-
-          let detectedCurrency = null
-          const valueStr = String(valueHit)
-          if (isCurrency(valueStr)) {
-            for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
-              for (const sym of symbols) {
-                if (valueStr.includes(sym)) {
-                  detectedCurrency = code
-                  break
-                }
-              }
-              if (detectedCurrency) break
-            }
-          }
-
-          if (!detectedCurrency) {
-            detectedCurrency = contextCurrency
-          }
-
-          const fieldName = bestMatch.colName
-          const currencyKey = detectedCurrency || 'UNKNOWN'
-
-          if (detectedFields[fieldName]) {
-            const existingValue = String(detectedFields[fieldName].value)
-            const newValue = String(valueHit)
-
-            if (existingValue !== newValue) {
-              if (!detectedFields[fieldName].currencyVariants) {
-                detectedFields[fieldName].currencyVariants = {}
-              }
-
-              const variantKey = detectedCurrency || `VARIANT_${Object.keys(detectedFields[fieldName].currencyVariants).length}`
-              detectedFields[fieldName].currencyVariants[variantKey] = valueHit
-              console.log(`[Phase 1] Added variant for "${fieldName}": ${variantKey} = ${valueHit}`)
-            }
-          } else {
-            detectedFields[fieldName] = {
-              currencyVariants: {},
-              selectedCurrency: currencyKey,
-              value: valueHit,
-              location,
-              confidence: bestMatch.score,
-              detectedFrom: direction,
-              semanticMatch: bestMatch.semanticKey,
-              currency: detectedCurrency
-            }
-            detectedFields[fieldName].currencyVariants[currencyKey] = valueHit
-          }
-
-          detectedFieldsWithMetadata[fieldName] = detectedFields[fieldName]
-
-          usedLabelValuePairs.add(pairKey)
-          console.log(`[Phase 1] Detected required field "${fieldName}": "${valueHit}" (${detectedCurrency || 'no currency'}) at ${location}`)
-
-          const foundRequired = requiredFieldNames.filter(name => detectedFields[name])
-          if (foundRequired.length === requiredFieldNames.length) {
-            allRequiredFound = true
-            console.log('[Phase 1] All required fields found!')
-          }
-        }
-      }
-    }
-  }
-
-  console.log('=== Phase 1 Complete ===')
-  console.log('Required fields found:', requiredFieldNames.filter(name => detectedFields[name]).length, '/', requiredFieldNames.length)
-
-  console.log('=== Phase 2: Scanning for additional fields ===')
-  const maxAdditionalFields = 50
-  let additionalFieldsFound = 0
-
-  for (let R = boundaries.startRow; R <= boundaries.endRow && additionalFieldsFound < maxAdditionalFields; R++) {
-    for (let C = boundaries.startCol; C <= boundaries.endCol && additionalFieldsFound < maxAdditionalFields; C++) {
-      const cellKey = `${R}_${C}`
-      if (processedCells.has(cellKey)) continue
-
-      const label = data[R]?.[C]
-      if (!label || String(label).trim() === '') continue
-
-      const labelStr = String(label).trim()
-      const labelLower = labelStr.toLowerCase()
-
-      const isPureNumeric = isNumeric(labelStr)
-      const isPureDate = isDateLike(labelStr)
-      const isPureCurrency = isCurrency(labelStr) && labelStr.length < 10
-      const isPurePercentage = isPercentage(labelStr)
-
-      const isTextTerm = /^[A-Z]{3}$/.test(labelStr.toUpperCase()) ||
-                          /^(annually|semi-annually|quarterly|monthly|annual|semiannual|daily)$/i.test(labelStr) ||
-                          /^(30\/360|actual\/360|actual\/365|actual\/actual|30E\/360)$/i.test(labelStr) ||
-                          /^(bond|bill|note|money market)$/i.test(labelStr)
-
-      if ((isPureNumeric || isPureDate || isPureCurrency || isPurePercentage) && !isTextTerm) {
-        continue
-      }
-
-      const context = getContextualClues(data, R, C, 2)
-
-      let contextCurrency = null
-      const contextForCurrency = getContextualClues(data, R, C, 3)
-      for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
-        for (const sym of symbols) {
-          if (contextForCurrency.includes(sym)) {
-            contextCurrency = code
-            break
-          }
-        }
-        if (contextCurrency) break
-      }
-
-      let valueHit = null
-      let valueLocation = null
-      let direction = null
-
-      for (let offset = 1; offset <= 5 && C + offset <= boundaries.endCol; offset++) {
-        const val = data[R]?.[C + offset]
-        if (val && String(val).trim() !== '') {
-          valueHit = val
-          valueLocation = { row: R, col: C + offset }
-          direction = 'horizontal'
-          processedCells.add(`${R}_${C + offset}`)
-          break
-        }
-      }
-
-      if (!valueHit) {
-        for (let offset = 1; offset <= 5 && R + offset <= boundaries.endRow; offset++) {
-          const val = data[R + offset]?.[C]
-          if (val && String(val).trim() !== '') {
-            valueHit = val
-            valueLocation = { row: R + offset, col: C }
-            direction = 'vertical'
-            processedCells.add(`${R + offset}_${C}`)
-            break
-          }
-        }
-      }
-
-      if (!valueHit) continue
-
-      let bestMatch = null
-      let bestScore = 0
-
-      for (const [colName, { semanticKey, definition, isRequired }] of semanticFieldMap) {
-        if (isRequired) continue
-        if (detectedFields[colName]) continue
-
-        const score = calculateSemanticMatchScore(labelStr, valueHit, definition, context)
-
-        if (score > 0.4) {
-          console.log(`[Phase 2] Score for "${colName}": ${score.toFixed(2)} (label: "${labelStr}", value: "${valueHit}")`)
-        }
-
-        if (score > bestScore && score > 0.4) {
-          bestScore = score
-          bestMatch = { colName, semanticKey, score, isRequired }
-        }
-      }
-
-      if (bestMatch) {
-        const pairKey = `${labelStr}_${valueHit}_${R}_${C}`
-        if (!usedLabelValuePairs.has(pairKey)) {
-          const location = valueLocation ? rowColToCellRef(valueLocation.row, valueLocation.col) : rowColToCellRef(R, C + 1)
-
-          let detectedCurrency = null
-          const valueStr = String(valueHit)
-          if (isCurrency(valueStr)) {
-            for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
-              for (const sym of symbols) {
-                if (valueStr.includes(sym)) {
-                  detectedCurrency = code
-                  break
-                }
-              }
-              if (detectedCurrency) break
-            }
-          }
-
-          if (!detectedCurrency) {
-            detectedCurrency = contextCurrency
-          }
-
-          const fieldName = bestMatch.colName
-          const currencyKey = detectedCurrency || 'UNKNOWN'
-
-          if (detectedFields[fieldName]) {
-            const existingValue = String(detectedFields[fieldName].value)
-            const newValue = String(valueHit)
-
-            if (existingValue !== newValue) {
-              if (!detectedFields[fieldName].currencyVariants) {
-                detectedFields[fieldName].currencyVariants = {}
-              }
-
-              const variantKey = detectedCurrency || `VARIANT_${Object.keys(detectedFields[fieldName].currencyVariants).length}`
-              detectedFields[fieldName].currencyVariants[variantKey] = valueHit
-              console.log(`[Phase 2] Added variant for "${fieldName}": ${variantKey} = ${valueHit}`)
-            }
-          } else {
-            detectedFields[fieldName] = {
-              currencyVariants: {},
-              selectedCurrency: currencyKey,
-              value: valueHit,
-              location,
-              confidence: bestMatch.score,
-              detectedFrom: direction,
-              semanticMatch: bestMatch.semanticKey,
-              currency: detectedCurrency
-            }
-            detectedFields[fieldName].currencyVariants[currencyKey] = valueHit
-          }
-
-          detectedFieldsWithMetadata[fieldName] = detectedFields[fieldName]
-
-          usedLabelValuePairs.add(pairKey)
-          additionalFieldsFound++
-          console.log(`[Phase 2] Detected additional field "${fieldName}": "${valueHit}" (${detectedCurrency || 'no currency'}) at ${location}`)
-        }
-      }
-    }
-  }
-
-  console.log('=== Phase 2 Complete ===')
-  console.log('Additional fields found:', additionalFieldsFound)
-
-  console.log('=== Detection Complete ===')
-  console.log('Total detected fields:', Object.keys(detectedFields).length)
-  console.log('Detected fields:', Object.keys(detectedFields))
-
-  const primaryFields = {}
-  const primaryFieldsWithMetadata = {}
-  const additionalFields = {}
-
-  for (const [colName, detection] of Object.entries(detectedFields)) {
-    const { semanticKey, isRequired } = semanticFieldMap.get(colName) || { isRequired: false }
-
-    const selectedValue = detection.selectedCurrency && detection.currencyVariants[detection.selectedCurrency]
-      ? detection.currencyVariants[detection.selectedCurrency]
-      : detection.value
-
-    if (isRequired) {
-      // FIX: Map the semantic key back to the caller's original required-column
-      // name (e.g. 'face_value' → 'FaceValue'). Previously primaryFields kept
-      // the semantic key, so a downstream `missingFields = requiredColumns.filter(
-      // col => !primaryFields[col])` check flagged every matched field as
-      // missing because 'FaceValue' !== 'face_value'.
-      const requiredColMatch = requiredColumns.find(reqCol =>
-        reqCol.toLowerCase().replace(/[-_\s]/g, '') === colName.toLowerCase().replace(/[-_\s]/g, '')
-      )
-      const outputKey = requiredColMatch || colName
-      primaryFields[outputKey] = selectedValue
-      primaryFieldsWithMetadata[outputKey] = detection
-    } else {
-      additionalFields[colName] = selectedValue
-    }
-  }
-
-  console.log('Primary (required) fields:', Object.keys(primaryFields).length)
-  console.log('Additional fields:', Object.keys(additionalFields).length)
-  console.log('Missing required fields:', requiredColumns.filter(col => !primaryFields[col]))
-
-  const currencies = detectCurrencies(data)
-  if (customCurrency) {
-    const normalized = normalizeCurrencyToCode(customCurrency)
-    if (normalized && !currencies.includes(normalized)) {
-      currencies.push(normalized)
-    }
-  }
-  console.log('Detected currencies:', currencies)
-
-  const dateValidationWarnings = []
-  const valuationDate = primaryFields['Valuation Date'] || primaryFields['valuation_date'] || additionalFields['valuation_date']
-  const maturityDate = primaryFields['Maturity Date'] || primaryFields['maturity_date'] || additionalFields['maturity_date']
-  const issueDate = primaryFields['Issue Date'] || primaryFields['issue_date'] || additionalFields['issue_date']
-
-  if (valuationDate && maturityDate) {
-    const vDate = new Date(valuationDate)
-    const mDate = new Date(maturityDate)
-    if (!isNaN(vDate.getTime()) && !isNaN(mDate.getTime())) {
-      if (mDate < vDate) {
-        dateValidationWarnings.push(`Maturity date (${maturityDate}) is before valuation date (${valuationDate})`)
-      }
-    }
-  }
-
-  const missingFields = requiredColumns.filter(col => !primaryFields[col])
-
-  console.log('=== Final Detection Result ===')
-  console.log('Primary (required) fields:', Object.keys(primaryFields))
-  console.log('Additional fields:', Object.keys(additionalFields))
-  console.log('Missing required fields:', missingFields)
-
-  return {
-    fields: primaryFields,
-    fieldsWithMetadata: primaryFieldsWithMetadata,
-    currencies,
-    missingFields,
-    additionalFields,
-    warnings: dateValidationWarnings
-  }
-}
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
 function splitIntoWords(str) {
   if (!str) return []
-  const withSpaces = String(str)
+  return String(str)
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/[_\-]+/g, ' ')
     .trim()
-  return withSpaces.split(/\s+/).filter(Boolean)
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+function detectCurrencies(data) {
+  const currencies = new Set()
+  for (let r = 0; r < data.length; r++) {
+    for (let c = 0; c < (data[r]?.length || 0); c++) {
+      const cell = data[r][c]
+      if (!cell) continue
+      const str = String(cell).trim()
+      for (const [code, symbols] of Object.entries(CURRENCY_SYMBOLS)) {
+        for (const sym of symbols) {
+          if (str.includes(sym)) currencies.add(code)
+        }
+      }
+      if (/^[A-Z]{3}$/.test(str.toUpperCase())) {
+        const code = str.toUpperCase()
+        if (KNOWN_ISO_CODES.has(code) && !NON_CURRENCY_WORDS.has(code)) currencies.add(code)
+      }
+    }
+  }
+  return Array.from(currencies)
+}
+
+function calculateSemanticMatchScore(label, value, fieldDef, context) {
+  const labelLower = String(label || '').toLowerCase().trim()
+  const valueStr = String(value || '').trim()
+  const valueType = getValueType(value)
+  if (valueType === 'empty') return 0
+  if (fieldDef.rejectPatterns) {
+    for (const pattern of fieldDef.rejectPatterns) {
+      try {
+        if (new RegExp(pattern, 'i').test(valueStr)) return 0
+      } catch (e) { /* bad pattern */ }
+    }
+  }
+  if (fieldDef.excludeKeywords) {
+    for (const ex of fieldDef.excludeKeywords) {
+      if (labelLower.includes(ex.toLowerCase())) return 0
+    }
+  }
+  if (fieldDef.valueTypes && fieldDef.valueTypes.length > 0) {
+    if (!fieldDef.valueTypes.includes(valueType)) return 0
+  }
+  if (fieldDef.allowedValues && fieldDef.allowedValues.length > 0) {
+    const vLower = valueStr.toLowerCase()
+    if (!fieldDef.allowedValues.some(a => vLower === a.toLowerCase())) return 0
+  }
+  let score = 0.3
+  if (fieldDef.keywords) {
+    for (const keyword of fieldDef.keywords) {
+      const kw = keyword.toLowerCase().trim()
+      if (!kw) continue
+      if (labelLower === kw) { score += 0.55; break }
+      if (new RegExp(`(^|[\\s_\\-])${kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[\\s_\\-])`).test(labelLower)) {
+        score += 0.40; break
+      }
+      if (labelLower.includes(kw)) { score += 0.20; break }
+    }
+  }
+  if (fieldDef.contextPatterns && context) {
+    const ctxLower = context.toLowerCase()
+    for (const p of fieldDef.contextPatterns) {
+      if (ctxLower.includes(p.toLowerCase())) { score += 0.15; break }
+    }
+  }
+  if (fieldDef.typicalRange && isNumeric(valueStr)) {
+    const num = parseFloat(valueStr.replace(/[%,\s$€£¥₹R]/g, ''))
+    const [min, max] = fieldDef.typicalRange
+    if (num >= min && num <= max) score += 0.10
+    else if (fieldDef.minValue && num < fieldDef.minValue) return 0
+  }
+  return Math.min(score, 1.0)
+}
+
+export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumns, instrumentType, tableRange = null, tableData = null, customCurrency = null, statusCallback = null) {
+  const updateStatus = (s) => { if (statusCallback) statusCallback(s) }
+  if (!fileBuffer || !sheetName) throw new Error('File buffer and sheet name are required')
+  console.log('=== autoDetectInstrumentFields ===')
+  console.log('Sheet:', sheetName, '| Type:', instrumentType, '| Required:', requiredColumns)
+  updateStatus('scanning')
+  let data = []
+  if (tableData && Array.isArray(tableData) && tableData.length > 0) {
+    data = tableData
+  } else {
+    const workbook = XLSX.read(fileBuffer, {
+      type: 'array', cellDates: true, cellNF: true
+    })
+    const worksheet = workbook.Sheets[sheetName]
+    if (!worksheet) {
+      return { fields: {}, fieldsWithMetadata: {}, currencies: [],
+               missingFields: requiredColumns, additionalFields: {} }
+    }
+    let range = worksheet['!ref']
+      ? XLSX.utils.decode_range(worksheet['!ref'])
+      : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } }
+    let maxRow = 0, maxCol = 0
+    for (const addr in worksheet) {
+      if (addr.startsWith('!')) continue
+      const ref = XLSX.utils.decode_cell(addr)
+      if (ref.r > maxRow) maxRow = ref.r
+      if (ref.c > maxCol) maxCol = ref.c
+    }
+    if (maxRow < range.e.r) range.e.r = maxRow
+    if (maxCol < range.e.c) range.e.c = maxCol
+    if ((range.e.r - range.s.r + 1) > MAX_DETECT_ROWS) {
+      range.e.r = range.s.r + MAX_DETECT_ROWS - 1
+    }
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      const row = []
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const cell = worksheet[XLSX.utils.encode_cell({ r: R, c: C })]
+        row.push(cell ? (cell.w ?? cell.v ?? '') : '')
+      }
+      data.push(row)
+    }
+  }
+  updateStatus('analyzing')
+  const boundaries = tableRange && !tableData
+    ? { startRow: tableRange.startRow, endRow: tableRange.endRow,
+        startCol: tableRange.startCol, endCol: tableRange.endCol }
+    : { startRow: 0, endRow: data.length - 1,
+        startCol: 0, endCol: Math.max(...data.map(r => r?.length || 0)) - 1 }
+  const semanticFieldMap = new Map()
+  for (const [key, def] of Object.entries(SEMANTIC_FIELD_DEFINITIONS)) {
+    const norm = (k) => k.toLowerCase().replace(/[-_\s]/g, '')
+    const isReq = (requiredColumns || []).some(col => norm(col) === norm(key))
+    semanticFieldMap.set(key, { definition: def, isRequired: isReq })
+  }
+  const normalizedSemanticKeys = new Set(
+    Array.from(semanticFieldMap.keys()).map(k => k.toLowerCase().replace(/[-_\s]/g, ''))
+  )
+  for (const col of (requiredColumns || [])) {
+    const normCol = col.toLowerCase().replace(/[-_\s]/g, '')
+    if (!normalizedSemanticKeys.has(normCol)) {
+      semanticFieldMap.set(col, {
+        definition: {
+          valueTypes: ['currency', 'percentage', 'number', 'date', 'text'],
+          keywords: splitIntoWords(col),
+          rejectPatterns: [],
+        },
+        isRequired: true
+      })
+      normalizedSemanticKeys.add(normCol)
+    }
+  }
+  const requiredNames = Array.from(semanticFieldMap.entries())
+    .filter(([_, v]) => v.isRequired).map(([k]) => k)
+  updateStatus('detecting')
+  const detectedFields = {}
+  const detectedMetadata = {}
+  const usedPairs = new Set()
+  const processedCells = new Set()
+  let allRequiredFound = false
+  for (let R = boundaries.startRow; R <= boundaries.endRow && !allRequiredFound; R++) {
+    for (let C = boundaries.startCol; C <= boundaries.endCol && !allRequiredFound; C++) {
+      const cellKey = `${R}_${C}`
+      if (processedCells.has(cellKey)) continue
+      const label = data[R]?.[C]
+      if (!label || String(label).trim() === '') continue
+      const labelStr = String(label).trim()
+      if (labelStr.length > 80) continue
+      if (/^\d+(?:\.\d+)?\s*%$/.test(labelStr)) continue
+      if (/^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}$/.test(labelStr)) continue
+      if (/^-?\d+(?:\.\d+)?$/.test(labelStr)) continue
+      const context = getContextualClues(data, R, C, 2)
+      let valueHit = null, valueLoc = null, direction = null
+      for (let off = 1; off <= MAX_LOOKAHEAD && C + off <= boundaries.endCol; off++) {
+        const v = data[R]?.[C + off]
+        if (v && String(v).trim() !== '') {
+          valueHit = v
+          valueLoc = { row: R, col: C + off }
+          direction = 'horizontal'
+          processedCells.add(`${R}_${C + off}`)
+          break
+        }
+      }
+      if (!valueHit) {
+        for (let off = 1; off <= MAX_LOOKAHEAD && R + off <= boundaries.endRow; off++) {
+          const v = data[R + off]?.[C]
+          if (v && String(v).trim() !== '') {
+            valueHit = v
+            valueLoc = { row: R + off, col: C }
+            direction = 'vertical'
+            processedCells.add(`${R + off}_${C}`)
+            break
+          }
+        }
+      }
+      if (!valueHit) continue
+      let best = null, bestScore = 0.5
+      for (const [colName, { definition, isRequired }] of semanticFieldMap) {
+        if (!isRequired) continue
+        if (detectedFields[colName]) continue
+        const score = calculateSemanticMatchScore(labelStr, valueHit, definition, context)
+        if (score > bestScore) { bestScore = score; best = { colName, score } }
+      }
+      if (best) {
+        const pairKey = `${labelStr}|${valueHit}|${R}|${C}`
+        if (!usedPairs.has(pairKey)) {
+          const loc = valueLoc ? rowColToCellRef(valueLoc.row, valueLoc.col) : rowColToCellRef(R, C + 1)
+          detectedFields[best.colName] = valueHit
+          detectedMetadata[best.colName] = {
+            location: loc, confidence: best.score,
+            originalLabel: labelStr, detectedFrom: direction,
+          }
+          usedPairs.add(pairKey)
+          console.log(`[Phase1] ${best.colName} = "${valueHit}" @ ${loc} (score ${best.score.toFixed(2)})`)
+          const found = requiredNames.filter(n => detectedFields[n])
+          if (found.length === requiredNames.length) allRequiredFound = true
+        }
+      }
+    }
+  }
+  const additionalFields = {}
+  const additionalMetadata = {}
+  let additionalCount = 0
+  const MAX_ADDITIONAL = 40
+  for (let R = boundaries.startRow; R <= boundaries.endRow && additionalCount < MAX_ADDITIONAL; R++) {
+    for (let C = boundaries.startCol; C <= boundaries.endCol && additionalCount < MAX_ADDITIONAL; C++) {
+      const cellKey = `${R}_${C}`
+      if (processedCells.has(cellKey)) continue
+      const label = data[R]?.[C]
+      if (!label || String(label).trim() === '') continue
+      const labelStr = String(label).trim()
+      if (labelStr.length > 80) continue
+      if (/^\d+(?:\.\d+)?\s*%$/.test(labelStr)) continue
+      if (/^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}$/.test(labelStr)) continue
+      if (/^-?\d+(?:\.\d+)?$/.test(labelStr)) continue
+      const context = getContextualClues(data, R, C, 2)
+      let valueHit = null, valueLoc = null, direction = null
+      for (let off = 1; off <= MAX_LOOKAHEAD && C + off <= boundaries.endCol; off++) {
+        const v = data[R]?.[C + off]
+        if (v && String(v).trim() !== '') {
+          valueHit = v; valueLoc = { row: R, col: C + off }
+          direction = 'horizontal'; processedCells.add(`${R}_${C + off}`)
+          break
+        }
+      }
+      if (!valueHit) {
+        for (let off = 1; off <= MAX_LOOKAHEAD && R + off <= boundaries.endRow; off++) {
+          const v = data[R + off]?.[C]
+          if (v && String(v).trim() !== '') {
+            valueHit = v; valueLoc = { row: R + off, col: C }
+            direction = 'vertical'; processedCells.add(`${R + off}_${C}`)
+            break
+          }
+        }
+      }
+      if (!valueHit) continue
+      let best = null, bestScore = 0.55
+      for (const [colName, { definition, isRequired }] of semanticFieldMap) {
+        if (isRequired) continue
+        if (additionalFields[colName]) continue
+        const score = calculateSemanticMatchScore(labelStr, valueHit, definition, context)
+        if (score > bestScore) { bestScore = score; best = { colName, score } }
+      }
+      if (best) {
+        const pairKey = `${labelStr}|${valueHit}|${R}|${C}`
+        if (!usedPairs.has(pairKey)) {
+          const loc = valueLoc ? rowColToCellRef(valueLoc.row, valueLoc.col) : rowColToCellRef(R, C + 1)
+          additionalFields[best.colName] = valueHit
+          additionalMetadata[best.colName] = {
+            location: loc, confidence: best.score,
+            originalLabel: labelStr, detectedFrom: direction,
+          }
+          usedPairs.add(pairKey)
+          additionalCount++
+          console.log(`[Phase2] ${best.colName} = "${valueHit}" @ ${loc} (score ${best.score.toFixed(2)})`)
+        }
+      }
+    }
+  }
+  const missingFields = (requiredColumns || []).filter(c => !detectedFields[c])
+  console.log('=== Detection result ===')
+  console.log('Required:', Object.keys(detectedFields))
+  console.log('Additional:', Object.keys(additionalFields))
+  console.log('Missing:', missingFields)
+  return {
+    fields: detectedFields,
+    fieldsWithMetadata: detectedMetadata,
+    currencies: detectCurrencies(data),
+    missingFields,
+    additionalFields,
+    additionalFieldsWithMetadata: additionalMetadata,
+    warnings: []
+  }
 }

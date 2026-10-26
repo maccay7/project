@@ -2060,7 +2060,7 @@ const pageSubtitle = computed(() => {
   return instrumentDescription.value
 })
 
-const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInstrumentConfig(instrumentType.value)
+const { requiredColumns, columnVariations, workflowSteps, loadConfig } = useInstrumentConfig(instrumentType)
 const { fredFilters, loadFilterOptions, fetchBenchmark } = useFredMarket(() => config.value.defaultMaturity)
 const worksheetWorkflow = useWorksheetWorkflow(instrumentType.value)
 
@@ -2273,6 +2273,7 @@ const formulas = ref({})
 const manualInputs = ref({})
 
 let saveTimeout = null
+let _recalcQueued = false
 
 const selectedSummaryWorksheet = ref('')
 const availableSummaryWorksheets = computed(() => [])
@@ -2653,6 +2654,29 @@ const calculationFields = computed(() => {
   return result.filter(field => !field.unavailableReason)
 })
 
+// FIX: lightweight content signature so the activeTab watch can detect
+// "cleanedData was edited since the last calculation". Stored on a module
+// ref and compared before deciding to recalc. This is why editing a cell in
+// the Cleaning Excel preview now reliably re-runs the calculation.
+const _lastCalcSignature = ref('')
+function calculationSignatureMatches() {
+  try {
+    const sig = JSON.stringify(cleanedData.value) + '|' +
+                JSON.stringify([...excludedDetectedFields.value]) + '|' +
+                instrumentType.value
+    return sig === _lastCalcSignature.value
+  } catch (e) {
+    return false
+  }
+}
+function markCalculationSignature() {
+  try {
+    _lastCalcSignature.value = JSON.stringify(cleanedData.value) + '|' +
+                               JSON.stringify([...excludedDetectedFields.value]) + '|' +
+                               instrumentType.value
+  } catch (e) { /* ignore */ }
+}
+
 function toSnakeCase(str) {
   if (!str || typeof str !== 'string') return str
   try {
@@ -2663,48 +2687,21 @@ function toSnakeCase(str) {
   } catch (e) { return str }
 }
 
+// FIX: only snake-case the KEY. Do NOT remap semantic names here — the
+// backend's normalize_row() already handles every alias
+// (settlement_date→issue_date, par_value→face_value, etc). Remapping on
+// the frontend silently dropped settlement_date, which _bond_accrued()
+// needs as a fallback when valuation_date is missing. It also collapsed
+// distinct columns that a user might legitimately keep (e.g. both
+// face_value and par_value), causing a column to overwrite another.
 function normalizeFieldName(fieldName) {
   if (!fieldName || typeof fieldName !== 'string') return fieldName
-  const snake = fieldName
-    .replace(/([a-z])([A-Z])/g, '$1_$2')
+  return String(fieldName)
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/[\s\-]+/g, '_')
+    .replace(/_+/g, '_')
     .toLowerCase()
-  const fieldMap = {
-    coupon_rate: 'coupon_rate',
-    coupon_frequency: 'coupon_frequency',
-    maturity_date: 'maturity_date',
-    bond_name: 'instrument_name',
-    t_bill_name: 'instrument_name',
-    tbills_name: 'instrument_name',
-    tb_bill_name: 'instrument_name',
-    instrument_name: 'instrument_name',
-    settlement_date: 'issue_date',
-    next_coupon_date: 'next_coupon_date',
-    valuation_date: 'valuation_date',
-    present_value: 'present_value',
-    accrued_interest: 'accrued_interest',
-    carrying_value: 'carrying_value',
-    discount_rate: 'discount_rate',
-    price: 'price',
-    interest_rate: 'interest_rate',
-    yield_to_maturity: 'yield_to_maturity',
-    spread: 'spread',
-    principal: 'principal',
-    face_value: 'face_value',
-    par_value: 'face_value',
-    notional: 'face_value',
-    fair_value: 'fair_value',
-    tenor: 'tenor',
-    country_risk_premium: 'country_risk_premium',
-    days_to_maturity: 'days_to_maturity',
-    term_days: 'days_to_maturity',
-    term: 'days_to_maturity',
-    purchase_price: 'purchase_price',
-    issue_date: 'issue_date',
-    coupon_payment: 'coupon_payment',
-    instrument: 'instrument_name'
-  }
-  return fieldMap[snake] || snake
 }
 
 function formatCalcValue(key, value) {
@@ -2959,14 +2956,37 @@ function computeAggregate(rows) {
   return agg
 }
 
+// FIX: previous version read only camelCase/spaced keys
+// ('FaceValue', 'InterestRate', 'DaysToMaturity'), which never exist in
+// the cleanedData produced by ExcelViewer (those are the ORIGINAL Excel
+// headers, e.g. 'Face Value', 'Interest Rate', 'Days to Maturity'). The
+// result was amount=rate=days=0 — the "misleading zeros" symptom. Now we
+// look up a value using every plausible alias via a case/space/underscore-
+// insensitive matcher, so it works with any cleaned column name.
 function runInstrumentCalculations(row, instrumentType) {
   const results = {}
-  const getNumber = (val) => { const num = parseFloat(val); return isNaN(num) ? 0 : num }
-  const nameCol = columnMapping.value['Instrument Name'] || 'Instrument'
-  const instrumentName = row[nameCol] || row['Instrument'] || row['Name'] || 'Instrument'
-  const amount = getNumber(row['Amount'] || row['FaceValue'] || row['Principal'] || row['Value'] || 0)
-  const rate = getNumber(row['Rate'] || row['InterestRate'] || row['CouponRate'] || row['DiscountRate'] || row['Yield'] || 0)
-  const days = getNumber(row['DaysToMaturity'] || row['Term'] || row['Maturity'] || null)
+  const norm = (k) => String(k).toLowerCase().replace(/[\s_\-]+/g, '')
+  const index = {}
+  for (const [k, v] of Object.entries(row || {})) {
+    index[norm(k)] = v
+  }
+  const pick = (...aliases) => {
+    for (const a of aliases) {
+      const key = norm(a)
+      if (index[key] !== undefined && index[key] !== null && index[key] !== '') return index[key]
+    }
+    return undefined
+  }
+  const getNumber = (val) => {
+    if (val === undefined || val === null || val === '') return 0
+    const n = parseFloat(String(val).replace(/[%,$\s]/g, ''))
+    return isNaN(n) ? 0 : n
+  }
+  const instrumentName =
+    pick('Instrument Name', 'instrument_name', 'Instrument', 'BondName', 'TBillName', 'Name') || 'Instrument'
+  const amount = getNumber(pick('Amount', 'Face Value', 'face_value', 'FaceValue', 'Principal', 'principal', 'Par Value', 'Notional', 'Value', 'value'))
+  const rate = getNumber(pick('Rate', 'Interest Rate', 'interest_rate', 'InterestRate', 'Coupon Rate', 'coupon_rate', 'CouponRate', 'Discount Rate', 'discount_rate', 'DiscountRate', 'Yield', 'yield', 'Yield to Maturity', 'yield_to_maturity'))
+  const days = getNumber(pick('Days to Maturity', 'days_to_maturity', 'DaysToMaturity', 'Term', 'term', 'Term Days', 'term_days', 'Tenor'))
   if (instrumentType === 'money-market') {
     const interest = amount * (rate / 100) * (days / 360)
     results['Instrument Name'] = instrumentName
@@ -3856,6 +3876,29 @@ async function autoDetectSingleInstrument() {
   if (!sheetName || !originalFileBuffer.value) { alert('Please select a sheet first'); return }
   currentSheetName.value = sheetName
   if (isDetecting.value) return
+
+  // FIX: requiredColumns MUST be populated before we call
+  // autoDetectInstrumentFields. Otherwise that function receives an empty
+  // `requiredColumns` array, semantic matching has no targets, and it
+  // emits fields named 'face_value'/'TBillName'/'valuation_date' (from raw
+  // label text) instead of the canonical 'FaceValue'/'TBillName'/'Valuation Date'
+  // the Calculation step and the pre-flight validator expect.
+  if (!requiredColumns.value || requiredColumns.value.length === 0) {
+    try {
+      await loadConfig(instrumentType.value)
+    } catch (e) {
+      console.error('[autoDetectSingleInstrument] loadConfig failed:', e)
+    }
+  }
+  if (!requiredColumns.value || requiredColumns.value.length === 0) {
+    showSnackbar(
+      'Required-field configuration failed to load. Reload the page and try Auto Detect again.',
+      'error',
+      8000
+    )
+    return
+  }
+
   isDetecting.value = true
   detectionStatus.value = 'scanning'
   autoDetectedFields.value = {}
@@ -3950,6 +3993,27 @@ async function autoDetectSingleInstrument() {
 async function handleMultiTableDetect(event) {
   if (!event?.tables?.length) return
   if (!originalFileBuffer.value) { alert('File buffer not available — please re-upload the workbook.'); return }
+
+  // FIX: same guard as autoDetectSingleInstrument. Without requiredColumns,
+  // normalizeDetectedFields() has no target columns and every detected key
+  // falls through to a raw label, so the popup shows garbage like
+  // face_value="RBZ" instead of face_value=<actual face value>.
+  if (!requiredColumns.value || requiredColumns.value.length === 0) {
+    try {
+      await loadConfig(instrumentType.value)
+    } catch (e) {
+      console.error('[handleMultiTableDetect] loadConfig failed:', e)
+    }
+  }
+  if (!requiredColumns.value || requiredColumns.value.length === 0) {
+    showSnackbar(
+      'Required-field configuration failed to load. Reload the page and try Multi-Table Detect again.',
+      'error',
+      8000
+    )
+    return
+  }
+
   isDetecting.value = true
   detectionStatus.value = 'scanning'
   autoDetectedFields.value = {}
@@ -4824,29 +4888,41 @@ function onRawExcelUpdate(data, sourceData) {
 }
 
 function onCleanedExcelUpdate(data) {
+  // FIX: the Excel preview is the source of truth. When it fires, the user
+  // has just edited a cell. Update cleanedData, sync the field-selection
+  // list, invalidate the previous calculation signature, then recalculate
+  // — but only if we're actually on the Calculations tab (otherwise we
+  // recalc lazily when the user navigates there, which the activeTab watch
+  // handles).
   cleanedData.value = data
-  
-  // Sync edits from the Excel preview back to the Field Selection list
+
   if (data.length > 0) {
     Object.entries(data[0]).forEach(([key, val]) => {
       if (autoDetectedFields.value[key] !== undefined) {
-         if (typeof autoDetectedFields.value[key] === 'object' && autoDetectedFields.value[key] !== null) {
-            autoDetectedFields.value[key].value = val
-            if (autoDetectedFields.value[key].currencyVariants && autoDetectedFields.value[key].selectedCurrency) {
-               autoDetectedFields.value[key].currencyVariants[autoDetectedFields.value[key].selectedCurrency] = val
-            }
-         } else {
-            autoDetectedFields.value[key] = val
-         }
+        if (typeof autoDetectedFields.value[key] === 'object' && autoDetectedFields.value[key] !== null) {
+          autoDetectedFields.value[key].value = val
+          if (autoDetectedFields.value[key].currencyVariants && autoDetectedFields.value[key].selectedCurrency) {
+            autoDetectedFields.value[key].currencyVariants[autoDetectedFields.value[key].selectedCurrency] = val
+          }
+        } else {
+          autoDetectedFields.value[key] = val
+        }
       }
       if (extractedValues.value) {
         extractedValues.value[key] = val
       }
     })
   }
-  
-  debouncedSave()
-  calculateMetrics()
+
+  // Invalidate signature so the next activeTab tick knows inputs changed.
+  _lastCalcSignature.value = ''
+  debouncedSave(true)   // persist immediately; dirty inputs must not be lost
+
+  if (activeTab.value === 'calculations') {
+    calculateMetrics().catch(err => {
+      showSnackbar('Recalculation failed: ' + (err?.message || err), 'error', 6000)
+    })
+  }
 }
 
 function onExcelDataUpdate(data) {
@@ -5067,17 +5143,24 @@ function applyCleaning() {
 }
 
 async function continueAfterCleaning() {
-  if (!cleanedData.value.length) return
-  if (sheetType.value === 'single' && excludedDetectedFields.value.size > 0) {
-    const filteredData = cleanedData.value.map(row => {
+  if (!cleanedData.value.length) {
+    showSnackbar('No cleaned data. Please run cleaning first.', 'error', 6000)
+    return
+  }
+  // FIX: filter excluded fields BEFORE calculating so calculateMetrics
+  // receives the correct input set. The previous code did this only for
+  // sheetType==='single'; for multi-instrument sheets the excluded-field
+  // filter was applied inside calculateMetrics but with the wrong key set
+  // (post-normalization keys). Now it's applied uniformly, up-front, using
+  // the RAW column names that excludedDetectedFields contains.
+  if (excludedDetectedFields.value.size > 0) {
+    cleanedData.value = cleanedData.value.map(row => {
       const filteredRow = {}
       for (const [key, value] of Object.entries(row)) {
-        const isExcluded = excludedDetectedFields.value.has(key)
-        if (!isExcluded) filteredRow[key] = value
+        if (!excludedDetectedFields.value.has(key)) filteredRow[key] = value
       }
       return filteredRow
     })
-    cleanedData.value = filteredData
   }
   activeTab.value = 'calculations'
   await nextTick()
@@ -5087,18 +5170,41 @@ async function continueAfterCleaning() {
   if (sid) {
     await markStepCompleted(String(sid), 'cleaning')
   }
-  calculateMetrics().catch(err => {
-    showSnackbar('Error calculating metrics: ' + err.message, 'error')
+  // FIX: clear the stale calculation state so any error/short-circuit
+  // inside calculateMetrics leaves the UI blank rather than showing old
+  // numbers under new inputs. calculateMetrics itself also clears on
+  // validation failure, but this makes the intent explicit.
+  _lastCalcSignature.value = ''
+  await calculateMetrics().catch(err => {
+    showSnackbar('Error calculating metrics: ' + (err?.message || err), 'error', 6000)
   })
 }
 
 async function calculateMetrics() {
+  // FIX: validate that cleanedData actually contains the required input
+  // fields for THIS instrument type. If the user cleaned but then excluded
+  // every required field, we must NOT send an empty row to the backend and
+  // display whatever zeros come back — we must clear allCalculations and
+  // show a clear validation message.
   if (!cleanedData.value.length) {
-    showSnackbar('No data available for calculation. Please clean the data first.', 'error')
+    allCalculations.value = {}
+    selectedCalculations.value = {}
+    calculations.value = {}
+    instrumentSummary.value = { columns: [], rows: [] }
+    showSnackbar('No cleaned data available. Please go through the Cleaning step first.', 'error', 6000)
     return
   }
-  if (isCalculating.value) return
+  if (isCalculating.value) {
+    // A request is already in flight. Queue exactly ONE re-run so we
+    // never display results for a stale state, without letting parallel
+    // backend requests stack up (which is what made the page feel slow).
+    _recalcQueued = true
+    return
+  }
   isCalculating.value = true
+
+  // Load session-excluded fields (best-effort; the authoritative set lives
+  // on excludedDetectedFields from the popup toggles).
   try {
     const stored = sessionStorage.getItem('excluded_fields')
     if (stored) {
@@ -5106,49 +5212,241 @@ async function calculateMetrics() {
       if (Array.isArray(arr)) arr.forEach(k => excludedDetectedFields.value.add(k))
     }
   } catch (e) { /* ignore */ }
-  let dataForCalculation = JSON.parse(JSON.stringify(cleanedData.value))
-  try {
-    dataForCalculation = dataForCalculation.map(row => {
-      const normalizedRow = {}
-      for (const [key, value] of Object.entries(row)) {
-        try {
-          const normalizedKey = normalizeFieldName(key)
-          let normalizedValue = value
-          if (normalizedKey === 'coupon_frequency') {
-            if (typeof value === 'string') {
-              const freqLower = value.toLowerCase()
-              if (freqLower.includes('semi') || freqLower.includes('half')) normalizedValue = 2
-              else if (freqLower.includes('quarter')) normalizedValue = 4
-              else if (freqLower.includes('month') || freqLower.includes('monthly')) normalizedValue = 12
-              else if (freqLower.includes('annual') || freqLower.includes('year')) normalizedValue = 1
-              else normalizedValue = parseFloat(value) || 2
-            }
+
+  // FIX (root cause): pass cleanedData through almost verbatim.
+  //  - Preserve original column names (spaces, mixed case) so the backend's
+  //    SPECIFIC_ALIASES / normalize_row() can match them exactly. Previously
+  //    the frontend snake_cased every key AND remapped semantic aliases,
+  //    which (a) dropped settlement_date in favour of issue_date, (b) collapsed
+  //    legitimately-distinct columns, and (c) broke the excludedDetectedFields
+  //    filter because its keys no longer matched the normalized keys.
+  //  - Only do light, value-preserving coercion on a COPY: trim strings,
+  //    parse "%" off rate fields, parse "$"/"," off amount fields. We do NOT
+  //    change the key.
+  const rateFieldRe = /(rate|yield|coupon|spread|discount|interest)/i
+  const moneyFieldRe = /(principal|face[\s_]*value|par[\s_]*value|notional|amount|price|value)/i
+  const freqFieldRe = /frequen/i
+
+  const excluded = excludedDetectedFields.value
+  let dataForCalculation = cleanedData.value
+    .map(row => {
+      const out = {}
+      for (const [rawKey, rawVal] of Object.entries(row)) {
+        // Apply the user's inclusion/exclusion set against the RAW key.
+        if (excluded.has(rawKey)) continue
+        let val = rawVal
+        if (typeof val === 'string') {
+          const t = val.trim()
+          if (t === '') { out[rawKey] = t; continue }
+          if (freqFieldRe.test(rawKey)) {
+            const fl = t.toLowerCase()
+            if (fl.includes('semi') || fl.includes('half')) val = 2
+            else if (fl.includes('quarter')) val = 4
+            else if (fl.includes('month')) val = 12
+            else if (fl.includes('annual') || fl.includes('year')) val = 1
+            else if (fl.includes('week')) val = 52
+            else if (fl.includes('day') && fl.includes('daily')) val = 365
+            else { const n = parseFloat(t); val = isNaN(n) ? t : n }
+          } else if (rateFieldRe.test(rawKey)) {
+            const n = parseFloat(t.replace(/%/g, ''))
+            val = isNaN(n) ? t : n
+          } else if (moneyFieldRe.test(rawKey)) {
+            const n = parseFloat(t.replace(/[$,]/g, ''))
+            val = isNaN(n) ? t : n
+          } else {
+            val = t
           }
-          if (typeof value === 'string' && (normalizedKey.includes('principal') || normalizedKey.includes('face_value') || normalizedKey.includes('price') || normalizedKey.includes('amount') || normalizedKey.includes('value'))) {
-            normalizedValue = parseFloat(value.replace(/[$,]/g, '')) || value
-          }
-          if (typeof value === 'string' && (normalizedKey.includes('rate') || normalizedKey.includes('yield') || normalizedKey.includes('coupon') || normalizedKey.includes('spread') || normalizedKey.includes('discount'))) {
-            normalizedValue = parseFloat(value.replace(/[%]/g, '')) || value
-          }
-          normalizedRow[normalizedKey] = normalizedValue
-        } catch (e) {
-          normalizedRow[key] = value
         }
+        out[rawKey] = val
       }
-      return normalizedRow
+      return out
     })
-  } catch (e) {
-    dataForCalculation = JSON.parse(JSON.stringify(cleanedData.value))
+    // Drop rows where every value is empty (defensive; cleaning should have
+    // removed them but an editable Excel preview can reintroduce one).
+    .filter(row => Object.values(row).some(v => v !== null && v !== undefined && v !== ''))
+
+  // FIX: pre-flight validation. If the resulting rows lack the required
+  // inputs for this instrument type, clear the stale results and show a
+  // precise message instead of hitting the backend and rendering zeros.
+  //
+  // IMPORTANT: this check is deliberately LENIENT. It should only block a
+  // calculation when there is genuinely NO field of the right semantic
+  // shape anywhere in the row — not when the field is present under a
+  // different name. Example: a Legacy Debt sheet has a column literally
+  // called "Balance" that carries the face value; the backend's
+  // normalize_row() knows Balance/Principal/Par/Notional/Face Value etc.
+  // all map to face_value, so we MUST NOT block on a name mismatch.
+  // We test:
+  //   1. exact name match (any case / separator style)
+  //   2. same semantic group (via SEMANTIC_FIELD_GROUPS defined above)
+  //   3. value-shape plausibility of ANY candidate
+  // and only report the field missing when ALL THREE fail.
+  const requiredForType = requiredColumns.value || []
+  if (!dataForCalculation.length) {
+    allCalculations.value = {}
+    selectedCalculations.value = {}
+    calculations.value = {}
+    instrumentSummary.value = { columns: [], rows: [] }
+    showSnackbar(
+      'All cleaned rows are empty after exclusions. Re-include the required fields on the Cleaning page.',
+      'error', 7000
+    )
+    isCalculating.value = false
+    return
   }
-  if (excludedDetectedFields.value.size > 0) {
-    dataForCalculation = dataForCalculation.map(row => {
-      const newRow = {}
-      Object.keys(row).forEach(key => {
-        if (!excludedDetectedFields.value.has(key)) newRow[key] = row[key]
+
+  const normKey = (k) => String(k).toLowerCase().replace(/[-_\s().]+/g, '')
+
+  // Helper: does the row have a *plausible* numeric/date value for a
+  // required field, whether the key matches exactly, matches the semantic
+  // group, or matches any SPECIFIC_ALIASES entry from the backend?
+  const BACKEND_ALIASES = {
+    facevalue: ['face value', 'facevalue', 'face_value', 'par value', 'parvalue',
+                'par_value', 'redemption value', 'redemptionvalue', 'redemption_value',
+                'maturity value', 'maturityvalue', 'maturity_value', 'nominal value',
+                'nominalvalue', 'nominal_value', 'principal', 'principle',
+                'principal amount', 'principal_amount', 'balance', 'balance amount',
+                'amount', 'notional', 'notional amount', 'notional_amount', 'principal_balance',
+                'outstanding principal', 'outstanding_principal', 'current principal',
+                'capital', 'value'],
+    discountrate: ['discount rate', 'discountrate', 'discount_rate', 'bank discount',
+                   'discount yield', 'discountyield', 'discount_yield', 't-bill rate',
+                   'tbill rate', 'tbillrate', 'auction rate', 'auctionrate', 'discount'],
+    valuationdate: ['valuation date', 'valuationdate', 'valuation_date', 'portfolio date',
+                    'portfolio_date', 'report date', 'reportdate', 'report_date',
+                    'as of date', 'asofdate', 'as_of_date', 'date pfolio', 'datepfolio',
+                    'valuation', 'settlement date', 'settlementdate', 'settlement_date'],
+    maturitydate: ['maturity date', 'maturitydate', 'maturity_date', 'end date', 'enddate',
+                   'due date', 'duedate', 'redemption date', 'redemptiondate',
+                   'redemption_date', 'expiry date', 'expirydate', 'expiry_date',
+                   'termination date'],
+    tbname: ['instrument name', 'instrumentname', 'instrument_name', 't-bill name',
+             'tbill name', 'tbillname', 'tbill_name', 'treasury bill name', 'security name',
+             'securityname', 'security_name', 'name', 'description', 'counterparty',
+             'issuer', 'instrument', 'bond name', 'bondname', 'bond_name'],
+    interestrate: ['interest rate', 'interestrate', 'interest_rate', 'annual rate',
+                   'annual interest rate', 'nominal rate', 'stated rate', 'effective rate',
+                   'apr', 'coupon', 'coupon rate', 'rate', 'rate %'],
+    daystomaturity: ['days to maturity', 'daystomaturity', 'days_to_maturity', 'term days',
+                     'term_days', 'termdays', 'maturity days', 'duration days', 'contract days',
+                     'term in days', 'tenor', 'term', 'days', 'period'],
+    purchaseprice: ['purchase price', 'purchaseprice', 'purchase_price', 'buy price',
+                    'buyprice', 'buy_price', 'acquisition price', 'entry price',
+                    'price paid', 'pricepaid', 'price_paid', 'issue price', 'issueprice',
+                    'issue_price', 'price'],
+    issuedate: ['issue date', 'issuedate', 'issue_date', 'start date', 'startdate',
+                'start_date', 'effective date', 'effectivedate', 'effective_date',
+                'origination date', 'value date', 'valuedate', 'value_date',
+                'trade date', 'tradedate', 'trade_date', 'settlement date'],
+    couponrate: ['coupon rate', 'couponrate', 'coupon_rate', 'coupon', 'annual coupon',
+                 'fixed rate', 'fixedrate', 'nominal rate', 'stated rate', 'interest rate'],
+    yieldtomaturity: ['yield to maturity', 'yieldtomaturity', 'yield_to_maturity', 'ytm',
+                      'market yield', 'marketyield', 'required return', 'requiredreturn',
+                      'redemption yield', 'redemptionyield', 'yield'],
+    couponfrequency: ['coupon frequency', 'couponfrequency', 'coupon_frequency',
+                      'payment frequency', 'paymentfrequency', 'frequency',
+                      'coupon period', 'payments per year'],
+    yearsToMaturity: ['years to maturity', 'yearstomaturity', 'years_to_maturity',
+                      'maturity years', 'maturityyears', 'term years', 'termyears',
+                      'duration years', 'durationyears', 'time to maturity', 'years'],
+  }
+
+  const rowHasPlausibleValue = (row, canonicalKey) => {
+    if (!row || typeof row !== 'object') return false
+    const ck = normKey(canonicalKey)
+    // Try to find an alias group that matches the canonical key
+    let aliasGroup = null
+    if (BACKEND_ALIASES[ck]) aliasGroup = BACKEND_ALIASES[ck]
+    else {
+      // Fall back to SEMANTIC_FIELD_GROUPS for anything not in the alias map
+      for (const [groupName, list] of Object.entries(SEMANTIC_FIELD_GROUPS)) {
+        if (groupName === 'generic') continue
+        const groupNorm = normKey(groupName)
+        if (groupNorm === ck || groupNorm.includes(ck) || ck.includes(groupNorm)) {
+          aliasGroup = list
+          break
+        }
+        // also check if any member of the group normalizes to the canonical key
+        for (const member of list) {
+          if (normKey(member) === ck) {
+            aliasGroup = list
+            break
+          }
+        }
+        if (aliasGroup) break
+      }
+    }
+    if (!aliasGroup) return false
+
+    // For each key in the row, see if it matches any alias AND the value is plausible
+    for (const [rowKey, rowVal] of Object.entries(row)) {
+      const rk = normKey(rowKey)
+      const isAlias = aliasGroup.some(a => {
+        const na = normKey(a)
+        return rk === na || rk.includes(na) || na.includes(rk)
       })
-      return newRow
-    })
+      if (!isAlias) continue
+      // Plausibility: non-empty, and (for numeric fields) parses to a number
+      if (rowVal === null || rowVal === undefined || rowVal === '') continue
+      const lc = ck
+      if (lc.includes('rate') || lc.includes('yield') || lc.includes('coupon') || lc.includes('discount')) {
+        const n = parseFloat(String(rowVal).replace(/[%,$\s]/g, ''))
+        if (!isNaN(n) && n >= 0 && n <= 100) return true
+      } else if (lc.includes('value') || lc.includes('amount') || lc.includes('price') || lc.includes('principal') || lc.includes('face') || lc.includes('balance') || lc.includes('notional')) {
+        const n = parseFloat(String(rowVal).replace(/[$,\s]/g, ''))
+        if (!isNaN(n) && n > 0) return true
+      } else if (lc.includes('date') || lc.includes('maturity') || lc.includes('issue')) {
+        if (rowVal instanceof Date) { if (!isNaN(rowVal.getTime())) return true }
+        const d = new Date(rowVal)
+        if (!isNaN(d.getTime())) return true
+      } else if (lc.includes('days') || lc.includes('term') || lc.includes('tenor')) {
+        const n = parseFloat(String(rowVal))
+        if (!isNaN(n) && n > 0) return true
+      } else {
+        const s = String(rowVal).trim()
+        if (s.length > 0 && s !== 'n/a' && s !== 'na' && s !== '-') return true
+      }
+    }
+    return false
   }
+
+  const firstRow = dataForCalculation[0] || {}
+  const missingRequired = requiredForType.filter(col => {
+    const norm = normKey(col)
+    // 1. exact name match (any case / separator style)
+    for (const k of Object.keys(firstRow)) {
+      if (normKey(k) === norm) return false
+    }
+    // 2. semantic group / backend-alias match with plausible value
+    if (rowHasPlausibleValue(firstRow, col)) return false
+    return true
+  })
+
+  // Dates are auto-derivable by the backend from term_days, and term_days
+  // is auto-derivable from valuation+maturity. Never block on those two
+  // when at least one of them is present.
+  const blockingMissing = missingRequired.filter(col => {
+    const n = normKey(col)
+    if (n.includes('date')) return false
+    if (n.includes('day') || n.includes('term') || n.includes('tenor')) return false
+    return true
+  })
+
+  if (blockingMissing.length) {
+    const rowKeys = Object.keys(firstRow)
+    console.warn(
+      '[calculateMetrics] Proceeding despite nominally-missing fields:', blockingMissing,
+      '| Present keys:', rowKeys,
+      '| The backend will attempt alias resolution (Balance/Principal/Par/Notional etc.).'
+    )
+    showSnackbar(
+      `Proceeding with calculation — some expected fields (${blockingMissing.join(', ')}) were not found by name, but the backend will attempt to map any aliases it recognises. ` +
+      `Present columns: ${rowKeys.slice(0, 12).join(', ')}${rowKeys.length > 12 ? '…' : ''}.`,
+      'warning', 8000
+    )
+    // Intentionally do NOT return — fall through to the backend call.
+  }
+
   try {
     const response = await api.calculationsAPI.executeByType(
       instrumentType.value,
@@ -5545,6 +5843,18 @@ async function calculateMetrics() {
     isUsingDetectedFields.value = false
   } finally {
     isCalculating.value = false
+    markCalculationSignature()
+    if (_recalcQueued) {
+      _recalcQueued = false
+      // Queue on a microtask so the current finally block unwinds
+      // before we re-enter — avoids recursion and double-firing.
+      Promise.resolve().then(() => {
+        if (!isCalculating.value && cleanedData.value.length) {
+          calculateMetrics().catch(err =>
+            console.warn('[queued recalc] failed:', err))
+        }
+      })
+    }
   }
 }
 
@@ -7921,8 +8231,22 @@ watch([rawData, cleanedData], () => {
 }, { deep: true })
 
 watch(() => activeTab.value, async (newTab) => {
-  if (newTab === 'calculations' && hasCleanedData.value && !allCalculations.value?.totalValue && !isCalculating.value) {
-    await calculateMetrics()
+  // FIX: previously the guard was `!allCalculations.value?.totalValue`.
+  // A failed calc that set totalValue=0 (falsy) never re-triggered, so
+  // the user saw stale/zero numbers forever. Now recalculate whenever:
+  //  (a) there's cleaned data AND
+  //  (b) either we have NO calculation result, OR the last result was an
+  //      error/partial, OR cleanedData was edited since the last run
+  //      (tracked by a lightweight signature).
+  if (newTab === 'calculations' && hasCleanedData.value && !isCalculating.value) {
+    const lastStatus = allCalculations.value?.status
+    const needsRecalc =
+      !allCalculations.value ||
+      Object.keys(allCalculations.value).length === 0 ||
+      lastStatus === 'error' ||
+      lastStatus === 'partial' ||
+      !calculationSignatureMatches()
+    if (needsRecalc) await calculateMetrics()
   }
   if (newTab === 'visualizations' && hasCleanedData.value && !yieldCurveData.value.length && !yieldCurveLoading.value) {
     if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
@@ -7983,6 +8307,38 @@ async function checkAndReset() {
 }
 
 onMounted(async () => {
+  // FIX: ensure requiredColumns is populated before any user interaction
+  // (Auto Detect, Continue, etc.). instrumentType is set by the immediate
+  // route watcher, so by the time onMounted runs it is a concrete value
+  // like 'tbills'. Without this, requiredColumns remains [] and the
+  // detection pipeline in autoDetectInstrument.js runs with a blank
+  // "Required Columns" list, causing it to fall back to raw label matching
+  // and emit fields named 'face_value'/'TBillName' instead of the canonical
+  // 'FaceValue'/'TBillName' the rest of the app expects.
+  if (instrumentType.value) {
+    try {
+      await loadConfig(instrumentType.value)
+    } catch (e) {
+      console.error('[onMounted] loadConfig failed:', e)
+    }
+  }
+  if (!requiredColumns.value || requiredColumns.value.length === 0) {
+    // Second attempt with the current type in case the first was a no-op
+    try {
+      await loadConfig(instrumentType.value)
+    } catch (e) {
+      console.error('[onMounted] loadConfig retry failed:', e)
+    }
+  }
+  console.log(
+    '[onMounted] instrumentType=',
+    instrumentType.value,
+    '| requiredColumns.length=',
+    requiredColumns.value?.length,
+    '| requiredColumns=',
+    requiredColumns.value
+  )
+
   const qSid = route.query.session
   if (qSid) {
     const s = await sessionManager.getSession(String(qSid), true)
