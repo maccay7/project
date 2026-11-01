@@ -521,6 +521,21 @@ function goToReport() {
 function openDetailModal(inst) {
   if (!inst.details || !inst.details.length) return
   selectedInst.value = inst
+  // Load the valuation Excel data from the workflow to show exact same data as Calculations page
+  const loadValuationExcel = async () => {
+    try {
+      const sid = activeSession.value?.id
+      if (!sid) return
+      const wf = await sessionManager.getInstrumentWorkflow(sid, inst.id)
+      if (wf?.valuationExcelData && Array.isArray(wf.valuationExcelData)) {
+        inst.details = wf.valuationExcelData
+        inst.detailHeaders = wf.valuationExcelData.length ? Object.keys(wf.valuationExcelData[0] || {}) : []
+      }
+    } catch (e) {
+      console.warn('Failed to load valuation Excel data:', e)
+    }
+  }
+  loadValuationExcel()
   detailModalVisible.value = true
 }
 
@@ -809,6 +824,7 @@ async function loadSummary() {
       const aggCalc = buildAggregatesFromBackend(aggregatePayload, null, template.id)
 
       // === Details: individual instrument rows (what Calculations page shows) ===
+      // Use the same data source as Calculations page: instrumentSummary.rows
       const details = Array.isArray(instSummary.rows) ? instSummary.rows : []
 
       // Headers MUST come from the actual row keys so `row[header]` resolves.

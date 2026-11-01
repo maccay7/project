@@ -686,7 +686,7 @@ async function goToReports() {
     alert('Dataset reference missing. Please run calculations first.')
     return
   }
-  // If a FRED load is still in flight, wait for it so the session save is current.
+
   if (yieldLoading.value) {
     await new Promise(resolve => {
       const check = setInterval(() => {

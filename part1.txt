@@ -46,6 +46,603 @@
       <div class="tab-content-wrapper">
         <!-- ===== UPLOAD ===== -->
         <div v-if="activeTab === 'upload'" class="content-card">
+  <v-card>
+    <v-card-title>Upload {{ instrumentLabel }} Dataset</v-card-title>
+    <v-card-text>
+      <div class="valuation-date-section">
+        <label class="filter-label">Valuation Date</label>
+        <input 
+          type="date" 
+          v-model="valuationDate" 
+          class="date-input"
+        />
+      </div>
+
+      <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop">
+        <input
+          type="file"
+          ref="fileInput"
+          @change="handleFileUpload"
+          accept=".csv,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.xlam,.ods,.xml,.html,.prn,.dif,.slk,.dbf"
+          style="display: none"
+        />
+        <p>Drag & drop or <span class="browse-link" @click="$refs.fileInput.click()">browse</span></p>
+        <small>Supported: CSV, Excel (including .xlsm, .xlsb, .ods), and many other spreadsheet formats</small>
+      </div>
+
+      <div v-if="uploadHistory.length" class="upload-history">
+        <h4>Upload History ({{ uploadHistory.length }} files)</h4>
+        <div class="history-list">
+          <div v-for="(item, idx) in uploadHistory" :key="idx" class="history-item" @click="loadHistoryFile(item)">
+            <span>{{ item.name }}</span>
+            <small>{{ new Date(item.date).toLocaleString() }}</small>
+            <button class="btn-delete-history" @click.stop="deleteHistoryItem(idx)">×</button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="fileLoading" class="loading-container">
+        <p>{{ uploadProgress > 0 ? `Processing file... ${uploadProgress}%` : 'Parsing file... Please wait.' }}</p>
+        <v-progress-linear v-if="uploadProgress > 0" :value="uploadProgress" color="#0B2044" height="6"></v-progress-linear>
+      </div>
+
+      <div v-if="uploadedFile" class="file-info">
+        <span>{{ uploadedFile.name }}</span>
+        <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
+        <button class="remove-btn" @click="removeFile">×</button>
+        <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
+        <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
+        <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!worksheetSelected">Review Excel</button>
+        <button v-if="sheetType === 'multi'" class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
+      </div>
+
+      <div v-if="worksheetWorkflow.workbookSheets.length > 0" class="worksheet-selector-section" style="margin-top: 20px;">
+        <WorksheetSelector
+          :workbook-sheets="worksheetWorkflow.workbookSheets"
+          :worksheet-status="worksheetWorkflow.worksheetStatus"
+          :selected-worksheet="worksheetWorkflow.selectedWorksheet"
+          :loading="fileLoading"
+          :error="uploadError"
+          :is-detecting="isDetecting"
+          @select-sheet="handleWorksheetSelect"
+          @work-on-sheet="handleWorkOnSheet"
+          @view-results="handleViewResults"
+          @auto-detect-sheet="handleAutoDetectSheet"
+        />
+      </div>
+
+      <!-- ============================================================
+           REQUIRED COLUMNS SELECTOR — shown FIRST so users can map
+           before previewing. Driven by columnMapping / fileColumns /
+           requiredColumns and the hasRequiredColumn() helper.
+           ============================================================ -->
+      <div class="required-columns" v-if="sheetType === 'multi'">
+        <h4>Required Columns</h4>
+
+        <div class="required-columns-context">
+          <div class="context-item">
+            <span class="context-label">Instrument</span>
+            <span class="context-value">{{ formatInstrumentTypeLabel(instrumentType) }}</span>
+          </div>
+          <div class="context-item">
+            <span class="context-label">Worksheet</span>
+            <span class="context-value">{{ currentSheetName || '—' }}</span>
+          </div>
+          <div class="context-item">
+            <span class="context-label">Mapped</span>
+            <span class="context-value">
+              {{ requiredColumns.length - missingColumns.length }} / {{ requiredColumns.length }}
+            </span>
+          </div>
+          <div class="context-item" v-if="selectedCurrency">
+            <span class="context-label">Currency</span>
+            <span class="context-value">{{ selectedCurrency === 'custom' ? customCurrency : selectedCurrency }}</span>
+          </div>
+        </div>
+
+        <div class="mapping-selector-block">
+          <div class="mapping-selector-header">
+            <span class="selector-col selector-col--required">Required Field</span>
+            <span class="selector-col selector-col--source">Source File Column</span>
+            <span class="selector-col selector-col--status">Status</span>
+          </div>
+          <div
+            v-for="reqCol in requiredColumns"
+            :key="reqCol"
+            class="mapping-selector-row"
+            :class="{ 'mapping-selector-row--missing': !hasRequiredColumn(reqCol) }"
+          >
+            <span class="selector-col selector-col--required">
+              <span class="field-badge">{{ reqCol }}</span>
+            </span>
+            <span class="selector-col selector-col--source">
+              <select
+                v-model="columnMapping[reqCol]"
+                class="mapping-select"
+                @change="updateColumnMapping(columnMapping)"
+              >
+                <option :value="null">— Select a column —</option>
+                <option
+                  v-for="fileCol in fileColumns"
+                  :key="fileCol"
+                  :value="fileCol"
+                >{{ fileCol }}</option>
+              </select>
+            </span>
+            <span class="selector-col selector-col--status">
+              <span v-if="hasRequiredColumn(reqCol)" class="status-pill status-pill--ok">✓ Mapped</span>
+              <span v-else class="status-pill status-pill--missing">○ Missing</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="columns-list">
+          <span
+            v-for="col in requiredColumns"
+            :key="col"
+            class="column-badge"
+            :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }"
+          >
+            <span class="badge-icon">{{ hasRequiredColumn(col) ? '✓' : '○' }}</span>
+            {{ col }}
+          </span>
+        </div>
+
+        <div v-if="rawData.length && missingColumns.length" class="warning-message">
+          <span class="warning-icon">⚠</span>
+          <span>Missing required columns. Use the dropdowns above or click "Map Columns" to assign them.</span>
+        </div>
+        <div v-if="rawData.length && missingColumns.length === 0 && mappingApplied" class="success-message">
+          <span class="success-icon">✓</span>
+          <span>All columns mapped. Ready to continue.</span>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           FILE PREVIEW — shows ORIGINAL file columns plus the live
+           mapping dropdowns on the header cells. rawData stays in its
+           original shape so these dropdowns render correctly.
+           ============================================================ -->
+      <div v-if="rawData.length && showPreview" class="excel-preview-section">
+        <h4>File Preview – {{ currentSheetName || 'Selected Sheet' }}</h4>
+        <p class="preview-info">{{ rawData.length }} total rows — edit cells below like Excel</p>
+
+        <ExcelViewer
+          v-if="sheetType === 'multi' && rawData.length"
+          :data="rawData.slice(0, 500)"
+          :headers="uploadPreviewHeaders"
+          :original-data="originalRawData.slice(0, 500)"
+          :original-headers="originalFileColumns"
+          :show-mapping-controls="!mappingApplied"
+          :column-mapping="columnMapping"
+          :available-file-columns="fileColumns"
+          :required-columns="requiredColumns"
+          :workbook-sheets="[]"
+          :current-sheet-name="currentSheetName"
+          @data-update="onRawExcelUpdate"
+          @mapping-update="updateColumnMapping"
+        ></ExcelViewer>
+
+        <ExcelViewer
+          v-else-if="sheetType === 'single' && rawData.length"
+          :data="rawData.slice(0, 500)"
+          :headers="uploadPreviewHeaders"
+          :original-data="originalRawData.slice(0, 500)"
+          :original-headers="originalFileColumns"
+          :show-mapping-controls="false"
+          :column-mapping="{}"
+          :available-file-columns="fileColumns"
+          :required-columns="requiredColumns"
+          :workbook-sheets="[]"
+          :current-sheet-name="currentSheetName"
+          @data-update="onRawExcelUpdate"
+        ></ExcelViewer>
+
+        <div v-if="sheetType === 'multi'" class="preview-actions">
+          <button class="btn-primary" @click="saveFinalMapping">Save Mapping</button>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           DIALOGS — deduplicated
+           ============================================================ -->
+
+      <!-- Map Columns dialog -->
+      <v-dialog v-model="showMappingDialog" max-width="650px">
+        <v-card>
+          <v-card-title class="mapping-dialog-title">
+            Map Columns – {{ instrumentLabel }}
+            <v-spacer></v-spacer>
+            <span class="mapping-count">{{ requiredColumns.length }} required fields</span>
+          </v-card-title>
+          <v-card-text class="mapping-dialog-body">
+            <div v-if="isolatedTableData && isolatedTableData.rawTableData"
+                 class="header-selection-section"
+                 style="margin-bottom: 24px; padding: 16px; background: #f8f9ff; border-radius: 8px; border-left: 4px solid #0B2044;">
+              <label style="font-weight: 600; color: #0B2044; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; font-size: 14px;">
+                <v-icon size="16" color="#0B2044">mdi-format-line-spacing</v-icon>
+                Select Header Row for Mapping
+              </label>
+              <select v-model="selectedHeaderRowIndex" @change="updateIsolatedTableData" class="mapping-select" style="width: 100%;">
+                <option v-for="(row, idx) in isolatedTableData.rawTableData" :key="idx" :value="idx">
+                  Row {{ idx + 1 }}: {{ getRowPreview(row) }}
+                </option>
+              </select>
+              <p style="font-size: 12px; color: #666; margin-top: 8px;">
+                If the detected column headers below are incorrect, choose the correct row above.
+              </p>
+            </div>
+
+            <div class="mapping-grid">
+              <div v-for="reqCol in requiredColumns" :key="reqCol" class="mapping-row">
+                <label class="required-label">{{ reqCol }}</label>
+                <div class="dropdown-wrapper">
+                  <select v-model="columnMapping[reqCol]" class="mapping-select">
+                    <option :value="null">— Select a column —</option>
+                    <option v-for="fileCol in fileColumns" :key="fileCol" :value="fileCol">{{ fileCol }}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="missingColumns.length" class="warning-message">
+              <span>Missing mappings for: {{ missingColumns.join(', ') }}</span>
+            </div>
+            <div v-if="!missingColumns.length && Object.values(columnMapping).some(v => v)" class="success-message">
+              <span>All columns mapped! Ready to continue.</span>
+            </div>
+
+            <div style="margin-top: 16px; text-align: right;">
+              <button class="btn-secondary small" @click="showSavedMappingsDialog = true">Manage Saved Mappings</button>
+            </div>
+          </v-card-text>
+          <v-card-actions>
+            <button class="btn-secondary" @click="closeMappingDialog">Cancel</button>
+            <button class="btn-primary" @click="applyColumnMappingAndClose">Apply Mapping</button>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- Saved Mappings dialog -->
+      <v-dialog v-model="showSavedMappingsDialog" max-width="700px">
+        <v-card>
+          <v-card-title class="saved-mappings-popup-title">
+            Saved Mappings
+            <v-spacer></v-spacer>
+            <button class="btn-close-dialog" @click="showSavedMappingsDialog = false">×</button>
+          </v-card-title>
+          <v-card-text class="saved-mappings-popup-body">
+            <div class="save-section">
+              <div class="save-row">
+                <input 
+                  v-model="newTemplateName" 
+                  class="template-input" 
+                  placeholder="Enter mapping name..." 
+                  @keyup.enter="saveCurrentMappingAsTemplate"
+                />
+                <button class="btn-primary" @click="saveCurrentMappingAsTemplate">Save Mapping</button>
+              </div>
+            </div>
+
+            <div v-if="!savedTemplates.length" class="empty-state">
+              <p>No saved mappings yet.</p>
+            </div>
+            <div v-else class="saved-mappings-list">
+              <div v-for="template in savedTemplates" :key="template.id" class="saved-mapping-item">
+                <div class="mapping-name">{{ template.name }}</div>
+                <div class="mapping-meta">Saved: {{ new Date(template.created_at).toLocaleDateString() }}</div>
+                <div class="mapping-actions">
+                  <button class="btn-secondary small" @click="loadTemplateFromPopup(template.id)">Load</button>
+                  <button class="btn-secondary small danger" @click="deleteTemplateFromPopup(template.id)">Delete</button>
+                </div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-dialog>
+
+      <!-- MULTI-TABLE DETECTION -->
+      <v-dialog v-model="showMultiTableDetectionSuccess" max-width="800px">
+        <v-card>
+          <v-card-title class="detection-success-title">
+            Multi-Table Detection Successful
+            <v-spacer></v-spacer>
+            <span class="detection-count">{{ multiTableDetectionResults.length }} table(s)</span>
+            <button class="btn-close-dialog" @click="showMultiTableDetectionSuccess = false">×</button>
+          </v-card-title>
+
+          <v-card-text class="detection-success-body">
+            <div class="instrument-type-display">
+              <strong>Instrument:</strong> {{ formatInstrumentTypeLabel(instrumentType) }}
+              <span class="required-summary">
+                {{ multiRequiredCount }} required · {{ multiAdditionalCount }} additional
+              </span>
+            </div>
+
+            <div class="currency-selection-section">
+              <label class="currency-label">Currency to include in auto-detected values:</label>
+              <v-select
+                v-model="selectedCurrency"
+                @update:modelValue="handleCurrencyChange"
+                :items="currencyOptions"
+                label="Currency"
+                variant="outlined"
+                density="compact"
+                hide-details
+                class="currency-select-vuetify"
+              ></v-select>
+              <div v-if="selectedCurrency === 'custom'" class="custom-currency-input-wrapper">
+                <v-text-field
+                  v-model="customCurrency"
+                  label="Custom Currency Code"
+                  placeholder="e.g., ZWG"
+                  variant="outlined"
+                  density="compact"
+                  maxlength="3"
+                  hide-details
+                  @update:modelValue="handleCustomCurrencyInput"
+                ></v-text-field>
+              </div>
+              <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
+                <strong>Detected currencies:</strong> {{ detectedCurrencies.join(', ') }}
+              </div>
+            </div>
+
+            <div class="multi-instruments-list">
+              <div
+                v-for="(instrument, index) in multiTableDetectionResults"
+                :key="index"
+                class="multi-instrument-item"
+              >
+                <div class="multi-instrument-header">
+                  <strong>Table {{ index + 1 }}: {{ instrument.tableName }}</strong>
+                  <span class="field-count-badge">{{ Object.keys(instrument.fields).length }} fields</span>
+                </div>
+
+                <div class="field-group">
+                  <div class="field-group-title">
+                    <v-icon size="14" color="#2e7d32">mdi-check-circle</v-icon>
+                    Required for {{ instrumentLabel }} calculation
+                  </div>
+                  <div class="field-grid">
+                    <div
+                      v-for="(value, field) in instrument.fields"
+                      :key="'req-' + field"
+                      v-show="isRequiredField(field)"
+                      class="field-row field-row--required"
+                    >
+                      <span class="field-name">{{ instrument.fieldsWithMetadata?.[field]?.originalLabel || field }}</span>
+                      <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                      <span v-if="instrument.fieldsWithMetadata?.[field]?.location" class="field-loc">
+                        @ {{ instrument.fieldsWithMetadata[field].location }}
+                      </span>
+                      <div
+                        v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1"
+                        class="currency-variant-selector"
+                      >
+                        <select
+                          :value="value.selectedCurrency"
+                          @change="updateMultiTableCurrency(instrument, field, $event.target.value)"
+                          class="currency-select"
+                        >
+                          <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
+                            {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="hasAdditionalFields(instrument)" class="field-group">
+                  <div class="field-group-title">
+                    <v-icon size="14" color="#1565c0">mdi-plus-circle</v-icon>
+                    Additional detected fields
+                    <span class="field-group-hint">(used only if checked)</span>
+                  </div>
+                  <div class="field-grid">
+                    <label
+                      v-for="(value, field) in instrument.fields"
+                      :key="'add-' + field"
+                      v-show="!isRequiredField(field)"
+                      class="field-row field-row--additional"
+                      :class="{ 'field-row--excluded': excludedDetectedFields.has(field) }"
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="!excludedDetectedFields.has(field)"
+                        @change="toggleExcludeField(field)"
+                        class="field-checkbox"
+                      />
+                      <span class="field-name">{{ field }}</span>
+                      <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                      <span v-if="instrument.fieldsWithMetadata?.[field]?.location" class="field-loc">
+                        @ {{ instrument.fieldsWithMetadata[field].location }}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div v-if="instrument.missingFields.length > 0" class="multi-missing-fields">
+                  <span class="missing-label">Missing required:</span>
+                  {{ instrument.missingFields.join(', ') }}
+                </div>
+              </div>
+            </div>
+          </v-card-text>
+
+          <v-card-actions class="detection-footer">
+            <span class="footer-selection-summary">
+              {{ selectedAdditionalCount }} additional field(s) will be included
+            </span>
+            <v-spacer></v-spacer>
+            <button class="btn-secondary" @click="cancelMultiTableDetection">Cancel</button>
+            <button class="btn-primary" @click="useMultiTableDetectedFields" :disabled="isDetecting">
+              <v-icon v-if="isDetecting" size="16" class="spin-animation">mdi-loading</v-icon>
+              Use Combined Fields
+            </button>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- SINGLE-INSTRUMENT DETECTION -->
+      <v-dialog v-model="showDetectionSuccess" max-width="700px">
+        <v-card>
+          <v-card-title class="detection-success-title">
+            Auto Detection Successful
+            <v-spacer></v-spacer>
+            <span class="detection-count">
+              {{ Object.keys(autoDetectedFields).length }} required ·
+              {{ Object.keys(autoDetectedAdditionalFields).length }} additional
+            </span>
+            <button class="btn-close-dialog" @click="showDetectionSuccess = false">×</button>
+          </v-card-title>
+
+          <v-card-text class="detection-success-body">
+            <div class="instrument-type-display">
+              <strong>Instrument:</strong> {{ formatInstrumentTypeLabel(detectedInstrumentType) }}
+            </div>
+
+            <div v-if="Object.keys(autoDetectedFields).length > 0" class="field-group">
+              <div class="field-group-title">
+                <v-icon size="14" color="#2e7d32">mdi-check-circle</v-icon>
+                Required fields detected
+              </div>
+              <div class="field-grid">
+                <div
+                  v-for="(value, field) in autoDetectedFields"
+                  :key="field"
+                  class="field-row field-row--required"
+                >
+                  <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
+                  <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                  <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="field-loc">
+                    @ {{ autoDetectedFieldsWithMetadata[field].location }}
+                  </span>
+                  <div
+                    v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1"
+                    class="currency-variant-selector"
+                  >
+                    <select
+                      v-model="value.selectedCurrency"
+                      @change="updateSelectedCurrency(field, value.selectedCurrency)"
+                      class="currency-select"
+                    >
+                      <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
+                        {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="Object.keys(autoDetectedAdditionalFields).length > 0" class="field-group">
+              <div class="field-group-title">
+                <v-icon size="14" color="#1565c0">mdi-plus-circle</v-icon>
+                Additional detected fields
+                <span class="field-group-hint">(used only if checked)</span>
+              </div>
+              <div class="field-grid">
+                <label
+                  v-for="(value, field) in autoDetectedAdditionalFields"
+                  :key="'add-' + field"
+                  class="field-row field-row--additional"
+                  :class="{ 'field-row--excluded': excludedDetectedFields.has(field) }"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="!excludedDetectedFields.has(field)"
+                    @change="toggleExcludeField(field)"
+                    class="field-checkbox"
+                  />
+                  <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
+                  <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                  <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="field-loc">
+                    @ {{ autoDetectedFieldsWithMetadata[field].location }}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div
+              v-if="Object.keys(autoDetectedFields).length === 0 && Object.keys(autoDetectedAdditionalFields).length === 0"
+              class="no-detection-message"
+            >
+              <p>No fields were detected in this worksheet.</p>
+              <p>Try selecting a different sheet, section, or check the field names.</p>
+            </div>
+
+            <div v-if="Object.keys(autoDetectedFields).length < requiredColumns.length" class="missing-fields-warning">
+              <p><strong>Missing required fields:</strong></p>
+              <ul>
+                <li v-for="col in requiredColumns.filter(c => !autoDetectedFields[c])" :key="col">{{ col }}</li>
+              </ul>
+            </div>
+          </v-card-text>
+
+          <v-card-actions class="detection-footer">
+            <span class="footer-selection-summary">
+              {{ Object.keys(autoDetectedAdditionalFields).length - excludedDetectedFields.size }} additional field(s) will be included
+            </span>
+            <v-spacer></v-spacer>
+            <button class="btn-secondary" @click="showDetectionSuccess = false">Cancel</button>
+            <button class="btn-primary" @click="useDetectedFields">
+              Work on This Worksheet
+            </button>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <!-- Workbook viewer -->
+      <v-dialog v-model="showWorkbookViewer" max-width="95%" persistent>
+        <v-card style="height: 90vh;">
+          <v-card-title class="excel-dialog-title-no-logo">
+            <span>Excel Workbook – {{ currentSheetName || 'Select a sheet' }}</span>
+            <v-spacer></v-spacer>
+            
+            <button class="btn-auto-detect-green" @click="() => autoDetectSingleInstrument()" v-if="workbookSheets.length > 0" :disabled="isDetecting">
+              <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
+              <v-icon v-else size="16" class="spin-animation">mdi-loading</v-icon>
+              {{ getDetectionButtonText() }}
+            </button>
+            <button class="btn-work-on-sheet" @click="workOnSelectedSheet" v-if="currentSheetName && workbookSheets.length">
+              Work on This Sheet
+            </button>
+            <button class="btn-close-dialog" @click="showWorkbookViewer = false">×</button>
+          </v-card-title>
+          <v-card-text class="pa-0" style="height: calc(90vh - 120px);">
+            <ExcelWorkbookViewer
+              v-if="showWorkbookViewer"
+              :workbook-data="{ sheets: [], fileBuffer: originalFileBuffer }"
+              :file-name="uploadedFile?.name || 'Workbook'"
+              :instrument-type="instrumentType"
+              :worksheet-statuses="worksheetStatuses"
+              :detecting-from-parent="isDetecting"
+              :dataset-id="originalDatasetId"
+              @close="showWorkbookViewer = false"
+              @sheet-selected="handleSheetSelectedFromViewer"
+              @single-instrument-extracted="handleSingleInstrumentExtracted"
+              @table-isolated="handleTableIsolated"
+              @multi-table-detect="handleMultiTableDetect"
+              @workbook-loaded="handleWorkbookLoaded"
+            />
+          </v-card-text>
+          <div class="popup-footer">
+            <span v-if="activeValuationDate" class="valuation-date-footer">Valuation Date: {{ activeValuationDate }}</span>
+            <v-spacer></v-spacer>
+            <button class="btn-secondary" @click="showWorkbookViewer = false">Close</button>
+          </div>
+        </v-card>
+      </v-dialog>
+
+      <div class="navigation-buttons">
+        <button class="btn-primary" @click="continueAfterUpload" :disabled="!uploadedFile || !rawData.length">Continue</button>
+        <button class="btn-secondary" @click="goToDashboard">Cancel</button>
+      </div>
+    </v-card-text>
+  </v-card>
+</div>
           <v-card>
             <v-card-title>Upload {{ instrumentLabel }} Dataset</v-card-title>
             <v-card-text>
@@ -676,7 +1273,7 @@
               </span>
               <v-spacer></v-spacer>
               <button
-                v-if="instrumentSummary.rows.length >= 2 && sheetType === 'multi'"
+                v-if="showMultiResults && instrumentSummary.rows.length >= 2 && sheetType === 'multi'"
                 class="btn-calculated-instruments"
                 @click="openAllCalculationsPopup"
               >
@@ -689,7 +1286,7 @@
                 <button class="btn-primary" @click="switchTab('cleaning')">Go to Cleaning</button>
               </div>
               <div v-else>
-                <div class="summary-cards">
+                <div v-if="sheetType !== 'multi' || showMultiResults" class="summary-cards">
                   <div class="summary-card total" @click="showFormula('Total Portfolio Value')">
                     <div class="card-label">Total Portfolio Value</div>
                     <div class="card-value">{{ formatNumber(allCalculations.totalValue || 0) }}</div>

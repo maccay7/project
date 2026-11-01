@@ -1,11 +1,4 @@
-/**
- * Maps backend calculation payloads (snake_case aggregates + per-row calcs)
- * to the camelCase keys used by InstrumentView KPI cards and summaries.
- *
- * Multi-instrument rule: when `rowCalc` is null, only aggregate totals /
- * averages are used — never a single instrument's private fields — so the
- * calculation boxes show portfolio-level results.
- */
+
 
 function firstDefined (...candidates) {
   for (const v of candidates) {
@@ -580,6 +573,29 @@ export function buildValuationExcelRows (cleanedRows, calcRows, instrumentType) 
     if (instrumentTypeValue !== null) merged['Instrument Type'] = instrumentTypeValue
     rows.push(merged)
   }
+
+  // Filter out columns that are empty throughout all rows
+  if (rows.length > 0) {
+    const allColumns = new Set()
+    rows.forEach(row => Object.keys(row).forEach(k => allColumns.add(k)))
+    const nonEmptyColumns = new Set()
+    allColumns.forEach(col => {
+      const hasValue = rows.some(row => {
+        const val = row[col]
+        return val !== null && val !== undefined && val !== ''
+      })
+      if (hasValue) nonEmptyColumns.add(col)
+    })
+    // Keep only non-empty columns
+    return rows.map(row => {
+      const filtered = {}
+      nonEmptyColumns.forEach(col => {
+        filtered[col] = row[col]
+      })
+      return filtered
+    })
+  }
+
   return rows
 }
 

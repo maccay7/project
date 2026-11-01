@@ -595,10 +595,7 @@ async function goToCalculations() {
   const normalizedType = normalizeInstrumentType(rawType)
 
   // Map excluded *normalized* field names back to the actual column
-  // headers present in the cleaned data. The exclusion set holds keys
-  // like `face_value`; the row dicts hold `Face Value`. Without this
-  // translation, the downstream exclusion filter in calculateMetrics()
-  // matches nothing and silently no-ops.
+  // headers present in the cleaned data.
   const ALIAS_TO_HEADER = {
     face_value: ['Face Value', 'FaceValue', 'face_value', 'faceValue', 'Par Value', 'Principal'],
     principal: ['Principal', 'principal', 'Face Value', 'Amount'],
@@ -629,8 +626,7 @@ async function goToCalculations() {
       if (cleanedHeaders.has(excludedKey)) translatedExclusions.add(excludedKey)
       continue
     }
-    // Only add aliases that actually exist as columns; adding all
-    // aliases would try to remove columns that aren't in the sheet.
+    // Only add aliases that actually exist as columns
     for (const header of candidates) {
       if (cleanedHeaders.has(header)) translatedExclusions.add(header)
     }
@@ -655,7 +651,6 @@ async function goToCalculations() {
       completedInstrumentSummary: wf.completedInstrumentSummary || { columns: [], rows: [] },
       completedPortfolioSummary: wf.completedPortfolioSummary || { columns: [], rows: [] },
       // Store BOTH forms so the exclusion filter in calculateMetrics
-      // (which iterates raw row keys) finds the right columns.
       excludedDetectedFields: Array.from(new Set([
         ...excludedFields.value,
         ...translatedExclusions

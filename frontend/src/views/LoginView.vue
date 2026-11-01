@@ -1,7 +1,7 @@
 <template>
   <div class="login-container">
     <div class="login-form">
-      <!-- Logo – no pill -->
+      <!-- Logo -->
       <div class="logo-section">
         <img 
           src="/Untitled - July 02, 2026 at 13.19.30.png" 
@@ -330,7 +330,7 @@ const goToRegister = () => {
 </script>
 
 <style scoped>
-/* ===== BRIGHTENED GLASS – no pill ===== */
+/* ===== BRIGHTENED GLASS ===== */
 .login-container {
   min-height: 100vh;
   background: url('/login1.jpg') center/cover no-repeat;

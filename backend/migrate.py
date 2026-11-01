@@ -1,4 +1,4 @@
-"""Apply additive database migrations and record their verified versions."""
+"""Applying additive database migrations and record their verified versions."""
 
 import hashlib
 import os

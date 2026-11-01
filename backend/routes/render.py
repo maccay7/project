@@ -1,4 +1,3 @@
-# routes/render.py
 # LibreOffice-based Excel-to-HTML render + diagnostics.
 
 import io
@@ -14,8 +13,6 @@ def render_routes(app):
     _RENDER_DIRS = {}
 
     def _libreoffice_bin():
-        # Windows: soffice.exe (usually not on PATH after winget install)
-        # Linux/macOS: libreoffice or soffice
         import platform
 
         candidates = []
@@ -37,8 +34,6 @@ def render_routes(app):
         return _libreoffice_bin()
 
     def _libreoffice_works():
-        # Note: this --version check sometimes falsely fails on Windows 
-        # due to profile locks, but the actual render works fine.
         bin_path = _libreoffice_bin()
         if not bin_path:
             return False
@@ -51,7 +46,7 @@ def render_routes(app):
         except Exception:
             return False
 
-    # ── Diagnostic endpoint ────────────────────────────────────
+    # ── Diagnostic endpoint ──
     @app.route('/api/render/diagnose', methods=['GET'])
     def render_diagnose():
         lo_path = _libreoffice_path()

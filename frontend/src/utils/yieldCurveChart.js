@@ -12,24 +12,9 @@ export function toChartDatasets(apiData, fallbackLabel = 'Yield') {
       fill: false
     }))
   }
-  // NO FALLBACK - return empty if no valid FRED data
   return []
 }
 
-/**
- * Build a linear x-axis config where every integer year from 0 to maxYears
- * gets an explicit tick — no auto-skip. Use in live Chart.js components
- * (Dashboard / Visualizations) so a 10-year chart shows 0,1,2,…,10.
- *
- * Usage:
- *   import { buildLinearXAxisConfig } from '@/services/yieldCurveChart'
- *   options: {
- *     scales: {
- *       x: buildLinearXAxisConfig(this.horizonYears),   // e.g. 10
- *       y: { ...existing y-axis config... }
- *     }
- *   }
- */
 export function buildLinearXAxisConfig(maxYears, { maxRotation = 0 } = {}) {
   const max = Math.max(0, Math.ceil(maxYears))
   return {

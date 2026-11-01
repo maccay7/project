@@ -1435,43 +1435,7 @@
             <h4>Formula Used:</h4>
             <div class="formula-text">{{ formulaText }}</div>
           </div>
-          <v-divider v-if="formulaCalculationDetails"></v-divider>
-          <div v-if="formulaCalculationDetails" class="calculation-details">
-            <h4>Workings with Exact Figures:</h4>
-            <div class="calculation-steps">
-              <div v-for="(step, idx) in formulaCalculationDetails" :key="idx" class="calculation-step">
-                <div class="step-header">
-                  <span class="step-label">{{ step.label }}</span>
-                  <span class="step-value">{{ step.value }}</span>
-                </div>
-                <div v-if="step.formula" class="step-formula">{{ step.formula }}</div>
-              </div>
-            </div>
-            <v-divider v-if="formulaCalculationDetails.breakdown"></v-divider>
-            <div v-if="formulaCalculationDetails.breakdown" class="breakdown-section">
-              <button class="btn-secondary small" @click="showIndividualBreakdown = !showIndividualBreakdown">
-                <v-icon small>{{ showIndividualBreakdown ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-                {{ showIndividualBreakdown ? 'Hide' : 'Show' }} Formula Component Breakdown
-              </button>
-              <div v-if="showIndividualBreakdown" class="breakdown-components">
-                <h5>{{ formulaCalculationDetails.breakdown.title }}</h5>
-                <div v-for="(component, cIdx) in formulaCalculationDetails.breakdown.components" :key="cIdx" class="component-breakdown">
-                  <div class="component-header">
-                    <span class="component-name">{{ component.componentName }}</span>
-                  </div>
-                  <div class="component-calculation">
-                    <span class="component-data">{{ component.calculation }}</span>
-                  </div>
-                  <div class="component-formula">{{ component.formula }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
         </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <button class="btn-secondary" @click="formulaDialog = false">Close</button>
-        </v-card-actions>
       </v-card>
     </v-dialog>
 
@@ -2304,8 +2268,7 @@ const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
 const uploadPreviewHeaders = computed(() => {
-  // FIX: For multi-instrument sheets, always show required columns as headers
-  // so the mapping dropdowns are always visible in the preview.
+  // multi-instrument sheets to show required columns as headers
   if (sheetType.value === 'multi') {
     return requiredColumns.value
   }
@@ -2532,7 +2495,8 @@ const calculationFields = computed(() => {
     return { ...field, value, unavailableReason }
   })
   
-  return result
+  // Filter out boxes without values - only show calculated values
+  return result.filter(f => f.value !== null && f.value !== undefined && f.unavailableReason === null)
 })
 
 // FIX: lightweight content signature so the activeTab watch can detect
@@ -2591,10 +2555,7 @@ function formatCalcValue(key, value) {
   const lc = key.toLowerCase()
 
   if (typeof value === 'number') {
-    // Only exact whole-day keys round to integers. Value keys (maturityValue,
-    // presentValue, fairValue) and duration/years keys that need decimal
-    // precision are NOT in this list, so `maturityValue: 59,855,497.04` keeps
-    // its decimals and `yearsToMaturity: 4.50` stays decimal.
+    // Only exact whole-day keys round to integers. Value keys (maturityValue,presentValue, fairValue) and duration/years keys that need decimalprecision are NOT in this list
     const isDayCountKey =
       lc === 'termdays' || lc === 'term_days' ||
       lc === 'daystomaturity' || lc === 'days_to_maturity' ||
@@ -3358,7 +3319,7 @@ function getFieldSelectionValue(key, rawValue) {
   return formatDetectedValue(key, typeof rawValue === 'object' && rawValue !== null ? rawValue.value : rawValue)
 }
 
-// [NEW] Handle header row selection & re-mapping
+//  Handle header row selection & re-mapping
 function handleTableIsolated({ sheetName, tableName, rawTableData, headerRowIndex, tableRange }) {
   currentSheetName.value = sheetName
   clearActiveCache(true)
@@ -3870,10 +3831,7 @@ async function handleMultiTableDetect(event) {
   if (!event?.tables?.length) return
   if (!originalFileBuffer.value) { alert('File buffer not available — please re-upload the workbook.'); return }
 
-  // FIX: same guard as autoDetectSingleInstrument. Without requiredColumns,
-  // normalizeDetectedFields() has no target columns and every detected key
-  // falls through to a raw label, so the popup shows garbage like
-  // face_value="RBZ" instead of face_value=<actual face value>.
+  // same guard as autoDetectSingleInstrument
   if (!requiredColumns.value || requiredColumns.value.length === 0) {
     try {
       await loadConfig(instrumentType.value)
@@ -3990,9 +3948,7 @@ async function handleMultiTableDetect(event) {
   }
 }
 
-// [FIX-MULTICURRENCY + EXCLUSION] Preserve multi-currency fields (with
-// currencyVariants) in autoDetectedFields, but skip fields the user
-// explicitly excluded in the multi-table popup.
+// [MULTICURRENCY + EXCLUSION] 
 function useMultiTableDetectedFields() {
   showMultiTableDetectionSuccess.value = false
   showWorkbookViewer.value = false
@@ -4068,8 +4024,7 @@ function formatDetectedValue(field, value) {
   return String(value)
 }
 
-// [FIX-MULTICURRENCY] Full propagation. Mirrors the selected currency value
-// into Cleaning / Calculations / Summary, then saves and re-runs calculations.
+// [MULTICURRENCY] 
 function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
   const targetRef = isAdditional ? autoDetectedAdditionalFields : autoDetectedFields
   const targetFields = targetRef.value || {}
@@ -4649,11 +4604,11 @@ function viewAllSummaries() {
 }
 
 function viewInstrumentSummaryExcel() {
-  excelPopupMode.value = 'current'
-  showInstrumentExcelPopup.value = true
-  sortColumn.value = ''
-  sortOrder.value = 'asc'
-  currentPage.value = 1
+  // Use the same data as Calculations page: valuationExcelData
+  excelData.value = valuationExcelData.value
+  excelColumns.value = valuationExcelDisplayData.value.length ? Object.keys(valuationExcelDisplayData.value[0] || {}) : []
+  excelDialogTitle.value = 'Calculated Instruments – Exact Same as Calculations Page'
+  showExcelDialog.value = true
 }
 
 function viewPreviousSummariesExcel() {
@@ -5201,26 +5156,12 @@ async function calculateMetrics() {
       }
       return out
     })
-    // Drop rows where every value is empty (defensive; cleaning should have
-    // removed them but an editable Excel preview can reintroduce one).
+    // Drop rows where every value is empty 
     .filter(row => Object.values(row).some(v => v !== null && v !== undefined && v !== ''))
 
   // FIX: pre-flight validation. If the resulting rows lack the required
   // inputs for this instrument type, clear the stale results and show a
   // precise message instead of hitting the backend and rendering zeros.
-  //
-  // IMPORTANT: this check is deliberately LENIENT. It should only block a
-  // calculation when there is genuinely NO field of the right semantic
-  // shape anywhere in the row — not when the field is present under a
-  // different name. Example: a Legacy Debt sheet has a column literally
-  // called "Balance" that carries the face value; the backend's
-  // normalize_row() knows Balance/Principal/Par/Notional/Face Value etc.
-  // all map to face_value, so we MUST NOT block on a name mismatch.
-  // We test:
-  //   1. exact name match (any case / separator style)
-  //   2. same semantic group (via SEMANTIC_FIELD_GROUPS defined above)
-  //   3. value-shape plausibility of ANY candidate
-  // and only report the field missing when ALL THREE fail.
   const requiredForType = requiredColumns.value || []
   if (!dataForCalculation.length) {
     allCalculations.value = {}
@@ -5240,9 +5181,6 @@ async function calculateMetrics() {
 
   const normKey = (k) => String(k).toLowerCase().replace(/[-_\s().]+/g, '')
 
-  // Helper: does the row have a *plausible* numeric/date value for a
-  // required field, whether the key matches exactly, matches the semantic
-  // group, or matches any SPECIFIC_ALIASES entry from the backend?
   const BACKEND_ALIASES = {
     facevalue: ['face value', 'facevalue', 'face_value', 'par value', 'parvalue',
                 'par_value', 'redemption value', 'redemptionvalue', 'redemption_value',
@@ -5366,8 +5304,7 @@ async function calculateMetrics() {
   })
 
   // Dates are auto-derivable by the backend from term_days, and term_days
-  // is auto-derivable from valuation+maturity. Never block on those two
-  // when at least one of them is present.
+  // is auto-derivable from valuation+maturity. 
   const blockingMissing = missingRequired.filter(col => {
     const n = normKey(col)
     if (n.includes('date')) return false
@@ -5702,6 +5639,7 @@ async function calculateMetrics() {
               allCalculations: allCalculations.value,
               selectedCalculations: selectedCalculations.value,
               columnMapping: columnMapping.value,
+              valuationExcelData: valuationExcelData.value,
               worksheetStatus: worksheetStatus.value,
               workbookSheets: workbookSheets.value,
               instrumentSummary: instrumentSummary.value,
@@ -8427,8 +8365,8 @@ watch([rawData, cleanedData], () => {
   debouncedSave()
 }, { deep: true })
 
-// Watch cleanedData to trigger recalculation when values change on Cleaning page
-// This ensures calculations always use the latest cleaned and included values
+//  cleanedData to trigger recalculation when values change on Cleaning page
+
 let cleanDataChangeTimeout = null
 watch(cleanedData, () => {
   if (activeTab.value === 'calculations' && hasCleanedData.value) {
@@ -8459,13 +8397,7 @@ watch(() => [...excludedDetectedFields.value], () => {
 })
 
 watch(() => activeTab.value, async (newTab) => {
-  // FIX: previously the guard was `!allCalculations.value?.totalValue`.
-  // A failed calc that set totalValue=0 (falsy) never re-triggered, so
-  // the user saw stale/zero numbers forever. Now recalculate whenever:
-  //  (a) there's cleaned data AND
-  //  (b) either we have NO calculation result, OR the last result was an
-  //      error/partial, OR cleanedData was edited since the last run
-  //      (tracked by a lightweight signature).
+
   if (newTab === 'calculations' && hasCleanedData.value && !isCalculating.value) {
     const lastStatus = allCalculations.value?.status
     const needsRecalc =
@@ -8555,14 +8487,7 @@ async function checkAndReset() {
 }
 
 onMounted(async () => {
-  // FIX: ensure requiredColumns is populated before any user interaction
-  // (Auto Detect, Continue, etc.). instrumentType is set by the immediate
-  // route watcher, so by the time onMounted runs it is a concrete value
-  // like 'tbills'. Without this, requiredColumns remains [] and the
-  // detection pipeline in autoDetectInstrument.js runs with a blank
-  // "Required Columns" list, causing it to fall back to raw label matching
-  // and emit fields named 'face_value'/'TBillName' instead of the canonical
-  // 'FaceValue'/'TBillName' the rest of the app expects.
+  // FIX: ensure requiredColumns is populated before any user interaction(Auto Detect, Continue, etc.)
   if (instrumentType.value) {
     try {
       await loadConfig(instrumentType.value)

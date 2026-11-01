@@ -49,9 +49,6 @@ async function callAPI(endpoint, method = 'GET', body = null, isFileUpload = fal
 
 // ─────────────────────────────────────────────────────────────
 // Binary download helper (PDF / docx / xlsx).
-// Returns { blob, filename } so the caller can trigger a save.
-// Backend download routes return a file stream, not JSON, so
-// response.json() would throw — this helper reads .blob() instead.
 // ─────────────────────────────────────────────────────────────
 async function callAPIDownload(endpoint, method = 'GET', body = null, fetchOptions = {}) {
   const url = API_BASE_URL + endpoint

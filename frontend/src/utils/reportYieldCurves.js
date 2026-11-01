@@ -1,7 +1,5 @@
 /**
  * Load and render per-instrument yield curves for combined reports.
- * Uses session workflow (Visualizations) first, then FRED with saved filters,
- * then portfolio valuation rows — never mock or duplicated curves.
  */
 
 const COUNTRY_MAP = {
