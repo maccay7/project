@@ -69,10 +69,37 @@ export function applyMappingToRows(sourceData, requiredColumns, mapping) {
     const newRow = {}
     requiredColumns.forEach(reqCol => {
       const srcCol = mapping[reqCol]
-      newRow[reqCol] = (srcCol && row[srcCol] !== undefined) ? row[srcCol] : null
+      if (!srcCol || srcCol === '__na__') {
+        newRow[reqCol] = ''
+        return
+      }
+
+      const sourceKey = Object.prototype.hasOwnProperty.call(row, srcCol)
+        ? srcCol
+        : Object.keys(row).find(key => normalizeField(key) === normalizeField(srcCol))
+      const sourceValue = sourceKey === undefined ? undefined : row[sourceKey]
+      if (sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue) &&
+          ('v' in sourceValue || 'value' in sourceValue || 'w' in sourceValue)) {
+        newRow[reqCol] = sourceValue.v ?? sourceValue.value ?? sourceValue.w ?? ''
+      } else {
+        newRow[reqCol] = sourceValue ?? ''
+      }
     })
     return newRow
   })
+}
+
+export function mapSourceColumnToTarget(mapping, sourceColumn, targetColumn) {
+  const updated = { ...(mapping || {}) }
+  for (const [target, source] of Object.entries(updated)) {
+    if (normalizeField(source) === normalizeField(sourceColumn)) {
+      delete updated[target]
+    }
+  }
+  if (targetColumn && targetColumn !== '__na__') {
+    updated[targetColumn] = sourceColumn
+  }
+  return updated
 }
 
 export function isColumnMapped(col, { mappingApplied, columnMapping, rawData }) {

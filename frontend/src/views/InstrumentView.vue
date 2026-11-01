@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <FixedLayout>
     <div class="instrument-page">
       <div class="page-header">
@@ -117,7 +117,7 @@
                   :headers="uploadPreviewHeaders"
                   :original-data="originalRawData.slice(0, 500)"
                   :original-headers="originalFileColumns"
-                  :show-mapping-controls="true"
+                  :show-mapping-controls="!mappingApplied"
                   :column-mapping="columnMapping"
                   :available-file-columns="fileColumns"
                   :required-columns="requiredColumns"
@@ -749,7 +749,7 @@
               </span>
               <v-spacer></v-spacer>
               <button
-                v-if="instrumentSummary.rows.length >= 2 && sheetType === 'multi'"
+                v-if="uniqueInstrumentCount >= 2"
                 class="btn-calculated-instruments"
                 @click="openAllCalculationsPopup"
               >
@@ -765,7 +765,7 @@
                 <div class="summary-cards">
                   <div class="summary-card total" @click="showFormula('Total Portfolio Value')">
                     <div class="card-label">Total Portfolio Value</div>
-                    <div class="card-value">{{ formatNumber(allCalculations.totalValue) }}</div>
+                    <div class="card-value">{{ allCalculations.totalValue != null ? formatNumber(allCalculations.totalValue) : '—' }}</div>
                   </div>
                   <div class="summary-card rate" @click="showFormula(config.primaryRateKey)">
                     <div class="card-label">{{ rateLabel }}</div>
@@ -834,7 +834,7 @@
                 <div class="calculations-section">
                   <h3>{{ instrumentLabel }} Calculations</h3>
 
-                  <div v-if="isCalculating" class="calculating-animation">
+                  <div v-if="isCalculating && !allCalculations.status" class="calculating-animation">
                     <v-icon size="16" class="spin-animation">mdi-loading</v-icon>
                     <span>Calculating...</span>
                   </div>
@@ -851,6 +851,7 @@
                       <span>
                         <strong>Partial calculation:</strong>
                         <span v-if="allCalculations.missing_fields?.length"> Missing: {{ allCalculations.missing_fields.join(', ') }}</span>
+                        <span v-if="allCalculations.missing_prerequisites?.length"> Missing inputs: {{ allCalculations.missing_prerequisites.flat(Infinity).join(', ') }}</span>
                         <span v-if="allCalculations.invalid_fields?.length"> Invalid: {{ allCalculations.invalid_fields.map(f => typeof f === 'object' ? f.field : f).join(', ') }}</span>
                         <span v-if="allCalculations.status === 'error'"> {{ allCalculations.message }}</span>
                       </span>
@@ -864,6 +865,9 @@
                       >
                         <div class="calc-name">{{ calc.label }}</div>
                         <div class="calc-value">{{ formatCalcValue(calc.key, calc.value) }}</div>
+                        <div v-if="calc.unavailableReason" class="calc-unavailable-reason">
+                          {{ calc.unavailableReason }}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -885,33 +889,44 @@
                         <p>No instruments detected. Please process a worksheet first.</p>
                       </div>
                       <div v-else class="excel-table-container">
-                        <div class="search-bar-container">
-                          <input 
-                            type="text" 
-                            v-model="instrumentSearchQuery" 
-                            placeholder="Search instruments..." 
-                            class="search-input"
-                          />
-                          <v-icon class="search-icon">mdi-magnify</v-icon>
+                        <!-- Totals Summary for Multiple Instruments -->
+                        <div v-if="instrumentSummary.rows.length > 1" class="totals-summary-box" style="margin-bottom: 16px; padding: 16px; background: #f5f7fa; border-radius: 8px; border: 1px solid #e0e0e0;">
+                          <h4 style="margin: 0 0 12px 0; color: #0B2044; font-size: 16px; font-weight: 600;">
+                            <v-icon size="20" color="#1a4d8f" style="margin-right: 8px;">mdi-calculator</v-icon>
+                            Portfolio Totals ({{ instrumentSummary.rows.length }} instruments)
+                          </h4>
+                          <div class="totals-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                            <div class="total-item">
+                              <div class="total-label">Total Value</div>
+                              <div class="total-value">{{ allCalculations.totalValue ? '$' + formatNumber(allCalculations.totalValue) : '—' }}</div>
+                            </div>
+                            <div class="total-item">
+                              <div class="total-label">Total Face Value</div>
+                              <div class="total-value">{{ allCalculations.totalFaceValue ? '$' + formatNumber(allCalculations.totalFaceValue) : '—' }}</div>
+                            </div>
+                            <div class="total-item">
+                              <div class="total-label">Average Rate</div>
+                              <div class="total-value">{{ allCalculations.avgRate !== null && allCalculations.avgRate !== undefined ? allCalculations.avgRate.toFixed(2) + '%' : '—' }}</div>
+                            </div>
+                            <div class="total-item">
+                              <div class="total-label">Total Interest</div>
+                              <div class="total-value">{{ allCalculations.totalInterest ? '$' + formatNumber(allCalculations.totalInterest) : '—' }}</div>
+                            </div>
+                            <div class="total-item">
+                              <div class="total-label">Number of Instruments</div>
+                              <div class="total-value">{{ allCalculations.instrumentCount || instrumentSummary.rows.length }}</div>
+                            </div>
+                          </div>
                         </div>
-                        <p class="popup-instruction">View all calculated instrument values below.</p>
-                        <table class="excel-table">
-                          <thead>
-                            <tr>
-                              <th v-for="col in instrumentSummaryColumnsForDisplay" :key="col">{{ formatColumnHeader(col) }}</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr
-                              v-for="(row, idx) in sortedInstrumentSummaryRows"
-                              :key="idx"
-                            >
-                              <td v-for="col in instrumentSummaryColumnsForDisplay" :key="col">
-                                {{ formatTableCell(row[col], col) }}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
+                        <p class="popup-instruction">Calculated results for each instrument. Totals on the Calculations page are the sum of these rows.</p>
+                        <div v-if="calculatedValuesExcelData.length" class="excel-scroll-wrapper" style="margin-bottom: 16px;">
+                          <ExcelViewer
+                            :data="calculatedValuesExcelData"
+                            :headers="calculatedValuesExcelHeaders"
+                            read-only
+                          />
+                        </div>
+                        <p v-else class="empty-state">No calculated values are available for this worksheet.</p>
                       </div>
                     </v-card-text>
                     <v-card-actions class="popup-footer">
@@ -990,12 +1005,12 @@
                     <button 
                       class="toggle-btn" 
                       :class="{ active: maturityMode === 'maturity' }"
-                      @click="maturityMode = 'maturity'"
+                      @click="switchToMaturityMode('maturity')"
                     >Maturity</button>
                     <button 
                       class="toggle-btn" 
                       :class="{ active: maturityMode === 'dateRange' }"
-                      @click="maturityMode = 'dateRange'"
+                      @click="switchToMaturityMode('dateRange')"
                     >Date Range</button>
                   </div>
                   <select v-if="maturityMode === 'maturity'" v-model="selectedMaturityOption" @change="onMaturitySelectChange" class="filter-select">
@@ -1013,12 +1028,14 @@
                     <input 
                       type="date" 
                       v-model="yieldCurveStartDate" 
+                      @change="onDateRangeChange"
                       class="date-input-small"
                       placeholder="Start Date"
                     />
                     <input 
                       type="date" 
                       v-model="yieldCurveEndDate" 
+                      @change="onDateRangeChange"
                       class="date-input-small"
                       placeholder="End Date"
                     />
@@ -1031,18 +1048,18 @@
                 <v-icon size="48" class="spin">mdi-loading</v-icon>
                 <p>Fetching yield curve from FRED...</p>
               </div>
-              <div v-else-if="yieldCurveError && !yieldCurveData.length" class="error-container">
+              <div v-if="yieldCurveError" class="error-container">
                 <v-icon color="error" size="48">mdi-alert-circle-outline</v-icon>
                 <p>{{ yieldCurveError }}</p>
-                <button class="btn-primary" @click="fetchYieldCurve">Retry</button>
+                <button v-if="!yieldCurveData.length" class="btn-primary" @click="fetchYieldCurve">Retry</button>
               </div>
-              <div v-else-if="yieldCurveData.length" class="chart-container chart-container--fred">
+              <div v-if="!yieldCurveLoading && yieldCurveData.length" class="chart-container chart-container--fred">
                 <canvas ref="yieldCurveChart" width="800" height="400" style="background: white; border-radius: 8px;"></canvas>
                 <div class="chart-footer">
                   <small>Source: FRED – {{ chartSeriesLabel }} ({{ getCountryLabel(effectiveCountry) }} / {{ getCurrencyLabel(effectiveCurrency) }})</small>
                 </div>
               </div>
-              <div v-else class="visualization-placeholder">
+              <div v-if="!yieldCurveLoading && !yieldCurveError && !yieldCurveData.length" class="visualization-placeholder">
                 <v-icon size="64" color="#0B2044">mdi-chart-line</v-icon>
                 <h3>No Yield Curve Loaded</h3>
                 <p>Click the <strong>Refresh curve</strong> button above to fetch the latest yield curve.</p>
@@ -1121,35 +1138,42 @@
                       <div class="kpi-card simple-kpi">
                         <div class="kpi-top-bar"></div>
                         <div class="kpi-info">
-                          <div class="kpi-value">{{ descriptiveAnalytics['Number of Records'] || '0' }}</div>
+                          <div class="kpi-value">{{ descriptiveAnalytics['Number of Records'] ?? '0' }}</div>
                           <div class="kpi-title">Number of Instruments</div>
                         </div>
                       </div>
                       <div class="kpi-card simple-kpi">
                         <div class="kpi-top-bar"></div>
                         <div class="kpi-info">
-                          <div class="kpi-value">{{ descriptiveAnalytics['Total Face Value'] || '0.00' }}</div>
+                          <div class="kpi-value">{{ descriptiveAnalytics['Total Calculated Value'] != null ? '$' + descriptiveAnalytics['Total Calculated Value'] : '—' }}</div>
+                          <div class="kpi-title">Total Calculated Value</div>
+                        </div>
+                      </div>
+                      <div class="kpi-card simple-kpi">
+                        <div class="kpi-top-bar"></div>
+                        <div class="kpi-info">
+                          <div class="kpi-value">{{ descriptiveAnalytics['Total Face Value'] ?? '—' }}</div>
                           <div class="kpi-title">Total Face Value</div>
                         </div>
                       </div>
                       <div class="kpi-card simple-kpi">
                         <div class="kpi-top-bar"></div>
                         <div class="kpi-info">
-                          <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Yield'] || '0.00' }}%</div>
+                          <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Yield'] ?? '—' }}{{ descriptiveAnalytics['Weighted Average Yield'] != null ? '%' : '' }}</div>
                           <div class="kpi-title">Weighted Avg Yield</div>
                         </div>
                       </div>
                       <div class="kpi-card simple-kpi">
                         <div class="kpi-top-bar"></div>
                         <div class="kpi-info">
-                          <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Maturity'] || '0.00' }}</div>
+                          <div class="kpi-value">{{ descriptiveAnalytics['Weighted Average Maturity'] ?? '—' }}</div>
                           <div class="kpi-title">Weighted Avg Maturity</div>
                         </div>
                       </div>
                       <div class="kpi-card simple-kpi">
                         <div class="kpi-top-bar"></div>
                         <div class="kpi-info">
-                          <div class="kpi-value">{{ descriptiveAnalytics['Average Rate'] || '0.00' }}%</div>
+                          <div class="kpi-value">{{ descriptiveAnalytics['Average Rate'] ?? '—' }}{{ descriptiveAnalytics['Average Rate'] != null ? '%' : '' }}</div>
                           <div class="kpi-title">Average Rate</div>
                         </div>
                       </div>
@@ -1502,12 +1526,21 @@ import sessionManager from '@/services/sessionManager.js'
 import mappingTemplateManager from '@/services/mappingTemplateManager.js'
 import { useFredMarket } from '@/composables/useFredMarket'
 import { useWorksheetWorkflow } from '@/composables/useWorksheetWorkflow.js'
+import {
+  FIELD_MAPPINGS,
+  INPUT_FIELDS,
+  SEMANTIC_FIELD_GROUPS,
+  formatInstrumentTypeLabel,
+  normalizeKeyForMatch,
+  findSemanticType,
+  isSemanticMatch
+} from '@/utils/instrumentFieldMappings.js'
 import ExcelViewer from '@/components/ExcelViewer.vue'
 import ExcelModalViewer from '@/components/ExcelModalViewer.vue'
 import ExcelWorkbookViewer from '@/components/ExcelWorkbookViewer.vue'
 import WorksheetSelector from '@/components/WorksheetSelector.vue'
 import { markStepCompleted, isStepPersistedCompleted } from '@/utils/workflowProgress.js'
-import { autoMatchColumns, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping'
+import { autoMatchColumns, applyMappingToRows, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping'
 import { detectSheetType, extractSingleInstrumentValues, getRequiredFieldMappings } from '@/utils/sheetTypeDetector'
 import { autoDetectInstrumentFields } from '@/utils/autoDetectInstrument.js'
 import Chart from 'chart.js/auto'
@@ -1515,8 +1548,17 @@ import 'chartjs-adapter-date-fns'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
 import {
   buildAggregatesFromBackend,
+  reconcilePortfolioTotals,
   hasDisplayableCalculation,
-  formatCalculationFailureMessage
+  formatCalculationFailureMessage,
+  buildValuationExcelRows,
+  countUniqueInstruments,
+  calculatedValuesOnlyRows,
+  resolveCalculatedInstrumentNames,
+  getYieldCurveRateForMaturity,
+  parseMaturityToYears,
+  omitInstrumentNameColumn,
+  isInstrumentNameColumn
 } from '@/utils/calculationDisplay.js'
 
 // ─────────────────────────────────────────────────────────────
@@ -1540,13 +1582,6 @@ function dedupeColumns(cols) {
     out.push(c)
   }
   return out
-}
-
-function formatInstrumentTypeLabel(type) {
-  if (type === 'money-market') return 'Money Market (money-market)'
-  if (type === 'tbills') return 'Treasury Bills (tbills)'
-  if (type === 'bonds') return 'Bonds (bonds)'
-  return type || 'Unknown'
 }
 
 function autoDetectTable(data) {
@@ -1577,193 +1612,9 @@ const router = useRouter()
 const route = useRoute()
 
 // ─────────────────────────────────────────────────────────────
-// FIX 2 — FIELD_MAPPINGS now maps snake_case AND camelCase
-// aliases for every field, including dates and identifiers.
+// FIX 2 — FIELD_MAPPINGS, INPUT_FIELDS, SEMANTIC_FIELD_GROUPS
+// and helper functions moved to shared utils/instrumentFieldMappings.js
 // ─────────────────────────────────────────────────────────────
-const FIELD_MAPPINGS = {
-  'money-market': {
-    'discount_yield': 'Discount Yield',
-    'discountYield': 'Discount Yield',
-    'effective_yield': 'Effective Yield',
-    'effectiveYield': 'Effective Yield',
-    'interest_earned': 'Interest Earned',
-    'interestEarned': 'Interest Earned',
-    'interest_rate': 'Interest Rate',
-    'interestRate': 'Interest Rate',
-    'principal': 'Principal',
-    'term_days': 'Days to Maturity',
-    'termDays': 'Days to Maturity',
-    'days_to_maturity': 'Days to Maturity',
-    'daysToMaturity': 'Days to Maturity',
-    'total_value': 'Total Value',
-    'totalValue': 'Total Value',
-    'yield_curve_rate': 'Yield Curve Rate',
-    'yieldCurveRate': 'Yield Curve Rate',
-    'valuation_date': 'Valuation Date',
-    'valuationDate': 'Valuation Date',
-    'maturity_date': 'Maturity Date',
-    'maturityDate': 'Maturity Date',
-    'issue_date': 'Issue Date',
-    'issueDate': 'Issue Date',
-    'settlement_date': 'Settlement Date',
-    'settlementDate': 'Settlement Date',
-    'instrument_name': 'Instrument Name',
-    'instrumentName': 'Instrument Name',
-    'instrument_type': 'Instrument Type',
-    'instrumentType': 'Instrument Type',
-    'status': 'Status'
-  },
-  'bonds': {
-    'clean_price': 'Clean Price',
-    'dirty_price': 'Dirty Price',
-    'current_price': 'Current Price',
-    'currentPrice': 'Current Price',
-    'price': 'Price',
-    'coupon_rate': 'Coupon Rate',
-    'couponRate': 'Coupon Rate',
-    'annual_coupon': 'Annual Coupon',
-    'annualCoupon': 'Annual Coupon',
-    'coupon_per_period': 'Coupon per Period',
-    'couponPerPeriod': 'Coupon per Period',
-    'yield_to_maturity': 'Yield to Maturity',
-    'yieldToMaturity': 'Yield to Maturity',
-    'current_yield': 'Current Yield',
-    'currentYield': 'Current Yield',
-    'duration': 'Duration',
-    'macaulay_duration': 'Macaulay Duration',
-    'macaulayDuration': 'Macaulay Duration',
-    'modified_duration': 'Modified Duration',
-    'modifiedDuration': 'Modified Duration',
-    'convexity': 'Convexity',
-    'accrued_interest': 'Accrued Interest',
-    'accruedInterest': 'Accrued Interest',
-    'face_value': 'Face Value',
-    'faceValue': 'Face Value',
-    'years_to_maturity': 'Years to Maturity',
-    'yearsToMaturity': 'Years to Maturity',
-    'price_per_100': 'Price per 100',
-    'pricePer100': 'Price per 100',
-    'valuation_date': 'Valuation Date',
-    'valuationDate': 'Valuation Date',
-    'maturity_date': 'Maturity Date',
-    'maturityDate': 'Maturity Date',
-    'issue_date': 'Issue Date',
-    'issueDate': 'Issue Date',
-    'settlement_date': 'Settlement Date',
-    'settlementDate': 'Settlement Date',
-    'last_coupon_date': 'Last Coupon Date',
-    'lastCouponDate': 'Last Coupon Date',
-    'days_accrued': 'Days Accrued',
-    'daysAccrued': 'Days Accrued',
-    'coupon_frequency': 'Coupon Frequency',
-    'couponFrequency': 'Coupon Frequency',
-    'frequency': 'Frequency',
-    'total_value': 'Total Value',
-    'totalValue': 'Total Value',
-    'yield_curve_rate': 'Yield Curve Rate',
-    'yieldCurveRate': 'Yield Curve Rate',
-    'instrument_name': 'Instrument Name',
-    'instrumentName': 'Instrument Name',
-    'instrument_type': 'Instrument Type',
-    'instrumentType': 'Instrument Type',
-    'status': 'Status'
-  },
-  'tbills': {
-    'discount_rate': 'Discount Rate',
-    'discountRate': 'Discount Rate',
-    'discount_yield': 'Discount Yield',
-    'discountYield': 'Discount Yield',
-    'investment_yield': 'Investment Yield',
-    'investmentYield': 'Investment Yield',
-    'bond_equivalent_yield': 'Bond Equivalent Yield',
-    'bondEquivalentYield': 'Bond Equivalent Yield',
-    'effective_annual_yield': 'Effective Annual Yield',
-    'effectiveAnnualYield': 'Effective Annual Yield',
-    'money_market_yield': 'Money Market Yield',
-    'moneyMarketYield': 'Money Market Yield',
-    'holding_period_yield': 'Holding Period Yield',
-    'holdingPeriodYield': 'Holding Period Yield',
-    'face_value': 'Face Value',
-    'faceValue': 'Face Value',
-    'purchase_price': 'Purchase Price',
-    'purchasePrice': 'Purchase Price',
-    'discount_amount': 'Discount Amount',
-    'discountAmount': 'Discount Amount',
-    'total_value': 'Total Value',
-    'totalValue': 'Total Value',
-    'days_to_maturity': 'Days to Maturity',
-    'daysToMaturity': 'Days to Maturity',
-    'term_days': 'Days to Maturity',
-    'termDays': 'Days to Maturity',
-    'valuation_date': 'Valuation Date',
-    'valuationDate': 'Valuation Date',
-    'maturity_date': 'Maturity Date',
-    'maturityDate': 'Maturity Date',
-    'issue_date': 'Issue Date',
-    'issueDate': 'Issue Date',
-    'settlement_date': 'Settlement Date',
-    'settlementDate': 'Settlement Date',
-    'yield_curve_rate': 'Yield Curve Rate',
-    'yieldCurveRate': 'Yield Curve Rate',
-    'instrument_name': 'Instrument Name',
-    'instrumentName': 'Instrument Name',
-    'instrument_type': 'Instrument Type',
-    'instrumentType': 'Instrument Type',
-    'status': 'Status'
-  }
-}
-
-const INPUT_FIELDS = {
-  'money-market': [
-    'Principal', 'Interest Rate', 'Discount Rate', 'Purchase Price',
-    'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date',
-    'Days to Maturity', 'Compounding Frequency', 'Day Count Convention',
-    'Status', 'Error', 'Instrument Name', 'Instrument Type'
-  ],
-  'bonds': [
-    'Face Value', 'Par Value', 'Coupon Rate', 'Coupon Frequency', 'Frequency',
-    'Yield to Maturity', 'Issue Date', 'Maturity Date', 'Settlement Date',
-    'Valuation Date', 'Last Coupon Date', 'Years to Maturity',
-    'Day Count Convention', 'Status', 'Error', 'Instrument Name', 'Instrument Type'
-  ],
-  'tbills': [
-    'Face Value', 'Discount Rate', 'Purchase Price',
-    'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date',
-    'Days to Maturity', 'Day Count Convention',
-    'Status', 'Error', 'Instrument Name', 'Instrument Type'
-  ]
-}
-
-function mapBackendFieldsToDisplayNames(row, instrumentType) {
-  const mapping = FIELD_MAPPINGS[instrumentType] || {}
-  const mappedRow = {}
-  for (const [key, value] of Object.entries(row)) {
-    const displayKey = mapping[key] || key
-    if (displayKey in mappedRow && mappedRow[displayKey] !== value) {
-      if (mappedRow[displayKey] === null || mappedRow[displayKey] === undefined || mappedRow[displayKey] === '') {
-        mappedRow[displayKey] = value
-      }
-      continue
-    }
-    mappedRow[displayKey] = value
-  }
-  return mappedRow
-}
-
-function filterToCalculatedFields(row, instrumentType) {
-  const inputFields = INPUT_FIELDS[instrumentType] || []
-  const filteredRow = {}
-  const alwaysInclude = ['Instrument Name', 'Instrument Type', 'Worksheet', 'Workbook']
-  for (const [key, value] of Object.entries(row)) {
-    if (alwaysInclude.includes(key)) {
-      filteredRow[key] = value
-      continue
-    }
-    const isInput = inputFields.includes(key)
-    if (!isInput) filteredRow[key] = value
-  }
-  return filteredRow
-}
 
 const VALID_FREQUENCIES = /^(annual(ly)?|semi[- ]?annual(ly)?|quarter(ly)?|month(ly)?|weekly|daily|at maturity|zero|bullet|1|2|4|12|52|365)$/i
 
@@ -1796,47 +1647,49 @@ function isPlausibleValue(canonicalKey, value) {
   return true
 }
 
-const SEMANTIC_FIELD_GROUPS = {
-  name: ['InstrumentName', 'BondName', 'TBillName', 'Instrument Name', 'Bond Name', 'T-Bill Name', 'Counterparty', 'Issuer', 'Name', 'Security', 'Security Name', 'Counter Party', 'Counterparty Name', 'Issuer Name', 'Instrument'],
-  faceValue: ['FaceValue', 'Principal', 'Notional', 'Par', 'ParValue', 'Nominal', 'NominalValue', 'Amount', 'Face Value', 'Par Value', 'Principal Amount', 'Investment Amount', 'Issue Amount', 'Redemption Value', 'Maturity Value', 'Nominal Amount', 'Face Amount', 'Par Amount', 'Notional Amount', 'Purchase Price', 'Future Value'],
-  rate: ['CouponRate', 'InterestRate', 'DiscountRate', 'Yield', 'YieldToMaturity', 'Rate', 'Interest Rate', 'Coupon Rate', 'Discount Rate', 'Current Yield', 'Yield Rate', 'YTM', 'Discount', 'Coupon', 'Investment Yield', 'Effective Annual Yield', 'Benchmark Rate', 'Reference Rate', 'Spread', 'Margin'],
-  date: ['IssueDate', 'MaturityDate', 'SettlementDate', 'ValuationDate', 'AuctionDate', 'NextCouponDate', 'Issue Date', 'Maturity Date', 'Settlement Date', 'Valuation Date', 'Auction Date', 'Next Coupon Date', 'Redemption Date', 'Due Date', 'Expiry Date', 'Value Date', 'Pricing Date', 'Trade Date', 'Effective Date', 'Start Date', 'End Date', 'Call Date', 'Put Date', 'Coupon Date', 'Last Coupon Date'],
-  frequency: ['CouponFrequency', 'InterestPaymentFrequency', 'PaymentFrequency', 'Frequency', 'Coupon Frequency', 'Interest Payment Frequency', 'Payment Freq', 'Pmt Frequency', 'Coupon Freq', 'Interest Pmt Frequency', 'Compounding Frequency'],
-  term: ['DaysToMaturity', 'Term', 'Tenor', 'Days to Maturity', 'Term (Days)', 'Tenor (Days)', 'Duration', 'Years to Maturity', 'Term in Days', 'Term in Months', 'Term in Years', 'Tenor Days', 'Tenor Months', 'Tenor Years', 'Accrued Days', 'Days in Coupon Period', 'Term to Maturity'],
-  currency: ['Currency', 'CurrencyCode', 'Currency Code', 'CCY', 'Denomination', 'Base Currency', 'Local Currency', 'Reporting Currency', 'Exchange Rate', 'FX Rate'],
-  status: ['Status', 'State', 'Type', 'Category', 'Classification'],
-  price: ['Price', 'Purchase Price', 'Clean Price', 'Dirty Price', 'Market Price', 'Current Price', 'Price per 100', 'Call Price', 'Put Price'],
-  interest: ['Accrued Interest', 'Interest Accrued', 'Coupon', 'Coupon Amount', 'Coupon Payment', 'Annual Coupon', 'Interest Earned', 'Interest Income', 'Discount Amount'],
-  duration: ['Macaulay Duration', 'Modified Duration', 'Convexity', 'DV01'],
-  return: ['Capital Gain Loss', 'Total Return', 'Profit Return', 'Market Value', 'Present Value', 'Carrying Value', 'Book Value', 'Fair Value', 'Maturity Value', 'Current Value', 'Purchase Cost']
+function getCalculatedInstrumentNames(calcRows, backendNames = []) {
+  const rowCount = Math.max(cleanedData.value.length, cleanedSourceData.value.length)
+  const cleanedRows = Array.from({ length: rowCount }, (_, index) => ({
+    ...(cleanedSourceData.value[index] || {}),
+    ...(cleanedData.value[index] || {})
+  }))
+  return resolveCalculatedInstrumentNames(
+    cleanedRows,
+    calcRows,
+    backendNames,
+    currentSheetName.value
+  )
 }
 
-function normalizeKeyForMatch(key) {
-  return String(key).toLowerCase().replace(/[\s_\-()]+/g, '')
-}
-
-function findSemanticType(key) {
-  const lower = normalizeKeyForMatch(key)
-  for (const [type, list] of Object.entries(SEMANTIC_FIELD_GROUPS)) {
-    if (list.some(f => {
-      const fLower = normalizeKeyForMatch(f)
-      return lower.includes(fLower) || fLower.includes(lower)
-    })) {
-      return type
+function mapBackendFieldsToDisplayNames(row, instrumentType) {
+  const mapping = FIELD_MAPPINGS[instrumentType] || {}
+  const mappedRow = {}
+  for (const [key, value] of Object.entries(row)) {
+    const displayKey = mapping[key] || key
+    if (displayKey in mappedRow && mappedRow[displayKey] !== value) {
+      if (mappedRow[displayKey] === null || mappedRow[displayKey] === undefined || mappedRow[displayKey] === '') {
+        mappedRow[displayKey] = value
+      }
+      continue
     }
+    mappedRow[displayKey] = value
   }
-  return null
+  return mappedRow
 }
 
-function isSemanticMatch(detectedKey, targetField, semanticType) {
-  const detectedLower = normalizeKeyForMatch(detectedKey)
-  const targetLower = normalizeKeyForMatch(targetField)
-  if (detectedLower === targetLower) return true
-  if (detectedLower.includes(targetLower) || targetLower.includes(detectedLower)) return true
-  const fields = SEMANTIC_FIELD_GROUPS[semanticType] || []
-  const detectedInList = fields.some(f => normalizeKeyForMatch(f) === detectedLower)
-  const targetInList = fields.some(f => normalizeKeyForMatch(f) === targetLower)
-  return detectedInList && targetInList
+function filterToCalculatedFields(row, instrumentType) {
+  const inputFields = INPUT_FIELDS[instrumentType] || []
+  const filteredRow = {}
+  const alwaysInclude = ['Instrument Name', 'Instrument Type', 'Worksheet', 'Workbook']
+  for (const [key, value] of Object.entries(row)) {
+    if (alwaysInclude.includes(key)) {
+      filteredRow[key] = value
+      continue
+    }
+    const isInput = inputFields.includes(key)
+    if (!isInput) filteredRow[key] = value
+  }
+  return filteredRow
 }
 
 function normalizeDetectedFields(fields, fieldsWithMetadata, instrumentType, requiredColsOverride = null) {
@@ -2081,16 +1934,7 @@ watch(instrumentType, (val) => {
   }
 }, { immediate: true })
 
-const activeSession = ref(null)
 const valuationDate = ref(new Date().toISOString().split('T')[0])
-const yieldCurveLoading = ref(false)
-const yieldCurveError = ref('')
-const yieldCurveChart = ref(null)
-const chartInstanceRef = { current: null }
-const yieldCurveData = ref([])
-const chartSeriesLabel = ref('')
-const chartImageData = ref('')
-
 const worksheetStatuses = ref({})
 
 const selectedMaturityOption = ref('')
@@ -2108,16 +1952,92 @@ const uploadedFileId = ref(null)
 const uploadedFilePath = ref(null)
 const uploadedFileBase64 = ref(null)
 const rawData = ref([])
+const originalRawData = ref([])
+const originalFileColumns = ref([])
+const originalFileBuffer = ref(null)
+const originalDatasetId = ref(null)
 const cleanedData = ref([])
+const cleanedSourceData = ref([])
 const previewData = ref([])
+const singleInstrumentExtractedValues = ref({})
 const columnMapping = ref({})
 const showMappingDialog = ref(false)
 const showSavedMappingsDialog = ref(false)
+const autoDetectedFields = ref({})
+const autoDetectedFieldsWithMetadata = ref({})
+const autoDetectedAdditionalFields = ref({})
 const fileColumns = ref([])
 const fixedValuesTracker = ref(new Map())
 const calculations = ref({})
 const allCalculations = ref({})
 const selectedCalculations = ref({})
+const lastCalcInputData = ref([])
+const instrumentSummary = ref({ columns: [], rows: [] })
+const portfolioSummary = ref({ columns: [], rows: [] })
+const completedInstrumentSummary = ref({ columns: [], rows: [] })
+const completedPortfolioSummary = ref({ columns: [], rows: [] })
+const isCalculating = ref(false)
+const fileLoading = ref(false)
+const uploadError = ref('')
+const uploadProgress = ref(0)
+const uploadHistory = ref([])
+const sheetTotalRows = ref(0)
+const sheetType = ref('multi')
+const currentSheetName = ref('')
+const currentWorkbookName = ref('')
+const activeSession = ref(null)
+const sessionSavedAt = ref(null)
+const isSaving = ref(false)
+const skipAutoSave = ref(false)
+const reportPreviewDialog = ref(false)
+const reportPreviewHtml = ref('')
+const reportGenerating = ref(false)
+const yieldCurveLoading = ref(false)
+const yieldCurveError = ref('')
+const yieldCurveChart = ref(null)
+const chartInstanceRef = { current: null }
+const yieldCurveData = ref([])
+const chartSeriesLabel = ref('')
+const chartImageData = ref('')
+const showExcelDialog = ref(false)
+const showWorkbookViewer = ref(false)
+const workbookSheets = ref([])
+const excelData = ref([])
+const excelColumns = ref([])
+const excelDialogTitle = ref('')
+const showInstrumentResultsTable = ref(false)
+const isolatedTableData = ref([])
+const selectedHeaderRowIndex = ref(0)
+const selectedSectionId = ref(null)
+const selectedInstruments = ref({
+  'money-market': true,
+  'treasury-bills': true,
+  'bonds': true
+})
+
+let isSavingVersion = false
+let lastInstrument = ''
+let lastSessionId = ''
+let lastSaveTime = 0
+const SAVE_DEBOUNCE_MS = 2000
+
+/** Excel view on Calculations: cleaned inputs merged with calc outputs. */
+const valuationExcelData = ref([])
+const valuationExcelDisplayData = computed(() =>
+  omitInstrumentNameColumn(valuationExcelData.value)
+)
+const valuationExcelHeaders = computed(() => {
+  const rows = valuationExcelDisplayData.value
+  if (!rows.length) return []
+  const cols = new Set()
+  rows.forEach(r => Object.keys(r || {}).forEach(k => cols.add(k)))
+  return Array.from(cols)
+})
+const uniqueInstrumentCount = computed(() =>
+  countUniqueInstruments(cleanedSourceData.value.length
+    ? cleanedSourceData.value
+    : cleanedData.value)
+)
 const cleaningStats = ref({
   totalRows: 0,
   validRows: 0,
@@ -2131,9 +2051,6 @@ const cleaningStats = ref({
   removedDuplicates: 0,
   operationsPerformed: []
 })
-const fileLoading = ref(false)
-const uploadError = ref('')
-const uploadProgress = ref(0)
 
 const showInstrumentExcelPopup = ref(false)
 const showWorkflowPopup = ref(false)
@@ -2151,23 +2068,9 @@ const rowsPerPage = ref(10)
 const mappingApplied = ref(false)
 const cumulativeRecords = ref([])
 const showCumulativeHistory = ref(false)
-const originalRawData = ref([])
-const originalFileColumns = ref([])
-const originalFileBuffer = ref(null)
-const originalDatasetId = ref(null)
-const sheetTotalRows = ref(0)
-const sessionSavedAt = ref(null)
 const showPreview = ref(false)
 const worksheetSelected = ref(false)
 const forceUpdate = ref(0)
-
-const isSaving = ref(false)
-const skipAutoSave = ref(false)
-let isSavingVersion = false
-let lastInstrument = ''
-let lastSessionId = ''
-let lastSaveTime = 0
-const SAVE_DEBOUNCE_MS = 2000
 
 const snackbar = ref({ show: false, message: '', color: 'error', timeout: 4000 })
 
@@ -2201,61 +2104,35 @@ const dateFormatOptions = ref([
 const selectedDateFormat = ref('YYYY-MM-DD')
 
 const selectedInstrumentType = computed(() => instrumentLabel.value)
-const instrumentSummary = ref({ columns: [], rows: [] })
-const completedInstrumentSummary = ref({ columns: [], rows: [] })
-const portfolioSummary = ref({ columns: [], rows: [] })
-const completedPortfolioSummary = ref({ columns: [], rows: [] })
+const calculatedValuesExcelData = computed(() =>
+  calculatedValuesOnlyRows(
+    instrumentSummary.value.rows,
+    INPUT_FIELDS[instrumentType.value] || [],
+    instrumentType.value
+  )
+)
+const calculatedValuesExcelHeaders = computed(() => {
+  const columns = new Set()
+  calculatedValuesExcelData.value.forEach(row =>
+    Object.keys(row || {}).forEach(key => columns.add(key))
+  )
+  return Array.from(columns)
+})
 const fieldDetectionResults = ref({ detected_fields: {}, summary: {} })
 const showFieldDetection = ref(false)
 const activeSummaryTab = ref('current')
 const selectedCalculationInstrument = ref(-1)
 const currentlyViewingInstrument = ref(null)
 const showAllCalculationsPopup = ref(false)
-const sheetType = ref('multi')
 const extractedValues = ref({})
 const worksheetStatus = ref({})
-const uploadHistory = ref([])
-const currentWorkbookName = ref('')
-
-const selectedInstruments = ref({ 'money-market': true, bonds: true, tbills: true })
-const reportPreviewDialog = ref(false)
-const reportPreviewHtml = ref('')
-
-const showExcelDialog = ref(false)
-const excelData = ref([])
-const excelColumns = ref([])
-const excelDialogTitle = ref('')
-const showInstrumentResultsTable = ref(false)
-
-const showWorkbookViewer = ref(false)
-const workbookSheets = ref([])
-const currentSheetName = ref('')
-const selectedSectionId = ref('')
-const singleInstrumentExtractedValues = ref({})
-const isolatedTableData = ref(null)
-const selectedHeaderRowIndex = ref(0)
-const autoDetectedFields = ref({})
-const autoDetectedFieldsWithMetadata = ref({})
-const autoDetectedAdditionalFields = ref({})
 const detectedCurrencies = ref([])
 const detectedInstrumentType = ref('')
 const selectedCurrency = ref('')
 const isDetecting = ref(false)
 const detectionWarnings = ref([])
 const detectionStatus = ref('idle')
-const isCalculating = ref(false)
 
-const getDetectionButtonText = () => {
-  switch (detectionStatus.value) {
-    case 'idle': return 'Auto Detect'
-    case 'scanning': return 'Scanning...'
-    case 'analyzing': return 'Analysing worksheet...'
-    case 'detecting': return 'Detecting fields...'
-    case 'validating': return 'Validating results...'
-    case 'complete': return 'Detection complete'
-    default: return 'Auto Detect'
-  }
-}
 const isUsingDetectedFields = ref(false)
 const excludedDetectedFields = ref(new Set())
 const newFieldName = ref('')
@@ -2268,6 +2145,19 @@ const formulaDialog = ref(false)
 const formulaText = ref('')
 const formulaCalculationDetails = ref(null)
 const showCalculationDetails = ref(false)
+
+const getDetectionButtonText = () => {
+  switch (detectionStatus.value) {
+    case 'idle': return 'Auto Detect'
+    case 'scanning': return 'Scanning...'
+    case 'analyzing': return 'Analysing worksheet...'
+    case 'detecting': return 'Detecting fields...'
+    case 'validating': return 'Validating results...'
+    case 'complete': return 'Detection complete'
+    default: return 'Auto Detect'
+  }
+}
+
 const showIndividualBreakdown = ref(false)
 const formulas = ref({})
 const manualInputs = ref({})
@@ -2303,49 +2193,25 @@ const activeValuationDate = computed(() => {
 const descriptiveAnalytics = computed(() => {
   const rows = currentSummaryRows.value
   if (!rows.length) return {}
-  if (allCalculations.value && (allCalculations.value.totalValue !== undefined || allCalculations.value.instrumentCount !== undefined)) {
-    const stats = {}
-    stats['Number of Records'] = allCalculations.value.instrumentCount || rows.length
-    stats['Total Face Value'] = allCalculations.value.totalValue || 0
-    stats['Weighted Average Yield'] = allCalculations.value.avgRate || allCalculations.value.weightedAvgRate || 0
-    stats['Weighted Average Maturity'] = allCalculations.value.avgDaysToMaturity || 0
-    stats['Average Rate'] = allCalculations.value.avgRate || 0
-    for (const [k, v] of Object.entries(stats)) {
-      if (typeof v === 'number') {
-        const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(k.toLowerCase())
-        if (isTimeField) {
-          stats[k] = Math.round(v).toLocaleString()
-        } else {
-          stats[k] = v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        }
-      }
-    }
-    return stats
+  const calculations = allCalculations.value || {}
+  const getNumber = (...values) => {
+    const value = values.find(candidate => candidate !== undefined && candidate !== null && candidate !== '')
+    if (value === undefined) return null
+    const parsed = Number(String(value).replace(/[%,$\s]/g, ''))
+    return Number.isFinite(parsed) ? parsed : null
   }
-  const getValue = (row) => parseFloat(row['Total Value'] ?? row['total_value'] ?? row['Calculated Value'] ?? row['calculated_value'] ?? row['Value'] ?? row['value'] ?? 0)
-  const getYield = (row) => parseFloat(row['Yield'] ?? row['yield'] ?? row['Rate'] ?? row['rate'] ?? row['Interest Rate'] ?? row['interest_rate'] ?? row['Coupon Rate'] ?? row['coupon_rate'] ?? row['Discount Rate'] ?? row['discount_rate'] ?? 0)
-  const getMaturity = (row) => parseFloat(row['Days to Maturity'] ?? row['days_to_maturity'] ?? row['Term'] ?? row['term'] ?? row['Maturity'] ?? row['maturity'] ?? 0)
-  const values = rows.map(getValue).filter(v => !isNaN(v) && v > 0)
-  const yields = rows.map(getYield).filter(v => !isNaN(v))
-  const maturities = rows.map(getMaturity).filter(v => !isNaN(v) && v > 0)
+  const faceValue = instrumentType.value === 'money-market'
+    ? getNumber(calculations.totalPrincipal, calculations.total_principal)
+    : getNumber(calculations.totalFaceValue, calculations.total_face_value)
   const stats = {}
-  if (values.length) {
-    const sum = values.reduce((a, b) => a + b, 0)
-    const avgRate = yields.length ? yields.reduce((a,b) => a+b, 0) / yields.length : null
-    stats['Number of Records'] = values.length
-    stats['Total Face Value'] = sum
-    if (yields.length && values.length) {
-      const weightedYield = yields.reduce((a, b, i) => a + b * values[i], 0) / (values.reduce((a, b) => a + b, 1) || 1)
-      stats['Weighted Average Yield'] = weightedYield
-    }
-    if (maturities.length && values.length) {
-      const weightedMaturity = maturities.reduce((a, b, i) => a + b * values[i], 0) / (values.reduce((a, b) => a + b, 1) || 1)
-      stats['Weighted Average Maturity'] = weightedMaturity
-    }
-    if (avgRate !== null) stats['Average Rate'] = avgRate
-  }
+  stats['Number of Records'] = getNumber(calculations.instrumentCount, calculations.instrument_count) ?? countUniqueInstruments(rows)
+  stats['Total Calculated Value'] = getNumber(calculations.totalValue, calculations.total_value)
+  stats['Total Face Value'] = faceValue
+  stats['Weighted Average Yield'] = getNumber(calculations.weightedAvgRate, calculations.weighted_avg_rate, calculations.avgRate, calculations.avg_rate)
+  stats['Weighted Average Maturity'] = getNumber(calculations.avgDaysToMaturity, calculations.avg_days_to_maturity)
+  stats['Average Rate'] = getNumber(calculations.avgRate, calculations.avg_rate)
   for (const [k, v] of Object.entries(stats)) {
-    if (typeof v === 'number') {
+    if (typeof v === 'number' && Number.isFinite(v)) {
       const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(k.toLowerCase())
       if (isTimeField) {
         stats[k] = Math.round(v).toLocaleString()
@@ -2373,7 +2239,6 @@ const dataQualitySummary = computed(() => {
   }
 })
 
-function loadSummaryForWorksheet() { forceUpdate.value++ }
 
 const displayCountryOptions = [
   { value: 'USA', label: 'United States' },
@@ -2624,14 +2489,23 @@ const calculationFields = computed(() => {
   const allCalc = allCalculations.value || {}
   const selectedCalc = selectedCalculations.value || {}
   
-  const missingFields = allCalc.missing_fields || allCalc.missingPrerequisites || []
+  const missingFields = [
+    ...(allCalc.missing_fields || []),
+    ...(allCalc.missingPrerequisites || []),
+    ...(allCalc.missing_prerequisites || [])
+  ].flat(Infinity).filter(Boolean)
   const calcStatus = allCalc.status || selectedCalc.status || 'unknown'
   
   const result = fields.map(field => {
-    let value = selectedCalc[field.key] !== undefined ? selectedCalc[field.key] :
-                allCalc[field.key] !== undefined ? allCalc[field.key] :
-                selectedCalc[toSnakeCase(field.key)] !== undefined ? selectedCalc[toSnakeCase(field.key)] :
-                allCalc[toSnakeCase(field.key)] !== undefined ? allCalc[toSnakeCase(field.key)] : null
+    const candidates = [
+      selectedCalc[field.key],
+      allCalc[field.key],
+      selectedCalc[toSnakeCase(field.key)],
+      allCalc[toSnakeCase(field.key)]
+    ]
+    let value = candidates.find(candidate =>
+      candidate !== null && candidate !== undefined && candidate !== ''
+    ) ?? null
     if (value === null || value === undefined) {
       const agg = allCalc.agg || selectedCalc.agg || {}
       value = agg[field.key] !== undefined ? agg[field.key] :
@@ -2648,6 +2522,8 @@ const calculationFields = computed(() => {
     } else if (value === null || value === undefined) {
       if (calcStatus === 'partial' && missingFields.length) {
         unavailableReason = `Missing inputs: ${missingFields.join(', ')}`
+      } else if (field.key === 'yieldCurveRate') {
+        unavailableReason = 'Optional market benchmark is unavailable'
       } else {
         unavailableReason = 'Cannot calculate — missing/invalid input'
       }
@@ -2656,7 +2532,7 @@ const calculationFields = computed(() => {
     return { ...field, value, unavailableReason }
   })
   
-  return result.filter(field => !field.unavailableReason)
+  return result
 })
 
 // FIX: lightweight content signature so the activeTab watch can detect
@@ -2666,20 +2542,15 @@ const calculationFields = computed(() => {
 const _lastCalcSignature = ref('')
 function calculationSignatureMatches() {
   try {
-    const sig = JSON.stringify(cleanedData.value) + '|' +
-                JSON.stringify([...excludedDetectedFields.value]) + '|' +
-                instrumentType.value
-    return sig === _lastCalcSignature.value
+    return getCalculationSignature() === _lastCalcSignature.value
   } catch (e) {
     return false
   }
 }
-function markCalculationSignature() {
-  try {
-    _lastCalcSignature.value = JSON.stringify(cleanedData.value) + '|' +
-                               JSON.stringify([...excludedDetectedFields.value]) + '|' +
-                               instrumentType.value
-  } catch (e) { /* ignore */ }
+function getCalculationSignature(data = cleanedData.value, excluded = excludedDetectedFields.value) {
+  return JSON.stringify(data) + '|' +
+         JSON.stringify([...excluded]) + '|' +
+         instrumentType.value
 }
 
 function toSnakeCase(str) {
@@ -2791,28 +2662,8 @@ async function goToReportTab() {
   forceUpdate.value++
 }
 
-function parseMaturityToYears(mat) {
-  const num = parseFloat(mat)
-  if (mat.endsWith('M')) return num / 12
-  if (mat.endsWith('W')) return num / 52
-  if (mat.endsWith('Y')) return num
-  return num
-}
-
 function getRateForMaturity(mat) {
-  if (!mat || !yieldCurveData.value.length) return null
-  const targetYears = parseMaturityToYears(mat)
-  let closest = null
-  let minDiff = Infinity
-  for (const point of yieldCurveData.value) {
-    const diff = Math.abs(point.maturity - targetYears)
-    if (diff < minDiff) {
-      minDiff = diff
-      closest = point
-    }
-  }
-  if (closest && minDiff < 0.5) return closest.rate
-  return null
+  return getYieldCurveRateForMaturity(yieldCurveData.value, mat)
 }
 
 function getCountryLabel(code) {
@@ -3173,7 +3024,8 @@ async function loadHistoryFile(item) {
         showSnackbar('Failed to parse workbook', 'error')
       }
     } catch (err) {
-      showSnackbar('Failed to load file', 'error')
+      console.error(`Failed to load workbook history item "${item.name}":`, err)
+      showSnackbar(`Failed to load ${item.name}: ${err.message || 'Unexpected error'}`, 'error')
     }
     saveSessionData()
   }
@@ -3268,6 +3120,7 @@ function removeFile() {
   originalRawData.value = []
   originalFileColumns.value = []
   cleanedData.value = []
+  cleanedSourceData.value = []
   previewData.value = []
   calculations.value = {}
   allCalculations.value = {}
@@ -3336,9 +3189,13 @@ function clearActiveCache(preservePreviousValuations = true) {
   }
   if (!isUsingDetectedFields.value) {
     cleanedData.value = []
+    cleanedSourceData.value = []
     calculations.value = {}
     allCalculations.value = {}
     selectedCalculations.value = {}
+    lastCalcInputData.value = []
+    valuationExcelData.value = []
+    cleanedSourceData.value = []
     columnMapping.value = {}
     autoDetectedFields.value = {}
     autoDetectedFieldsWithMetadata.value = {}
@@ -3350,6 +3207,8 @@ function clearActiveCache(preservePreviousValuations = true) {
     calculations.value = {}
     allCalculations.value = {}
     selectedCalculations.value = {}
+    lastCalcInputData.value = []
+    valuationExcelData.value = []
     columnMapping.value = {}
   }
   instrumentSummary.value = { columns: [], rows: [] }
@@ -3510,14 +3369,21 @@ function handleTableIsolated({ sheetName, tableName, rawTableData, headerRowInde
   
   showWorkbookViewer.value = false
   currentMappingTemplateId.value = null
-  showMappingDialog.value = true
   mappingApplied.value = false
+  
+  // Ensure sheet type is 'multi' so mapping dialog appears instead of single instrument view
+  sheetType.value = 'multi'
   
   // Generate headers and map fields based on the default header row
   updateIsolatedTableData()
   
   worksheetSelected.value = true
   showPreview.value = true
+  
+  // Open mapping dialog AFTER updating data to prevent race conditions
+  setTimeout(() => {
+    showMappingDialog.value = true
+  }, 50)
 }
 
 // [NEW] Recalculate mapping when the user changes the header row
@@ -3659,15 +3525,11 @@ function applyCurrentMapping() {
     showPreview.value = true
     return
   }
-  const transformed = originalRawData.value.map(row => {
-    const out = {}
-    for (const reqCol of required) {
-      const srcCol = columnMapping.value[reqCol]
-      out[reqCol] = (srcCol && srcCol !== '__na__' && row[srcCol] !== undefined) ? row[srcCol] : ''
-    }
-    return out
-  })
-  rawData.value = transformed
+  rawData.value = applyMappingToRows(
+    originalRawData.value,
+    required,
+    columnMapping.value
+  )
   mappingApplied.value = true
   showPreview.value = true
 }
@@ -3794,6 +3656,13 @@ async function applyColumnMappingAndClose() {
   showMappingDialog.value = false
   showPreview.value = true
   forceUpdate.value++
+  
+  // Automatically populate cleanedData from rawData after mapping
+  // so calculations can be triggered without manual cleaning step
+  if (rawData.value.length) {
+    cleanedData.value = JSON.parse(JSON.stringify(rawData.value))
+    cleanedSourceData.value = JSON.parse(JSON.stringify(rawData.value))
+  }
 }
 
 function resetMapping() {
@@ -4398,6 +4267,7 @@ async function useDetectedFields() {
   rawData.value = [{ ...values }]
   originalRawData.value = [{ ...values }]
   cleanedData.value = [{ ...values }]
+  cleanedSourceData.value = [{ ...values }]
   fileColumns.value = Object.keys(values)
   originalFileColumns.value = [...fileColumns.value]
   worksheetSelected.value = true
@@ -4519,19 +4389,36 @@ function toggleExcludeField(fieldKey) {
   }
   excludedDetectedFields.value = new Set(excludedDetectedFields.value)
 
-  // Persist across page reloads
+  // Persist against this browser tab as a legacy fallback; the session
+  // workflow remains the authoritative source when a session is loaded.
   try {
-    sessionStorage.setItem('excluded_fields', JSON.stringify([...excludedDetectedFields.value]))
+    const sid = activeSession.value?.id || sessionManager.getActiveSessionId()
+    if (sid) {
+      sessionStorage.setItem(
+        `excluded_fields:${sid}:${instrumentType.value}`,
+        JSON.stringify([...excludedDetectedFields.value])
+      )
+    }
   } catch (e) { /* ignore */ }
 
-  // FIX: rebuild cleanedData from rawData so the Excel preview
-  // and the valuation engine reflect the current exclusion set.
-  // The preview is now the single source of truth.
-  if (cleanedData.value.length > 0 && rawData.value.length > 0) {
-    applyCleaning()
+  if (cleanedSourceData.value.length) {
+    cleanedData.value = filterExcludedFields(cleanedSourceData.value)
+    _lastCalcSignature.value = ''
+    debouncedSave(true)
   }
+}
 
-  debouncedSave()
+function filterExcludedFields(rows) {
+  const excluded = new Set(
+    [...excludedDetectedFields.value].map(field =>
+      String(field).toLowerCase().replace(/[-_\s().]+/g, '')
+    )
+  )
+  return (rows || []).map(row => Object.fromEntries(
+    Object.entries(row || {}).filter(([key]) =>
+      !excluded.has(String(key).toLowerCase().replace(/[-_\s().]+/g, ''))
+    )
+  ))
 }
 
 function addCustomField() {
@@ -4823,7 +4710,7 @@ function formatForExcel(value, type = 'number', key = '') {
 // FIX 5 — downloadCalculatedInstrumentsExcel dedupes columns.
 // ─────────────────────────────────────────────────────────────
 function downloadCalculatedInstrumentsExcel() {
-  const summaryRows = instrumentSummary.value.rows || []
+  const summaryRows = calculatedValuesExcelData.value
   if (!summaryRows.length) {
     showSnackbar('No calculated instruments to export', 'error')
     return
@@ -4833,7 +4720,15 @@ function downloadCalculatedInstrumentsExcel() {
   summaryRows.forEach(row => {
     Object.keys(row).forEach(key => allColumns.add(key))
   })
-  const columns = dedupeColumns(Array.from(allColumns).filter(c => !isExcludedColumn(c)))
+  const columns = dedupeColumns(
+    Array.from(allColumns)
+  ).filter(col => {
+    const normalized = String(col).toLowerCase().replace(/[_\s\-]+/g, '')
+    // Exclude Worksheet, Workbook, and Ordered Derivations
+    if (normalized === 'worksheet' || normalized === 'workbook') return false
+    if (normalized === 'orderedderivations' || normalized === 'ordered_derivations') return false
+    return true
+  })
   const data = [columns.map(formatColumnHeader)]
   summaryRows.forEach(row => {
     const dataRow = columns.map(col => {
@@ -4901,7 +4796,11 @@ function onCleanedExcelUpdate(data) {
   // — but only if we're actually on the Calculations tab (otherwise we
   // recalc lazily when the user navigates there, which the activeTab watch
   // handles).
-  cleanedData.value = data
+  cleanedSourceData.value = data.map((row, index) => ({
+    ...(cleanedSourceData.value[index] || rawData.value[index] || {}),
+    ...row
+  }))
+  cleanedData.value = filterExcludedFields(cleanedSourceData.value)
 
   if (data.length > 0) {
     Object.entries(data[0]).forEach(([key, val]) => {
@@ -4930,6 +4829,52 @@ function onCleanedExcelUpdate(data) {
       showSnackbar('Recalculation failed: ' + (err?.message || err), 'error', 6000)
     })
   }
+}
+
+/**
+ * Edits on the Calculations-tab Excel view write back into cleanedData
+ * (input columns only) and force a recalculation. Calculated output
+ * columns edited by the user are ignored so they cannot become stale
+ * "inputs".
+ */
+function onValuationExcelUpdate(data) {
+  if (!Array.isArray(data) || !data.length) return
+  const inputKeys = new Set()
+  ;(lastCalcInputData.value[0] ? Object.keys(lastCalcInputData.value[0]) : Object.keys(cleanedData.value[0] || {}))
+    .forEach(k => inputKeys.add(k))
+
+  const nextCleaned = data.map((row, idx) => {
+    const base = { ...(cleanedData.value[idx] || lastCalcInputData.value[idx] || {}) }
+    for (const [k, v] of Object.entries(row || {})) {
+      if (inputKeys.has(k) || !(k in base) || base[k] === '' || base[k] == null) {
+        // Only propagate keys that originated as cleaned inputs, or new user columns
+        if (inputKeys.has(k) || inputKeys.size === 0) {
+          base[k] = v
+        }
+      }
+    }
+    return base
+  })
+  cleanedData.value = nextCleaned
+  cleanedSourceData.value = nextCleaned.map((row, idx) => ({
+    ...(cleanedSourceData.value[idx] || {}),
+    ...row
+  }))
+  _lastCalcSignature.value = ''
+  debouncedSave(true)
+  calculateMetrics().catch(err => {
+    showSnackbar('Recalculation failed: ' + (err?.message || err), 'error', 6000)
+  })
+}
+
+function syncValuationExcelFromResults(calcArray) {
+  const inputs = lastCalcInputData.value.length
+    ? lastCalcInputData.value
+    : (cleanedData.value || [])
+  const calcs = Array.isArray(calcArray) && calcArray.length
+    ? calcArray
+    : (instrumentSummary.value?.rows || [])
+  valuationExcelData.value = buildValuationExcelRows(inputs, calcs, instrumentType.value)
 }
 
 function onExcelDataUpdate(data) {
@@ -4971,8 +4916,11 @@ const cleaningOperationsSummary = computed(() => {
 function applyCleaning() {
   if (!rawData.value.length) return
   try {
-    const tableDetection = autoDetectTable(rawData.value)
-    let data = JSON.parse(JSON.stringify(rawData.value))
+    const cleaningSource = cleanedSourceData.value.length
+      ? cleanedSourceData.value
+      : rawData.value
+    const tableDetection = autoDetectTable(cleaningSource)
+    let data = JSON.parse(JSON.stringify(cleaningSource))
     const operations = []
     const originalLength = data.length
     if (tableDetection.type === 'table') {
@@ -5117,15 +5065,10 @@ function applyCleaning() {
       for (let i = data.length - 2; i >= 0; i--) Object.keys(data[i]).forEach(k => { if (data[i][k] === undefined || data[i][k] === null || data[i][k] === '') { data[i][k] = data[i+1][k]; filled++ } })
       if (filled > 0) operations.push(`Filled ${filled} missing values backward`)
     }
+    cleanedSourceData.value = JSON.parse(JSON.stringify(data))
     if (excludedDetectedFields.value.size > 0) {
       const excludedCount = excludedDetectedFields.value.size
-      data = data.map(row => {
-        const newRow = {}
-        Object.keys(row).forEach(key => {
-          if (!excludedDetectedFields.value.has(key)) newRow[key] = row[key]
-        })
-        return newRow
-      })
+      data = filterExcludedFields(data)
       operations.push(`Removed ${excludedCount} excluded fields from data`)
     }
     cleanedData.value = data
@@ -5160,15 +5103,10 @@ async function continueAfterCleaning() {
   // filter was applied inside calculateMetrics but with the wrong key set
   // (post-normalization keys). Now it's applied uniformly, up-front, using
   // the RAW column names that excludedDetectedFields contains.
-  if (excludedDetectedFields.value.size > 0) {
-    cleanedData.value = cleanedData.value.map(row => {
-      const filteredRow = {}
-      for (const [key, value] of Object.entries(row)) {
-        if (!excludedDetectedFields.value.has(key)) filteredRow[key] = value
-      }
-      return filteredRow
-    })
+  if (!cleanedSourceData.value.length) {
+    cleanedSourceData.value = JSON.parse(JSON.stringify(cleanedData.value))
   }
+  cleanedData.value = filterExcludedFields(cleanedSourceData.value)
   activeTab.value = 'calculations'
   await nextTick()
   forceUpdate.value++
@@ -5209,16 +5147,6 @@ async function calculateMetrics() {
     return
   }
   isCalculating.value = true
-
-  // Load session-excluded fields (best-effort; the authoritative set lives
-  // on excludedDetectedFields from the popup toggles).
-  try {
-    const stored = sessionStorage.getItem('excluded_fields')
-    if (stored) {
-      const arr = JSON.parse(stored)
-      if (Array.isArray(arr)) arr.forEach(k => excludedDetectedFields.value.add(k))
-    }
-  } catch (e) { /* ignore */ }
 
   // FIX (root cause): pass cleanedData through almost verbatim.
   //  - Preserve original column names (spaces, mixed case) so the backend's
@@ -5301,6 +5229,9 @@ async function calculateMetrics() {
     isCalculating.value = false
     return
   }
+  const calculationInputSignature = getCalculationSignature(
+    dataForCalculation, excluded
+  )
 
   const normKey = (k) => String(k).toLowerCase().replace(/[-_\s().]+/g, '')
 
@@ -5454,6 +5385,18 @@ async function calculateMetrics() {
     // Intentionally do NOT return — fall through to the backend call.
   }
 
+  // Persist the exact payload that will be valued — this is the source of
+  // truth for the Calculations Excel view and for session reload.
+  lastCalcInputData.value = JSON.parse(JSON.stringify(dataForCalculation))
+  calculations.value = {}
+  allCalculations.value = {}
+  selectedCalculations.value = {}
+  instrumentSummary.value = { columns: [], rows: [] }
+  portfolioSummary.value = { columns: [], rows: [] }
+  valuationExcelData.value = buildValuationExcelRows(
+    lastCalcInputData.value, [], instrumentType.value
+  )
+
   try {
     const response = await api.calculationsAPI.executeByType(
       instrumentType.value,
@@ -5462,6 +5405,7 @@ async function calculateMetrics() {
         country: effectiveCountry.value,
         currency: effectiveCurrency.value,
         maturity: effectiveMaturity.value,
+        benchmark_yield: benchmarkYield.value,
         manualInputs: manualInputs.value,
         sheet_name: currentSheetName.value,
         section_id: selectedSectionId.value,
@@ -5473,9 +5417,15 @@ async function calculateMetrics() {
     if (response?.success) {
       if (response?.is_multi_instrument) {
         if (response?.instrument_summary) {
-          const mappedRows = response.instrument_summary.rows?.map(row => {
+          const summaryRows = response.instrument_summary.rows || []
+          const instrumentNames = getCalculatedInstrumentNames(summaryRows)
+          const mappedRows = summaryRows.map((row, index) => {
             const mapped = mapBackendFieldsToDisplayNames(row, instrumentType.value)
-            return filterToCalculatedFields(mapped, instrumentType.value)
+            return {
+              ...filterToCalculatedFields(mapped, instrumentType.value),
+              'Instrument Name': instrumentNames[index],
+              'Instrument Type': instrumentType.value
+            }
           }) || []
           const currentRowsWithWorkbook = mappedRows.map(row => ({
             ...row,
@@ -5495,10 +5445,10 @@ async function calculateMetrics() {
               session_id: activeSession.value.id,
               instrument_type: instrumentType.value,
               instrument_name: currentSheetName.value || instrumentType.value,
-              total_value: firstAgg.total_value ?? firstAgg.totalValue ?? 0,
-              face_value: firstAgg.total_face_value ?? firstAgg.face_value ?? 0,
-              count: firstAgg.instrument_count ?? firstAgg.instrumentCount ?? instrumentSummary.value.rows.length,
-              avg_rate: firstAgg.avg_rate ?? firstAgg.avgRate ?? 0,
+              total_value: firstAgg.total_value ?? firstAgg.totalValue ?? null,
+              face_value: firstAgg.total_face_value ?? firstAgg.face_value ?? null,
+              count: firstAgg.instrument_count ?? firstAgg.instrumentCount ?? countUniqueInstruments(lastCalcInputData.value),
+              avg_rate: firstAgg.avg_rate ?? firstAgg.avgRate ?? null,
               details: instrumentSummary.value.rows,
               detail_headers: instrumentSummary.value.columns || [],
               aggregate: firstAgg,
@@ -5511,11 +5461,19 @@ async function calculateMetrics() {
         if (firstInstType && results[firstInstType]) {
           calculations.value = results[firstInstType].data
           if (response?.aggregate) {
-            const agg = { ...response.aggregate }
+            const agg = reconcilePortfolioTotals(
+              response.aggregate,
+              results[firstInstType].data?.calculations,
+              instrumentType.value
+            )
             allCalculations.value = agg
             selectedCalculations.value = agg
           } else if (response?.data?.aggregates) {
-            const agg = { ...response.data.aggregates }
+            const agg = reconcilePortfolioTotals(
+              response.data.aggregates,
+              results[firstInstType].data?.calculations,
+              instrumentType.value
+            )
             allCalculations.value = agg
             selectedCalculations.value = agg
           } else {
@@ -5529,6 +5487,10 @@ async function calculateMetrics() {
         if (response.data?.field_detection) fieldDetectionResults.value = response.data.field_detection
         const backendInstrumentNames = response?.instrument_names || []
         const calcArray = response.data.calculations || []
+        const calculationInstrumentNames = getCalculatedInstrumentNames(
+          calcArray,
+          backendInstrumentNames
+        )
         const backendAggregates = response.data.aggregates || {}
         if (calcArray.length === 1) {
           const singleCalc = calcArray[0]
@@ -5538,6 +5500,10 @@ async function calculateMetrics() {
           if (response.data.fred) agg.fred = response.data.fred
           if (Array.isArray(singleCalc.display_derivations)) {
             agg.display_derivations = singleCalc.display_derivations
+          }
+          // Preserve derivations for the Calculation Breakdown popup
+          if (singleCalc.derivations) {
+            agg.derivations = singleCalc.derivations
           }
           const displayable = hasDisplayableCalculation(agg)
           const failedStatuses = ['cannot_calculate', 'error']
@@ -5550,6 +5516,7 @@ async function calculateMetrics() {
             const fullErrorMsg = formatCalculationFailureMessage(singleCalc)
             showSnackbar(`Calculation failed: ${fullErrorMsg}`, 'error')
             allCalculations.value = {
+              ...agg,
               status: 'error',
               message: fullErrorMsg,
               error: singleCalc.error,
@@ -5558,16 +5525,19 @@ async function calculateMetrics() {
               display_derivations: Array.isArray(singleCalc.display_derivations)
                 ? singleCalc.display_derivations
                 : (Array.isArray(agg.display_derivations) ? agg.display_derivations : []),
-              derivations: singleCalc.derivations || agg.derivations || null,
-              ...agg
+              derivations: singleCalc.derivations || agg.derivations || null
             }
             selectedCalculations.value = allCalculations.value
           } else {
+            // Preserve derivations in the success case
+            if (singleCalc.derivations) {
+              agg.derivations = singleCalc.derivations
+            }
             allCalculations.value = agg
             selectedCalculations.value = agg
           }
           const row = {
-            'Instrument Name': backendInstrumentNames[0] || singleCalc.instrument_name || 'Instrument',
+            'Instrument Name': calculationInstrumentNames[0] || currentSheetName.value || 'Instrument',
             'Instrument Type': instrumentType.value,
             ...singleCalc,
             'Worksheet': currentSheetName.value || 'Calculated'
@@ -5582,45 +5552,58 @@ async function calculateMetrics() {
           }
           Object.keys(filteredRowWithWorkbook).forEach(k => currentCols.add(k))
           instrumentSummary.value = { columns: dedupeColumns(Array.from(currentCols)), rows: [filteredRowWithWorkbook] }
-        } else if (calcArray.length === 0 && cleanedData.value.length > 0) {
-          console.warn('Backend returned empty calculations — running local fallback')
-          const rows = cleanedData.value.map((row, idx) => {
-            const enriched = { ...row, 'Instrument Name': row.InstrumentName || row['Instrument Name'] || currentSheetName.value || `Instrument ${idx + 1}` }
-            const result = runInstrumentCalculations(enriched, instrumentType.value)
-            return {
-              'Instrument Name': enriched['Instrument Name'],
-              'Instrument Type': instrumentType.value,
-              ...result,
-              'Worksheet': currentSheetName.value || 'Calculated',
-              'Workbook': currentWorkbookName.value || 'Unknown'
-            }
-          })
-          const cols = new Set()
-          rows.forEach(r => Object.keys(r).forEach(k => cols.add(k)))
-          instrumentSummary.value = { columns: dedupeColumns(Array.from(cols)), rows }
-          const agg = computeAggregate(rows)
-          agg.instrumentCount = rows.length
-          allCalculations.value = agg
-          selectedCalculations.value = agg
-          calculations.value = agg
-          showSnackbar('Calculated locally — backend returned empty result. Verify the /calculations/execute-by-type endpoint.', 'warning', 6000)
+        } else if (calcArray.length === 0) {
+          const errorMsg = 'The calculation service returned no instrument results for the cleaned inputs.'
+          allCalculations.value = { status: 'error', message: errorMsg }
+          selectedCalculations.value = allCalculations.value
+          showSnackbar(errorMsg, 'error', 7000)
         } else if (calcArray.length > 1) {
-          const agg = buildAggregatesFromBackend(backendAggregates, null, instrumentType.value)
-          agg.instrumentCount = agg.instrumentCount ?? calcArray.length
+          // Multi-instrument: KPI boxes MUST show portfolio totals/averages,
+          // never a single row's private fields. Pass rowCalc=null so the
+          // mapper reads only aggregates.
+          let agg = reconcilePortfolioTotals(
+            buildAggregatesFromBackend(backendAggregates, null, instrumentType.value),
+            calcArray,
+            instrumentType.value
+          )
+          const nonSuccessRows = calcArray.filter(calc => calc.status !== 'success')
+          const missingPrerequisites = nonSuccessRows.flatMap(calc =>
+            calc.missing_prerequisites || []
+          ).flat(Infinity).filter(Boolean)
+          agg.status = nonSuccessRows.length
+            ? 'partial'
+            : (response.data.status || 'cannot_calculate')
+          if (missingPrerequisites.length) {
+            agg.missing_prerequisites = [...new Set(missingPrerequisites)]
+          }
+          agg.instrumentCount = agg.instrumentCount ?? countUniqueInstruments(lastCalcInputData.value)
           if (response.data.fred) agg.fred = response.data.fred
-          // Attach the ordered breakdown array from the first calc row so
-          // the KPI popup can render it. For multiple rows each row also
-          // carries its own display_derivations in instrumentSummary.
           if (Array.isArray(calcArray[0]?.display_derivations)) {
             agg.display_derivations = calcArray[0].display_derivations
           }
-          if (!hasDisplayableCalculation(agg) && response.data.status === 'cannot_calculate') {
+          // Preserve derivations from the first calculation for the popup
+          if (calcArray[0]?.derivations) {
+            agg.derivations = calcArray[0].derivations
+          }
+          if (!hasDisplayableCalculation(agg)) {
             const firstFail = calcArray.find(c => c.status !== 'success') || calcArray[0]
             const fullErrorMsg = formatCalculationFailureMessage(firstFail)
             showSnackbar(`Calculation failed: ${fullErrorMsg}`, 'error')
-            allCalculations.value = { status: 'error', message: fullErrorMsg, ...agg }
+            allCalculations.value = {
+              ...agg,
+              status: 'error',
+              message: fullErrorMsg,
+              missing_fields: firstFail.missing_fields || [],
+              missing_prerequisites: firstFail.missing_prerequisites || [],
+              invalid_fields: firstFail.invalid_fields || [],
+              derivations: calcArray[0]?.derivations || agg.derivations || null
+            }
             selectedCalculations.value = allCalculations.value
           } else {
+            // Preserve derivations in the success case
+            if (calcArray[0]?.derivations) {
+              agg.derivations = calcArray[0].derivations
+            }
             allCalculations.value = agg
             selectedCalculations.value = agg
           }
@@ -5628,9 +5611,9 @@ async function calculateMetrics() {
             const mappedCalc = mapBackendFieldsToDisplayNames(calc, instrumentType.value)
             const filteredCalc = filterToCalculatedFields(mappedCalc, instrumentType.value)
             return {
-              'Instrument Name': backendInstrumentNames[idx] || calc.instrument_name || `Instrument ${idx + 1}`,
-              'Instrument Type': instrumentType.value,
               ...filteredCalc,
+              'Instrument Name': calculationInstrumentNames[idx] || `Instrument ${idx + 1}`,
+              'Instrument Type': instrumentType.value,
               'Worksheet': currentSheetName.value || 'Calculated'
             }
           })
@@ -5693,16 +5676,46 @@ async function calculateMetrics() {
                 session_id: activeSession.value?.id,
                 instrument_type: instrumentType.value,
                 instrument_name: currentSheetName.value || instrumentType.value,
-                total_value: agg?.totalValue ?? 0,
-                face_value: agg?.faceValue ?? 0,
-                count: agg?.instrumentCount ?? 0,
-                avg_rate: agg?.avgRate ?? 0,
+                total_value: agg?.totalValue ?? null,
+                face_value: agg?.faceValue ?? null,
+                count: agg?.instrumentCount ?? null,
+                avg_rate: agg?.avgRate ?? null,
                 details: portfolioSummary.value?.rows || [],
                 detail_headers: portfolioSummary.value?.columns || [],
                 aggregate: agg || {},
                 valuation_date: activeValuationDate.value || new Date().toISOString().split('T')[0]
               })
             } catch (saveError) { /* non-fatal */ }
+          }
+          // Save workflow with latest calculation data for report generation
+          if (activeSession.value?.id) {
+            await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
+              rawData: rawData.value,
+              cleanedData: cleanedData.value,
+              cleanedSourceData: cleanedSourceData.value,
+              calculations: calculations.value,
+              allCalculations: allCalculations.value,
+              selectedCalculations: selectedCalculations.value,
+              columnMapping: columnMapping.value,
+              worksheetStatus: worksheetStatus.value,
+              workbookSheets: workbookSheets.value,
+              instrumentSummary: instrumentSummary.value,
+              portfolioSummary: portfolioSummary.value,
+              completedInstrumentSummary: completedInstrumentSummary.value,
+              completedPortfolioSummary: completedPortfolioSummary.value,
+              yieldCurveData: yieldCurveData.value,
+              fredFilters: {
+                country: effectiveCountry.value,
+                currency: effectiveCurrency.value,
+                maturity: effectiveMaturity.value,
+                maturityMode: maturityMode.value === 'dateRange' ? 'date' : 'tenor',
+                fromDate: yieldCurveStartDate.value,
+                toDate: yieldCurveEndDate.value
+              },
+              uploadedFile: uploadedFile.value?.name || null,
+              originalDatasetId: originalDatasetId.value,
+              lastCalculationTimestamp: Date.now()
+            })
           }
         } else if (calcArray.length) {
           const rows = calcArray.map((calc, idx) => {
@@ -5776,10 +5789,10 @@ async function calculateMetrics() {
               session_id: activeSession.value?.id,
               instrument_type: instrumentType.value,
               instrument_name: currentSheetName.value || instrumentType.value,
-              total_value: allCalculations.value?.totalValue ?? 0,
-              face_value: allCalculations.value?.faceValue ?? 0,
-              count: allCalculations.value?.instrumentCount ?? 0,
-              avg_rate: allCalculations.value?.avgRate ?? 0,
+              total_value: allCalculations.value?.totalValue ?? null,
+              face_value: allCalculations.value?.faceValue ?? null,
+              count: allCalculations.value?.instrumentCount ?? null,
+              avg_rate: allCalculations.value?.avgRate ?? null,
               details: portfolioData.rows || [],
               detail_headers: portfolioData.columns || [],
               aggregate: allCalculations.value || {},
@@ -5810,6 +5823,7 @@ async function calculateMetrics() {
           await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
             rawData: rawData.value,
             cleanedData: cleanedData.value,
+            cleanedSourceData: cleanedSourceData.value,
             calculations: calculations.value,
             allCalculations: allCalculations.value,
             selectedCalculations: selectedCalculations.value,
@@ -5845,13 +5859,28 @@ async function calculateMetrics() {
             currentSheetName: currentSheetName.value,
             extractedValues: extractedValues.value,
             selectedCurrency: selectedCurrency.value,
-            customCurrency: customCurrency.value
+            customCurrency: customCurrency.value,
+            lastCalcInputData: lastCalcInputData.value,
+            valuationExcelData: valuationExcelData.value
           })
         }
+        // Reconcile Excel view with the exact inputs that were valued and
+        // the per-instrument calculation outputs (multi: one row per instrument).
+        syncValuationExcelFromResults(
+          Array.isArray(response?.data?.calculations) ? response.data.calculations : null
+        )
         saveSessionData()
       } else {
         const errorMsg = response?.message || response?.error || 'Unknown error'
+        allCalculations.value = {
+          status: 'error',
+          message: `Calculation request failed: ${errorMsg}`
+        }
+        selectedCalculations.value = allCalculations.value
         showSnackbar('Calculation failed: ' + errorMsg, 'error')
+        valuationExcelData.value = buildValuationExcelRows(
+          lastCalcInputData.value, [], instrumentType.value
+        )
       }
       isUsingDetectedFields.value = false
       try { await enrichCalculationsWithFred() } catch (fredError) { /* non-fatal */ }
@@ -5859,11 +5888,18 @@ async function calculateMetrics() {
       forceUpdate.value++
     }
   } catch (err) {
-    showSnackbar('Error calculating metrics: ' + (err.message || 'Unknown error'), 'error')
+    const errorMsg = err.message || 'Unknown error'
+    allCalculations.value = {
+      status: 'error',
+      message: `Calculation request failed: ${errorMsg}`
+    }
+    selectedCalculations.value = allCalculations.value
+    showSnackbar('Error calculating metrics: ' + errorMsg, 'error')
     isUsingDetectedFields.value = false
   } finally {
     isCalculating.value = false
-    markCalculationSignature()
+    _lastCalcSignature.value = calculationInputSignature
+    if (!calculationSignatureMatches()) _recalcQueued = true
     if (_recalcQueued) {
       _recalcQueued = false
       // Queue on a microtask so the current finally block unwinds
@@ -5905,6 +5941,7 @@ async function continueFromVisualizations() {
     await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, {
       rawData: rawData.value,
       cleanedData: cleanedData.value,
+      cleanedSourceData: cleanedSourceData.value,
       calculations: calculations.value,
       allCalculations: allCalculations.value,
       selectedCalculations: selectedCalculations.value,
@@ -5995,7 +6032,7 @@ async function fetchYieldCurve() {
     await renderYieldCurveChart()
     return
   }
-  const cacheKey = `${instrumentType.value}_${normalizedCountry}_${currency}_${maturityMode.value}_${maturityMode.value === 'maturity' ? maturity : from_date + '_' + to_date}`
+  const cacheKey = `${instrumentType.value}_${normalizedCountry}_${currency}_${maturityMode.value}_${maturity}_${maturityMode.value === 'maturity' ? '' : from_date + '_' + to_date}`
   const cached = yieldCurveCache.get(cacheKey)
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     yieldCurveData.value = cached.data
@@ -6014,10 +6051,10 @@ async function fetchYieldCurve() {
     const payload = {
       instrument_type: instrumentType.value,
       country: normalizedCountry,
-      currency: currency
+      currency,
+      maturity: maturityMode.value === 'dateRange' ? (maturity || '10Y') : maturity
     }
-    if (maturityMode.value === 'maturity') payload.maturity = maturity
-    else {
+    if (maturityMode.value === 'dateRange') {
       payload.from_date = from_date
       payload.to_date = to_date
     }
@@ -6029,29 +6066,37 @@ async function fetchYieldCurve() {
         const points = curveData.maturities.map((m, idx) => {
           const dateStr = curveData.dates?.[idx] || null
           const labelStr = curveData.labels?.[idx] || m
+          const rate = curveData.rates?.[idx] ?? null
+          const matNum = Number(m)
           
           if (isDateMode && dateStr) {
             return {
               x: new Date(dateStr).getTime(),
-              y: curveData.rates?.[idx] || 0,
-              maturity: null,
+              y: rate,
+              maturity: Number.isFinite(matNum) && matNum > 0 ? matNum : null,
               maturityLabel: dateStr,
-              rate: curveData.rates?.[idx] || 0,
+              rate,
               date: dateStr,
               isDate: true
             }
           }
-          const matNum = parseFloat(m) || 1.0
+          if (!Number.isFinite(matNum) || matNum <= 0) return null
           return {
             x: matNum,
-            y: curveData.rates?.[idx] || 0,
+            y: rate,
             maturity: matNum,
             maturityLabel: labelStr,
-            rate: curveData.rates?.[idx] || 0,
+            rate,
             date: dateStr,
             isDate: false
           }
-        })
+        }).filter(point =>
+          point &&
+          point.rate !== null &&
+          Number.isFinite(Number(point.rate)) &&
+          (!point.isDate && Number.isFinite(point.maturity) && point.maturity > 0 ||
+            point.isDate && Number.isFinite(point.x))
+        )
         yieldCurveCache.set(cacheKey, { data: points, timestamp: Date.now() })
         yieldCurveData.value = points
         chartSeriesLabel.value = `FRED Yield Curve (${curveData.country || normalizedCountry})`
@@ -6184,6 +6229,14 @@ async function renderYieldCurveChart() {
       }
     }
   }
+  if (!transformed.length) {
+    yieldCurveError.value = 'FRED returned no plottable yield curve points for the selected filters.'
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy()
+      chartInstanceRef.current = null
+    }
+    return
+  }
   const ctx = yieldCurveChart.value.getContext('2d')
   chartInstanceRef.current = new Chart(ctx, {
     type: 'line',
@@ -6227,6 +6280,31 @@ async function renderYieldCurveChart() {
 function onCustomCountryInput() { selectedCountryOption.value = '__custom__'; onFredFilterChange() }
 function onCustomCurrencyInput() { selectedCurrencyOption.value = '__custom__'; onFredFilterChange() }
 function onCustomMaturityInput() { selectedMaturityOption.value = '__custom__'; onFredFilterChange() }
+function onDateRangeChange() {
+  if (yieldCurveStartDate.value && yieldCurveEndDate.value) {
+    onFredFilterChange()
+  }
+}
+function switchToMaturityMode(mode) {
+  maturityMode.value = mode
+  if (mode === 'dateRange') {
+    // Set default date range if not already set
+    if (!yieldCurveStartDate.value || !yieldCurveEndDate.value) {
+      const today = new Date()
+      const oneYearAgo = new Date(today)
+      oneYearAgo.setFullYear(today.getFullYear() - 1)
+      yieldCurveEndDate.value = today.toISOString().split('T')[0]
+      yieldCurveStartDate.value = oneYearAgo.toISOString().split('T')[0]
+    }
+    // Trigger fetch if dates are set
+    if (yieldCurveStartDate.value && yieldCurveEndDate.value) {
+      fetchYieldCurve()
+    }
+  } else {
+    // Switch back to maturity mode - trigger fetch
+    fetchYieldCurve()
+  }
+}
 function onCountrySelectChange() {
   if (selectedCountryOption.value !== '__custom__') {
     fredFilters.value.country = selectedCountryOption.value
@@ -6268,6 +6346,8 @@ async function enrichCalculationsWithFred() {
     if (bench?.benchmark_rate != null) {
       const portfolio = parseFloat(portfolioAvgRate.value) || 0
       allCalculations.value.fred = { ...bench, spread_vs_market: +(portfolio - bench.benchmark_rate).toFixed(2) }
+      allCalculations.value.yieldCurveRate = bench.benchmark_rate
+      selectedCalculations.value.yieldCurveRate = bench.benchmark_rate
       calculations.value.fred = allCalculations.value.fred
     } else {
       if (allCalculations.value.fred) delete allCalculations.value.fred
@@ -6285,7 +6365,6 @@ async function loadSavedTemplates() {
   }
 }
 
-async function saveTemplates() {}
 
 async function saveCurrentMappingAsTemplate() {
   if (!newTemplateName.value || !newTemplateName.value.trim()) {
@@ -6493,6 +6572,7 @@ async function saveToSession() {
     const datasetSnapshot = {
       rawData: rawData.value,
       cleanedData: cleanedData.value,
+      cleanedSourceData: cleanedSourceData.value,
       calculations: calculations.value,
       allCalculations: allCalculations.value,
       selectedCalculations: selectedCalculations.value,
@@ -6531,6 +6611,7 @@ async function saveToSession() {
       sheetType: sheetType.value,
       rawData: rawData.value,
       cleanedData: cleanedData.value,
+      cleanedSourceData: cleanedSourceData.value,
       calculations: calculations.value,
       allCalculations: allCalculations.value,
       selectedCalculations: selectedCalculations.value,
@@ -6623,6 +6704,8 @@ function saveSessionData(explicitSave = false) {
     calculations: calculations.value,
     allCalculations: allCalculations.value,
     selectedCalculations: selectedCalculations.value,
+    lastCalcInputData: lastCalcInputData.value,
+    valuationExcelData: valuationExcelData.value,
     columnMapping: columnMapping.value,
     worksheetStatus: worksheetStatus.value,
     workbookSheets: workbookSheets.value,
@@ -6646,7 +6729,6 @@ function saveSessionData(explicitSave = false) {
     sessionSavedAt: sessionSavedAt.value || new Date().toISOString(),
     manualInputs: manualInputs.value,
     formulas: formulas.value,
-    isCalculating: isCalculating.value,
     autoDetectedFields: autoDetectedFields.value,
     autoDetectedFieldsWithMetadata: autoDetectedFieldsWithMetadata.value,
     autoDetectedAdditionalFields: autoDetectedAdditionalFields.value,
@@ -6697,9 +6779,20 @@ async function loadSavedData(force = false, prefetchedWorkflow = null) {
     if (wf) {
       rawData.value = wf.rawData || []
       cleanedData.value = wf.cleanedData || []
+      cleanedSourceData.value = Array.isArray(wf.cleanedSourceData)
+        ? wf.cleanedSourceData
+        : (wf.cleanedData || [])
       calculations.value = wf.calculations || {}
       allCalculations.value = wf.allCalculations || wf.calculations || {}
       selectedCalculations.value = wf.selectedCalculations || wf.calculations || {}
+      lastCalcInputData.value = Array.isArray(wf.lastCalcInputData) ? wf.lastCalcInputData : (wf.cleanedData || [])
+      valuationExcelData.value = Array.isArray(wf.valuationExcelData) && wf.valuationExcelData.length
+        ? wf.valuationExcelData
+        : buildValuationExcelRows(
+            lastCalcInputData.value,
+            wf.instrumentSummary?.rows || (Array.isArray(wf.calculations) ? wf.calculations : []),
+            instrumentType.value
+          )
       columnMapping.value = wf.columnMapping || {}
       worksheetStatus.value = wf.worksheetStatus || {}
       workbookSheets.value = wf.workbookSheets || []
@@ -6717,7 +6810,8 @@ async function loadSavedData(force = false, prefetchedWorkflow = null) {
       }
       manualInputs.value = wf.manualInputs || {}
       formulas.value = wf.formulas || {}
-      isCalculating.value = wf.isCalculating || false
+      // In-flight requests cannot be resumed after a page reload.
+      isCalculating.value = false
       if (wf.sheetType) sheetType.value = wf.sheetType
       if (wf.currentSheetName) currentSheetName.value = wf.currentSheetName
       if (wf.extractedValues && Object.keys(wf.extractedValues).length) extractedValues.value = wf.extractedValues
@@ -7239,6 +7333,34 @@ function showFormula(metricKey) {
       
       details.push({ label: 'Data Source', value: 'Cleaned Data', formula: 'Source' })
       
+      // Show cleaned inputs
+      const cleanedRow = cleanedData.value?.[0] || {}
+      if (Object.keys(cleanedRow).length > 0) {
+        details.push({ label: 'Cleaned Input Values', value: '—', formula: 'Original cleaned data' })
+
+        const relevantCleanedKeys = [
+          'principal', 'face_value', 'amount', 'interest_rate', 'discount_rate', 'yield',
+          'coupon_rate', 'price', 'purchase_price', 'term_days', 'days_to_maturity',
+          'valuation_date', 'maturity_date', 'issue_date', 'settlement_date', 'last_coupon_date',
+          'day_count_convention', 'frequency', 'coupon_frequency', 'currency'
+        ]
+
+        for (const key of relevantCleanedKeys) {
+          const displayKey = formatColumnHeader(key)
+          const val = cleanedRow[key] ?? cleanedRow[displayKey] ?? cleanedRow[toSnakeCase(key)]
+          if (val !== undefined && val !== null && val !== '') {
+            const displayVal = typeof val === 'number'
+              ? val.toLocaleString(undefined, { maximumFractionDigits: 6 })
+              : String(val)
+            details.push({
+              label: `  ${displayKey}`,
+              value: displayVal,
+              formula: 'Cleaned input'
+            })
+          }
+        }
+      }
+
       for (const [label, key] of [
         ['Valuation Date', 'valuation_date'],
         ['Maturity Date', 'maturity_date'],
@@ -7357,28 +7479,38 @@ function showFormula(metricKey) {
       const explanations = {
         'days_to_maturity': 'Number of days from valuation (or issue) date to maturity date',
         'years_to_maturity': 'Time to maturity expressed in years',
-        'interest_earned': 'Interest accrued over the investment period',
+        'interest_earned': 'Interest accrued over the investment period (simple interest)',
         'total_value': 'Principal plus accrued interest',
+        'maturity_value': 'Face value paid at maturity',
         'discount_yield': 'Annualized discount rate based on face value',
+        'discount_rate': 'Discount rate used to calculate purchase price (T-Bills)',
         'money_market_yield': 'Equivalent bond yield based on purchase price',
         'bond_equivalent_yield': 'Bond-equivalent yield using 365-day year',
         'holding_period_yield': 'Total return over the holding period',
         'effective_annual_yield': 'Effective annual rate with compounding',
         'effective_annual_rate': 'Effective annual rate with compounding',
         'present_value': 'Current value of future cash flows discounted',
-        'fair_value': 'Estimated market value considering risk factors',
+        'fair_value': 'Estimated market value (equals present value for most instruments)',
         'discount_amount': 'Difference between face value and purchase price',
         'purchase_price': 'Price paid to acquire the instrument',
+        'carrying_value': 'Book value including accrued interest (equals dirty price for bonds)',
+        'market_value': 'Fair market value (equals dirty price/current price)',
+        'clean_price': 'Quoted price excluding accrued interest (bonds)',
+        'dirty_price': 'Invoice price including accrued interest (bonds)',
         'annual_coupon': 'Total annual coupon payment',
         'coupon_payment': 'Coupon payment per period',
         'current_price': 'Present value of all future cash flows',
         'yield_to_maturity': 'Internal rate of return to maturity',
+        'investor_yield': 'Investor yield based on purchase price (T-Bills)',
         'current_yield': 'Annual coupon divided by current price',
-        'accrued_interest': 'Interest earned since last coupon date',
+        'accrued_interest': 'Interest earned since last coupon date (bonds) or since issue (money market)',
         'macaulay_duration': 'Weighted average time to receive cash flows',
         'modified_duration': 'Price sensitivity to yield changes',
         'convexity': 'Rate of change of duration with respect to yield',
-        'dv01': 'Dollar value of a 1 basis point yield change'
+        'dv01': 'Dollar value of a 1 basis point yield change',
+        'days_accrued': 'Days since last coupon date (bonds) or since issue (money market)',
+        'principal': 'Initial investment amount (money market)',
+        'face_value': 'Par value paid at maturity'
       }
       
       const explanation = explanations[toSnakeCase(metricKey)] || explanations[metricKey]
@@ -8198,9 +8330,12 @@ async function downloadCombinedReport(format) {
         alert('No active session found')
         return
       }
+      const reportHeaders = { 'Content-Type': 'application/json' }
+      const authToken = localStorage.getItem('auth_token')
+      if (authToken) reportHeaders.Authorization = `Bearer ${authToken}`
       const response = await fetch(`${API_BASE_URL}/api/report/generate-word`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: reportHeaders,
         body: JSON.stringify({
           session_id: sessionId,
           report_html: html,
@@ -8215,7 +8350,9 @@ async function downloadCombinedReport(format) {
         return
       }
       const downloadPath = `${API_BASE_URL}/api/report/download-word/${sessionId}`
-      const downloadResponse = await fetch(downloadPath)
+      const downloadResponse = await fetch(downloadPath, {
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}
+      })
       if (!downloadResponse.ok) {
         alert('Failed to download the generated report')
         return
@@ -8250,6 +8387,37 @@ watch([rawData, cleanedData], () => {
   debouncedSave()
 }, { deep: true })
 
+// Watch cleanedData to trigger recalculation when values change on Cleaning page
+// This ensures calculations always use the latest cleaned and included values
+let cleanDataChangeTimeout = null
+watch(cleanedData, () => {
+  if (activeTab.value === 'calculations' && hasCleanedData.value) {
+    if (isCalculating.value) {
+      _recalcQueued = true
+      return
+    }
+    if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
+    cleanDataChangeTimeout = setTimeout(async () => {
+      // Only recalculate if the data actually changed (signature mismatch)
+      if (!calculationSignatureMatches()) {
+        await calculateMetrics()
+      }
+    }, 500)
+  }
+}, { deep: true })
+
+watch(() => [...excludedDetectedFields.value], () => {
+  if (activeTab.value !== 'calculations' || !hasCleanedData.value) return
+  if (isCalculating.value) {
+    _recalcQueued = true
+    return
+  }
+  if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
+  cleanDataChangeTimeout = setTimeout(async () => {
+    if (!calculationSignatureMatches()) await calculateMetrics()
+  }, 0)
+})
+
 watch(() => activeTab.value, async (newTab) => {
   // FIX: previously the guard was `!allCalculations.value?.totalValue`.
   // A failed calc that set totalValue=0 (falsy) never re-triggered, so
@@ -8268,10 +8436,15 @@ watch(() => activeTab.value, async (newTab) => {
       !calculationSignatureMatches()
     if (needsRecalc) await calculateMetrics()
   }
-  if (newTab === 'visualizations' && hasCleanedData.value && !yieldCurveData.value.length && !yieldCurveLoading.value) {
-    if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
-    if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
-    await fetchYieldCurve()
+  if (newTab === 'visualizations' && hasCleanedData.value) {
+    await nextTick()
+    if (yieldCurveData.value.length) {
+      await renderYieldCurveChart()
+    } else if (!yieldCurveLoading.value) {
+      if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
+      if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
+      await fetchYieldCurve()
+    }
   }
 }, { deep: true })
 
@@ -8285,6 +8458,17 @@ watch(yieldCurveData, async () => {
     await renderYieldCurveChart()
   }
 }, { deep: true })
+
+watch(hasCleanedData, hasData => {
+  if (
+    hasData &&
+    activeTab.value !== 'visualizations' &&
+    !yieldCurveData.value.length &&
+    !yieldCurveLoading.value
+  ) {
+    void fetchYieldCurve()
+  }
+})
 
 let checkTimeout = null
 
@@ -8312,7 +8496,11 @@ async function checkAndReset() {
           if (savedTab && steps.value.some(s => s.tab === savedTab)) activeTab.value = savedTab
           else activeTab.value = 'upload'
         }
-        if (cleanedData.value.length && !allCalculations.value?.totalValue && !isCalculating.value) {
+        if (
+          cleanedData.value.length &&
+          !isCalculating.value &&
+          !hasDisplayableCalculation(allCalculations.value)
+        ) {
           await calculateMetrics()
         }
         if (activeTab.value === 'visualizations' && !yieldCurveData.value.length) {
@@ -8424,6 +8612,14 @@ onMounted(async () => {
   }
   if (Object.keys(allCalculations.value).length) enrichCalculationsWithFred()
   if (!allCalculations.value.totalValue && activeSession.value) await loadSavedData()
+  if (
+    activeSession.value &&
+    activeTab.value !== 'visualizations' &&
+    !yieldCurveData.value.length &&
+    !yieldCurveLoading.value
+  ) {
+    void fetchYieldCurve()
+  }
   debouncedSave()
 })
 
@@ -8431,6 +8627,13 @@ const handleSessionRestored = async (event) => {
   const { sessionId } = event.detail || {}
   if (sessionId && activeSession.value?.id === sessionId) {
     await loadSavedData(true)
+    if (
+      cleanedData.value.length &&
+      !isCalculating.value &&
+      !hasDisplayableCalculation(allCalculations.value)
+    ) {
+      await calculateMetrics()
+    }
     await refreshSessionVersionCount(sessionId)
     forceUpdate.value++
   }
@@ -8440,6 +8643,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('storage', () => checkAndReset())
   window.removeEventListener('session-restored', handleSessionRestored)
   if (saveTimeout) clearTimeout(saveTimeout)
+  if (chartInstanceRef.current) {
+    chartInstanceRef.current.destroy()
+    chartInstanceRef.current = null
+  }
   try { saveSessionData() } catch (err) { console.error('onBeforeUnmount save failed:', err) }
 })
 </script>
@@ -8707,6 +8914,7 @@ onBeforeUnmount(() => {
 .calculation-card:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
 .calc-name { font-size: 13px; color: #666; margin-bottom: 8px; }
 .calc-value { font-size: 22px; font-weight: 700; color: #0B2044; }
+.calc-unavailable-reason { color: #a45b00; font-size: 11px; line-height: 1.4; margin-top: 6px; }
 .calc-warning-banner { background: #fff3e0; border: 1px solid #ffcc80; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; color: #e65100; }
 .calc-warning-banner v-icon { flex-shrink: 0; }
 .comparison-card { background: linear-gradient(135deg, #f8f9ff, #eef2ff); border-radius: 12px; padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; gap: 15px; }

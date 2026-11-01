@@ -180,7 +180,6 @@ async function calculate() {
   finally { calculating.value = false }
 }
 
-// Visualize - draw yield curve (fetch from backend FRED endpoint)
 async function drawYieldCurve() {
   if (!yieldCanvas.value) return
   if (yieldChart) yieldChart.destroy()

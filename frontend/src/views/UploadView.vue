@@ -107,6 +107,7 @@
         :show-mapping-controls="true"
         :column-mapping="columnMapping"
         :available-file-columns="fileColumns"
+        :required-columns="requiredFieldNames"
         :mapping-validation="mappingValidation"
         :suggested-mappings="suggestedMapping"
         @data-update="onRawExcelUpdate"

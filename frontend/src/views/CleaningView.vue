@@ -239,6 +239,7 @@ const route = useRoute()
 
 const dataset = ref(null)
 const originalDataset = ref(null)
+const cleanedSourceData = ref([])
 const uploadId = ref(null)
 const results = ref(null)
 const isCleaning = ref(false)
@@ -330,15 +331,18 @@ function toggleAllAdditional() {
 }
 
 function persistExclusions() {
+  const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
+  const type = normalizeInstrumentType(dataset.value?.instrumentType)
   try {
-    sessionStorage.setItem('excluded_fields', JSON.stringify([...excludedFields.value]))
+    if (sid) {
+      sessionStorage.setItem(`excluded_fields:${sid}:${type}`, JSON.stringify([...excludedFields.value]))
+    }
   } catch (e) { /* ignore */ }
   try {
-    const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
     if (sid) {
-      sessionManager.getInstrumentWorkflow(sid, normalizeInstrumentType(dataset.value?.instrumentType))
+      sessionManager.getInstrumentWorkflow(sid, type)
         .then(wf => {
-          if (wf) sessionManager.saveInstrumentWorkflow(sid, normalizeInstrumentType(dataset.value?.instrumentType), {
+          if (wf) sessionManager.saveInstrumentWorkflow(sid, type, {
             ...wf,
             excludedDetectedFields: [...excludedFields.value]
           })
@@ -349,12 +353,15 @@ function persistExclusions() {
 }
 
 function rebuildCleanedFromExclusions() {
-  const original = originalDataset.value?.data || dataset.value?.data || []
-  if (!original.length) return
-  const filtered = original.map(row => {
+  if (!cleanedSourceData.value.length) return
+  const filtered = cleanedSourceData.value.map(row => {
     const newRow = {}
     for (const [k, v] of Object.entries(row)) {
-      if (!excludedFields.value.has(k)) newRow[k] = v
+      const normalizedKey = String(k).toLowerCase().replace(/[-_\s().]+/g, '')
+      const isExcluded = [...excludedFields.value].some(excluded =>
+        normalizedKey === String(excluded).toLowerCase().replace(/[-_\s().]+/g, '')
+      )
+      if (!isExcluded) newRow[k] = v
     }
     return newRow
   })
@@ -363,37 +370,41 @@ function rebuildCleanedFromExclusions() {
 }
 
 async function loadDetectedValues() {
+  const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
+  const type = normalizeInstrumentType(dataset.value?.instrumentType)
+  let workflowLoaded = false
   try {
-    const stored =
-      sessionStorage.getItem('detectedValues') ||
-      sessionStorage.getItem('detected_values') ||
-      sessionStorage.getItem('extracted_values')
-    if (stored) detectedValues.value = JSON.parse(stored)
-    const storedExcluded = sessionStorage.getItem('excluded_fields')
-    if (storedExcluded) excludedFields.value = new Set(JSON.parse(storedExcluded))
-  } catch (e) { detectedValues.value = {} }
-
-  if (Object.keys(detectedValues.value).length) return
-
-  try {
-    const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
-    if (!sid) return
-    for (const key of ['money-market', 'bonds', 'tbills']) {
-      const wf = await sessionManager.getInstrumentWorkflow(sid, key)
-      if (!wf) continue
-      const fields =
-        (wf.autoDetectedFields && Object.keys(wf.autoDetectedFields).length && wf.autoDetectedFields) ||
-        (wf.extractedValues && Object.keys(wf.extractedValues).length && wf.extractedValues) ||
-        null
-      if (fields) {
-        detectedValues.value = { ...fields }
+    if (sid) {
+      const wf = await sessionManager.getInstrumentWorkflow(sid, type)
+      if (wf) {
+        workflowLoaded = true
+        const fields =
+          (wf.autoDetectedFields && Object.keys(wf.autoDetectedFields).length && wf.autoDetectedFields) ||
+          (wf.extractedValues && Object.keys(wf.extractedValues).length && wf.extractedValues) ||
+          null
+        if (fields) detectedValues.value = { ...fields }
         if (Array.isArray(wf.excludedDetectedFields)) {
           excludedFields.value = new Set(wf.excludedDetectedFields)
         }
-        return
       }
     }
   } catch (e) { console.warn('read from session workflow failed', e) }
+
+  if (workflowLoaded) return
+
+  try {
+    if (!sid) {
+      const stored =
+        sessionStorage.getItem('detectedValues') ||
+        sessionStorage.getItem('detected_values') ||
+        sessionStorage.getItem('extracted_values')
+      if (stored) detectedValues.value = JSON.parse(stored)
+    }
+    const storedExcluded = sid
+      ? sessionStorage.getItem(`excluded_fields:${sid}:${type}`)
+      : null
+    if (storedExcluded) excludedFields.value = new Set(JSON.parse(storedExcluded))
+  } catch (e) { detectedValues.value = {} }
 }
 
 const kpiStats = computed(() => {
@@ -431,6 +442,7 @@ async function loadData() {
       sheetNames: last.headers || ['Sheet1']
     }
     originalDataset.value = JSON.parse(JSON.stringify(dataset.value))
+    cleanedSourceData.value = []
     uploadId.value = last.id
     sheetNames.value = last.headers || ['Sheet1']
     selectedSheet.value = sheetNames.value[0]
@@ -449,6 +461,7 @@ function resetOptions() {
 }
 function clearResults() {
   results.value = null
+  cleanedSourceData.value = []
   if (originalDataset.value) dataset.value = JSON.parse(JSON.stringify(originalDataset.value))
   alert('Results cleared')
 }
@@ -469,21 +482,33 @@ async function deleteData() {
 
 function handleCleanedUpdate(newData) {
   if (results.value) {
-    results.value.cleanedData = newData
-    dataset.value.data = newData
+    cleanedSourceData.value = newData.map((row, index) => ({
+      ...(cleanedSourceData.value[index] || {}),
+      ...row
+    }))
     const excludedNow = new Set(excludedFields.value)
-    const originalCols = Object.keys(originalDataset.value?.data?.[0] || {})
+    const originalCols = Object.keys(cleanedSourceData.value[0] || {})
     const currentCols = new Set(Object.keys(newData[0] || {}))
     for (const col of originalCols) {
       if (!currentCols.has(col)) excludedNow.add(col)
     }
     excludedFields.value = excludedNow
     persistExclusions()
+    rebuildCleanedFromExclusions()
   }
 }
 
 function handleDataUpdate(newData) {
-  if (dataset.value) dataset.value.data = newData
+  if (!dataset.value) return
+  if (results.value) {
+    cleanedSourceData.value = newData.map((row, index) => ({
+      ...(cleanedSourceData.value[index] || {}),
+      ...row
+    }))
+    rebuildCleanedFromExclusions()
+  } else {
+    dataset.value.data = newData
+  }
 }
 
 async function startCleaning() {
@@ -494,17 +519,22 @@ async function startCleaning() {
     cleaningOptions.value.forEach(opt => { if (opt.value) options[opt.key] = true })
     if (options.formatDates) options.dateFormat = selectedDateFormat.value
 
-    const response = await dataAPI.clean(dataset.value.data, options)
+    const inputData = results.value && cleanedSourceData.value.length
+      ? cleanedSourceData.value
+      : dataset.value.data
+    const response = await dataAPI.clean(inputData, options)
     if (response.success) {
-      let cleaned = response.data
+      cleanedSourceData.value = response.data
+      let cleaned = cleanedSourceData.value
       if (excludedFields.value.size > 0) {
-        cleaned = cleaned.map(row => {
-          const newRow = {}
-          for (const [k, v] of Object.entries(row)) {
-            if (!excludedFields.value.has(k)) newRow[k] = v
-          }
-          return newRow
-        })
+        cleaned = cleaned.map(row => Object.fromEntries(
+          Object.entries(row).filter(([key]) => {
+            const normalizedKey = String(key).toLowerCase().replace(/[-_\s().]+/g, '')
+            return ![...excludedFields.value].some(excluded =>
+              normalizedKey === String(excluded).toLowerCase().replace(/[-_\s().]+/g, '')
+            )
+          })
+        ))
       }
       results.value = {
         originalRows: dataset.value.data.length,
@@ -553,13 +583,58 @@ function normalizeInstrumentType(raw) {
   return 'money-market'
 }
 
+let _isHandingOff = false
 async function goToCalculations() {
+  if (_isHandingOff) return
   if (!results.value) return alert('Please clean data first')
   const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
   if (!sid) return alert('No active session. Open Dashboard first.')
+  _isHandingOff = true
 
   const rawType = dataset.value?.instrumentType
   const normalizedType = normalizeInstrumentType(rawType)
+
+  // Map excluded *normalized* field names back to the actual column
+  // headers present in the cleaned data. The exclusion set holds keys
+  // like `face_value`; the row dicts hold `Face Value`. Without this
+  // translation, the downstream exclusion filter in calculateMetrics()
+  // matches nothing and silently no-ops.
+  const ALIAS_TO_HEADER = {
+    face_value: ['Face Value', 'FaceValue', 'face_value', 'faceValue', 'Par Value', 'Principal'],
+    principal: ['Principal', 'principal', 'Face Value', 'Amount'],
+    interest_rate: ['Interest Rate', 'interest_rate', 'interestRate', 'Rate'],
+    coupon_rate: ['Coupon Rate', 'coupon_rate', 'couponRate', 'Coupon'],
+    discount_rate: ['Discount Rate', 'discount_rate', 'discountRate', 'Discount'],
+    days_to_maturity: ['Days to Maturity', 'days_to_maturity', 'daysToMaturity', 'Term', 'Term Days'],
+    term_days: ['Term Days', 'term_days', 'termDays', 'Days to Maturity', 'Term'],
+    issue_date: ['Issue Date', 'issue_date', 'issueDate', 'Start Date'],
+    maturity_date: ['Maturity Date', 'maturity_date', 'maturityDate', 'End Date'],
+    valuation_date: ['Valuation Date', 'valuation_date', 'valuationDate', 'As of Date'],
+    yield: ['Yield', 'yield', 'Yield to Maturity', 'YTM'],
+    yield_to_maturity: ['Yield to Maturity', 'yield_to_maturity', 'yieldToMaturity', 'YTM', 'Yield'],
+    coupon_frequency: ['Coupon Frequency', 'coupon_frequency', 'couponFrequency', 'Frequency'],
+    purchase_price: ['Purchase Price', 'purchase_price', 'purchasePrice', 'Price'],
+    current_price: ['Current Price', 'current_price', 'currentPrice', 'Price'],
+    instrument_name: ['Instrument Name', 'instrument_name', 'instrumentName', 'Name'],
+  }
+
+  const cleanedHeaders = new Set(
+    Object.keys((results.value.cleanedData?.[0]) || {})
+  )
+  const translatedExclusions = new Set()
+  for (const excludedKey of excludedFields.value) {
+    const candidates = ALIAS_TO_HEADER[excludedKey]
+    if (!candidates) {
+      // If it's already a raw header present in the cleaned data, keep it.
+      if (cleanedHeaders.has(excludedKey)) translatedExclusions.add(excludedKey)
+      continue
+    }
+    // Only add aliases that actually exist as columns; adding all
+    // aliases would try to remove columns that aren't in the sheet.
+    for (const header of candidates) {
+      if (cleanedHeaders.has(header)) translatedExclusions.add(header)
+    }
+  }
 
   try {
     await markStepCompleted(String(sid), 'cleaning')
@@ -568,9 +643,10 @@ async function goToCalculations() {
     await sessionManager.saveInstrumentWorkflow(sid, normalizedType, {
       ...wf,
       cleanedData: results.value.cleanedData,
-      rawData: dataset.value.data,
+      cleanedSourceData: cleanedSourceData.value,
+      rawData: originalDataset.value?.data || dataset.value.data,
       instrumentType: normalizedType,
-      sheetType: 'multi',
+      sheetType: wf.sheetType || 'multi',
       calculations: {},
       allCalculations: {},
       selectedCalculations: {},
@@ -578,13 +654,19 @@ async function goToCalculations() {
       portfolioSummary: { columns: [], rows: [] },
       completedInstrumentSummary: wf.completedInstrumentSummary || { columns: [], rows: [] },
       completedPortfolioSummary: wf.completedPortfolioSummary || { columns: [], rows: [] },
-      excludedDetectedFields: [...excludedFields.value],
+      // Store BOTH forms so the exclusion filter in calculateMetrics
+      // (which iterates raw row keys) finds the right columns.
+      excludedDetectedFields: Array.from(new Set([
+        ...excludedFields.value,
+        ...translatedExclusions
+      ])),
       last_tab: 'calculations',
       sessionSavedAt: new Date().toISOString()
     })
   } catch (e) {
     console.warn('Failed to persist cleaned data to session workflow:', e)
     alert('Could not save cleaned data to session. Check the browser console.')
+    _isHandingOff = false
     return
   }
 
@@ -593,11 +675,12 @@ async function goToCalculations() {
     path: `/instrument/${normalizedType}`,
     query: { session: sid, tab: 'calculations' }
   })
+  _isHandingOff = false
 }
 
-onMounted(() => {
-  loadDetectedValues()
-  if (route.query.dataset_id) loadData()
+onMounted(async () => {
+  if (route.query.dataset_id) await loadData()
+  await loadDetectedValues()
 })
 </script>
 

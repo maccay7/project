@@ -334,8 +334,14 @@ import { useAuthStore } from '@/stores/auth'
 const router = useRouter()
 const authStore = useAuthStore()
 
-const STORAGE_KEY = 'dura_sessions'
-const ACTIVE_KEY = 'dura_active_session_id'
+function dashboardActiveKey() {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || 'null')
+    if (user?.id != null) return `dura_active_session_id_${user.id}`
+  } catch { /* ignore */ }
+  return 'dura_active_session_id'
+}
+const ACTIVE_KEY = dashboardActiveKey()
 
 // ---- Reactive state ----
 const sessions = ref([])
@@ -414,7 +420,6 @@ const activeInstrumentCount = computed(() => {
   return activeSession.value.instrument_count || 0
 })
 
-// ---- Helper to count unique instrument types from versions ----
 function getUniqueInstrumentCount(versions) {
   if (!versions || !versions.length) return 0
   const types = new Set()
@@ -439,16 +444,11 @@ const filteredVersions = computed(() => {
 // ---- Helper functions ----
 const formatDate = d => d ? new Date(d).toLocaleString() : ''
 const formatVersionTime = t => new Date(t).toLocaleString()
-const formatCurrency = (val) => {
-  if (!val) return '$0'
-  return '$' + Number(val).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
-}
 
 function getInstrumentCount(session) {
   return session.instrument_count || 0
 }
 
-// ---- Update session instrument count in backend ----
 async function updateSessionInstrumentCount(sessionId, count) {
   try {
     await sessionManager.updateSession(sessionId, { instrument_count: count })
@@ -465,7 +465,6 @@ async function updateSessionInstrumentCount(sessionId, count) {
   }
 }
 
-// ---- Refresh a single session (fetch latest data, versions, and update count) ----
 async function refreshSession(sessionId) {
   try {
     const session = await sessionManager.getSession(sessionId)
@@ -497,9 +496,12 @@ async function refreshSession(sessionId) {
       console.warn('Failed to fetch versions for session:', sessionId, e)
     }
 
-    const newCount = getUniqueInstrumentCount(versions)
+    const versionInstrumentCount = getUniqueInstrumentCount(versions)
+    const existingCount = Number(session.instrument_count || 0)
+    const newCount = Math.max(existingCount, versionInstrumentCount)
 
-    // Build enriched session object
+    // Build enriched session object. Do not replace a stored instrument
+    // count with 0 just because version history is empty.
     const enriched = {
       ...session,
       versions: versions,
@@ -519,8 +521,7 @@ async function refreshSession(sessionId) {
     }
 
     // Persist the instrument count if it changed (or if it was previously missing)
-    const storedCount = session.instrument_count || 0
-    if (storedCount !== newCount) {
+    if (existingCount !== newCount) {
       await updateSessionInstrumentCount(sessionId, newCount)
     }
 
@@ -534,29 +535,34 @@ async function refreshSession(sessionId) {
 async function refreshDashboard() {
   try {
     const backendSessions = await sessionManager.getAllSessions()
-    // We will not fetch versions for all sessions here, only when they are loaded/clicked.
-    // But we should preserve any previously loaded versions and counts.
-    // For now, just merge with existing data.
     const existingMap = {}
-    sessions.value.forEach(s => { existingMap[s.id] = s })
-    const newSessions = backendSessions.map(s => {
-      const existing = existingMap[s.id]
+    sessions.value.forEach(s => { existingMap[String(s.id)] = s })
+    const incoming = Array.isArray(backendSessions) ? backendSessions : []
+    const newSessions = incoming.map(s => {
+      const existing = existingMap[String(s.id)]
       return {
         ...s,
+        id: String(s.id || s.session_id),
         versions: existing?.versions || [],
-        version_count: s.version_count || 0,
-        instrument_count: s.instrument_count || 0 // use stored count, will be updated on load
+        version_count: s.version_count || existing?.version_count || 0,
+        instrument_count: s.instrument_count || existing?.instrument_count || 0
       }
     })
+    // If the server returned nothing, keep whatever is already on screen
+    // (newly created session) instead of flashing "No sessions yet".
+    if (!newSessions.length && sessions.value.length) {
+      return
+    }
     sessions.value = newSessions
 
     if (activeSession.value) {
-      const updated = sessions.value.find(s => s.id === activeSession.value.id)
+      const updated = sessions.value.find(s => String(s.id) === String(activeSession.value.id))
       if (updated) {
         activeSession.value = updated
-      } else {
-        activeSession.value = null
-        localStorage.removeItem(ACTIVE_KEY)
+      }
+      // Keep the active session visible even if list omitted it.
+      else if (activeSession.value.id) {
+        sessions.value = [activeSession.value, ...sessions.value]
       }
     }
   } catch (error) {
@@ -564,7 +570,6 @@ async function refreshDashboard() {
   }
 }
 
-// ---- Load an existing session (with versions) ----
 async function loadExistingSession(sessionId) {
   try {
     // First, refresh the session to get latest versions and count
@@ -584,14 +589,25 @@ async function createNewSession() {
   if (!newSessionName.value.trim()) return
   try {
     const created = await sessionManager.createSession(newSessionName.value.trim())
+    const createdId = String(created.id)
+    // Show the session immediately — do not wait for a round-trip that can
+    // return an empty list and wipe the UI.
+    if (!sessions.value.some(s => String(s.id) === createdId)) {
+      sessions.value = [created, ...sessions.value]
+    }
+    activeSession.value = created
+    sessionManager.setActiveSession(created)
+    localStorage.setItem(ACTIVE_KEY, createdId)
+    newSessionName.value = ''
     await refreshDashboard()
-    const fresh = sessions.value.find(s => s.id === created.id)
+    const fresh = sessions.value.find(s => String(s.id) === createdId)
     if (fresh) {
       activeSession.value = fresh
       sessionManager.setActiveSession(fresh)
       localStorage.setItem(ACTIVE_KEY, fresh.id)
+    } else if (!sessions.value.some(s => String(s.id) === createdId)) {
+      sessions.value = [created, ...sessions.value]
     }
-    newSessionName.value = ''
   } catch (err) {
     showSnackbar('Failed to create session: ' + err.message, 'error')
   }
@@ -818,7 +834,6 @@ async function handleLogout() {
   router.push('/login')
 }
 
-// ---- Event handler for session updates ----
 const handleSessionUpdate = async (event) => {
   const { sessionId, versionCount, instrumentCount } = event.detail || {}
   if (sessionId) {
@@ -854,9 +869,14 @@ onMounted(async () => {
   await refreshDashboard()
 
   let activeId = localStorage.getItem(ACTIVE_KEY)
+    || localStorage.getItem('dura_active_session_id')
+    || sessionManager.getActiveSessionId()
   if (activeId) {
     // Load the active session with versions
     await loadExistingSession(activeId)
+    if (activeSession.value && !sessions.value.some(s => String(s.id) === String(activeId))) {
+      sessions.value = [activeSession.value, ...sessions.value]
+    }
   }
 
   if (!activeSession.value && sessions.value.length) {

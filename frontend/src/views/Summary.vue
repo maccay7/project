@@ -38,35 +38,35 @@
           <div class="kpi-card simple-kpi">
             <div class="kpi-top-bar"></div>
             <div class="kpi-info">
-              <div class="kpi-value">{{ analyticsData['Number of Records'] || '0' }}</div>
+              <div class="kpi-value">{{ analyticsData['Number of Records'] ?? '0' }}</div>
               <div class="kpi-title">Number of Instruments</div>
             </div>
           </div>
           <div class="kpi-card simple-kpi">
             <div class="kpi-top-bar"></div>
             <div class="kpi-info">
-              <div class="kpi-value">${{ analyticsData['Total Face Value'] || '0.00' }}</div>
+              <div class="kpi-value">{{ analyticsData['Total Face Value'] != null ? '$' + analyticsData['Total Face Value'] : '—' }}</div>
               <div class="kpi-title">Total Face Value</div>
             </div>
           </div>
           <div class="kpi-card simple-kpi">
             <div class="kpi-top-bar"></div>
             <div class="kpi-info">
-              <div class="kpi-value">{{ analyticsData['Weighted Average Yield'] || '0.00' }}%</div>
+              <div class="kpi-value">{{ analyticsData['Weighted Average Yield'] ?? '—' }}{{ analyticsData['Weighted Average Yield'] != null ? '%' : '' }}</div>
               <div class="kpi-title">Weighted Avg Yield</div>
             </div>
           </div>
           <div class="kpi-card simple-kpi">
             <div class="kpi-top-bar"></div>
             <div class="kpi-info">
-              <div class="kpi-value">{{ analyticsData['Weighted Average Maturity'] || '0.00' }}</div>
+              <div class="kpi-value">{{ analyticsData['Weighted Average Maturity'] ?? '—' }}</div>
               <div class="kpi-title">Weighted Avg Maturity</div>
             </div>
           </div>
           <div class="kpi-card simple-kpi">
             <div class="kpi-top-bar"></div>
             <div class="kpi-info">
-              <div class="kpi-value">{{ analyticsData['Average Rate'] || '0.00' }}%</div>
+              <div class="kpi-value">{{ analyticsData['Average Rate'] ?? '—' }}{{ analyticsData['Average Rate'] != null ? '%' : '' }}</div>
               <div class="kpi-title">Average Rate</div>
             </div>
           </div>
@@ -87,7 +87,7 @@
           <div class="card-body">
             <div class="stat-row highlight">
               <span>Total value</span>
-              <strong>${{ formatNumber(inst.value) }}</strong>
+              <strong>{{ inst.value !== null ? '$' + formatNumber(inst.value) : '—' }}</strong>
             </div>
             <div class="stat-row">
               <span>Count</span>
@@ -251,9 +251,9 @@
                   <tbody>
                     <tr v-for="inst in sortedInstruments" :key="inst.id">
                       <td><strong>{{ inst.name }}</strong></td>
-                      <td>${{ formatNumber(inst.faceValue || 0) }}</td>
-                      <td>${{ formatNumber(inst.value) }}</td>
-                      <td>${{ formatNumber(inst.difference || 0) }}</td>
+                      <td>{{ inst.faceValue !== null ? '$' + formatNumber(inst.faceValue) : '—' }}</td>
+                      <td>{{ inst.value !== null ? '$' + formatNumber(inst.value) : '—' }}</td>
+                      <td>{{ inst.difference !== null ? '$' + formatNumber(inst.difference) : '—' }}</td>
                       <td>{{ inst.count }}</td>
                       <td>{{ inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate : '—' }}</td>
                       <td>{{ inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench : '—' }}</td>
@@ -326,8 +326,8 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import sessionManager from '@/services/sessionManager.js'
-import api from '@/services/api.js'
 import * as XLSX from 'xlsx'
+import { buildAggregatesFromBackend, countUniqueInstruments } from '@/utils/calculationDisplay.js'
 
 const router = useRouter()
 const activeSession = ref(null)
@@ -407,35 +407,31 @@ const activeValuationDate = computed(() => {
 })
 
 const analyticsData = computed(() => {
-  const allDetails = instrumentsWithDetails.value.flatMap(inst => inst.details || [])
-  if (!allDetails.length) return {}
-
-  const getValue = (row) => parseFloat(row['Total Value'] ?? row['total_value'] ?? row['Calculated Value'] ?? row['calculated_value'] ?? row['Value'] ?? row['value'] ?? 0)
-  const getYield = (row) => parseFloat(row['Yield'] ?? row['yield'] ?? row['Rate'] ?? row['rate'] ?? row['Interest Rate'] ?? row['interest_rate'] ?? row['Coupon Rate'] ?? row['coupon_rate'] ?? row['Discount Rate'] ?? row['discount_rate'] ?? 0)
-  const getMaturity = (row) => parseFloat(row['Days to Maturity'] ?? row['days_to_maturity'] ?? row['Term'] ?? row['term'] ?? row['Maturity'] ?? row['maturity'] ?? 0)
-
-  const values = allDetails.map(getValue).filter(v => !isNaN(v) && v > 0)
-  const yields = allDetails.map(getYield).filter(v => !isNaN(v))
-  const maturities = allDetails.map(getMaturity).filter(v => !isNaN(v) && v > 0)
-
+  if (!instruments.value.length) return {}
+  const rateMetrics = instruments.value
+    .map(inst => ({ rate: inst.weightedAvgRate ?? inst.avgRate, weight: inst.faceValue || inst.count || 0 }))
+    .filter(item => Number.isFinite(item.rate) && item.weight > 0)
+  const maturityMetrics = instruments.value
+    .map(inst => ({ maturity: inst.avgMaturity, weight: inst.faceValue || inst.count || 0 }))
+    .filter(item => Number.isFinite(item.maturity) && item.weight > 0)
   const stats = {}
-  if (values.length) {
-    const sum = values.reduce((a, b) => a + b, 0)
-    const avgRate = yields.length ? yields.reduce((a,b) => a+b, 0) / yields.length : null
-    stats['Number of Records'] = allDetails.length
-    stats['Total Face Value'] = sum
-    if (yields.length && values.length) {
-      const weightedYield = yields.reduce((a, b, i) => a + b * values[i], 0) / (values.reduce((a, b) => a + b, 1) || 1)
-      stats['Weighted Average Yield'] = weightedYield
-    }
-    if (maturities.length && values.length) {
-      const weightedMaturity = maturities.reduce((a, b, i) => a + b * values[i], 0) / (values.reduce((a, b) => a + b, 1) || 1)
-      stats['Weighted Average Maturity'] = weightedMaturity
-    }
-    if (avgRate !== null) stats['Average Rate'] = avgRate
+  stats['Number of Records'] = totalInstruments.value
+  stats['Total Face Value'] = totalFaceValue.value
+  if (rateMetrics.length) {
+    const weight = rateMetrics.reduce((sum, item) => sum + item.weight, 0)
+    stats['Weighted Average Yield'] = rateMetrics.reduce((sum, item) => sum + item.rate * item.weight, 0) / weight
+  }
+  if (maturityMetrics.length) {
+    const weight = maturityMetrics.reduce((sum, item) => sum + item.weight, 0)
+    stats['Weighted Average Maturity'] = maturityMetrics.reduce((sum, item) => sum + item.maturity * item.weight, 0) / weight
+  }
+  const averageRates = instruments.value.filter(inst => Number.isFinite(inst.avgRate) && inst.count > 0)
+  if (averageRates.length) {
+    const count = averageRates.reduce((sum, inst) => sum + inst.count, 0)
+    stats['Average Rate'] = averageRates.reduce((sum, inst) => sum + inst.avgRate * inst.count, 0) / count
   }
   for (const [k, v] of Object.entries(stats)) {
-    if (typeof v === 'number') {
+    if (typeof v === 'number' && Number.isFinite(v)) {
       const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(k.toLowerCase())
       stats[k] = isTimeField
         ? Math.round(v).toLocaleString()
@@ -445,15 +441,26 @@ const analyticsData = computed(() => {
   return stats
 })
 
-const totalFaceValue = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.faceValue || 0), 0))
-const grandTotal = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.value || 0), 0))
+const totalFaceValue = computed(() => {
+  const values = instruments.value.map(inst => inst.faceValue).filter(Number.isFinite)
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : null
+})
+const grandTotal = computed(() => {
+  const values = instruments.value.map(inst => inst.value).filter(Number.isFinite)
+  return values.length ? values.reduce((sum, value) => sum + value, 0) : null
+})
+const portfolioDifference = computed(() =>
+  totalFaceValue.value !== null && grandTotal.value !== null
+    ? totalFaceValue.value - grandTotal.value
+    : null
+)
 const totalInstruments = computed(() => instruments.value.reduce((sum, inst) => sum + (inst.count || 0), 0))
 const completedCount = computed(() => instruments.value.filter(i => i.completed).length)
 
 const extendedKpis = computed(() => [
   { label: 'Total Face Value', value: '$' + formatNumber(totalFaceValue.value), icon: 'mdi-cash', gradient: 'linear-gradient(135deg, #0B2044, #1a3a6e)' },
   { label: 'Total Calculated', value: '$' + formatNumber(grandTotal.value), icon: 'mdi-calculator', gradient: 'linear-gradient(135deg, #1E88E5, #42a5f5)' },
-  { label: 'Difference', value: '$' + formatNumber(totalFaceValue.value - grandTotal.value), icon: 'mdi-arrow-right', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' },
+  { label: 'Difference', value: portfolioDifference.value !== null ? '$' + formatNumber(portfolioDifference.value) : '—', icon: 'mdi-arrow-right', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)' },
   { label: 'Instrument Types', value: `${completedCount.value}/3`, icon: 'mdi-chart-pie', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)' }
 ])
 
@@ -475,7 +482,7 @@ const sortedInstruments = computed(() => {
 })
 
 function formatNumber(num) {
-  if (num === undefined || num === null) return '0.00'
+  if (num === undefined || num === null || !Number.isFinite(Number(num))) return '—'
   const rounded = Math.round(num * 100) / 100
   return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -564,7 +571,7 @@ function exportCombinedExcel() {
       inst.name,
       formatForExcel(inst.faceValue, 'money'),
       formatForExcel(inst.value, 'money'),
-      formatForExcel((inst.faceValue || 0) - inst.value, 'money'),
+      formatForExcel(inst.difference, 'money'),
       inst.count,
       inst.avgRate !== null ? formatForExcel(inst.avgRate, 'percentage') : '—',
       inst.fredBench !== null ? formatForExcel(inst.fredBench, 'percentage') : '—',
@@ -572,7 +579,7 @@ function exportCombinedExcel() {
     ])
   })
   summaryRows.push(['TOTAL', formatForExcel(totalFaceValue.value, 'money'), formatForExcel(grandTotal.value, 'money'),
-    formatForExcel(totalFaceValue.value - grandTotal.value, 'money'), totalInstruments.value, '', '', ''])
+    formatForExcel(portfolioDifference.value, 'money'), totalInstruments.value, '', '', ''])
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows)
   summarySheet['!cols'] = [{ wch: 20 },{ wch: 18 },{ wch: 20 },{ wch: 18 },{ wch: 10 },{ wch: 14 },{ wch: 18 },{ wch: 14 }]
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
@@ -626,7 +633,7 @@ function exportToExcel() {
       inst.name,
       formatForExcel(inst.faceValue, 'money'),
       formatForExcel(inst.value, 'money'),
-      formatForExcel((inst.faceValue || 0) - inst.value, 'money'),
+      formatForExcel(inst.difference, 'money'),
       inst.count,
       inst.avgRate !== null ? formatForExcel(inst.avgRate, 'percentage') : '—',
       inst.fredBench !== null ? formatForExcel(inst.fredBench, 'percentage') : '—',
@@ -634,7 +641,7 @@ function exportToExcel() {
     ])
   })
   summaryRows.push(['TOTAL', formatForExcel(totalFaceValue.value, 'money'), formatForExcel(grandTotal.value, 'money'),
-    formatForExcel(totalFaceValue.value - grandTotal.value, 'money'), totalInstruments.value, '', '', ''])
+    formatForExcel(portfolioDifference.value, 'money'), totalInstruments.value, '', '', ''])
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows)
   summarySheet['!cols'] = [{ wch: 20 },{ wch: 18 },{ wch: 20 },{ wch: 18 },{ wch: 10 },{ wch: 14 },{ wch: 18 },{ wch: 14 }]
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
@@ -764,31 +771,11 @@ async function loadSummary() {
 
     const sid = activeSession.value.id
 
-    // --- 2. Optional: try backend summaries for aggregates only ---
-    let backendSummaries = []
-    try {
-      const response = await api.portfolioAPI.getSummaries(sid)
-      if (response?.success && Array.isArray(response.data)) backendSummaries = response.data
-    } catch (e) {
-      console.warn('Backend portfolio summaries unavailable, using workflow data:', e)
-    }
-
     const templates = [
       { id: 'money-market', name: 'Money Market', icon: 'mdi-chart-line', gradient: 'linear-gradient(135deg, #1E88E5, #0B2044)', rateLabel: 'Avg interest rate', barColor: '#1E88E5' },
       { id: 'bonds', name: 'Bonds', icon: 'mdi-chart-timeline', gradient: 'linear-gradient(135deg, #4CAF50, #2E7D32)', rateLabel: 'Avg coupon', barColor: '#4CAF50' },
       { id: 'tbills', name: 'T-Bills', icon: 'mdi-finance', gradient: 'linear-gradient(135deg, #FFC107, #FF9800)', rateLabel: 'Avg discount', barColor: '#FF9800' }
     ]
-
-    const getVal = (row, ...keys) => {
-      for (const key of keys) {
-        const val = row[key]
-        if (val !== undefined && val !== null && val !== '') {
-          const num = parseFloat(val)
-          if (!isNaN(num)) return num
-        }
-      }
-      return 0
-    }
 
     const detailsList = []
     const instrumentResults = []
@@ -802,8 +789,6 @@ async function loadSummary() {
     }
 
     for (const template of templates) {
-      const backendSummary = backendSummaries.find(s => s.id === template.id)
-
       // === Workflow is source of truth (same object the Calculations page reads) ===
       let wfType = null
       try {
@@ -813,7 +798,15 @@ async function loadSummary() {
       }
 
       const instSummary = wfType?.instrumentSummary || { rows: [], columns: [] }
-      const aggCalc = wfType?.allCalculations || wfType?.calculations || {}
+      const savedCalculations = wfType?.allCalculations
+      const calculationPayload = wfType?.calculations
+      const aggregatePayload = savedCalculations && Object.keys(savedCalculations).length
+        ? savedCalculations
+        : (calculationPayload?.aggregates
+            || calculationPayload?.data?.aggregates
+            || calculationPayload
+            || {})
+      const aggCalc = buildAggregatesFromBackend(aggregatePayload, null, template.id)
 
       // === Details: individual instrument rows (what Calculations page shows) ===
       const details = Array.isArray(instSummary.rows) ? instSummary.rows : []
@@ -831,83 +824,38 @@ async function loadSummary() {
         : (Array.isArray(instSummary.columns) ? instSummary.columns : [])
       const detailHeaders = headerSource
 
-      // === Aggregates: primary source is allCalculations ===
-      let totalValue = numOr(aggCalc.totalValue ?? aggCalc.total_value, 0)
-      let totalFaceValue = numOr(
-        aggCalc.totalFaceValue ?? aggCalc.total_face_value
-        ?? aggCalc.totalPrincipal ?? aggCalc.total_principal,
-        0
+      // These totals and rates are the same aggregate values used by the
+      // Calculations page. Detail rows are presentation-only, not a fallback.
+      const totalValue = numOr(aggCalc.totalValue, null)
+      const totalFaceValue = numOr(
+        template.id === 'money-market' ? aggCalc.totalPrincipal : aggCalc.totalFaceValue,
+        null
       )
-      let instrumentCount = numOr(aggCalc.instrumentCount ?? aggCalc.instrument_count, 0)
-
-      // === Type-specific primary rate (matches Calculations page boxes) ===
-      let rateValue = null
-      if (template.id === 'money-market') {
-        rateValue = numOr(aggCalc.avgRate ?? aggCalc.avg_rate, null)
-      } else if (template.id === 'bonds') {
-        rateValue = numOr(
-          aggCalc.avgCouponRate ?? aggCalc.avg_coupon_rate
-          ?? aggCalc.weightedAvgCoupon ?? aggCalc.weighted_avg_coupon
-          ?? aggCalc.avgRate ?? aggCalc.avg_rate,
-          null
-        )
-      } else if (template.id === 'tbills') {
-        rateValue = numOr(
-          aggCalc.avgDiscountRate ?? aggCalc.avg_discount_rate
-          ?? aggCalc.weightedAvgDiscount ?? aggCalc.weighted_avg_discount
-          ?? aggCalc.avgRate ?? aggCalc.avg_rate,
-          null
-        )
-      }
+      const instrumentCount = numOr(aggCalc.instrumentCount, null)
+      const rateValue = numOr(aggCalc.avgRate, null)
+      const weightedAvgRate = numOr(aggCalc.weightedAvgRate, rateValue)
+      const avgMaturity = numOr(aggCalc.avgDaysToMaturity, null)
 
       // === FRED benchmark from same allCalculations object ===
       let fredBench = null
       if (aggCalc.fred && aggCalc.fred.benchmark_rate != null) {
         fredBench = numOr(aggCalc.fred.benchmark_rate, null)
-      } else if (backendSummary && backendSummary.fredBench != null) {
-        fredBench = numOr(backendSummary.fredBench, null)
       }
 
-      // === Fallback to backend summary only if workflow aggregate is empty ===
-      if (totalValue === 0 && backendSummary?.totalValue) totalValue = numOr(backendSummary.totalValue, 0)
-      if (totalFaceValue === 0 && backendSummary?.faceValue) totalFaceValue = numOr(backendSummary.faceValue, 0)
-      if (instrumentCount === 0 && backendSummary?.count) instrumentCount = numOr(backendSummary.count, 0)
-      if (rateValue === null && backendSummary?.avgRate != null) rateValue = numOr(backendSummary.avgRate, null)
+      const finalCount = instrumentCount ?? countUniqueInstruments(details)
 
-      // === Last resort: derive from details ONLY if aggregate fields are still empty ===
-      if (totalValue === 0 && details.length) {
-        totalValue = details.reduce((s, r) => s + numOr(
-          r['Total Value'] ?? r['total_value'] ?? r['Calculated Value'] ?? r['calculated_value'] ?? r['Value'] ?? r['value'],
-          0
-        ), 0)
-      }
-      if (totalFaceValue === 0 && details.length) {
-        totalFaceValue = details.reduce((s, r) => s + numOr(
-          r['Face Value'] ?? r['face_value'] ?? r['Amount'] ?? r['amount']
-          ?? r['Principal'] ?? r['principal'] ?? r['Total Principal'] ?? r['total_principal'],
-          0
-        ), 0)
-      }
-      if (rateValue === null && details.length) {
-        const rateKeys = template.id === 'bonds'
-          ? ['Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate']
-          : template.id === 'tbills'
-            ? ['Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate']
-            : ['Average Rate', 'average_rate', 'Avg Rate', 'avg_rate', 'Interest Rate', 'interest_rate']
-        const rates = details.map(r => {
-          for (const k of rateKeys) {
-            const v = numOr(r[k], null)
-            if (v !== null) return v
-          }
-          return null
-        }).filter(v => v !== null && v > 0)
-        if (rates.length) rateValue = rates.reduce((a, b) => a + b, 0) / rates.length
-      }
-
-      // === Count: use details length so KPI == table row count exactly ===
-      const finalCount = details.length > 0 ? details.length : instrumentCount
-
-      const completed = details.length > 0 || totalValue > 0 || finalCount > 0
+      const calculatedValueKeys = [
+        'Total Value', 'total_value', 'Fair Value', 'fair_value',
+        'Current Price', 'current_price', 'Purchase Price', 'purchase_price',
+        'Present Value', 'present_value'
+      ]
+      const hasCalculatedResult = details.some(row =>
+        calculatedValueKeys.some(key => numOr(row?.[key], null) !== null)
+      )
+      const calculationFailed = ['error', 'cannot_calculate'].includes(aggCalc.status)
+      const completed = !calculationFailed && (
+        totalValue !== null || ['success', 'partial'].includes(aggCalc.status) || hasCalculatedResult
+      )
 
       detailsList.push({
         id: template.id,
@@ -920,13 +868,15 @@ async function loadSummary() {
         ...template,
         value: totalValue,
         faceValue: totalFaceValue,
-        difference: totalFaceValue - totalValue,
+        difference: totalFaceValue !== null && totalValue !== null ? totalFaceValue - totalValue : null,
         count: finalCount,
         avgRate: rateValue,
+        weightedAvgRate,
+        avgMaturity,
         fredBench,
         completed,
         statusClass: completed ? 'completed' : 'pending',
-        statusText: completed ? 'Completed' : 'Not started',
+        statusText: completed ? 'Completed' : finalCount > 0 ? 'Needs calculation' : 'Not started',
         statusIcon: completed ? 'mdi-check-circle' : 'mdi-clock-outline'
       })
     }
@@ -958,32 +908,6 @@ async function loadSummary() {
   }
 }
 
-/**
- * Dedupe instrument rows to derive a unique-instrument count.
- * Prefers common identifier fields; falls back to the full row signature.
- */
-function dedupeInstruments(rows) {
-  if (!Array.isArray(rows)) return []
-  const idFields = [
-    'Instrument Name', 'instrument_name', 'InstrumentName',
-    'BondName', 'Bond Name', 'TBillName', 'T-Bill Name',
-    'BB Ticker', 'BBTicker', 'Ticker', 'ISIN', 'CUSIP'
-  ]
-  const seen = new Set()
-  const out = []
-  for (const row of rows) {
-    if (!row || typeof row !== 'object') continue
-    let id = null
-    for (const f of idFields) {
-      if (row[f] !== undefined && row[f] !== null && row[f] !== '') { id = String(row[f]).trim(); break }
-    }
-    if (!id) id = JSON.stringify(row)
-    if (seen.has(id)) continue
-    seen.add(id)
-    out.push(row)
-  }
-  return out
-}
 
 const handleSessionUpdate = async (event) => {
   const { sessionId } = event.detail || {}

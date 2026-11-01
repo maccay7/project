@@ -27,6 +27,7 @@
             @input="updateFormulaBarValue($event.target.value)"
             @blur="applyFormulaBarEdit"
             @keydown.enter.prevent="applyFormulaBarEdit"
+            :readonly="readOnly"
             class="formula-input"
           />
         </div>
@@ -62,9 +63,9 @@
                     class="mapping-dropdown"
                     @click.stop
                   >
-                    <option value="__na__">— Select source —</option>
-                    <option v-for="fileCol in availableFileColumns" :key="fileCol" :value="fileCol">
-                      {{ fileCol }}
+                    <option value="__na__">— Map to field —</option>
+                    <option v-for="targetCol in mappingTargetColumns" :key="targetCol" :value="targetCol">
+                      {{ targetCol }}
                     </option>
                   </select>
                   <span class="header-label">{{ header }}</span>
@@ -135,10 +136,7 @@
 
 <script>
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import luckysheet from 'luckysheet'
-import 'luckysheet/dist/plugins/css/pluginsCss.css'
-import 'luckysheet/dist/plugins/plugins.css'
-import 'luckysheet/dist/css/luckysheet.css'
+import { mapSourceColumnToTarget } from '@/utils/instrumentMapping'
 
 function getColumnLetter(index) {
   let letter = ''
@@ -158,6 +156,7 @@ export default {
     headers: { type: Array, default: () => [] },
     originalData: { type: Array, default: () => [] },
     originalHeaders: { type: Array, default: () => [] },
+    readOnly: { type: Boolean, default: false },
     showMappingControls: { type: Boolean, default: false },
     columnMapping: { type: Object, default: () => ({}) },
     availableFileColumns: { type: Array, default: () => [] },
@@ -177,6 +176,9 @@ export default {
 
     const luckysheetContainer = ref(null)
     const luckysheetInitialized = ref(false)
+    let luckysheet = null
+    let luckysheetLoading = null
+    let luckysheetInitializing = false
 
     const formulaInput = ref(null)
     const formulaBarValue = ref('')
@@ -234,6 +236,11 @@ export default {
     })
 
     const displayHeaders = computed(() => uniqueHeaders.value)
+    const mappingTargetColumns = computed(() =>
+      props.requiredColumns.length
+        ? props.requiredColumns
+        : Object.keys(props.columnMapping || {})
+    )
 
     const totalPages = computed(() => Math.max(1, Math.ceil(displayData.value.length / pageSize.value)))
     const paginatedData = computed(() => {
@@ -265,7 +272,11 @@ export default {
     }
 
     function getMappingForHeader(header) {
-      return props.columnMapping[header] || '__na__'
+      const normalize = value => String(value).toLowerCase().replace(/[_\-\s:]+/g, '')
+      const mappedTarget = Object.entries(props.columnMapping || {}).find(
+        ([, source]) => normalize(source) === normalize(header)
+      )
+      return mappedTarget?.[0] || '__na__'
     }
 
     function isCellSelected(rowIndex, colIndex) {
@@ -328,6 +339,7 @@ export default {
     }
 
     function applyFormulaBarEdit() {
+      if (props.readOnly) return
       if (!selectedCell.value) return
       const { row, col } = selectedCell.value
       const header = displayHeaders.value[col]
@@ -352,7 +364,7 @@ export default {
 
       // FIX: If clicking the already selected cell, start editing immediately (like Excel)
       if (selectedCell.value && selectedCell.value.row === rowIndex && selectedCell.value.col === colIndex) {
-        startEditing(rowIndex, colIndex)
+        if (!props.readOnly) startEditing(rowIndex, colIndex)
         return
       }
 
@@ -390,6 +402,7 @@ export default {
     }
 
     function startEditing(row, col) {
+      if (props.readOnly) return
       if (row < 0 || row >= paginatedData.value.length) return
       if (col < 0 || col >= displayHeaders.value.length) return
       const header = displayHeaders.value[col]
@@ -458,6 +471,7 @@ export default {
     }
 
     function handleKeyDown(event) {
+      if (props.readOnly) return
       if (editingCell.value) return
       if (!selectedCell.value) return
       const tag = (event.target?.tagName || '').toLowerCase()
@@ -632,43 +646,69 @@ export default {
       }
     }
 
-    function onMappingChange(header, newSrcCol) {
-      const newMapping = { ...props.columnMapping }
-      newMapping[header] = newSrcCol === '__na__' ? null : newSrcCol
+    function onMappingChange(header, newTargetCol) {
+      const newMapping = mapSourceColumnToTarget(
+        props.columnMapping,
+        header,
+        newTargetCol
+      )
       emit('mapping-update', newMapping)
     }
 
-    function initializeLuckysheet() {
-      if (!props.useLuckysheet || !luckysheetContainer.value || luckysheetInitialized.value) return
-      const sheetData = internalData.value.map(row => Object.values(row))
-      const headers = uniqueHeaders.value
-      sheetData.unshift(headers)
-      const options = {
-        container: luckysheetContainer.value,
-        data: [sheetData],
-        title: props.currentSheetName || 'Sheet 1',
-        showinfobar: false,
-        showsheetbar: false,
-        showstatisticBar: false,
-        enableAddRow: false,
-        enableAddBackTop: false,
-        userInfo: false,
-        showConfigWindowResize: true,
-        forceCalculation: false,
-        rowHeaderWidth: 46,
-        columnHeaderHeight: 25,
-        defaultColWidth: 120,
-        defaultRowHeight: 30,
-        lang: 'en',
-        showGrid: true,
-        showToolbar: true,
-        showFormulaBar: true,
-      }
+    async function initializeLuckysheet() {
+      if (!props.useLuckysheet || !luckysheetContainer.value ||
+          luckysheetInitialized.value || luckysheetInitializing) return
       try {
+        if (!luckysheet) {
+          if (!luckysheetLoading) {
+            luckysheetLoading = Promise.all([
+              import('luckysheet'),
+              import('luckysheet/dist/plugins/css/pluginsCss.css'),
+              import('luckysheet/dist/plugins/plugins.css'),
+              import('luckysheet/dist/css/luckysheet.css'),
+            ]).then(([module]) => {
+              luckysheet = module.default
+            }).catch((error) => {
+              luckysheetLoading = null
+              throw error
+            })
+          }
+          await luckysheetLoading
+        }
+        if (!props.useLuckysheet || !luckysheetContainer.value ||
+            luckysheetInitialized.value || luckysheetInitializing) return
+
+        luckysheetInitializing = true
+        const sheetData = internalData.value.map(row => Object.values(row))
+        const headers = uniqueHeaders.value
+        sheetData.unshift(headers)
+        const options = {
+          container: luckysheetContainer.value,
+          data: [sheetData],
+          title: props.currentSheetName || 'Sheet 1',
+          showinfobar: false,
+          showsheetbar: false,
+          showstatisticBar: false,
+          enableAddRow: false,
+          enableAddBackTop: false,
+          userInfo: false,
+          showConfigWindowResize: true,
+          forceCalculation: false,
+          rowHeaderWidth: 46,
+          columnHeaderHeight: 25,
+          defaultColWidth: 120,
+          defaultRowHeight: 30,
+          lang: 'en',
+          showGrid: true,
+          showToolbar: true,
+          showFormulaBar: true,
+        }
         luckysheet.create(options)
         luckysheetInitialized.value = true
       } catch (error) {
         console.error('Luckysheet initialization error:', error)
+      } finally {
+        luckysheetInitializing = false
       }
     }
 
@@ -758,6 +798,7 @@ export default {
       setCellValue,
       isRequiredColumn,
       getMappingForHeader,
+      mappingTargetColumns,
       isCellSelected,
       isRowSelected,
       isEditingCell,

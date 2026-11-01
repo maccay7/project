@@ -1,13 +1,25 @@
 // services/sessionManager.js
 import api from './api.js'
 
-const STORAGE_KEY = 'dura_sessions'
-const ACTIVE_KEY = 'dura_active_session_id'
+function getStorageKeys() {
+  let userId = 'anonymous'
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || 'null')
+    if (user?.id != null) userId = String(user.id)
+  } catch {
+    localStorage.removeItem('user')
+  }
+  return {
+    sessions: `dura_sessions_${userId}`,
+    activeSession: `dura_active_session_id_${userId}`
+  }
+}
 
 class SessionManager {
   constructor() {
     this.sessions = []
     this.activeSessionId = null
+    this.cacheOwnerKey = null
     this.loadCache()
   }
 
@@ -19,8 +31,10 @@ class SessionManager {
   // (saving one instrument's workflow wiped the others).
   // ─────────────────────────────────────────────────────────────
   loadCache() {
+    const { sessions, activeSession } = getStorageKeys()
+    this.cacheOwnerKey = sessions
     try {
-      const stored = localStorage.getItem(STORAGE_KEY)
+      const stored = localStorage.getItem(sessions)
       const metadata = stored ? JSON.parse(stored) : []
       this.sessions = metadata.map(m => ({
         id: m.id,
@@ -39,11 +53,16 @@ class SessionManager {
     } catch {
       this.sessions = []
     }
-    const active = localStorage.getItem(ACTIVE_KEY)
+    const active = localStorage.getItem(activeSession)
     this.activeSessionId = active || null
   }
 
+  syncCacheOwner() {
+    if (getStorageKeys().sessions !== this.cacheOwnerKey) this.loadCache()
+  }
+
   saveCache() {
+    const { sessions: storageKey, activeSession } = getStorageKeys()
     const metadata = this.sessions.map(s => ({
       id: s.id,
       name: s.name,
@@ -59,16 +78,16 @@ class SessionManager {
       versions: s.versions || []
     }))
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(metadata))
+      localStorage.setItem(storageKey, JSON.stringify(metadata))
     } catch (e) {
       console.error('LocalStorage quota exceeded, clearing old sessions:', e)
       const recent = metadata.slice(0, 20)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(recent))
+      localStorage.setItem(storageKey, JSON.stringify(recent))
     }
     if (this.activeSessionId) {
-      localStorage.setItem(ACTIVE_KEY, this.activeSessionId)
+      localStorage.setItem(activeSession, this.activeSessionId)
     } else {
-      localStorage.removeItem(ACTIVE_KEY)
+      localStorage.removeItem(activeSession)
     }
   }
 
@@ -76,48 +95,50 @@ class SessionManager {
   // READ
   // ─────────────────────────────────────────────────────────────
   async getAllSessions() {
+    this.syncCacheOwner()
+    const cached = Array.isArray(this.sessions) ? [...this.sessions] : []
     try {
       const response = await api.sessionsAPI.list()
-      // Tolerant shape check: accept response.data or response.sessions
-      const raw = response && response.success
-        ? (Array.isArray(response.data) ? response.data
-          : Array.isArray(response.sessions) ? response.sessions
-          : [])
-        : []
+      if (!response?.success) {
+        throw new Error(response?.message || 'Session list was not loaded from the server')
+      }
+      const raw = Array.isArray(response.data) ? response.data
+        : Array.isArray(response.sessions) ? response.sessions : []
       const backendSessions = raw.map(bs => ({
         ...bs,
-        id: bs.id || bs.session_id
-      }))
+        id: String(bs.id || bs.session_id || ''),
+        name: bs.name,
+        status: bs.status || 'in-progress',
+        date: bs.date || bs.created_at,
+        created_at: bs.created_at || bs.date,
+        instrument_count: bs.instrument_count || 0,
+        version_count: bs.version_count || 0,
+        total_value: bs.total_value || 0
+      })).filter(s => s.id)
 
-      const merged = [...this.sessions]
-      for (const bs of backendSessions) {
-        const idx = merged.findIndex(s => s.id === bs.id || s.session_id === bs.id)
-        if (idx !== -1) {
-          merged[idx] = { ...merged[idx], ...bs }
-        } else {
-          merged.push(bs)
-        }
-      }
-      this.sessions = merged
+      // Keep locally created sessions that the list endpoint has not yet returned
+      // (replication lag, list query error after a successful save, etc.).
+      const backendIds = new Set(backendSessions.map(s => s.id))
+      const pendingLocal = cached.filter(s => s?.id && !backendIds.has(String(s.id)))
+      this.sessions = [...pendingLocal, ...backendSessions]
       this.saveCache()
       return this.sessions
     } catch (err) {
       console.error('Failed to fetch sessions from backend:', err)
+      // Do not wipe the dashboard: fall back to the local cache.
+      this.sessions = cached
       return this.sessions
     }
   }
 
-  async getSession(id, forceRefresh = false) {
-    if (!forceRefresh) {
-      const cached = this.sessions.find(s => s.id === id)
-      if (cached) return cached
-    }
+  async getSession(id) {
+    this.syncCacheOwner()
     try {
       const response = await api.sessionsAPI.get(id)
-      // Tolerant shape check: accept response.data or response.session
-      const data = response && response.success
-        ? (response.data || response.session || null)
-        : null
+      if (!response?.success) {
+        throw new Error(response?.message || 'Session was not loaded from the server')
+      }
+      const data = response.data || response.session || null
       if (data) {
         const mapped = {
           id: data.id || data.session_id,
@@ -142,37 +163,37 @@ class SessionManager {
         this.saveCache()
         return mapped
       }
+      this.sessions = this.sessions.filter(session => session.id !== id)
+      this.saveCache()
+      return null
     } catch (err) {
       console.error('Failed to fetch session from backend:', err)
-      // FIX #4: on forced refresh failure, fall back to cache
-      // instead of returning null and breaking downstream callers.
-      if (forceRefresh) {
-        const cached = this.sessions.find(s => s.id === id)
-        if (cached) return cached
-      }
+      throw err
     }
-    return null
   }
 
   // ─────────────────────────────────────────────────────────────
   // ACTIVE SESSION
   // ─────────────────────────────────────────────────────────────
   setActiveSession(session) {
+    this.syncCacheOwner()
     if (!session) {
       this.activeSessionId = null
-      localStorage.removeItem(ACTIVE_KEY)
+      localStorage.removeItem(getStorageKeys().activeSession)
       return
     }
     this.activeSessionId = session.id
-    localStorage.setItem(ACTIVE_KEY, session.id)
+    localStorage.setItem(getStorageKeys().activeSession, session.id)
   }
 
   getActiveSession() {
+    this.syncCacheOwner()
     if (!this.activeSessionId) return null
     return this.sessions.find(s => s.id === this.activeSessionId) || null
   }
 
   getActiveSessionId() {
+    this.syncCacheOwner()
     return this.activeSessionId
   }
 
@@ -180,6 +201,7 @@ class SessionManager {
   // CREATE / UPDATE
   // ─────────────────────────────────────────────────────────────
   async createSession(nameOverride = '') {
+    this.syncCacheOwner()
     const newSession = {
       id: Date.now().toString(),
       name: nameOverride || `Session ${new Date().toLocaleDateString()}`,
@@ -193,12 +215,8 @@ class SessionManager {
       worksheets: {},
       workbookName: null
     }
-    this.sessions.unshift(newSession)
-    this.saveCache()
-    this.setActiveSession(newSession)
-
     try {
-      await api.sessionsAPI.save({
+      const response = await api.sessionsAPI.save({
         id: newSession.id,
         session_id: newSession.id,
         name: newSession.name,
@@ -209,55 +227,58 @@ class SessionManager {
         worksheets: {},
         workbookName: null
       })
+      if (!response?.success) {
+        throw new Error(response?.message || 'Session save was not confirmed by the server')
+      }
     } catch (err) {
-      console.error('Failed to create session on backend:', err)
+      throw new Error(`Failed to create session: ${err.message || 'Database save failed'}`)
     }
+    this.sessions.unshift(newSession)
+    this.saveCache()
+    this.setActiveSession(newSession)
     return newSession
   }
 
   async updateSession(id, updates) {
-    const idx = this.sessions.findIndex(s => s.id === id)
-    if (idx === -1) return null
-
-    const existingVersions = this.sessions[idx].versions || []
-    const existingWorkflows = this.sessions[idx].instrumentWorkflow || {}
-    const existingWorksheets = this.sessions[idx].worksheets || {}
-    const existingWorkbookName = this.sessions[idx].workbookName || null
-
-    this.sessions[idx] = { ...this.sessions[idx], ...updates, timestamp: Date.now() }
-
-    if (!updates.versions) {
-      this.sessions[idx].versions = existingVersions
+    this.syncCacheOwner()
+    let idx = this.sessions.findIndex(s => s.id === id)
+    const current = idx === -1 ? await this.getSession(id, true) : this.sessions[idx]
+    if (!current) throw new Error('Cannot update session: session was not found')
+    idx = this.sessions.findIndex(s => s.id === id)
+    const updatedSession = {
+      ...current,
+      ...updates,
+      timestamp: Date.now(),
+      versions: updates.versions || current.versions || [],
+      instrumentWorkflow: updates.instrumentWorkflow || current.instrumentWorkflow || {},
+      worksheets: updates.worksheets || current.worksheets || {},
+      workbookName: updates.workbookName || current.workbookName || null
     }
-    if (!updates.instrumentWorkflow) {
-      this.sessions[idx].instrumentWorkflow = existingWorkflows
-    }
-    if (!updates.worksheets) {
-      this.sessions[idx].worksheets = existingWorksheets
-    }
-    if (!updates.workbookName) {
-      this.sessions[idx].workbookName = existingWorkbookName
-    }
-    this.saveCache()
 
     try {
-      await api.sessionsAPI.save({
-        id: this.sessions[idx].id,
-        session_id: this.sessions[idx].id,
-        name: this.sessions[idx].name,
-        status: this.sessions[idx].status,
-        payload: this.sessions[idx],
-        instrument_workflows: this.sessions[idx].instrumentWorkflow || {},
-        versions: this.sessions[idx].versions || [],
-        instrument_count: this.sessions[idx].instrument_count || 0,
-        version_count: this.sessions[idx].version_count || 0,
-        worksheets: this.sessions[idx].worksheets || {},
-        workbookName: this.sessions[idx].workbookName || null
+      const response = await api.sessionsAPI.save({
+        id: updatedSession.id,
+        session_id: updatedSession.id,
+        name: updatedSession.name,
+        status: updatedSession.status,
+        payload: updatedSession,
+        instrument_workflows: updatedSession.instrumentWorkflow,
+        versions: updatedSession.versions,
+        instrument_count: updatedSession.instrument_count || 0,
+        version_count: updatedSession.version_count || 0,
+        total_value: updatedSession.total_value || 0,
+        worksheets: updatedSession.worksheets,
+        workbookName: updatedSession.workbookName
       })
+      if (!response?.success) {
+        throw new Error(response?.message || 'Session update was not confirmed by the server')
+      }
     } catch (err) {
-      console.error('Failed to update session on backend:', err)
+      throw new Error(`Failed to save session: ${err.message || 'Database update failed'}`)
     }
-    return this.sessions[idx]
+    this.sessions[idx] = updatedSession
+    this.saveCache()
+    return updatedSession
   }
 
   async renameSession(id, newName) {
@@ -265,16 +286,20 @@ class SessionManager {
   }
 
   async deleteSession(id) {
+    this.syncCacheOwner()
+    try {
+      const response = await api.sessionsAPI.delete(id)
+      if (!response?.success) {
+        throw new Error(response?.message || 'Session deletion was not confirmed by the server')
+      }
+    } catch (err) {
+      throw new Error(`Failed to delete session: ${err.message || 'Database deletion failed'}`)
+    }
     this.sessions = this.sessions.filter(s => s.id !== id)
     this.saveCache()
     if (this.activeSessionId === id) {
       this.activeSessionId = null
-      localStorage.removeItem(ACTIVE_KEY)
-    }
-    try {
-      await api.sessionsAPI.delete(id)
-    } catch (err) {
-      console.error('Failed to delete session from backend:', err)
+      localStorage.removeItem(getStorageKeys().activeSession)
     }
   }
 
@@ -287,7 +312,7 @@ class SessionManager {
   // ─────────────────────────────────────────────────────────────
   async saveInstrumentWorkflow(sessionId, instrumentKey, workflow) {
     const session = await this.getSession(sessionId)
-    if (!session) return
+    if (!session) throw new Error('Cannot save workflow: session was not found')
 
     const iw = { ...(session.instrumentWorkflow || {}), [instrumentKey]: workflow }
     const instrumentCount = this.countSessionInstrumentsFromWorkflows(iw)
@@ -297,8 +322,6 @@ class SessionManager {
       instrument_count: instrumentCount
     })
 
-    // Confirm the backend accepted the update (no-op if response OK).
-    await this.getSession(sessionId, true)
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -306,7 +329,7 @@ class SessionManager {
   // ─────────────────────────────────────────────────────────────
   async saveWorksheetData(sessionId, worksheetName, worksheetData) {
     const session = await this.getSession(sessionId)
-    if (!session) return
+    if (!session) throw new Error('Cannot save worksheet: session was not found')
 
     const worksheets = session.worksheets || {}
     worksheets[worksheetName] = {
@@ -359,31 +382,26 @@ class SessionManager {
       timestamp: Date.now(),
       ...version
     }
+    const savedVersion = await api.versionAPI.create(
+      sessionId,
+      version.instrument || 'General',
+      version.shortDescription || version.changeType || 'Saved',
+      version.datasetSnapshot || null,
+      version.mappingSnapshot || null,
+      version.calculationSnapshot || null,
+      version.portfolioSnapshot || null,
+      version.reportSnapshot || null,
+      null
+    )
+    if (!savedVersion?.success) {
+      throw new Error(savedVersion?.message || 'Version save was not confirmed by the server')
+    }
+    record.versionNumber = savedVersion.version_number
     versions.unshift(record)
-    const newVersionCount = versions.length
-
     await this.updateSession(sessionId, {
       versions,
-      version_count: newVersionCount
+      version_count: versions.length
     })
-
-    try {
-      await api.versionAPI.create(
-        sessionId,
-        version.instrument || 'General',
-        version.shortDescription || version.changeType || 'Saved',
-        version.datasetSnapshot || null,
-        version.mappingSnapshot || null,
-        version.calculationSnapshot || null,
-        version.portfolioSnapshot || null,
-        version.reportSnapshot || null,
-        null
-      )
-      // Refresh to pick up any backend-side version metadata.
-      await this.getSession(sessionId, true)
-    } catch (err) {
-      console.error('Failed to save version to backend:', err)
-    }
     return record
   }
 
@@ -426,7 +444,7 @@ class SessionManager {
   // ─────────────────────────────────────────────────────────────
   clearAllSessions() {
     this.sessions = []
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([]))
+    localStorage.setItem(getStorageKeys().sessions, JSON.stringify([]))
     localStorage.removeItem(ACTIVE_KEY)
     this.activeSessionId = null
   }

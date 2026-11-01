@@ -150,11 +150,11 @@ export const calculationsAPI = {
 
 // ===== USER API =====
 export const userAPI = {
-  getProfile: (userId = 1) => callAPI(`/api/user/profile?user_id=${userId}`),
+  getProfile: (userId = null) => callAPI(`/api/user/profile${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`),
   updateProfile: (profile) => callAPI('/api/user/profile', 'PUT', profile),
-  getPreferences: (userId = 1) => callAPI(`/api/user/preferences?user_id=${userId}`),
+  getPreferences: (userId = null) => callAPI(`/api/user/preferences${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`),
   updatePreferences: (prefs) => callAPI('/api/user/preferences', 'PUT', prefs),
-  getNotificationSettings: (userId = 1) => callAPI(`/api/user/notifications/settings?user_id=${userId}`),
+  getNotificationSettings: (userId = null) => callAPI(`/api/user/notifications/settings${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`),
   updateNotificationSettings: (settings) => callAPI('/api/user/notifications/settings', 'PUT', settings)
 }
 

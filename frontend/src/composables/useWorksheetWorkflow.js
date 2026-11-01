@@ -199,8 +199,11 @@ export function useWorksheetWorkflow(instrumentTypeRef) {
     }
 
     try {
+      const token = localStorage.getItem('auth_token')
+      const headers = token ? { Authorization: `Bearer ${token}` } : {}
       const response = await fetch(`${API_BASE_URL}/api/dataset/upload`, {
         method: 'POST',
+        headers,
         body: formData
       })
       if (!response.ok) {
