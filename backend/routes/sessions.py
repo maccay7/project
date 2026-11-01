@@ -1,10 +1,12 @@
 import json
+import os
 import pymysql.cursors
 import traceback
 from contextlib import contextmanager
-from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from flask import request, jsonify
 from utils.db import get_db
+from utils.auth import resolve_current_user, session_is_owned
 
 
 _EXPECTED_SESSION_COLUMNS = {
@@ -60,6 +62,18 @@ def _decode_json(value, empty, preserve_raw_on_fail=False):
         return json.loads(value)
     except Exception:
         return value if preserve_raw_on_fail else empty
+
+
+def _decimal_or_none(value, field):
+    if value is None or value == '':
+        return None
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        raise ValueError(f'{field} must be a finite number')
+    if not number.is_finite():
+        raise ValueError(f'{field} must be a finite number')
+    return number
 
 
 def _count_from_workflows(workflows):
@@ -130,9 +144,9 @@ def create_sessions_table():
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS version_history (
                     id INT AUTO_INCREMENT PRIMARY KEY,
-                    version_id VARCHAR(64),
-                    session_id VARCHAR(255),
-                    instrument_type VARCHAR(64),
+                    session_id VARCHAR(255) NOT NULL,
+                    version_number INT NOT NULL,
+                    instrument_type VARCHAR(64) NOT NULL,
                     change_summary TEXT,
                     dataset_snapshot JSON,
                     mapping_snapshot JSON,
@@ -142,7 +156,7 @@ def create_sessions_table():
                     user_id INT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     INDEX (session_id),
-                    INDEX (version_id),
+                    INDEX (version_number),
                     INDEX (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             ''')
@@ -212,15 +226,21 @@ def sessions_routes(app):
     def save_session():
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
+
         payload = request.get_json() or {}
         session_id = payload.get('id') or payload.get('session_id')
 
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id is required'}), 400
+        if not isinstance(session_id, str) or len(session_id) > 255:
+            return jsonify({'success': False, 'message': 'session_id must be at most 255 characters'}), 400
 
         name = payload.get('name') or ''
         status = payload.get('status') or 'in-progress'
-        user_id = payload.get('user_id')
         versions = payload.get('versions', [])
         instrument_workflows = payload.get('instrument_workflows', {})
         legacy_payload = payload.get('payload')
@@ -254,36 +274,50 @@ def sessions_routes(app):
             if not conn:
                 return jsonify({'success': False, 'message': 'DB connection failed'}), 500
             try:
-                cursor.execute('''
-                    INSERT INTO ui_sessions
-                        (session_id, user_id, name, status, versions,
-                         instrument_workflows, payload, instrument_count, version_count, total_value)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        name = VALUES(name),
-                        status = VALUES(status),
-                        versions = VALUES(versions),
-                        instrument_workflows = VALUES(instrument_workflows),
-                        payload = VALUES(payload),
-                        instrument_count = VALUES(instrument_count),
-                        version_count = VALUES(version_count),
-                        total_value = VALUES(total_value),
-                        updated_at = CURRENT_TIMESTAMP
-                ''', (
-                    session_id,
-                    user_id if user_id is not None else 0,
-                    name,
-                    status,
-                    json.dumps(versions) if versions else None,
-                    json.dumps(instrument_workflows) if instrument_workflows else None,
-                    json.dumps(merged_payload) if merged_payload else None,
-                    instrument_count,
-                    version_count,
-                    total_value,
-                ))
+                conn.begin()
+                cursor.execute(
+                    'SELECT user_id FROM ui_sessions WHERE session_id = %s FOR UPDATE',
+                    (session_id,)
+                )
+                existing = cursor.fetchone()
+                if existing:
+                    owner_id = existing.get('user_id') if isinstance(existing, dict) else existing[0]
+                    if owner_id is None or int(owner_id) != user_id:
+                        conn.rollback()
+                        return jsonify({'success': False, 'message': 'Session not found'}), 404
+                    cursor.execute('''
+                        UPDATE ui_sessions
+                        SET name = %s, status = %s, versions = %s,
+                            instrument_workflows = %s, payload = %s,
+                            instrument_count = %s, version_count = %s,
+                            total_value = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE session_id = %s AND user_id = %s
+                    ''', (
+                        name, status,
+                        json.dumps(versions) if versions else None,
+                        json.dumps(instrument_workflows) if instrument_workflows else None,
+                        json.dumps(merged_payload) if merged_payload else None,
+                        instrument_count, version_count, total_value,
+                        session_id, user_id,
+                    ))
+                else:
+                    cursor.execute('''
+                        INSERT INTO ui_sessions
+                            (session_id, user_id, name, status, versions,
+                             instrument_workflows, payload, instrument_count,
+                             version_count, total_value)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (
+                        session_id, user_id, name, status,
+                        json.dumps(versions) if versions else None,
+                        json.dumps(instrument_workflows) if instrument_workflows else None,
+                        json.dumps(merged_payload) if merged_payload else None,
+                        instrument_count, version_count, total_value,
+                    ))
                 conn.commit()
                 return jsonify({'success': True, 'session_id': session_id, 'version_count': version_count})
             except Exception as e:
+                conn.rollback()
                 print(f"Save session error: {e}")
                 traceback.print_exc()
                 return jsonify({'success': False, 'message': str(e)}), 500
@@ -292,6 +326,10 @@ def sessions_routes(app):
     def get_session():
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
         data = request.get_json() or {}
         session_id = data.get('session_id')
         if not session_id:
@@ -304,11 +342,14 @@ def sessions_routes(app):
                 cursor.execute('''
                     SELECT session_id AS id, name, status, versions, instrument_workflows,
                            payload, instrument_count, version_count, total_value,
-                           created_at, updated_at
+                           created_at, updated_at,
+                           (SELECT COUNT(*) FROM version_history vh
+                            WHERE vh.session_id = ui_sessions.session_id)
+                            AS version_count_from_history
                     FROM ui_sessions
-                    WHERE session_id = %s
+                    WHERE session_id = %s AND user_id = %s
                     LIMIT 1
-                ''', (session_id,))
+                ''', (session_id, user_id))
                 row = cursor.fetchone()
             except Exception as e:
                 print(f"Get session error: {e}")
@@ -318,30 +359,7 @@ def sessions_routes(app):
             if not row:
                 return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
 
-            try:
-                hist_cursor = conn.cursor(pymysql.cursors.DictCursor)
-                try:
-                    hist_cursor.execute(
-                        'SELECT COUNT(*) AS cnt FROM version_history WHERE session_id = %s',
-                        (session_id,)
-                    )
-                    hist_row = hist_cursor.fetchone()
-                    hist_count = (hist_row or {}).get('cnt', 0)
-                    if hist_count > (row.get('version_count') or 0):
-                        row['version_count'] = hist_count
-                        upd = conn.cursor()
-                        try:
-                            upd.execute(
-                                'UPDATE ui_sessions SET version_count = %s WHERE session_id = %s',
-                                (hist_count, session_id)
-                            )
-                            conn.commit()
-                        finally:
-                            upd.close()
-                finally:
-                    hist_cursor.close()
-            except Exception as e:
-                print(f"Failed to check version history: {e}")
+            row['version_count'] = row.get('version_count_from_history') or 0
 
         versions = _decode_json(row.get('versions'), [])
         instrument_workflows = _decode_json(row.get('instrument_workflows'), {})
@@ -375,6 +393,10 @@ def sessions_routes(app):
     def list_sessions():
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
 
         with _db(dict_cursor=True) as (conn, cursor):
             if not conn:
@@ -386,14 +408,15 @@ def sessions_routes(app):
                            (SELECT COUNT(*) FROM version_history v
                             WHERE v.session_id = s.session_id) AS version_count_from_history
                     FROM ui_sessions s
+                    WHERE s.user_id = %s
                     ORDER BY created_at DESC
                     LIMIT 200
-                ''')
+                ''', (user_id,))
                 rows = cursor.fetchall()
             except Exception as e:
                 print(f"List sessions error: {e}")
                 traceback.print_exc()
-                return jsonify({'success': False, 'message': 'Query failed', 'data': []}), 200
+                return jsonify({'success': False, 'message': 'Query failed'}), 500
 
         sessions_list = []
         for row in rows:
@@ -403,10 +426,7 @@ def sessions_routes(app):
             if instrument_count == 0 and instrument_workflows:
                 instrument_count = _count_from_workflows(instrument_workflows)
 
-            version_count = max(
-                row.get('version_count', 0) or 0,
-                row.get('version_count_from_history', 0) or 0,
-            )
+            version_count = row.get('version_count_from_history', 0) or 0
 
             sessions_list.append({
                 'id': row['session_id'],
@@ -427,6 +447,10 @@ def sessions_routes(app):
     def delete_session():
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
         data = request.get_json() or {}
         session_id = data.get('session_id')
         if not session_id:
@@ -436,15 +460,75 @@ def sessions_routes(app):
             if not conn:
                 return jsonify({'success': False, 'message': 'DB error'}), 500
             try:
-                try:
-                    cursor.execute('DELETE FROM version_history WHERE session_id = %s', (session_id,))
-                except Exception as e:
-                    print(f"version_history delete skipped: {e}")
-                cursor.execute('DELETE FROM ui_sessions WHERE session_id = %s', (session_id,))
+                conn.begin()
+                if not session_is_owned(cursor, session_id, user_id, lock=True):
+                    conn.rollback()
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
+                cursor.execute(
+                    'SELECT file_path FROM reports WHERE session_id = %s AND user_id = %s',
+                    (session_id, user_id)
+                )
+                report_rows = cursor.fetchall()
+                report_paths = [
+                    row.get('file_path') if isinstance(row, dict) else row[0]
+                    for row in report_rows if row
+                ]
+                report_paths = [path for path in report_paths if path]
+                cursor.execute(
+                    'DELETE FROM version_history WHERE session_id = %s',
+                    (session_id,)
+                )
+                cursor.execute(
+                    'DELETE FROM calculations WHERE session_id = %s',
+                    (session_id,)
+                )
+                cursor.execute(
+                    'DELETE FROM portfolio_summaries WHERE session_id = %s',
+                    (session_id,)
+                )
+                cursor.execute(
+                    'DELETE FROM report_configurations WHERE session_id = %s',
+                    (session_id,)
+                )
+                cursor.execute(
+                    'DELETE FROM reports WHERE session_id = %s AND user_id = %s',
+                    (session_id, user_id)
+                )
+                cursor.execute(
+                    'DELETE FROM ui_sessions WHERE session_id = %s AND user_id = %s',
+                    (session_id, user_id)
+                )
+                if cursor.rowcount != 1:
+                    conn.rollback()
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
                 conn.commit()
-                print(f'Session {session_id} and all related records deleted')
-                return jsonify({'success': True})
+                reports_folder = os.path.abspath(os.path.join(
+                    os.path.dirname(__file__), '..', 'reports'
+                ))
+                cleanup_failed = False
+                for report_path in report_paths:
+                    resolved = os.path.abspath(report_path)
+                    try:
+                        inside_reports = os.path.commonpath(
+                            [resolved, reports_folder]
+                        ) == reports_folder
+                    except ValueError:
+                        inside_reports = False
+                    if not inside_reports:
+                        cleanup_failed = True
+                    elif os.path.isfile(resolved):
+                        try:
+                            os.remove(resolved)
+                        except OSError:
+                            cleanup_failed = True
+                            traceback.print_exc()
+                return jsonify({
+                    'success': True,
+                    'warning': ('Session data was deleted, but one or more report files '
+                                'could not be removed.' if cleanup_failed else None)
+                })
             except Exception as e:
+                conn.rollback()
                 print(f"Delete session error: {e}")
                 traceback.print_exc()
                 return jsonify({'success': False, 'message': 'Delete failed'}), 500
@@ -453,6 +537,10 @@ def sessions_routes(app):
     def save_portfolio_summary():
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
         if not session_id:
@@ -466,6 +554,10 @@ def sessions_routes(app):
             if not conn:
                 return jsonify({'success': False, 'message': 'DB connection failed'}), 500
             try:
+                conn.begin()
+                if not session_is_owned(cursor, session_id, user_id, lock=True):
+                    conn.rollback()
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
                 cursor.execute('''
                     INSERT INTO portfolio_summaries
                         (session_id, instrument_type, instrument_name, total_value, face_value,
@@ -486,10 +578,10 @@ def sessions_routes(app):
                     session_id,
                     instrument_type,
                     payload.get('instrument_name'),
-                    float(payload.get('total_value', 0)),
-                    float(payload.get('face_value', 0)),
-                    int(payload.get('count', 0)),
-                    float(payload.get('avg_rate', 0)),
+                    _decimal_or_none(payload.get('total_value'), 'total_value'),
+                    _decimal_or_none(payload.get('face_value'), 'face_value'),
+                    int(payload['count']) if payload.get('count') is not None else None,
+                    _decimal_or_none(payload.get('avg_rate'), 'avg_rate'),
                     json.dumps(payload.get('details', [])) if payload.get('details') else None,
                     json.dumps(payload.get('detail_headers', [])) if payload.get('detail_headers') else None,
                     json.dumps(payload.get('aggregate', {})) if payload.get('aggregate') else None,
@@ -497,7 +589,11 @@ def sessions_routes(app):
                 ))
                 conn.commit()
                 return jsonify({'success': True})
+            except ValueError as e:
+                conn.rollback()
+                return jsonify({'success': False, 'message': str(e)}), 400
             except Exception as e:
+                conn.rollback()
                 print(f"Save portfolio summary error: {e}")
                 traceback.print_exc()
                 return jsonify({'success': False, 'message': str(e)}), 500
@@ -506,11 +602,17 @@ def sessions_routes(app):
     def get_portfolio_summaries(session_id):
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
 
         with _db(dict_cursor=True) as (conn, cursor):
             if not conn:
                 return jsonify({'success': False, 'message': 'DB connection failed'}), 500
             try:
+                if not session_is_owned(cursor, session_id, user_id):
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
                 cursor.execute('''
                     SELECT instrument_type, instrument_name, total_value, face_value,
                            count, avg_rate, details, detail_headers, aggregate, valuation_date
@@ -545,6 +647,10 @@ def sessions_routes(app):
     def save_report_configuration():
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
         if not session_id:
@@ -563,6 +669,10 @@ def sessions_routes(app):
             if not conn:
                 return jsonify({'success': False, 'message': 'DB connection failed'}), 500
             try:
+                conn.begin()
+                if not session_is_owned(cursor, session_id, user_id, lock=True):
+                    conn.rollback()
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
                 cursor.execute('''
                     INSERT INTO report_configurations
                         (session_id, selected_instruments, report_type, visualisation_config)
@@ -582,6 +692,7 @@ def sessions_routes(app):
                 conn.commit()
                 return jsonify({'success': True})
             except Exception as e:
+                conn.rollback()
                 print(f"Save report configuration error: {e}")
                 traceback.print_exc()
                 return jsonify({'success': False, 'message': str(e)}), 500
@@ -590,11 +701,17 @@ def sessions_routes(app):
     def get_report_configuration(session_id):
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
 
         with _db(dict_cursor=True) as (conn, cursor):
             if not conn:
                 return jsonify({'success': False, 'message': 'DB connection failed'}), 500
             try:
+                if not session_is_owned(cursor, session_id, user_id):
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
                 cursor.execute('''
                     SELECT selected_instruments, report_type, visualisation_config,
                            generated_at, updated_at

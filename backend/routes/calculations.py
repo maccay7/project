@@ -1,13 +1,15 @@
 import json
+import math
 import re
 import uuid
 from contextlib import contextmanager
 from flask import request, jsonify
 
 from pages.calculations_details import (
-    calculate_data, normalize_row, validate_row, calc_single,
+    calculate_data, validate_row, calc_single, normalize_row, parse_date,
 )
 from utils.db import get_db
+from utils.auth import resolve_current_user, session_is_owned
 from utils.fred_config import attach_fred_to_calculation, get_market_benchmark
 from utils.instrument_detection import create_instrument_detector
 
@@ -109,6 +111,19 @@ def _instrument_identity(result_row):
         s = str(c).strip()
         if s and s.lower() not in ('n/a', 'na', '-', 'none', 'null'):
             return s.lower()
+    fingerprint_fields = (
+        'face_value', 'principal', 'interest_rate', 'coupon_rate',
+        'discount_rate', 'term_days', 'days_to_maturity',
+        'maturity_date', 'currency',
+    )
+    fingerprint = []
+    for field in fingerprint_fields:
+        value = result_row.get(field)
+        if value is None or str(value).strip() == '':
+            continue
+        fingerprint.append(f'{field}:{str(value).strip().lower()}')
+    if fingerprint:
+        return '|'.join(fingerprint)
     return None
 
 
@@ -187,6 +202,27 @@ def _resolve_instrument_name(rows, sheet_name):
     return [updated]
 
 
+def _apply_currency_fallback(rows, currency):
+    if not currency:
+        return rows
+    fallback = str(currency).strip().upper()
+    if not fallback:
+        return rows
+
+    def apply(row):
+        if not isinstance(row, dict):
+            return row
+        if normalize_row(row).get('currency'):
+            return row
+        return {**row, 'currency': fallback}
+
+    if isinstance(rows, dict):
+        return apply(rows)
+    if isinstance(rows, list):
+        return [apply(row) for row in rows]
+    return rows
+
+
 def detect_instruments_from_data(data):
     if not data:
         return {'unique_instruments': [], 'instrument_counts': {},
@@ -256,7 +292,7 @@ def _ensure_calculations_table(cursor):
             instrument_names JSON,
             input_data JSON,
             result_data JSON,
-            calculation_status VARCHAR(32) DEFAULT 'completed',
+            calculation_status ENUM('pending','processing','completed','failed') DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_at TIMESTAMP NULL,
             input_hash VARCHAR(64),
@@ -280,55 +316,44 @@ def save_calculation(instrument_type, input_data, result_data,
         cursor = conn.cursor()
         _ensure_calculations_table(cursor)
         conn.commit()
-        for column_name, column_type in [
-            ('sheet_name', 'VARCHAR(255)'),
-            ('section_id', 'VARCHAR(64)'),
-            ('input_hash', 'VARCHAR(64)'),
-            ('instrument_names', 'JSON'),
-            ('calculation_id', 'VARCHAR(64)'),
-        ]:
-            try:
-                cursor.execute(f"SHOW COLUMNS FROM calculations LIKE '{column_name}'")
-                if not cursor.fetchone():
-                    cursor.execute(
-                        f"ALTER TABLE calculations ADD COLUMN {column_name} {column_type}")
-                    conn.commit()
-            except Exception:
-                pass
 
         hash_basis = {"instrument_type": instrument_type,
                       "sheet_name": sheet_name, "section_id": section_id,
                       "data": input_data}
         input_str = json.dumps(hash_basis, sort_keys=True, default=str)
-        input_hash = hashlib.md5(input_str.encode()).hexdigest()
-
-        cursor.execute(
-            """SELECT id FROM calculations
-               WHERE session_id = %s AND instrument_type = %s
-                 AND input_hash = %s AND calculation_status = 'completed'
-               ORDER BY created_at DESC LIMIT 1""",
-            (session_id, instrument_type, input_hash))
-        dup = cursor.fetchone()
-        if dup:
-            return dup['id'] if isinstance(dup, dict) else dup[0]
+        input_hash = hashlib.sha256(input_str.encode()).hexdigest()
+        calculation_rows = result_data.get('data', {}).get('calculations', [])
+        if not calculation_rows:
+            calculation_rows = result_data.get('calculations', [])
+        statuses = [row.get('status') for row in calculation_rows if isinstance(row, dict)]
+        if statuses and all(status == 'success' for status in statuses):
+            stored_status = 'completed'
+        elif any(status in ('success', 'partial') for status in statuses):
+            stored_status = 'completed'
+        else:
+            stored_status = 'failed'
 
         cursor.execute(
             """INSERT INTO calculations
                (calculation_id, instrument_type, dataset_id, session_id,
                 sheet_name, section_id, instrument_names, input_data,
                 result_data, calculation_status, completed_at, input_hash)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'completed',NOW(),%s)""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s)""",
             (calculation_id or str(uuid.uuid4()),
              instrument_type, dataset_id, session_id, sheet_name, section_id,
              json.dumps(instrument_names) if instrument_names else None,
              json.dumps(input_data, default=str),
              json.dumps(result_data, default=str),
+             stored_status,
              input_hash))
         conn.commit()
         return cursor.lastrowid
     except Exception as e:
-        print(f"Save failed: {e}")
-        return None
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise RuntimeError(f"Could not persist calculation: {e}") from e
     finally:
         if cursor:
             try:
@@ -360,6 +385,19 @@ def _fetch_benchmark(inst_type, maturity, country, currency):
     return None
 
 
+def _provided_benchmark(payload):
+    value = payload.get('benchmark_yield')
+    if value is None or value == '':
+        return None
+    try:
+        benchmark = float(value)
+    except (TypeError, ValueError):
+        raise ValueError('benchmark_yield must be a finite number')
+    if not math.isfinite(benchmark):
+        raise ValueError('benchmark_yield must be a finite number')
+    return benchmark
+
+
 def _attach_fred(result, inst_type, maturity, country, currency):
     try:
         attach_fred_to_calculation(result, inst_type, maturity, country, currency)
@@ -369,18 +407,32 @@ def _attach_fred(result, inst_type, maturity, country, currency):
 
 def _fix_instrument_count(result):
     calc_list = result.get('calculations', [])
-    individual = [{
-        'instrumentId': c.get('instrument_name') or f'instrument-{i+1}',
-        'instrument_name': c.get('instrument_name'),
-        'status': c.get('status', 'cannot_calculate'),
-    } for i, c in enumerate(calc_list)]
-    unique_count = _unique_instrument_count(
-        individual, result.get('instrument_count', 0)
-    )
+    unique_count = _unique_instrument_count(calc_list)
     if isinstance(result.get('aggregates'), dict):
         result['aggregates']['instrument_count'] = unique_count
     result['instrument_count'] = unique_count
     return unique_count
+
+
+def _owned_calculation_scope(cursor, user_id, session_id=None, dataset_id=None):
+    if session_id and not session_is_owned(cursor, session_id, user_id):
+        return False
+    if dataset_id:
+        cursor.execute(
+            'SELECT id FROM datasets WHERE id = %s AND user_id = %s LIMIT 1',
+            (dataset_id, user_id)
+        )
+        if not cursor.fetchone():
+            return False
+    return bool(session_id or dataset_id)
+
+
+def _authenticated_user():
+    user_id, auth_error = resolve_current_user()
+    if auth_error:
+        status, message = auth_error
+        return None, (jsonify({'success': False, 'message': message}), status)
+    return user_id, None
 
 
 _DERIVATION_LABELS = {
@@ -461,7 +513,10 @@ def calculations_routes(app):
         validations = []
         for idx, row in enumerate(data):
             merged = {**row}
-            if valuation_date:
+            cleaned_date = parse_date(
+                normalize_row(row).get('valuation_date')
+            )
+            if valuation_date and cleaned_date is None:
                 merged['valuation_date'] = valuation_date
             v = validate_row(merged, inst_type)
             validations.append({
@@ -503,6 +558,7 @@ def calculations_routes(app):
                                         'message': 'instrument_type is required'}]}), 400
 
         row = _resolve_instrument_name(row, sheet_name)
+        row = _apply_currency_fallback(row, currency)
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
 
         result = calc_single(row, inst_type, valuation_date=valuation_date,
@@ -558,15 +614,25 @@ def calculations_routes(app):
             return jsonify({'status': 'error',
                             'errors': [{'field': 'instrument_type', 'code': 'missing',
                                         'message': 'instrument_type is required'}]}), 400
+        if session_id or dataset_id:
+            user_id, auth_response = _authenticated_user()
+            if auth_response:
+                return auth_response
+            with _db() as (conn, cursor):
+                if not conn:
+                    return jsonify({'success': False, 'message': 'Database unavailable'}), 503
+                try:
+                    if not _owned_calculation_scope(cursor, user_id, session_id, dataset_id):
+                        return jsonify({'success': False, 'message': 'Session or dataset not found'}), 404
+                except Exception as error:
+                    return jsonify({'success': False, 'message': 'Could not verify calculation ownership'}), 500
 
         data = _resolve_instrument_name(data, sheet_name)
+        data = _apply_currency_fallback(data, currency)
 
         merged = []
         for row in data:
-            r = {**row}
-            if valuation_date:
-                r['valuation_date'] = valuation_date
-            merged.append(r)
+            merged.append(dict(row))
 
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
         calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date,
@@ -635,13 +701,18 @@ def calculations_routes(app):
         if isinstance(response['aggregates'], dict):
             response['aggregates']['instrument_count'] = unique_count
 
-        try:
-            save_calculation(inst_type, data, response,
-                             dataset_id=dataset_id, session_id=session_id,
-                             sheet_name=sheet_name, section_id=section_id,
-                             calculation_id=calc_id)
-        except Exception as e:
-            print(f"Save failed: {e}")
+        if session_id or dataset_id:
+            try:
+                saved_id = save_calculation(
+                    inst_type, data, response,
+                    dataset_id=dataset_id, session_id=session_id,
+                    sheet_name=sheet_name, section_id=section_id,
+                    calculation_id=calc_id)
+            except Exception as error:
+                print(f"Save failed: {error}")
+                return jsonify({'success': False, 'message': 'Calculation completed but could not be saved'}), 500
+            if not saved_id:
+                return jsonify({'success': False, 'message': 'Calculation completed but could not be saved'}), 500
 
         if success_count == 0:
             return jsonify(response), 400
@@ -654,31 +725,88 @@ def calculations_routes(app):
         payload = request.get_json() or {}
         per_type = payload.get('results', {})
         currency = payload.get('currency')
-        total = 0.0
+        currency_totals = {}
         count = 0
         failed = 0
+        unresolved_currency = False
+        unresolved_valuation = False
         by_type = {}
         for itype, res in per_type.items():
             agg = (res or {}).get('aggregates', {}) or {}
-            tv = (agg.get('total_value')
-                  or agg.get('total_market_value')
-                  or agg.get('total_face_value') or 0)
+            tv = agg.get('total_value')
+            if tv is None:
+                tv = agg.get('total_market_value')
             ic = agg.get('instrument_count') or 0
             fc = agg.get('failed_count') or 0
-            total += float(tv or 0)
             count += int(ic or 0)
             failed += int(fc or 0)
+            unresolved_valuation = unresolved_valuation or int(fc or 0) > 0
             by_type[itype] = {'total_value': tv, 'instrument_count': ic,
                               'failed_count': fc}
-        return jsonify({'status': 'success', 'portfolio_total': total,
+
+            groups = agg.get('currency_groups')
+            if isinstance(groups, dict) and groups:
+                by_type[itype]['currency_groups'] = groups
+                for group_currency, group in groups.items():
+                    group_value = group.get('total_value')
+                    if group_value is None:
+                        group_value = group.get('total_market_value')
+                    if group_value is None:
+                        if ic:
+                            unresolved_valuation = True
+                        continue
+                    key = str(group_currency or 'UNSPECIFIED').strip().upper()
+                    if key == 'UNSPECIFIED':
+                        unresolved_currency = True
+                    currency_totals[key] = (
+                        currency_totals.get(key, 0.0) + float(group_value)
+                    )
+            elif tv is not None:
+                group_currency = (
+                    (res or {}).get('currency')
+                    or agg.get('currency')
+                    or currency
+                )
+                key = str(group_currency or 'UNSPECIFIED').strip().upper()
+                if key == 'UNSPECIFIED':
+                    unresolved_currency = True
+                currency_totals[key] = (
+                    currency_totals.get(key, 0.0) + float(tv)
+                )
+            elif ic:
+                unresolved_valuation = True
+
+        known_currencies = {
+            key for key in currency_totals if key != 'UNSPECIFIED'
+        }
+        can_combine = (
+            len(known_currencies) == 1
+            and not unresolved_currency
+            and not unresolved_valuation
+        )
+        portfolio_total = (
+            sum(currency_totals.values()) if can_combine else None
+        )
+        return jsonify({'status': 'success', 'portfolio_total': portfolio_total,
                         'total_instrument_count': count,
                         'total_failed_count': failed,
-                        'by_type': by_type, 'currency': currency})
+                        'by_type': by_type,
+                        'currency_totals': currency_totals,
+                        'currency': (
+                            next(iter(known_currencies)) if can_combine else None
+                        ),
+                        'warning': None if can_combine else (
+                            'Portfolio total is unavailable because valuations '
+                            'are missing, incomplete, or have different currencies.'
+                        )})
 
     @app.route('/api/calculations/<calculation_id>', methods=['GET', 'OPTIONS'])
     def calculations_get_by_id(calculation_id):
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
         with _db() as (conn, cursor):
             if not conn:
                 return jsonify({'status': 'error', 'errors': [
@@ -688,14 +816,14 @@ def calculations_routes(app):
                 cursor.execute("SELECT * FROM calculations WHERE calculation_id = %s LIMIT 1",
                                (calculation_id,))
                 row = cursor.fetchone()
+                if not row or not _owned_calculation_scope(
+                        cursor, user_id, row.get('session_id'), row.get('dataset_id')):
+                    return jsonify({'status': 'error', 'errors': [
+                        {'field': 'calculationId', 'code': 'not_found',
+                         'message': f'Calculation {calculation_id} not found'}]}), 404
             except Exception as e:
                 return jsonify({'status': 'error', 'errors': [
                     {'field': 'db', 'code': 'error', 'message': str(e)}]}), 500
-
-            if not row:
-                return jsonify({'status': 'error', 'errors': [
-                    {'field': 'calculationId', 'code': 'not_found',
-                     'message': f'Calculation {calculation_id} not found'}]}), 404
             return jsonify({
                 'status': 'success',
                 'calculationId': row.get('calculation_id'),
@@ -724,13 +852,11 @@ def calculations_routes(app):
                  'message': 'No data provided'}]}), 400
 
         data = _resolve_instrument_name(data, sheet_name)
+        data = _apply_currency_fallback(data, currency)
 
         merged = []
         for row in data:
-            r = {**row}
-            if valuation_date:
-                r['valuation_date'] = valuation_date
-            merged.append(r)
+            merged.append(dict(row))
 
         benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
         calc_result = calculate_data(merged, inst_type, valuation_date=valuation_date,
@@ -787,11 +913,32 @@ def calculations_routes(app):
                 return jsonify({'success': False, 'status': 'error',
                                 'message': 'No data provided'}), 400
 
+            if session_id or dataset_id:
+                user_id, auth_response = _authenticated_user()
+                if auth_response:
+                    return auth_response
+                with _db() as (conn, cursor):
+                    if not conn:
+                        return jsonify({'success': False, 'message': 'Database unavailable'}), 503
+                    try:
+                        if not _owned_calculation_scope(cursor, user_id, session_id, dataset_id):
+                            return jsonify({'success': False, 'message': 'Session or dataset not found'}), 404
+                    except Exception:
+                        return jsonify({'success': False, 'message': 'Could not verify calculation ownership'}), 500
+
             data = _resolve_instrument_name(data, sheet_name)
-            benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
-            result = calculate_data(data, inst_type, valuation_date=valuation_date,
-                                    benchmark_yield=benchmark_yield)
-            _attach_fred(result, inst_type, maturity, country, currency)
+            data = _apply_currency_fallback(data, currency)
+            try:
+                benchmark_yield = _provided_benchmark(payload)
+            except ValueError as error:
+                return jsonify({'success': False, 'status': 'error',
+                                'message': str(error)}), 400
+            result = calculate_data(
+                data,
+                inst_type,
+                valuation_date=valuation_date,
+                benchmark_yield=benchmark_yield,
+            )
             _fix_instrument_count(result)
 
             response_body = {
@@ -804,15 +951,18 @@ def calculations_routes(app):
                 'portfolio_summary': {'columns': [], 'rows': [],
                                       'portfolio_total': 0, 'instrument_counts': {}},
             }
-            if session_id and result.get('calculations'):
+            if (session_id or dataset_id) and result.get('calculations'):
                 try:
-                    save_calculation(
+                    saved_id = save_calculation(
                         inst_type, data, response_body,
                         dataset_id=dataset_id, session_id=session_id,
                         sheet_name=sheet_name, section_id=section_id,
                     )
                 except Exception as e:
                     print(f"Legacy save failed: {e}")
+                    return jsonify({'success': False, 'message': 'Calculation completed but could not be saved'}), 500
+                if not saved_id:
+                    return jsonify({'success': False, 'message': 'Calculation completed but could not be saved'}), 500
             return jsonify(response_body)
         return _handler
 
@@ -829,18 +979,14 @@ def calculations_routes(app):
         data = payload.get('data', [])
         valuation_date = payload.get('valuationDate') or payload.get('valuation_date')
         currency = payload.get('currency')
-        maturity = payload.get('maturity')
-        country = payload.get('country')
         sheet_name = payload.get('sheet_name')
         if not data:
             return jsonify({'success': False, 'status': 'error',
                             'message': 'No uploaded data'}), 400
 
         data = _resolve_instrument_name(data, sheet_name)
-        benchmark_yield = _fetch_benchmark(inst_type, maturity, country, currency)
-        result = calculate_data(data, inst_type, valuation_date=valuation_date,
-                                benchmark_yield=benchmark_yield)
-        _attach_fred(result, inst_type, maturity, country, currency)
+        data = _apply_currency_fallback(data, currency)
+        result = calculate_data(data, inst_type, valuation_date=valuation_date)
         _fix_instrument_count(result)
 
         return jsonify({'success': True, 'data': result})
@@ -859,6 +1005,7 @@ def calculations_routes(app):
             return jsonify({'success': False, 'status': 'error',
                             'message': 'No uploaded data'}), 400
 
+        data = _apply_currency_fallback(data, currency)
         detection = detect_instruments_from_data(data)
         if detection.get('is_multi_instrument'):
             split = split_data_by_instrument(data, detection.get('instrument_column'))
@@ -899,16 +1046,28 @@ def calculations_routes(app):
     def calculations_history():
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
         with _db() as (conn, cursor):
             if not conn:
-                return jsonify({'success': True, 'data': []})
+                return jsonify({'success': False, 'message': 'Database unavailable'}), 503
             try:
-                cursor.execute("SELECT id, instrument_type, dataset_id, session_id, "
-                               "calculation_status, created_at FROM calculations "
-                               "ORDER BY created_at DESC LIMIT 20")
+                cursor.execute(
+                    """SELECT DISTINCT c.id, c.instrument_type, c.dataset_id, c.session_id,
+                              c.calculation_status, c.created_at
+                       FROM calculations c
+                       LEFT JOIN ui_sessions s
+                         ON s.session_id = c.session_id AND s.user_id = %s
+                       LEFT JOIN datasets d
+                         ON d.id = c.dataset_id AND d.user_id = %s
+                       WHERE s.session_id IS NOT NULL OR d.id IS NOT NULL
+                       ORDER BY c.created_at DESC LIMIT 20""",
+                    (user_id, user_id)
+                )
                 rows = cursor.fetchall()
-            except Exception:
-                return jsonify({'success': True, 'data': []})
+            except Exception as error:
+                return jsonify({'success': False, 'message': str(error)}), 500
             return jsonify({'success': True, 'data': [{
                 'id': r['id'], 'instrument_type': r['instrument_type'],
                 'dataset_id': r['dataset_id'], 'session_id': r['session_id'],
@@ -921,20 +1080,25 @@ def calculations_routes(app):
     def calculations_latest():
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
+        dataset_id = request.args.get('dataset_id')
+        session_id = request.args.get('session_id')
+        if not dataset_id and not session_id:
+            return jsonify({'success': False, 'message': 'session_id or dataset_id is required'}), 400
         with _db() as (conn, cursor):
             if not conn:
-                return jsonify({'success': False, 'message': 'DB unavailable'}), 500
+                return jsonify({'success': False, 'message': 'DB unavailable'}), 503
             try:
-                dataset_id = request.args.get('dataset_id')
-                session_id = request.args.get('session_id')
+                if not _owned_calculation_scope(cursor, user_id, session_id, dataset_id):
+                    return jsonify({'success': False, 'message': 'Session or dataset not found'}), 404
                 if dataset_id:
                     cursor.execute("SELECT * FROM calculations WHERE dataset_id = %s "
                                    "ORDER BY created_at DESC LIMIT 1", (dataset_id,))
-                elif session_id:
+                else:
                     cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
                                    "ORDER BY created_at DESC LIMIT 1", (session_id,))
-                else:
-                    cursor.execute("SELECT * FROM calculations ORDER BY created_at DESC LIMIT 1")
                 row = cursor.fetchone()
             except Exception as e:
                 return jsonify({'success': False, 'message': str(e)}), 500
@@ -957,15 +1121,20 @@ def calculations_routes(app):
         session_id = payload.get('session_id')
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id required'}), 400
+        user_id, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
         with _db() as (conn, cursor):
             if not conn:
-                return jsonify({'success': True, 'data': {'columns': [], 'rows': []}})
+                return jsonify({'success': False, 'message': 'Database unavailable'}), 503
             try:
+                if not session_is_owned(cursor, session_id, user_id):
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
                 cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
                                "ORDER BY created_at DESC", (session_id,))
                 rows = cursor.fetchall()
-            except Exception:
-                return jsonify({'success': True, 'data': {'columns': [], 'rows': []}})
+            except Exception as error:
+                return jsonify({'success': False, 'message': str(error)}), 500
             summary_rows = []
             for row in rows:
                 result_data = _load_json(row.get('result_data'))
@@ -1001,19 +1170,24 @@ def calculations_routes(app):
         session_id = payload.get('session_id')
         if not session_id:
             return jsonify({'success': False, 'message': 'session_id required'}), 400
-        empty = {'columns': [], 'rows': [], 'portfolio_total': 0,
-                 'instrument_counts': {}}
+        user_id, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
         with _db() as (conn, cursor):
             if not conn:
-                return jsonify({'success': True, 'data': empty})
+                return jsonify({'success': False, 'message': 'Database unavailable'}), 503
             try:
+                if not session_is_owned(cursor, session_id, user_id):
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
                 cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
                                "ORDER BY created_at DESC", (session_id,))
                 rows = cursor.fetchall()
-            except Exception:
-                return jsonify({'success': True, 'data': empty})
+            except Exception as error:
+                return jsonify({'success': False, 'message': str(error)}), 500
             portfolio_rows = []
-            portfolio_total = 0
+            currency_totals = {}
+            unresolved_currency = False
+            unresolved_valuation = False
             instrument_counts = {}
             seen = set()
             for row in rows:
@@ -1023,12 +1197,41 @@ def calculations_routes(app):
                 seen.add(cid)
                 result_data = _load_json(row.get('result_data'))
                 agg = result_data.get('aggregates', {}) or {}
-                tv = (agg.get('total_value')
-                      or agg.get('total_market_value')
-                      or agg.get('total_face_value') or 0)
-                portfolio_total += float(tv or 0)
-
+                tv = agg.get('total_value')
+                if tv is None:
+                    tv = agg.get('total_market_value')
+                groups = agg.get('currency_groups')
                 stored_count = agg.get('instrument_count') or 0
+                if agg.get('failed_count') or (tv is None and stored_count):
+                    unresolved_valuation = True
+                if isinstance(groups, dict) and groups:
+                    for group_currency, group in groups.items():
+                        group_value = group.get('total_value')
+                        if group_value is None:
+                            group_value = group.get('total_market_value')
+                        if group_value is None:
+                            if stored_count:
+                                unresolved_valuation = True
+                            continue
+                        key = str(group_currency or 'UNSPECIFIED').strip().upper()
+                        if key == 'UNSPECIFIED':
+                            unresolved_currency = True
+                        currency_totals[key] = (
+                            currency_totals.get(key, 0.0) + float(group_value)
+                        )
+                elif tv is not None:
+                    row_currency = (
+                        agg.get('currency')
+                        or result_data.get('currency')
+                        or row.get('currency')
+                    )
+                    key = str(row_currency or 'UNSPECIFIED').strip().upper()
+                    if key == 'UNSPECIFIED':
+                        unresolved_currency = True
+                    currency_totals[key] = (
+                        currency_totals.get(key, 0.0) + float(tv)
+                    )
+
                 stored_results = (result_data.get('results')
                                   or result_data.get('calculations') or [])
                 unique_count = _unique_instrument_count(stored_results, stored_count)
@@ -1042,27 +1245,51 @@ def calculations_routes(app):
                     'Failed Count': agg.get('failed_count') or 0,
                     'Calculation ID': cid,
                 })
+            known_currencies = {
+                key for key in currency_totals if key != 'UNSPECIFIED'
+            }
+            can_combine = (
+                len(known_currencies) == 1
+                and not unresolved_currency
+                and not unresolved_valuation
+            )
+            portfolio_total = (
+                sum(currency_totals.values()) if can_combine else None
+            )
             return jsonify({'success': True, 'data': {
                 'columns': ['Instrument Type', 'Total Value', 'Instrument Count',
                             'Failed Count', 'Calculation ID'],
                 'rows': portfolio_rows,
                 'portfolio_total': portfolio_total,
                 'instrument_counts': instrument_counts,
+                'currency_totals': currency_totals,
+                'currency': (
+                    next(iter(known_currencies)) if can_combine else None
+                ),
+                'warning': None if can_combine else (
+                    'Portfolio total is unavailable because valuations have '
+                    'missing, incomplete, or different currencies.'
+                ),
             }})
 
     @app.route('/api/calculations/session/<session_id>', methods=['GET', 'OPTIONS'])
     def calculations_by_session(session_id):
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
         with _db() as (conn, cursor):
             if not conn:
-                return jsonify({'success': True, 'data': []})
+                return jsonify({'success': False, 'message': 'Database unavailable'}), 503
             try:
+                if not session_is_owned(cursor, session_id, user_id):
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
                 cursor.execute("SELECT * FROM calculations WHERE session_id = %s "
                                "ORDER BY created_at DESC", (session_id,))
                 rows = cursor.fetchall()
-            except Exception:
-                return jsonify({'success': True, 'data': []})
+            except Exception as error:
+                return jsonify({'success': False, 'message': str(error)}), 500
             return jsonify({'success': True, 'data': [{
                 'id': r.get('id'),
                 'instrument_type': r.get('instrument_type'),
@@ -1077,24 +1304,22 @@ def calculations_routes(app):
     def session_workflows(session_id):
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
         with _db() as (conn, cursor):
             if not conn:
-                return jsonify({'success': True, 'data': {}})
+                return jsonify({'success': False, 'message': 'Database unavailable'}), 503
             try:
                 cursor.execute("SELECT instrument_workflows FROM ui_sessions "
-                               "WHERE session_id = %s", (session_id,))
+                               "WHERE session_id = %s AND user_id = %s", (session_id, user_id))
                 row = cursor.fetchone()
-            except Exception:
-                return jsonify({'success': True, 'data': {}})
-            if row and row.get('instrument_workflows'):
-                try:
-                    v = row['instrument_workflows']
-                    return jsonify({'success': True,
-                                    'data': json.loads(v) if isinstance(v, str) else v})
-                except Exception:
-                    return jsonify({'success': True, 'data': {}})
-            return jsonify({'success': True, 'data': {}})
-
+            except Exception as error:
+                return jsonify({'success': False, 'message': str(error)}), 500
+            if not row:
+                return jsonify({'success': False, 'message': 'Session not found'}), 404
+            workflows = _load_json(row.get('instrument_workflows'))
+            return jsonify({'success': True, 'data': workflows})
 
 def auto_detect_instrument_type(inputs: dict) -> str:
     if inputs.get('discount_rate') and not inputs.get('coupon_rate'):

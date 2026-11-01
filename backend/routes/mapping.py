@@ -2,6 +2,8 @@ import json
 from contextlib import contextmanager
 from flask import request, jsonify
 from utils.db import get_db
+from utils.auth import resolve_current_user, session_is_owned
+from utils.excel_parser import parse_full_workbook
 
 
 @contextmanager
@@ -110,6 +112,50 @@ def get_mapping_by_dataset(dataset_id):
             return None
 
 
+def _authenticated_user():
+    user_id, auth_error = resolve_current_user()
+    if auth_error:
+        status, message = auth_error
+        return None, (jsonify({'success': False, 'message': message}), status)
+    return user_id, None
+
+
+def _load_owned_dataset_data(dataset_id, user_id):
+    with _db() as (conn, cursor):
+        if not conn:
+            raise RuntimeError('Database unavailable')
+        cursor.execute(
+            """SELECT name, data, headers, file_path, instrument_type
+               FROM datasets WHERE id = %s AND user_id = %s LIMIT 1""",
+            (dataset_id, user_id)
+        )
+        dataset = cursor.fetchone()
+    if not dataset:
+        return None
+
+    data = dataset.get('data')
+    if isinstance(data, str):
+        data = json.loads(data)
+    if isinstance(data, list) and data:
+        headers = dataset.get('headers')
+        if isinstance(headers, str):
+            headers = json.loads(headers)
+        return {'data': data, 'headers': headers or []}
+
+    from routes.dataset import _absolute_upload_path
+    file_path = _absolute_upload_path(dataset.get('file_path'))
+    if not file_path:
+        return {'data': [], 'headers': []}
+    parsed = parse_full_workbook(file_path, dataset.get('instrument_type'), max_rows=None)
+    rows = [
+        row
+        for sheet in parsed.get('sheets', [])
+        for row in sheet.get('data', [])
+        if isinstance(row, dict)
+    ]
+    return {'data': rows, 'headers': list(rows[0]) if rows else []}
+
+
 def apply_column_mapping(data, column_mapping):
     if not data or not column_mapping:
         return data
@@ -135,6 +181,9 @@ def mapping_routes(app):
     def auto_match_mapping():
         if request.method == 'OPTIONS':
             return '', 200
+        _, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
 
         payload = request.get_json() or {}
         file_columns = payload.get('file_columns', [])
@@ -153,6 +202,9 @@ def mapping_routes(app):
     def apply_mapping():
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
 
         payload = request.get_json() or {}
         dataset_id = payload.get('dataset_id')
@@ -165,6 +217,20 @@ def mapping_routes(app):
 
         if not dataset_id or not instrument_type:
             return jsonify({'success': False, 'message': 'Missing required fields'}), 400
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'Database unavailable'}), 503
+            try:
+                cursor.execute(
+                    "SELECT id FROM datasets WHERE id = %s AND user_id = %s LIMIT 1",
+                    (dataset_id, user_id)
+                )
+                if not cursor.fetchone():
+                    return jsonify({'success': False, 'message': 'Dataset not found'}), 404
+                if session_id and not session_is_owned(cursor, session_id, user_id):
+                    return jsonify({'success': False, 'message': 'Session not found'}), 404
+            except Exception as error:
+                return jsonify({'success': False, 'message': str(error)}), 500
 
         mapping_id = save_mapping(dataset_id, instrument_type, column_mapping,
                                   file_columns, required_columns, mapping_type)
@@ -173,23 +239,23 @@ def mapping_routes(app):
             return jsonify({'success': False, 'message': 'Failed to save mapping'}), 500
 
         try:
-            from routes.data_processing import get_dataset_data
             from routes.calculations import calculate_data, normalize_instrument_type, save_calculation
 
-            dataset_data = get_dataset_data(dataset_id)
+            dataset_data = _load_owned_dataset_data(dataset_id, user_id)
             if dataset_data and dataset_data.get('data'):
                 mapped_data = apply_column_mapping(dataset_data['data'], column_mapping)
                 inst_type = normalize_instrument_type(instrument_type)
                 calc_result = calculate_data(mapped_data, inst_type)
 
-                if session_id:
-                    save_calculation(
-                        inst_type,
-                        {'data': mapped_data, 'column_mapping': column_mapping},
-                        calc_result,
-                        dataset_id=dataset_id,
-                        session_id=session_id
-                    )
+                saved_calculation_id = save_calculation(
+                    inst_type,
+                    {'data': mapped_data, 'column_mapping': column_mapping},
+                    calc_result,
+                    dataset_id=dataset_id,
+                    session_id=session_id
+                )
+                if not saved_calculation_id:
+                    return jsonify({'success': False, 'message': 'Calculation could not be saved'}), 500
 
                 return jsonify({
                     'success': True,
@@ -201,19 +267,29 @@ def mapping_routes(app):
                 })
         except Exception as e:
             print(f"Auto-calculation after mapping failed: {e}")
+            return jsonify({'success': False, 'message': 'Mapping saved, but calculation failed'}), 500
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'mapping_id': mapping_id,
-                'column_mapping': column_mapping
-            }
-        })
+        return jsonify({'success': False, 'message': 'Dataset contains no calculable rows'}), 422
 
     @app.route('/api/mapping/dataset/<int:dataset_id>', methods=['GET', 'OPTIONS'])
     def get_dataset_mapping(dataset_id):
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'Database unavailable'}), 503
+            try:
+                cursor.execute(
+                    "SELECT id FROM datasets WHERE id = %s AND user_id = %s LIMIT 1",
+                    (dataset_id, user_id)
+                )
+                if not cursor.fetchone():
+                    return jsonify({'success': False, 'message': 'Dataset not found'}), 404
+            except Exception as error:
+                return jsonify({'success': False, 'message': str(error)}), 500
 
         mapping = get_mapping_by_dataset(dataset_id)
 
@@ -225,6 +301,9 @@ def mapping_routes(app):
     def validate_mapping():
         if request.method == 'OPTIONS':
             return '', 200
+        _, auth_response = _authenticated_user()
+        if auth_response:
+            return auth_response
 
         payload = request.get_json() or {}
         column_mapping = payload.get('column_mapping', {})

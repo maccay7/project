@@ -8,6 +8,7 @@ from pages.settings_details import (
     get_system_info
 )
 from utils.db import get_db
+from utils.auth import resolve_current_user
 
 
 @contextmanager
@@ -59,6 +60,16 @@ def create_settings_table():
         except Exception as e:
             print(f"Error creating user_settings table: {e}")
             return False
+
+
+def _authenticated_user_id(requested_user_id=None):
+    user_id, auth_error = resolve_current_user()
+    if auth_error:
+        status, message = auth_error
+        return None, (jsonify({'success': False, 'message': message}), status)
+    if requested_user_id is not None and str(requested_user_id) != str(user_id):
+        return None, (jsonify({'success': False, 'message': 'User not found'}), 404)
+    return user_id, None
 
 
 def get_setting(user_id, setting_key):
@@ -127,21 +138,27 @@ def settings_routes(app):
     def profile():
         if request.method == 'OPTIONS':
             return '', 200
-        user_id = request.args.get('user_id', 1)
+        user_id, error_response = _authenticated_user_id(request.args.get('user_id'))
+        if error_response:
+            return error_response
         return jsonify({'success': True, 'data': get_user_profile(user_id)})
 
     @app.route('/api/user/preferences', methods=['GET', 'OPTIONS'])
     def preferences():
         if request.method == 'OPTIONS':
             return '', 200
-        user_id = request.args.get('user_id', 1)
+        user_id, error_response = _authenticated_user_id(request.args.get('user_id'))
+        if error_response:
+            return error_response
         return jsonify({'success': True, 'data': get_user_preferences(user_id)})
 
     @app.route('/api/user/notifications/settings', methods=['GET', 'OPTIONS'])
     def notifications_settings():
         if request.method == 'OPTIONS':
             return '', 200
-        user_id = request.args.get('user_id', 1)
+        user_id, error_response = _authenticated_user_id(request.args.get('user_id'))
+        if error_response:
+            return error_response
         return jsonify({'success': True, 'data': get_notification_settings(user_id)})
 
     @app.route('/api/system/info', methods=['GET', 'OPTIONS'])
@@ -155,7 +172,9 @@ def settings_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
         data = request.get_json()
-        user_id = data.get('user_id', 1)
+        user_id, error_response = _authenticated_user_id(data.get('user_id'))
+        if error_response:
+            return error_response
         first_name = data.get('first_name')
         last_name = data.get('last_name')
         email = data.get('email')
@@ -192,7 +211,9 @@ def settings_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
         data = request.get_json()
-        user_id = data.get('user_id', 1)
+        user_id, error_response = _authenticated_user_id(data.get('user_id'))
+        if error_response:
+            return error_response
 
         with _db() as (conn, cursor):
             if not conn:
@@ -234,6 +255,9 @@ def settings_routes(app):
     def get_user_settings(user_id):
         if request.method == 'OPTIONS':
             return '', 200
+        _, error_response = _authenticated_user_id(user_id)
+        if error_response:
+            return error_response
         settings = get_all_settings(user_id)
         return jsonify({'success': True, 'data': settings})
 
@@ -241,6 +265,9 @@ def settings_routes(app):
     def get_user_setting(user_id, setting_key):
         if request.method == 'OPTIONS':
             return '', 200
+        _, error_response = _authenticated_user_id(user_id)
+        if error_response:
+            return error_response
         value = get_setting(user_id, setting_key)
         if value is not None:
             return jsonify({'success': True, 'data': {setting_key: value}})
@@ -250,6 +277,9 @@ def settings_routes(app):
     def update_user_setting(user_id, setting_key):
         if request.method == 'OPTIONS':
             return '', 200
+        _, error_response = _authenticated_user_id(user_id)
+        if error_response:
+            return error_response
         payload = request.get_json() or {}
         setting_value = payload.get('value')
         setting_type = payload.get('type', 'preference')
@@ -264,6 +294,9 @@ def settings_routes(app):
     def save_user_settings(user_id):
         if request.method == 'OPTIONS':
             return '', 200
+        _, error_response = _authenticated_user_id(user_id)
+        if error_response:
+            return error_response
         payload = request.get_json() or {}
         settings = payload.get('settings', {})
         if not settings:
@@ -282,7 +315,9 @@ def settings_routes(app):
             return '', 200
         try:
             data = request.get_json()
-            user_id = data.get('user_id')
+            user_id, error_response = _authenticated_user_id(data.get('user_id'))
+            if error_response:
+                return error_response
             country = data.get('country', 'US')
             currency = data.get('currency', 'USD')
             maturity = data.get('maturity', '1Y')
@@ -301,9 +336,9 @@ def settings_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
         try:
-            user_id = request.args.get('user_id')
-            if not user_id:
-                return jsonify({'success': False, 'error': 'user_id is required'}), 400
+            user_id, error_response = _authenticated_user_id(request.args.get('user_id'))
+            if error_response:
+                return error_response
             settings = get_setting(user_id, 'fred_preferences')
             if settings:
                 return jsonify({'success': True, 'data': settings})

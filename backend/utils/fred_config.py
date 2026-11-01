@@ -1,6 +1,7 @@
 import os
 import requests
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
@@ -254,22 +255,59 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None,
             except Exception as e:
                 logger.error(f"Error fetching time series for {series_id}: {e}")
     else:
-        for mat_label in maturities:
-            series_id, label, used_mat, note = _series_for_instrument(
+        if maturity:
+            maturity_text = str(maturity).strip().upper()
+            suffix = maturity_text[-1:] if maturity_text[-1:] in {'M', 'W', 'Y'} else 'Y'
+            try:
+                value_text = maturity_text[:-1] if maturity_text.endswith(suffix) else maturity_text
+                maturity_value = float(value_text)
+                divisor = {'M': 12, 'W': 52, 'Y': 1}[suffix]
+                max_years = maturity_value / divisor
+                if max_years > 0:
+                    selected_maturity = (
+                        maturity_text
+                        if maturity_text in COUNTRY_SERIES_MAP.get(country_upper, {})
+                        else None
+                    )
+                    selected_years = maturity_map.get(selected_maturity)
+                    maturities = [
+                        label for label in maturities
+                        if maturity_map.get(str(label).strip().upper()) is not None
+                        and maturity_map[str(label).strip().upper()] <= max_years
+                        and (
+                            selected_years is None
+                            or abs(maturity_map[str(label).strip().upper()] - selected_years) > 1e-8
+                        )
+                    ]
+                    if selected_maturity:
+                        maturities.append(selected_maturity)
+            except (TypeError, ValueError):
+                logger.warning("Ignoring invalid yield-curve maturity: %s", maturity)
+
+        def fetch_maturity(mat_label):
+            series_id, _label, used_mat, _note = _series_for_instrument(
                 instrument_type, country_upper, mat_label
             )
             if not series_id:
                 logger.warning(f"No series for {country_upper} {mat_label} — skipping")
-                continue
+                return None
             val, date = fetch_fred_observation(series_id)
-            if val is not None:
-                points.append({
-                    'maturity': maturity_map.get(used_mat, 1.0),
-                    'maturityLabel': used_mat,
-                    'rate': round(val, 4),
-                    'date': date,
-                    'source': 'fred',
-                })
+            if val is None:
+                return None
+            return {
+                'maturity': maturity_map.get(used_mat, 1.0),
+                'maturityLabel': used_mat,
+                'rate': round(val, 4),
+                'date': date,
+                'source': 'fred',
+            }
+
+        worker_count = min(8, max(1, len(maturities)))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            points.extend(
+                point for point in executor.map(fetch_maturity, maturities)
+                if point is not None
+            )
 
     if from_date and to_date:
         points.sort(key=lambda x: x['date'] or '')

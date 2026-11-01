@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from flask import request, jsonify, send_file
 from utils.db import get_db
+from utils.auth import resolve_current_user, session_is_owned
 from utils.fred_config import (
     FRED_API_KEY, FRED_BASE_URL, get_yield_curve,
 )
@@ -26,6 +27,7 @@ except Exception:
     _PLAYWRIGHT_AVAILABLE = False
 
 frontend_base = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+REPORTS_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'reports'))
 
 A4_WIDTH_PX = 794
 A4_HEIGHT_PX = 1123
@@ -131,12 +133,21 @@ def create_reports_table():
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS reports (
                     id INT AUTO_INCREMENT PRIMARY KEY,
-                    session_id VARCHAR(64) NOT NULL,
-                    report_type VARCHAR(50),
+                    user_id INT NOT NULL,
+                    session_id VARCHAR(255),
+                    report_type VARCHAR(100) NOT NULL,
+                    report_name VARCHAR(255) NOT NULL,
                     report_data JSON,
-                    file_path VARCHAR(512),
+                    file_path VARCHAR(500),
+                    generation_status ENUM('pending','generating','completed','failed')
+                        DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_session_id (session_id)
+                    completed_at TIMESTAMP NULL,
+                    INDEX idx_reports_session_id (session_id),
+                    INDEX idx_reports_user_id (user_id),
+                    CONSTRAINT fk_reports_user FOREIGN KEY (user_id)
+                        REFERENCES users(id) ON DELETE CASCADE
                 )
             """)
             conn.commit()
@@ -144,6 +155,36 @@ def create_reports_table():
         except Exception as e:
             print(f"Error creating reports table: {e}")
             return False
+
+
+def _authenticated_session_owner(session_id):
+    user_id, auth_error = resolve_current_user()
+    if auth_error:
+        status, message = auth_error
+        return None, (jsonify({'success': False, 'message': message}), status)
+    if not session_id:
+        return None, (jsonify({'success': False, 'message': 'Session ID is required'}), 400)
+    with _db() as (conn, cursor):
+        if not conn:
+            return None, (jsonify({'success': False, 'message': 'Database unavailable'}), 503)
+        try:
+            if not session_is_owned(cursor, session_id, user_id):
+                return None, (jsonify({'success': False, 'message': 'Session not found'}), 404)
+        except Exception as error:
+            return None, (jsonify({'success': False, 'message': str(error)}), 500)
+    return user_id, None
+
+
+def _report_file_path(path):
+    if not path:
+        return None
+    resolved = os.path.abspath(path)
+    try:
+        if os.path.commonpath([resolved, REPORTS_FOLDER]) != REPORTS_FOLDER:
+            return None
+    except ValueError:
+        return None
+    return resolved
 
 
 def _load_visualisation_config(session_id, explicit_config=None):
@@ -440,7 +481,7 @@ def generate_appendix_data(data, instrument_type):
 
 def generate_report_excel(session_id, report_data, instrument_type,
                           visualisation_config=None):
-    output_dir = 'reports'
+    output_dir = REPORTS_FOLDER
     os.makedirs(output_dir, exist_ok=True)
 
     wb = openpyxl.Workbook()
@@ -638,19 +679,25 @@ def generate_report_excel(session_id, report_data, instrument_type,
     return file_path
 
 
-def save_report(session_id, report_type, report_data, file_path):
+def save_report(user_id, session_id, report_type, report_data, file_path):
     with _db() as (conn, cursor):
         if not conn:
             return None
         try:
+            conn.begin()
             cursor.execute(
-                """INSERT INTO reports (session_id, report_type, report_data, file_path)
-                   VALUES (%s, %s, %s, %s)""",
-                (session_id, report_type, json.dumps(report_data), file_path)
+                """INSERT INTO reports
+                   (user_id, session_id, report_type, report_name, report_data,
+                    file_path, generation_status, generated_at, completed_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, 'completed', CURRENT_TIMESTAMP,
+                           CURRENT_TIMESTAMP)""",
+                (user_id, session_id, report_type, os.path.basename(file_path),
+                 json.dumps(report_data, default=str), file_path)
             )
             conn.commit()
             return cursor.lastrowid
         except Exception as e:
+            conn.rollback()
             print(f"Error saving report: {e}")
             return None
 
@@ -763,7 +810,7 @@ def generate_word_from_html(session_id, report_html, requested_name=None,
     if visualisation_config:
         report_html = _inject_curves_into_html(report_html, visualisation_config)
 
-    output_dir = 'reports'
+    output_dir = REPORTS_FOLDER
     os.makedirs(output_dir, exist_ok=True)
     safe_sid = _safe_session_id(session_id)
     tmpdir = os.path.join(output_dir,
@@ -812,10 +859,10 @@ def reports_routes(app):
 
     @app.route('/reports/<path:filename>')
     def serve_report_image(filename):
-        output_dir = os.path.abspath('reports')
+        if filename not in {'DuraCapital logo.png', 'reportbackground.png'}:
+            return jsonify({'success': False, 'message': 'File not found'}), 404
+        output_dir = REPORTS_FOLDER
         requested = os.path.abspath(os.path.join(output_dir, filename))
-        if not requested.startswith(output_dir + os.sep) and requested != output_dir:
-            return jsonify({'success': False, 'message': 'Invalid path'}), 400
         if not os.path.isfile(requested):
             return jsonify({'success': False, 'message': 'File not found'}), 404
         return send_file(requested)
@@ -830,20 +877,26 @@ def reports_routes(app):
         instrument_type = payload.get('instrument_type') or 'portfolio'
         report_data = payload.get('report_data', {})
         explicit_config = payload.get('visualisation_config')
-        if not session_id:
-            return jsonify({'success': False, 'message': 'Session ID is required'}), 400
+        user_id, owner_error = _authenticated_session_owner(session_id)
+        if owner_error:
+            return owner_error
 
         visualisation_config = explicit_config or _load_visualisation_config(session_id)
 
-        file_path = generate_report_excel(session_id, report_data, instrument_type,
-                                         visualisation_config=visualisation_config)
-        report_id = save_report(session_id, report_type, report_data, file_path)
+        try:
+            file_path = generate_report_excel(session_id, report_data, instrument_type,
+                                              visualisation_config=visualisation_config)
+        except Exception as error:
+            return jsonify({'success': False, 'message': f'Report generation failed: {error}'}), 500
+        report_id = save_report(user_id, session_id, report_type, report_data, file_path)
         if report_id:
             return jsonify({
                 'success': True,
                 'data': {'report_id': report_id, 'file_path': file_path,
                          'report_type': report_type}
             })
+        if os.path.isfile(file_path):
+            os.remove(file_path)
         return jsonify({'success': False, 'message': 'Failed to save report'}), 500
 
     @app.route('/api/report/appendix', methods=['POST', 'OPTIONS'])
@@ -851,6 +904,15 @@ def reports_routes(app):
         if request.method == 'OPTIONS':
             return '', 200
         payload = request.get_json() or {}
+        _, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
+        session_id = payload.get('session_id')
+        if session_id:
+            _, owner_error = _authenticated_session_owner(session_id)
+            if owner_error:
+                return owner_error
         appendix = generate_appendix_data(
             payload.get('data', []),
             payload.get('instrument_type') or 'portfolio',
@@ -863,6 +925,9 @@ def reports_routes(app):
             return '', 200
         payload = request.get_json() or {}
         session_id = payload.get('session_id')
+        _, owner_error = _authenticated_session_owner(session_id)
+        if owner_error:
+            return owner_error
         explicit_config = payload.get('visualisation_config')
         visualisation_config = explicit_config or _load_visualisation_config(session_id)
         if not visualisation_config:
@@ -890,18 +955,23 @@ def reports_routes(app):
     def download_report(report_id):
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, auth_error = resolve_current_user()
+        if auth_error:
+            status, message = auth_error
+            return jsonify({'success': False, 'message': message}), status
         with _db() as (conn, cursor):
             if not conn:
                 return jsonify({'success': False, 'message': 'Database error'}), 500
             try:
-                cursor.execute("SELECT * FROM reports WHERE id = %s", (report_id,))
+                cursor.execute("SELECT * FROM reports WHERE id = %s AND user_id = %s",
+                               (report_id, user_id))
                 report = cursor.fetchone()
             except Exception as e:
                 return jsonify({'success': False, 'message': str(e)}), 500
         if not report:
             return jsonify({'success': False, 'message': 'Report not found'}), 404
-        file_path = report['file_path']
-        if not os.path.exists(file_path):
+        file_path = _report_file_path(report.get('file_path'))
+        if not file_path or not os.path.isfile(file_path):
             return jsonify({'success': False, 'message': 'Report file not found'}), 404
         return send_file(file_path, as_attachment=True,
                          download_name=os.path.basename(file_path))
@@ -917,8 +987,9 @@ def reports_routes(app):
         explicit_config = payload.get('visualisation_config')
         include_live_curves = bool(payload.get('include_live_curves', False))
 
-        if not session_id:
-            return jsonify({'success': False, 'message': 'Session ID is required'}), 400
+        user_id, owner_error = _authenticated_session_owner(session_id)
+        if owner_error:
+            return owner_error
         if not report_html:
             return jsonify({'success': False, 'message': 'report_html is required'}), 400
 
@@ -947,9 +1018,16 @@ def reports_routes(app):
                 allow_backend_fallback=allow_backend_fallback,
             )
             if file_path and os.path.exists(file_path):
+                report_id = save_report(user_id, session_id, 'word', {
+                    'file_name': display_name,
+                    'live_curves_included': include_live_curves,
+                }, file_path)
+                if not report_id:
+                    os.remove(file_path)
+                    return jsonify({'success': False, 'message': 'Failed to save report metadata'}), 500
                 return jsonify({
                     'success': True,
-                    'data': {'file_path': file_path, 'file_name': display_name,
+                    'data': {'report_id': report_id, 'file_path': file_path, 'file_name': display_name,
                              'stored_file_name': os.path.basename(file_path),
                              'live_curves_included': include_live_curves}
                 })
@@ -963,36 +1041,50 @@ def reports_routes(app):
     def download_word_report(session_id):
         if request.method == 'OPTIONS':
             return '', 200
-        output_dir = 'reports'
-        if not os.path.exists(output_dir):
-            return jsonify({'success': False, 'message': 'Reports directory not found'}), 404
-
-        safe_sid = _safe_session_id(session_id)
-        prefix = f'report_{safe_sid}_'
-        word_files = [f for f in os.listdir(output_dir)
-                      if f.startswith(prefix) and f.endswith('.docx')]
-        if not word_files:
+        user_id, owner_error = _authenticated_session_owner(session_id)
+        if owner_error:
+            return owner_error
+        with _db() as (conn, cursor):
+            if not conn:
+                return jsonify({'success': False, 'message': 'Database unavailable'}), 503
+            try:
+                cursor.execute(
+                    """SELECT file_path, report_name FROM reports
+                       WHERE session_id = %s AND user_id = %s
+                         AND generation_status = 'completed'
+                         AND report_name LIKE '%.docx'
+                       ORDER BY generated_at DESC LIMIT 1""",
+                    (session_id, user_id)
+                )
+                report = cursor.fetchone()
+            except Exception as error:
+                return jsonify({'success': False, 'message': str(error)}), 500
+        if not report:
             return jsonify({'success': False,
                             'message': 'No Word report found for this session'}), 404
-
-        word_files.sort(reverse=True)
-        file_path = os.path.join(output_dir, word_files[0])
+        file_path = _report_file_path(report.get('file_path'))
+        if not file_path or not os.path.isfile(file_path):
+            return jsonify({'success': False, 'message': 'Report file not found'}), 404
         requested = request.args.get('name')
-        download_name = (_safe_filename(requested, word_files[0])
-                         if requested else word_files[0])
+        download_name = (_safe_filename(requested, report.get('report_name'))
+                         if requested else report.get('report_name'))
         return send_file(file_path, as_attachment=True, download_name=download_name)
 
     @app.route('/api/report/session/<session_id>', methods=['GET', 'OPTIONS'])
     def get_session_reports(session_id):
         if request.method == 'OPTIONS':
             return '', 200
+        user_id, owner_error = _authenticated_session_owner(session_id)
+        if owner_error:
+            return owner_error
         with _db() as (conn, cursor):
             if not conn:
                 return jsonify({'success': False, 'message': 'Database error'}), 500
             try:
                 cursor.execute(
-                    "SELECT * FROM reports WHERE session_id = %s ORDER BY generated_at DESC",
-                    (session_id,)
+                    "SELECT * FROM reports WHERE session_id = %s AND user_id = %s "
+                    "ORDER BY generated_at DESC",
+                    (session_id, user_id)
                 )
                 rows = cursor.fetchall()
             except Exception as e:

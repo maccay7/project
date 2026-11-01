@@ -157,6 +157,7 @@ def fred_routes(app):
                 from_date=from_date,
                 to_date=to_date,
                 instrument_type=instrument_type,
+                maturity=maturity,
             )
 
             if not points:
