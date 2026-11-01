@@ -5161,6 +5161,7 @@ async function calculateMetrics() {
   const rateFieldRe = /(rate|yield|coupon|spread|discount|interest)/i
   const moneyFieldRe = /(principal|face[\s_]*value|par[\s_]*value|notional|amount|price|value)/i
   const freqFieldRe = /frequen/i
+  const dateFieldRe = /(date|time)/i
 
   const excluded = excludedDetectedFields.value
   let dataForCalculation = cleanedData.value
@@ -5188,6 +5189,10 @@ async function calculateMetrics() {
           } else if (moneyFieldRe.test(rawKey)) {
             const n = parseFloat(t.replace(/[$,]/g, ''))
             val = isNaN(n) ? t : n
+          } else if (dateFieldRe.test(rawKey)) {
+            // Preserve date strings as-is for backend parsing
+            // The backend will handle date format detection and parsing
+            val = t
           } else {
             val = t
           }
@@ -5740,6 +5745,10 @@ async function calculateMetrics() {
           if (response.data.fred) agg.fred = response.data.fred
           allCalculations.value = agg
           selectedCalculations.value = agg
+          // Preserve derivations from the first calculation for Excel exports
+          if (calcArray[0]?.derivations) {
+            agg.derivations = calcArray[0].derivations
+          }
           const portfolioRow = {
             'Portfolio Name': currentSheetName.value || 'Current Portfolio',
             'Instrument Type': instrumentType.value,
@@ -5861,8 +5870,39 @@ async function calculateMetrics() {
             selectedCurrency: selectedCurrency.value,
             customCurrency: customCurrency.value,
             lastCalcInputData: lastCalcInputData.value,
-            valuationExcelData: valuationExcelData.value
+            valuationExcelData: valuationExcelData.value,
+            lastCalculationTimestamp: Date.now()
           })
+          // Save workflow with latest calculation data for Excel exports
+          if (activeSession.value?.id) {
+            await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
+              rawData: rawData.value,
+              cleanedData: cleanedData.value,
+              cleanedSourceData: cleanedSourceData.value,
+              calculations: calculations.value,
+              allCalculations: allCalculations.value,
+              selectedCalculations: selectedCalculations.value,
+              columnMapping: columnMapping.value,
+              worksheetStatus: worksheetStatus.value,
+              workbookSheets: workbookSheets.value,
+              instrumentSummary: instrumentSummary.value,
+              portfolioSummary: portfolioSummary.value,
+              completedInstrumentSummary: completedInstrumentSummary.value,
+              completedPortfolioSummary: completedPortfolioSummary.value,
+              yieldCurveData: yieldCurveData.value,
+              fredFilters: {
+                country: effectiveCountry.value,
+                currency: effectiveCurrency.value,
+                maturity: effectiveMaturity.value,
+                maturityMode: maturityMode.value === 'dateRange' ? 'date' : 'tenor',
+                fromDate: yieldCurveStartDate.value,
+                toDate: yieldCurveEndDate.value
+              },
+              uploadedFile: uploadedFile.value?.name || null,
+              originalDatasetId: originalDatasetId.value,
+              lastCalculationTimestamp: Date.now()
+            })
+          }
         }
         // Reconcile Excel view with the exact inputs that were valued and
         // the per-instrument calculation outputs (multi: one row per instrument).

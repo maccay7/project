@@ -170,7 +170,7 @@ export const SEMANTIC_FIELD_GROUPS = {
   maturity: ['maturity_date', 'maturity', 'end_date', 'expiry_date'],
   issue: ['issue_date', 'issue', 'start_date', 'effective_date'],
   valuation: ['valuation_date', 'valuation', 'as_of_date', 'date'],
-  settlement: ['settlement_date', 'settlement', 'trade_date'],
+  settlement: ['settlement_date', 'settlement', 'trade_date', 'trade'],
   coupon: ['coupon_rate', 'coupon', 'interest_rate'],
   frequency: ['coupon_frequency', 'frequency', 'payment_frequency'],
   currency: ['currency', 'ccy', 'currency_code'],

@@ -1,0 +1,83 @@
+DURA CAPITAL PROJECT FILE INVENTORY
+Project Root: C:\Users\HP\Desktop\maccay school\Project\project\frontend
+Generated: 11/01/2026 16:18:51
+
+TOTAL FILES: 72
+
+========== BACKEND FILES ==========
+
+========== FRONTEND FILES ==========
+.env
+.env.example
+.gitignore
+all_files.txt
+backend-data-points.md
+files.txt
+index.html
+package.json
+package-lock.json
+public\background report 1.webp
+public\DataStudio logo.jpeg
+public\DataStudio-logo.jpeg
+public\DuraCapital logo.png
+public\login1.jpg
+public\login4.jpg
+public\logo.png
+public\reportbackground.png
+public\Untitled - July 02, 2026 at 13.19.30.png
+src\App.vue
+src\components\ExcelModalViewer.vue
+src\components\ExcelViewer.vue
+src\components\ExcelWorkbookViewer.vue
+src\components\FixedLayout.vue
+src\components\InstrumentWorkflow.vue
+src\components\TopNavbar.vue
+src\components\WorksheetSelector.vue
+src\composables\useCalculationOrchestration.js
+src\composables\useExcelUpload.js
+src\composables\useFredMarket.js
+src\composables\useInstrumentConfig.js
+src\composables\useReportGeneration.js
+src\composables\useSessionManagement.js
+src\composables\useVisualizationYieldCurve.js
+src\composables\useWorksheetWorkflow.js
+src\config.js
+src\main.ts
+src\router\index.ts
+src\services\api.js
+src\services\mappingTemplateManager.js
+src\services\sessionManager.js
+src\stores\auth.ts
+src\style.css
+src\utils\__tests__\calculationDisplay.test.js
+src\utils\__tests__\instrumentMapping.test.js
+src\utils\autoDetectInstrument.js
+src\utils\calculationDisplay.js
+src\utils\cleaningOperations.js
+src\utils\excelExport.js
+src\utils\generateReportHtml.js
+src\utils\instrumentFieldMappings.js
+src\utils\instrumentMapping.js
+src\utils\reportYieldCurves.js
+src\utils\sheetTypeDetector.js
+src\utils\workflowProgress.js
+src\utils\yieldCurveChart.js
+src\views\CleaningView.vue
+src\views\Dashboard.vue
+src\views\InstrumentView.vue
+src\views\LoginView.vue
+src\views\ReportsView.vue
+src\views\ResetPasswordView.vue
+src\views\SettingsView.vue
+src\views\SignupView.vue
+src\views\Summary.vue
+src\views\UploadView.vue
+src\views\VerifyCodeView.vue
+src\views\VisualizationsView.vue
+src\vite-env.d.ts
+tsconfig.json
+tsconfig.node.json
+vite.config.ts
+vitest.config.js
+
+========== OTHER PROJECT FILES ==========

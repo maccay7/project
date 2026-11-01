@@ -104,7 +104,7 @@
         v-if="rawData.length"
         :data="previewSlice"
         :headers="headers"
-        :show-mapping-controls="true"
+        :show-mapping-controls="showMappingControls"
         :column-mapping="columnMapping"
         :available-file-columns="fileColumns"
         :required-columns="requiredFieldNames"
@@ -242,6 +242,7 @@ const suggestedMapping = ref({})
 const mappingValidation = ref(null)
 const dependencyValidation = ref(null)
 const showMappingDialog = ref(false)
+const showMappingControls = ref(true)
 const selectedInstrumentType = ref(null)
 const columnMapping = ref({})
 
@@ -249,7 +250,10 @@ const requiredFieldNames = computed(() => {
   const m = suggestedMapping.value || {}
   const keys = Object.keys(m)
   if (keys.length) return keys
-  return Object.keys(columnMapping.value)
+  const mappingKeys = Object.keys(columnMapping.value)
+  if (mappingKeys.length) return mappingKeys
+  // Fallback: use file columns as mapping targets if detection fails
+  return fileColumns.value.length ? fileColumns.value : []
 })
 
 const SAMPLE_ROWS = 500
@@ -380,6 +384,12 @@ function applyParsedData(data) {
   headers.value = data.length ? Object.keys(data[0] || {}) : []
   fileColumns.value = headers.value
   showPreview.value = true
+  // Ensure mapping dropdowns are shown even if instrument detection fails
+  if (!selectedInstrumentType.value && requiredFieldNames.value.length === 0) {
+    // Use all file columns as potential mapping targets if detection fails
+    columnMapping.value = {}
+    showMappingControls.value = true
+  }
 }
 
 async function postLoadSetup(fileName) {
