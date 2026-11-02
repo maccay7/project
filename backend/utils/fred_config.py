@@ -249,6 +249,8 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None,
 
     country_upper = normalize_country(country)
     points = []
+    fallback_country = None
+    use_fallback = False
 
     if from_date and to_date:
         key_maturity = (maturity or '10Y').strip().upper()
@@ -327,6 +329,7 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None,
                 return None
             val, date = fetch_fred_observation(series_id)
             if val is None:
+                logger.warning(f"No data for {country_upper} {mat_label} (series: {series_id}) — skipping")
                 return None
             return {
                 'maturity': maturity_map.get(used_mat, 1.0),
@@ -343,10 +346,46 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None,
                 if point is not None
             )
 
+    # If no points were fetched and country is not US, try US as fallback
+    if not points and country_upper != 'US':
+        logger.warning(f"No data for {country_upper}, trying US as fallback")
+        fallback_country = 'US'
+        use_fallback = True
+        
+        def fetch_maturity_fallback(mat_label):
+            series_id, _label, used_mat, _note = _series_for_instrument(
+                instrument_type, 'US', mat_label
+            )
+            if not series_id:
+                return None
+            val, date = fetch_fred_observation(series_id)
+            if val is None:
+                return None
+            return {
+                'maturity': maturity_map.get(used_mat, 1.0),
+                'maturityLabel': used_mat,
+                'rate': round(val, 4),
+                'date': date,
+                'source': 'fred',
+                'note': f'Fallback: US data used (no data for {country_upper})',
+            }
+        
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            points.extend(
+                point for point in executor.map(fetch_maturity_fallback, maturities)
+                if point is not None
+            )
+
     if from_date and to_date:
         points.sort(key=lambda x: x['date'] or '')
     else:
         points.sort(key=lambda x: x['maturity'])
+    
+    # Add fallback note to all points if fallback was used
+    if use_fallback:
+        for point in points:
+            point['note'] = f'Fallback: US data used (no data for {country_upper})'
+    
     return points
 
 
@@ -402,16 +441,15 @@ def build_filter_options():
             'currency': currency_for_country(code),
             'maturities': [{'code': m, 'name': m} for m in COUNTRY_SERIES_MAP[code]],
         })
+    
+    # Include all currencies from COUNTRY_CURRENCY
+    currencies = []
+    for code in COUNTRY_CURRENCY.values():
+        if code not in currencies:
+            currencies.append({'code': code, 'name': code})
+    
     return {
         'countries': countries,
-        'currencies': [
-            {'code': 'USD', 'name': 'USD'},
-            {'code': 'GBP', 'name': 'GBP'},
-            {'code': 'EUR', 'name': 'EUR'},
-            {'code': 'JPY', 'name': 'JPY'},
-            {'code': 'CAD', 'name': 'CAD'},
-            {'code': 'AUD', 'name': 'AUD'},
-            {'code': 'ZAR', 'name': 'ZAR'},
-        ],
+        'currencies': currencies,
         'note': 'Filter options from local configuration',
     }
