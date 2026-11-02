@@ -195,27 +195,21 @@
         <v-icon size="16" class="table-icon">mdi-table-large</v-icon>
         <span>Working on: {{ selectedTable.name }} (Row {{ selectedTable.startRow + 1 }} - {{ selectedTable.endRow + 1 }})</span>
       </div>
+      <div class="header-row-selector">
+        <label class="header-row-label">Header Row:</label>
+        <select v-model="customHeaderRow" class="header-row-select">
+          <option v-for="row in availableHeaderRows" :key="row" :value="row">
+            Row {{ row + 1 }}
+          </option>
+        </select>
+        <button class="apply-header-btn" @click="applyCustomHeaderRow" :disabled="customHeaderRow === null">
+          Apply
+        </button>
+      </div>
       <button class="exit-isolation-btn" @click="exitTableIsolation">
         <v-icon size="16">mdi-close</v-icon>
         Exit Table Mode
       </button>
-    </div>
-
-    <div v-if="isSingleInstrumentSheet && Object.keys(extractedPreviewValues).length > 0" class="single-instrument-preview">
-      <div class="preview-header">
-        <v-icon size="16" class="preview-icon">mdi-check-circle</v-icon>
-        <span>Single Instrument Detected - Auto-Extracted Values</span>
-      </div>
-      <div class="preview-grid">
-        <div
-          v-for="(value, key) in extractedPreviewValues"
-          :key="key"
-          class="preview-item"
-        >
-          <span class="preview-label">{{ formatFieldName(key) }}:</span>
-          <span class="preview-value">{{ formatPreviewValue(value) }}</span>
-        </div>
-      </div>
     </div>
     </template>
   </div>
@@ -349,8 +343,18 @@ const rowHeights = ref({})
 const isSelectingRows = ref(false)
 const selectedRowRange = ref({ start: -1, end: -1 })
 const isRowSelectionMode = ref(false)
+const customHeaderRow = ref(null)
 
 const activeSheet = computed(() => sheets.value[activeSheetIndex.value] || null)
+
+const availableHeaderRows = computed(() => {
+  if (!selectedTable.value) return []
+  const rows = []
+  for (let i = selectedTable.value.startRow; i <= selectedTable.value.endRow; i++) {
+    rows.push(i)
+  }
+  return rows
+})
 
 function getColumnHeaders(count) {
   const headers = []
@@ -1184,6 +1188,9 @@ function mergeAndPrioritizeStructures(labelValuePairs, tables, sections, data) {
 function selectTable(table) {
   selectedTable.value = table
   isTableIsolationMode.value = true
+  
+  // Initialize custom header row to the detected header row
+  customHeaderRow.value = table.headerRow !== undefined ? table.headerRow : table.startRow
 
   if (activeSheet.value && activeSheet.value.fullData) {
     const table2D = []
@@ -1210,6 +1217,45 @@ function selectTable(table) {
         endCol: table.endCol,
         headerRow: table.headerRow,
         headerRowEnd: table.headerRowEnd
+      }
+    })
+  }
+}
+
+function applyCustomHeaderRow() {
+  if (!selectedTable.value || customHeaderRow.value === null) return
+  
+  const table = selectedTable.value
+  const headerRowIndex = customHeaderRow.value - table.startRow
+  
+  // Update the table's header row
+  table.headerRow = customHeaderRow.value
+  table.headerRowEnd = customHeaderRow.value
+  table.headerRows = [customHeaderRow.value]
+  
+  if (activeSheet.value && activeSheet.value.fullData) {
+    const table2D = []
+    for (let r = table.startRow; r <= table.endRow; r++) {
+      if (activeSheet.value.fullData[r]) {
+        table2D.push(activeSheet.value.fullData[r].slice(table.startCol, table.endCol + 1))
+      } else {
+        table2D.push([])
+      }
+    }
+    
+    emit('table-isolated', {
+      sheetName: activeSheet.value.name,
+      tableName: table.name,
+      type: table.type || 'table',
+      rawTableData: table2D,
+      headerRowIndex: headerRowIndex,
+      tableRange: {
+        startRow: table.startRow,
+        endRow: table.endRow,
+        startCol: table.startCol,
+        endCol: table.endCol,
+        headerRow: customHeaderRow.value,
+        headerRowEnd: customHeaderRow.value
       }
     })
   }
@@ -1706,6 +1752,13 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
 .btn-clear-selection:hover { background: #e0e0e0; }
 .table-isolation-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #e3f2fd; border-top: 1px solid #0B2044; flex-shrink: 0; }
 .isolation-info { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #0d47a1; font-size: 12px; }
+.header-row-selector { display: flex; align-items: center; gap: 8px; }
+.header-row-label { font-size: 11px; font-weight: 600; color: #0d47a1; }
+.header-row-select { padding: 4px 8px; font-size: 11px; border: 1px solid #c0c0c0; border-radius: 4px; background: white; cursor: pointer; }
+.header-row-select:hover { border-color: #0B2044; }
+.apply-header-btn { padding: 4px 12px; background: #0B2044; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 500; transition: background 0.2s; }
+.apply-header-btn:hover:not(:disabled) { background: #1a3a6e; }
+.apply-header-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .exit-isolation-btn { display: flex; align-items: center; gap: 4px; padding: 4px 12px; background: #fff; border: 1px solid #dc3545; border-radius: 4px; cursor: pointer; font-size: 11px; color: #dc3545; transition: all 0.2s; }
 .exit-isolation-btn:hover { background: #dc3545; color: #fff; }
 .single-instrument-preview { display: flex; flex-direction: column; padding: 12px; background: #e8f5e9; border-top: 1px solid #4caf50; flex-shrink: 0; }

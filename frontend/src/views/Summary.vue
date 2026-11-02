@@ -348,7 +348,8 @@ const PORTFOLIO_SNAPSHOT_KEY = '__portfolio_summary__'
 
 const EXCLUDED_COLUMNS = new Set([
   '_raw', '_source', 'index', '__v',
-  'instrument_name', 'instrument_type',
+  'instrument_name', 'instrument type',
+  'instrumentname', 'instrument_type',
   'worksheet', 'workbook', 'valuationtype',
   'currency', 'day_count_convention', 'derivations',
   'discount_amount', 'yield_curve_rate', 'term_days',
@@ -900,13 +901,19 @@ async function loadSummary() {
     instrumentsWithDetails.value = detailsList
     instruments.value = instrumentResults
 
-    const total = instruments.value.reduce((sum, inst) => sum + (inst.value || 0), 0)
-    // If total is 0 but some instruments have values, use the first non-zero value as total
-    const effectiveTotal = total > 0 ? total : (instruments.value.find(inst => inst.value > 0)?.value || 0)
-    instruments.value = instruments.value.map(inst => ({
-      ...inst,
-      percent: effectiveTotal > 0 ? (((inst.value || 0) / effectiveTotal) * 100).toFixed(1) : 0
-    }))
+    // Calculate total portfolio value for allocation percentages
+    const totalPortfolioValue = instruments.value.reduce((sum, inst) => sum + (inst.value || 0), 0)
+    // If total is 0, fall back to face value for allocation
+    const totalFaceValue = instruments.value.reduce((sum, inst) => sum + (inst.faceValue || 0), 0)
+    const effectiveTotal = totalPortfolioValue > 0 ? totalPortfolioValue : totalFaceValue
+
+    instruments.value = instruments.value.map(inst => {
+      const instValue = totalPortfolioValue > 0 ? (inst.value || 0) : (inst.faceValue || 0)
+      return {
+        ...inst,
+        percent: effectiveTotal > 0 ? ((instValue / effectiveTotal) * 100).toFixed(1) : 0
+      }
+    })
 
     const initSelections = {}
     instruments.value.forEach(inst => {

@@ -843,6 +843,24 @@
                       </span>
                     </div>
                     <div class="calculations-grid">
+                      <!-- Portfolio totals as calculation cards -->
+                      <div v-if="uniqueInstrumentCount >= 2" class="calculation-card total-summary-card" @click="showFormula('Total Principal')">
+                        <div class="calc-name">Total Principal</div>
+                        <div class="calc-value">{{ allCalculations.totalPrincipal != null ? formatNumber(allCalculations.totalPrincipal) : '—' }}</div>
+                      </div>
+                      <div v-if="uniqueInstrumentCount >= 2" class="calculation-card total-summary-card" @click="showFormula('Average Rate')">
+                        <div class="calc-name">Average Rate</div>
+                        <div class="calc-value">{{ allCalculations.avgRate != null ? formatNumber(allCalculations.avgRate) + '%' : '—' }}</div>
+                      </div>
+                      <div v-if="uniqueInstrumentCount >= 2" class="calculation-card total-summary-card" @click="showFormula('Weighted Average Rate')">
+                        <div class="calc-name">Weighted Average Rate</div>
+                        <div class="calc-value">{{ allCalculations.weightedAvgRate != null ? formatNumber(allCalculations.weightedAvgRate) + '%' : '—' }}</div>
+                      </div>
+                      <div v-if="uniqueInstrumentCount >= 2 && allCalculations.fred?.benchmark_rate" class="calculation-card total-summary-card" @click="showFormula('Benchmark Date')">
+                        <div class="calc-name">Benchmark Date</div>
+                        <div class="calc-value">{{ allCalculations.fred.benchmark_date || '—' }}</div>
+                      </div>
+                      <!-- Individual calculation fields -->
                       <div
                         v-for="calc in calculationFields"
                         :key="calc.key"
@@ -1630,7 +1648,7 @@ function mapBackendFieldsToDisplayNames(row, instrumentType) {
 function filterToCalculatedFields(row, instrumentType) {
   const inputFields = INPUT_FIELDS[instrumentType] || []
   const filteredRow = {}
-  const alwaysInclude = ['Instrument Name', 'Instrument Type', 'Worksheet', 'Workbook']
+  const alwaysInclude = ['Instrument Type', 'Worksheet', 'Workbook']
   for (const [key, value] of Object.entries(row)) {
     if (alwaysInclude.includes(key)) {
       filteredRow[key] = value
@@ -1929,6 +1947,7 @@ const completedPortfolioSummary = ref({ columns: [], rows: [] })
 const isCalculating = ref(false)
 const initialCalculationCompleted = ref(false)
 const _isSavingWorkflow = ref(false)
+const _isProgrammaticUpdate = ref(false)
 const fileLoading = ref(false)
 const uploadError = ref('')
 const uploadProgress = ref(0)
@@ -2789,14 +2808,11 @@ function runInstrumentCalculations(row, instrumentType) {
     const n = parseFloat(String(val).replace(/[%,$\s]/g, ''))
     return isNaN(n) ? 0 : n
   }
-  const instrumentName =
-    pick('Instrument Name', 'instrument_name', 'Instrument', 'BondName', 'TBillName', 'Name') || 'Instrument'
   const amount = getNumber(pick('Amount', 'Face Value', 'face_value', 'FaceValue', 'Principal', 'principal', 'Par Value', 'Notional', 'Value', 'value'))
   const rate = getNumber(pick('Rate', 'Interest Rate', 'interest_rate', 'InterestRate', 'Coupon Rate', 'coupon_rate', 'CouponRate', 'Discount Rate', 'discount_rate', 'DiscountRate', 'Yield', 'yield', 'Yield to Maturity', 'yield_to_maturity'))
   const days = getNumber(pick('Days to Maturity', 'days_to_maturity', 'DaysToMaturity', 'Term', 'term', 'Term Days', 'term_days', 'Tenor'))
   if (instrumentType === 'money-market') {
     const interest = amount * (rate / 100) * (days / 360)
-    results['Instrument Name'] = instrumentName
     results['Total Value'] = amount
     results['total_value'] = amount
     results['Instrument Count'] = 1
@@ -2819,7 +2835,6 @@ function runInstrumentCalculations(row, instrumentType) {
     results['total_principal'] = amount
   } else if (instrumentType === 'bonds') {
     const coupon = amount * (rate / 100)
-    results['Instrument Name'] = instrumentName
     results['Total Value'] = amount
     results['total_value'] = amount
     results['Instrument Count'] = 1
@@ -2835,7 +2850,6 @@ function runInstrumentCalculations(row, instrumentType) {
   } else {
     const discount = amount * (rate / 100) * (days / 360)
     const price = amount - discount
-    results['Instrument Name'] = instrumentName
     results['Total Value'] = amount
     results['total_value'] = amount
     results['Instrument Count'] = 1
@@ -2877,7 +2891,6 @@ function processInstrumentData(sheetName, data, instrumentType) {
     const enrichedRow = { ...row, 'Instrument Name': instrumentName }
     const result = runInstrumentCalculations(enrichedRow, instrumentType)
     return {
-      'Instrument Name': instrumentName,
       'Instrument Type': instrumentType,
       ...result,
       'Worksheet': sheetName
@@ -2886,16 +2899,15 @@ function processInstrumentData(sheetName, data, instrumentType) {
   const existingRows = instrumentSummary.value.rows || []
   const mergedRows = [...existingRows]
   rows.forEach(newRow => {
-    const id = newRow['Instrument Name'] + '_' + (newRow['Worksheet'] || '')
-    const exists = mergedRows.some(r => (r['Instrument Name'] || '') + '_' + (r['Worksheet'] || '') === id)
+    const id = (newRow['Worksheet'] || '')
+    const exists = mergedRows.some(r => (r['Worksheet'] || '') === id)
     if (!exists) mergedRows.push(newRow)
   })
   const allCols = new Set()
   mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
   instrumentSummary.value = { columns: dedupeColumns(Array.from(allCols)), rows: mergedRows }
   const agg = computeAggregate(mergedRows)
-  const uniqueNames = new Set(mergedRows.map(r => r['Instrument Name']))
-  agg.instrumentCount = uniqueNames.size
+  agg.instrumentCount = mergedRows.length
   allCalculations.value = agg
   selectedCalculations.value = agg
   calculations.value = agg
@@ -6781,6 +6793,7 @@ async function loadSavedData(force = false, prefetchedWorkflow = null) {
       Date.now() - _lastLoadSavedAt < LOAD_SAVED_THROTTLE_MS) {
     return true
   }
+  _isProgrammaticUpdate.value = true
   let loaded = false
   try {
     const wf = prefetchedWorkflow || await sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
@@ -6853,6 +6866,8 @@ async function loadSavedData(force = false, prefetchedWorkflow = null) {
     }
   } catch (err) {
     console.warn('loadSavedData failed:', err)
+  } finally {
+    _isProgrammaticUpdate.value = false
   }
   if (loaded) {
     _lastLoadSavedSessionId = sid
@@ -8391,7 +8406,7 @@ function downloadBlob(content, filename, mimeType) {
 const autoSaveEnabled = ref(false)
 
 watch([rawData, cleanedData], () => {
-  if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion) return
+  if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion || _isSavingWorkflow.value || _isProgrammaticUpdate.value) return
   debouncedSave()
 }, { deep: true })
 
