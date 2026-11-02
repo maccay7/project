@@ -5875,7 +5875,7 @@ async function calculateMetrics() {
       isUsingDetectedFields.value = false
       try { await enrichCalculationsWithFred() } catch (fredError) { /* non-fatal */ }
       try { await saveSessionData(true) } catch (e) { console.warn('Post-calc save failed:', e) }
-      forceUpdate.value++
+      // Removed forceUpdate to prevent re-render loop on calculations page
     }
   } catch (err) {
     const errorMsg = err.message || 'Unknown error'
@@ -8379,10 +8379,12 @@ watch([rawData, cleanedData], () => {
 }, { deep: true })
 
 //  cleanedData to trigger recalculation when values change on Cleaning page
+// Disabled for calculations tab to prevent re-render loop - recalculation is triggered by activeTab switch instead
 
 let cleanDataChangeTimeout = null
 watch(cleanedData, () => {
-  if (activeTab.value === 'calculations' && hasCleanedData.value) {
+  // Only trigger recalculation when NOT on calculations tab to prevent blinking
+  if (activeTab.value !== 'calculations' && hasCleanedData.value) {
     if (isCalculating.value) {
       _recalcQueued = true
       return
@@ -8400,17 +8402,19 @@ watch(cleanedData, () => {
 }, { deep: true })
 
 watch(() => [...excludedDetectedFields.value], () => {
-  if (activeTab.value !== 'calculations' || !hasCleanedData.value) return
-  if (isCalculating.value) {
-    _recalcQueued = true
-    return
+  // Only trigger recalculation when NOT on calculations tab to prevent blinking
+  if (activeTab.value !== 'calculations' && hasCleanedData.value) {
+    if (isCalculating.value) {
+      _recalcQueued = true
+      return
+    }
+    // Check signature before setting timeout to avoid unnecessary recalculations
+    if (calculationSignatureMatches()) return
+    if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
+    cleanDataChangeTimeout = setTimeout(async () => {
+      if (!calculationSignatureMatches()) await calculateMetrics()
+    }, 500)
   }
-  // Check signature before setting timeout to avoid unnecessary recalculations
-  if (calculationSignatureMatches()) return
-  if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
-  cleanDataChangeTimeout = setTimeout(async () => {
-    if (!calculationSignatureMatches()) await calculateMetrics()
-  }, 500)
 })
 
 watch(() => activeTab.value, async (newTab) => {
