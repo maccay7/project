@@ -8387,13 +8387,15 @@ watch(cleanedData, () => {
       _recalcQueued = true
       return
     }
+    // Check signature before setting timeout to avoid unnecessary recalculations
+    if (calculationSignatureMatches()) return
     if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
     cleanDataChangeTimeout = setTimeout(async () => {
       // Only recalculate if the data actually changed (signature mismatch)
       if (!calculationSignatureMatches()) {
         await calculateMetrics()
       }
-    }, 500)
+    }, 1000)
   }
 }, { deep: true })
 
@@ -8403,13 +8405,17 @@ watch(() => [...excludedDetectedFields.value], () => {
     _recalcQueued = true
     return
   }
+  // Check signature before setting timeout to avoid unnecessary recalculations
+  if (calculationSignatureMatches()) return
   if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
   cleanDataChangeTimeout = setTimeout(async () => {
     if (!calculationSignatureMatches()) await calculateMetrics()
-  }, 0)
+  }, 500)
 })
 
 watch(() => activeTab.value, async (newTab) => {
+  // Add guard to prevent recalculation if already calculating
+  if (isCalculating.value) return
 
   if (newTab === 'calculations' && hasCleanedData.value && !isCalculating.value) {
     const lastStatus = allCalculations.value?.status

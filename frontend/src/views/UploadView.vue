@@ -101,7 +101,7 @@
       </v-card>
 
       <ExcelViewer
-        v-if="rawData.length"
+        v-if="rawData.length && worksheetSelected"
         :data="previewSlice"
         :headers="headers"
         :show-mapping-controls="showMappingControls"
@@ -145,7 +145,7 @@
           </v-card-title>
           <v-card-text class="sheet-dialog-body">
             <p class="sheet-dialog-text">
-              Auto-mapping needs confirmation. Map each required field to a column from your file:
+              Auto-mapping needs confirmation. Map each {{ mappingDialogLabel }} to a column from your file:
             </p>
             <div class="mapping-grid">
               <div v-for="field in requiredFieldNames" :key="field" class="mapping-row">
@@ -242,11 +242,15 @@ const suggestedMapping = ref({})
 const mappingValidation = ref(null)
 const dependencyValidation = ref(null)
 const showMappingDialog = ref(false)
-const showMappingControls = ref(true)
+const showMappingControls = ref(false)
 const selectedInstrumentType = ref(null)
 const columnMapping = ref({})
+const worksheetSelected = ref(false)
 
 const requiredFieldNames = computed(() => {
+  // Only show required fields after worksheet is selected and data is loaded
+  if (!hasData.value || !worksheetSelected.value) return []
+  
   const m = suggestedMapping.value || {}
   const keys = Object.keys(m)
   if (keys.length) return keys
@@ -254,6 +258,14 @@ const requiredFieldNames = computed(() => {
   if (mappingKeys.length) return mappingKeys
   // Fallback: use file columns as mapping targets if detection fails
   return fileColumns.value.length ? fileColumns.value : []
+})
+
+const isSingleInstrument = computed(() => {
+  return selectedInstrumentType.value !== null && selectedInstrumentType.value !== 'all'
+})
+
+const mappingDialogLabel = computed(() => {
+  return isSingleInstrument.value ? 'required fields' : 'required columns'
 })
 
 const SAMPLE_ROWS = 500
@@ -277,12 +289,15 @@ function resetDataState() {
   uploadedFile.value = null
   fileSizeLabel.value = '—'
   showPreview.value = false
+  worksheetSelected.value = false
+  showMappingControls.value = false
 }
 
 function releaseWorkbook() {
   workbookData.value = null
   sheetNames.value = []
   selectedSheet.value = null
+  worksheetSelected.value = false
 }
 
 async function readFileData(file) {
@@ -384,12 +399,9 @@ function applyParsedData(data) {
   headers.value = data.length ? Object.keys(data[0] || {}) : []
   fileColumns.value = headers.value
   showPreview.value = true
-  // Ensure mapping dropdowns are shown even if instrument detection fails
-  if (!selectedInstrumentType.value && requiredFieldNames.value.length === 0) {
-    // Use all file columns as potential mapping targets if detection fails
-    columnMapping.value = {}
-    showMappingControls.value = true
-  }
+  // Only show mapping controls after worksheet is selected and data is loaded
+  worksheetSelected.value = true
+  showMappingControls.value = true
 }
 
 async function postLoadSetup(fileName) {
