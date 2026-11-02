@@ -1145,9 +1145,6 @@ def calculations_routes(app):
                         if not isinstance(c, dict):
                             continue
                         summary_rows.append({
-                            'Instrument Name': (c.get('instrument_name')
-                                                or c.get('instrumentId')
-                                                or 'Instrument'),
                             'Instrument Type': row.get('instrument_type'),
                             **c,
                         })
