@@ -259,8 +259,11 @@
                     <div class="instrument-type-display">
                       <strong>Instrument:</strong> {{ formatInstrumentTypeLabel(instrumentType) }}
                       <span class="required-summary">
-                        {{ multiRequiredCount }} required · {{ multiAdditionalCount }} additional
+                        {{ multiTableDetectionResults.reduce((sum, inst) => sum + Object.keys(inst.fields).length, 0) }} fields detected
                       </span>
+                    </div>
+                    <div class="detection-hint">
+                      Required fields are automatically included. Additional fields can be toggled.
                     </div>
 
                     <div class="currency-selection-section">
@@ -303,75 +306,55 @@
                           <span class="field-count-badge">{{ Object.keys(instrument.fields).length }} fields</span>
                         </div>
 
-                        <!-- REQUIRED fields -->
+                        <!-- UNIFIED field list -->
                         <div class="field-group">
-                          <div class="field-group-title">
-                            <v-icon size="14" color="#2e7d32">mdi-check-circle</v-icon>
-                            Required for {{ instrumentLabel }} calculation
-                          </div>
                           <div class="field-grid">
                             <div
                               v-for="(value, field) in instrument.fields"
-                              :key="'req-' + field"
-                              v-show="isRequiredField(field)"
-                              class="field-row field-row--required"
+                              :key="field"
+                              class="field-row"
+                              :class="{ 'field-row--required': isRequiredField(field), 'field-row--excluded': excludedDetectedFields.value?.has(field) }"
                             >
-                              <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
-                              <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                              <span v-if="instrument.fieldsWithMetadata?.[field]?.location" class="field-loc">
-                                @ {{ instrument.fieldsWithMetadata[field].location }}
-                              </span>
-                              <div
-                                v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1"
-                                class="currency-variant-selector"
-                              >
-                                <select
-                                  :value="value.selectedCurrency"
-                                  @change="updateMultiTableCurrency(instrument, field, $event.target.value)"
-                                  class="currency-select"
+                              <div class="field-indicator">
+                                <v-icon v-if="isRequiredField(field)" size="16" color="#2e7d32">mdi-check-circle</v-icon>
+                                <input
+                                  v-else
+                                  type="checkbox"
+                                  :checked="!excludedDetectedFields.value?.has(field)"
+                                  @change="toggleExcludeField(field)"
+                                  class="field-checkbox"
+                                />
+                              </div>
+                              <div class="field-content">
+                                <span class="field-name">{{ instrument.fieldsWithMetadata[field]?.originalLabel || field }}</span>
+                                <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                                <div
+                                  v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1"
+                                  class="currency-variant-selector"
                                 >
-                                  <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
-                                    {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
-                                  </option>
-                                </select>
+                                  <select
+                                    :value="value.selectedCurrency"
+                                    @change="updateMultiTableCurrency(instrument, field, $event.target.value)"
+                                    class="currency-select"
+                                  >
+                                    <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
+                                      {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
+                                    </option>
+                                  </select>
+                                </div>
+                              </div>
+                              <div class="field-status">
+                                <span v-if="isRequiredField(field)" class="status-badge status-badge--included">Included</span>
+                                <span v-else-if="excludedDetectedFields.value?.has(field)" class="status-badge status-badge--excluded">Excluded</span>
+                                <span v-else class="status-badge status-badge--included">Included</span>
                               </div>
                             </div>
                           </div>
                         </div>
 
-                        <!-- ADDITIONAL fields (toggleable) -->
-                        <div v-if="hasAdditionalFields(instrument)" class="field-group">
-                          <div class="field-group-title">
-                            <v-icon size="14" color="#1565c0">mdi-plus-circle</v-icon>
-                            Additional detected fields
-                            <span class="field-group-hint">(used only if checked)</span>
-                          </div>
-                          <div class="field-grid">
-                            <label
-                              v-for="(value, field) in instrument.fields"
-                              :key="'add-' + field"
-                              v-show="!isRequiredField(field)"
-                              class="field-row field-row--additional"
-                              :class="{ 'field-row--excluded': excludedDetectedFields.has(field) }"
-                            >
-                              <input
-                                type="checkbox"
-                                :checked="!excludedDetectedFields.has(field)"
-                                @change="toggleExcludeField(field)"
-                                class="field-checkbox"
-                              />
-                              <span class="field-name">{{ field }}</span>
-                              <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                              <span v-if="instrument.fieldsWithMetadata?.[field]?.location" class="field-loc">
-                                @ {{ instrument.fieldsWithMetadata[field].location }}
-                              </span>
-                            </label>
-                          </div>
-                        </div>
-
-                        <div v-if="instrument.missingFields.length > 0" class="multi-missing-fields">
+                        <div v-if="getMissingFieldsForInstrument(instrument).length > 0" class="multi-missing-fields">
                           <span class="missing-label">Missing required:</span>
-                          {{ instrument.missingFields.join(', ') }}
+                          {{ getMissingFieldsForInstrument(instrument).join(', ') }}
                         </div>
                       </div>
                     </div>
@@ -409,64 +392,63 @@
                       <strong>Instrument:</strong> {{ formatInstrumentTypeLabel(detectedInstrumentType) }}
                     </div>
 
-                    <div v-if="Object.keys(autoDetectedFields).length > 0" class="field-group">
-                      <div class="field-group-title">
-                        <v-icon size="14" color="#2e7d32">mdi-check-circle</v-icon>
-                        Required fields detected
-                      </div>
-                      <div class="field-grid">
-                        <div
-                          v-for="(value, field) in autoDetectedFields"
-                          :key="field"
-                          class="field-row field-row--required"
-                        >
-                          <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
-                          <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                          <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="field-loc">
-                            @ {{ autoDetectedFieldsWithMetadata[field].location }}
-                          </span>
-                          <div
-                            v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1"
-                            class="currency-variant-selector"
-                          >
-                            <select
-                              v-model="value.selectedCurrency"
-                              @change="updateSelectedCurrency(field, value.selectedCurrency)"
-                              class="currency-select"
-                            >
-                              <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
-                                {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
-                              </option>
-                            </select>
-                          </div>
-                        </div>
-                      </div>
+                    <div class="detection-summary">
+                      <strong>All Detected Fields ({{ Object.keys(autoDetectedFields).length + Object.keys(autoDetectedAdditionalFields).length }})</strong>
+                      <p class="summary-hint">Required fields are automatically included. Additional fields can be toggled.</p>
                     </div>
 
-                    <div v-if="Object.keys(autoDetectedAdditionalFields).length > 0" class="field-group">
-                      <div class="field-group-title">
-                        <v-icon size="14" color="#1565c0">mdi-plus-circle</v-icon>
-                        Additional detected fields
-                        <span class="field-group-hint">(used only if checked)</span>
-                      </div>
+                    <div v-if="Object.keys(autoDetectedFields).length > 0 || Object.keys(autoDetectedAdditionalFields).length > 0" class="field-group">
                       <div class="field-grid">
+                        <!-- Required fields - always included -->
+                        <div
+                          v-for="(value, field) in autoDetectedFields"
+                          :key="'req-' + field"
+                          class="field-row field-row--required"
+                        >
+                          <div class="field-indicator">
+                            <v-icon size="16" color="#2e7d32">mdi-check-circle</v-icon>
+                            <span class="field-status">Included</span>
+                          </div>
+                          <div class="field-content">
+                            <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
+                            <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                            <div
+                              v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1"
+                              class="currency-variant-selector"
+                            >
+                              <select
+                                v-model="value.selectedCurrency"
+                                @change="updateSelectedCurrency(field, value.selectedCurrency)"
+                                class="currency-select"
+                              >
+                                <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
+                                  {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
+                                </option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- Additional fields - selectable -->
                         <label
                           v-for="(value, field) in autoDetectedAdditionalFields"
                           :key="'add-' + field"
                           class="field-row field-row--additional"
-                          :class="{ 'field-row--excluded': excludedDetectedFields.has(field) }"
+                          :class="{ 'field-row--excluded': excludedDetectedFields.value?.has(field) }"
                         >
-                          <input
-                            type="checkbox"
-                            :checked="!excludedDetectedFields.has(field)"
-                            @change="toggleExcludeField(field)"
-                            class="field-checkbox"
-                          />
-                          <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
-                          <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
-                          <span v-if="autoDetectedFieldsWithMetadata[field]?.location" class="field-loc">
-                            @ {{ autoDetectedFieldsWithMetadata[field].location }}
-                          </span>
+                          <div class="field-indicator">
+                            <input
+                              type="checkbox"
+                              :checked="!excludedDetectedFields.value?.has(field)"
+                              @change="toggleExcludeField(field)"
+                              class="field-checkbox"
+                            />
+                            <span class="field-status">{{ excludedDetectedFields.value?.has(field) ? 'Excluded' : 'Included' }}</span>
+                          </div>
+                          <div class="field-content">
+                            <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
+                            <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                          </div>
                         </label>
                       </div>
                     </div>
@@ -482,14 +464,14 @@
                     <div v-if="Object.keys(autoDetectedFields).length < requiredColumns.length" class="missing-fields-warning">
                       <p><strong>Missing required fields:</strong></p>
                       <ul>
-                        <li v-for="col in requiredColumns.filter(c => !autoDetectedFields[c])" :key="col">{{ col }}</li>
+                        <li v-for="col in requiredColumns.filter(c => !Object.keys(autoDetectedFields).some(k => k.toLowerCase() === c.toLowerCase()))" :key="col">{{ col }}</li>
                       </ul>
                     </div>
                   </v-card-text>
 
                   <v-card-actions class="detection-footer">
                     <span class="footer-selection-summary">
-                      {{ Object.keys(autoDetectedAdditionalFields).length - excludedDetectedFields.size }} additional field(s) will be included
+                      {{ Object.keys(autoDetectedAdditionalFields).length - (excludedDetectedFields.value?.size || 0) }} additional field(s) will be included
                     </span>
                     <v-spacer></v-spacer>
                     <button class="btn-secondary" @click="showDetectionSuccess = false">Cancel</button>
@@ -619,8 +601,8 @@
                   <div class="cleaning-buttons">
                     <button class="btn-primary" @click="applyCleaning">Clean Data</button>
                     <button class="btn-secondary" @click="toggleAllAdditionalFields" v-if="sheetType === 'single'">
-                      <v-icon size="14">{{ excludedDetectedFields.size > 0 ? 'mdi-check-all' : 'mdi-close-circle-outline' }}</v-icon>
-                      {{ excludedDetectedFields.size > 0 ? 'Include all fields' : 'Exclude all additional' }}
+                      <v-icon size="14">{{ (excludedDetectedFields.value?.size || 0) > 0 ? 'mdi-check-all' : 'mdi-close-circle-outline' }}</v-icon>
+                      {{ (excludedDetectedFields.value?.size || 0) > 0 ? 'Include all fields' : 'Exclude all additional' }}
                     </button>
                   </div>
                 </div>
@@ -638,12 +620,12 @@
                       v-for="key in displayedSelectionFields"
                       :key="key"
                       class="compact-field-row"
-                      :class="{ 'compact-field-row--excluded': excludedDetectedFields.has(key) }"
+                      :class="{ 'compact-field-row--excluded': excludedDetectedFields.value?.has(key) }"
                     >
                       <label class="compact-checkbox">
                         <input
                           type="checkbox"
-                          :checked="!excludedDetectedFields.has(key)"
+                          :checked="!excludedDetectedFields.value?.has(key)"
                           @change="toggleExcludeField(key)"
                         />
                       </label>
@@ -651,7 +633,7 @@
                       <span class="compact-field-value">
                         {{ getFieldSelectionValue(key, autoDetectedFields[key]) }}
                       </span>
-                      <div v-if="autoDetectedFields[key] && typeof autoDetectedFields[key] === 'object' && autoDetectedFields[key]?.currencyVariants && Object.keys(autoDetectedFields[key].currencyVariants).length > 1 && !excludedDetectedFields.has(key)" class="currency-variant-selector" style="flex: 0 0 auto;">
+                      <div v-if="autoDetectedFields[key] && typeof autoDetectedFields[key] === 'object' && autoDetectedFields[key]?.currencyVariants && Object.keys(autoDetectedFields[key].currencyVariants).length > 1 && !excludedDetectedFields.value?.has(key)" class="currency-variant-selector" style="flex: 0 0 auto;">
                         <select v-model="autoDetectedFields[key].selectedCurrency" @change="updateSelectedCurrency(key, autoDetectedFields[key].selectedCurrency)" class="currency-select" style="min-width: 80px; padding: 2px 6px; font-size: 11px;">
                           <option v-for="(variantValue, currency) in autoDetectedFields[key].currencyVariants" :key="currency" :value="currency">
                             {{ currency }}
@@ -662,7 +644,7 @@
                   </div>
 
                   <div class="compact-summary">
-                    {{ Object.keys(autoDetectedFields).length - excludedDetectedFields.size }} of {{ Object.keys(autoDetectedFields).length }} fields included
+                    {{ Object.keys(autoDetectedFields).length - (excludedDetectedFields.value?.size || 0) }} of {{ Object.keys(autoDetectedFields).length }} fields included
                   </div>
 
                   <div class="add-field-section">
@@ -3280,7 +3262,7 @@ const selectedAdditionalCount = computed(() => {
   let n = 0
   for (const inst of multiTableDetectionResults.value) {
     for (const k of Object.keys(inst.fields || {})) {
-      if (!isRequiredField(k) && !excludedDetectedFields.value.has(k)) n++
+      if (!isRequiredField(k) && !excludedDetectedFields.value?.has(k)) n++
     }
   }
   return n
@@ -3743,6 +3725,7 @@ async function autoDetectSingleInstrument() {
   autoDetectedAdditionalFields.value = {}
   detectedCurrencies.value = []
   detectedInstrumentType.value = ''
+  ensureExcludedFieldsSet()
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
   try {
@@ -3768,10 +3751,10 @@ async function autoDetectSingleInstrument() {
       (status) => { detectionStatus.value = status }
     )
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Detection timeout - scan took too long')), 30000)
+      setTimeout(() => reject(new Error('Detection timeout - scan took too long')), 5000)
     )
     const detectionResult = await Promise.race([detectionPromise, timeoutPromise])
-    detectionStatus.value = 'validating'
+    detectionStatus.value = 'complete'
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
       detectionResult?.fieldsWithMetadata,
@@ -3779,27 +3762,19 @@ async function autoDetectSingleInstrument() {
       requiredColumns.value
     )
     detectionStatus.value = 'complete'
-    const deriveUnion = { ...normalized.fields, ...(detectionResult?.additionalFields || {}) }
-    const deriveUnionMeta = { ...normalized.fieldsWithMetadata }
+    // Merge all fields into autoDetectedFields for the popup
+    const allFields = { ...detectionResult?.fields, ...(detectionResult?.additionalFields || {}) }
+    const allFieldsWithMetadata = { ...detectionResult?.fieldsWithMetadata }
     for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
-      if (!(key in deriveUnionMeta)) {
-        deriveUnionMeta[key] = {
+      if (!(key in allFieldsWithMetadata)) {
+        allFieldsWithMetadata[key] = {
           ...(value && typeof value === 'object' ? value : {}),
           originalLabel: key,
         }
       }
     }
-    deriveDaysToMaturity(deriveUnion, deriveUnionMeta)
-    const primaryAfterDerive = { ...normalized.fields }
-    const metaAfterDerive = { ...normalized.fieldsWithMetadata }
-    for (const [key, value] of Object.entries(deriveUnion)) {
-      if (!(key in primaryAfterDerive) && deriveUnionMeta[key]?.source === 'auto-calculation') {
-        primaryAfterDerive[key] = value
-        metaAfterDerive[key] = deriveUnionMeta[key]
-      }
-    }
-    autoDetectedFields.value = primaryAfterDerive
-    autoDetectedFieldsWithMetadata.value = metaAfterDerive
+    autoDetectedFields.value = allFields
+    autoDetectedFieldsWithMetadata.value = allFieldsWithMetadata
     autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
     detectedCurrencies.value = detectionResult?.currencies || []
     detectedInstrumentType.value = instrumentType.value
@@ -3856,6 +3831,7 @@ async function handleMultiTableDetect(event) {
   detectedCurrencies.value = []
   detectedInstrumentType.value = ''
   selectedCurrency.value = ''
+  ensureExcludedFieldsSet()
   excludedDetectedFields.value.clear()
   showDetectionSuccess.value = false
   showMultiTableDetectionSuccess.value = false
@@ -3877,7 +3853,7 @@ async function handleMultiTableDetect(event) {
       detectionStatus.value = `analyzing (table ${processedTables} of ${totalTables})`
       try {
         const tableData = table.data
-        const TABLE_TIMEOUT_MS = 20000
+        const TABLE_TIMEOUT_MS = 5000
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(
             () => reject(new Error(`Table "${table.tableName}" detection timed out after ${TABLE_TIMEOUT_MS / 1000}s`)),
@@ -3895,39 +3871,25 @@ async function handleMultiTableDetect(event) {
           (status) => { detectionStatus.value = status }
         )
         const detectionResult = await Promise.race([detectionPromise, timeoutPromise])
-        const normalized = normalizeDetectedFields(
-          detectionResult?.fields,
-          detectionResult?.fieldsWithMetadata,
-          event.instrumentType,
-          requiredColumns.value
-        )
-        const mergedFields = { ...normalized.fields }
-        const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
-        const deriveUnion = { ...mergedFields, ...(detectionResult?.additionalFields || {}) }
-        const deriveUnionMeta = { ...mergedFieldsWithMetadata }
+        // Merge all fields directly without normalization
+        const allFields = { ...detectionResult?.fields, ...(detectionResult?.additionalFields || {}) }
+        const allFieldsWithMetadata = { ...detectionResult?.fieldsWithMetadata }
         for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
-          if (!(key in deriveUnionMeta)) {
-            deriveUnionMeta[key] = {
+          if (!(key in allFieldsWithMetadata)) {
+            allFieldsWithMetadata[key] = {
               ...(value && typeof value === 'object' ? value : {}),
               originalLabel: key,
             }
           }
         }
-        deriveDaysToMaturity(deriveUnion, deriveUnionMeta)
-        for (const [key, value] of Object.entries(deriveUnion)) {
-          if (!(key in mergedFields) && deriveUnionMeta[key]?.source === 'auto-calculation') {
-            mergedFields[key] = value
-            mergedFieldsWithMetadata[key] = deriveUnionMeta[key]
-          }
-        }
-        if (Object.keys(mergedFields).length > 0) {
+        if (Object.keys(allFields).length > 0) {
           detectedInstruments.push({
             tableName: table.tableName,
-            instrumentName: mergedFields.InstrumentName || table.tableName,
-            fields: mergedFields,
-            fieldsWithMetadata: mergedFieldsWithMetadata,
+            instrumentName: allFields.InstrumentName || table.tableName,
+            fields: allFields,
+            fieldsWithMetadata: allFieldsWithMetadata,
             currencies: detectionResult.currencies || [],
-            missingFields: requiredColumns.value.filter(c => !mergedFields[c]),
+            missingFields: requiredColumns.value.filter(c => !Object.keys(allFields).some(k => k.toLowerCase() === c.toLowerCase())),
             range: table.range
           })
         }
@@ -3937,6 +3899,30 @@ async function handleMultiTableDetect(event) {
     }
     detectionStatus.value = 'complete'
     multiTableDetectionResults.value = detectedInstruments
+    // Populate global detection structures for popup access
+    if (detectedInstruments.length > 0) {
+      const allFields = {}
+      const allFieldsWithMetadata = {}
+      const allAdditionalFields = {}
+      const allCurrencies = new Set()
+      for (const inst of detectedInstruments) {
+        Object.assign(allFields, inst.fields)
+        Object.assign(allFieldsWithMetadata, inst.fieldsWithMetadata)
+        // Separate additional fields
+        for (const [key, value] of Object.entries(inst.fields)) {
+          if (!requiredColumns.value.some(req => req.toLowerCase() === key.toLowerCase())) {
+            allAdditionalFields[key] = value
+          }
+        }
+        if (inst.currencies) {
+          inst.currencies.forEach(c => allCurrencies.add(c))
+        }
+      }
+      autoDetectedFields.value = allFields
+      autoDetectedFieldsWithMetadata.value = allFieldsWithMetadata
+      autoDetectedAdditionalFields.value = allAdditionalFields
+      detectedCurrencies.value = Array.from(allCurrencies)
+    }
     showMultiTableDetectionSuccess.value = true
     showWorkbookViewer.value = false
   } catch (err) {
@@ -4022,6 +4008,20 @@ function formatDetectedValue(field, value) {
     if (!isNaN(num)) return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
   return String(value)
+}
+
+// Helper function for case-insensitive missing fields check in multi-table detection
+function getMissingFieldsForInstrument(instrument) {
+  return requiredColumns.value.filter(c =>
+    !Object.keys(instrument.fields).some(k => k.toLowerCase() === c.toLowerCase())
+  )
+}
+
+// Ensure excludedDetectedFields is always a Set
+function ensureExcludedFieldsSet() {
+  if (!excludedDetectedFields.value || !(excludedDetectedFields.value instanceof Set)) {
+    excludedDetectedFields.value = new Set()
+  }
 }
 
 // [MULTICURRENCY] 
@@ -4580,11 +4580,11 @@ function exportSummary() {
 }
 
 function viewCurrentSummary() {
-  excelPopupMode.value = 'current'
-  showInstrumentExcelPopup.value = true
-  sortColumn.value = ''
-  sortOrder.value = 'asc'
-  currentPage.value = 1
+  // Use the same data as Calculations page: valuationExcelData
+  excelData.value = valuationExcelData.value
+  excelColumns.value = valuationExcelData.value.length ? Object.keys(valuationExcelData.value[0] || {}) : []
+  excelDialogTitle.value = 'Calculated Instruments – Exact Same as Calculations Page'
+  showExcelDialog.value = true
 }
 
 function viewPreviousSummary() {
@@ -5494,6 +5494,13 @@ async function calculateMetrics() {
           }
           Object.keys(filteredRowWithWorkbook).forEach(k => currentCols.add(k))
           instrumentSummary.value = { columns: dedupeColumns(Array.from(currentCols)), rows: [filteredRowWithWorkbook] }
+          // Sync valuationExcelData from the single-instrument calculation
+          syncValuationExcelFromResults([singleCalc])
+          // Update instrumentSummary to match valuationExcelData for consistency
+          if (valuationExcelData.value && valuationExcelData.value.length) {
+            const headers = Object.keys(valuationExcelData.value[0] || {})
+            instrumentSummary.value = { columns: headers, rows: valuationExcelData.value }
+          }
         } else if (calcArray.length === 0) {
           const errorMsg = 'The calculation service returned no instrument results for the cleaned inputs.'
           allCalculations.value = { status: 'error', message: errorMsg }
@@ -5847,6 +5854,11 @@ async function calculateMetrics() {
         syncValuationExcelFromResults(
           Array.isArray(response?.data?.calculations) ? response.data.calculations : null
         )
+        // Update instrumentSummary to match valuationExcelData for consistency
+        if (valuationExcelData.value && valuationExcelData.value.length) {
+          const headers = Object.keys(valuationExcelData.value[0] || {})
+          instrumentSummary.value = { columns: headers, rows: valuationExcelData.value }
+        }
         saveSessionData()
       } else {
         const errorMsg = response?.message || response?.error || 'Unknown error'
@@ -5931,6 +5943,7 @@ async function continueFromVisualizations() {
       completedInstrumentSummary: completedInstrumentSummary.value,
       completedPortfolioSummary: completedPortfolioSummary.value,
       yieldCurveData: yieldCurveData.value,
+      valuationExcelData: valuationExcelData.value,
       fredFilters: {
         country: effectiveCountry.value,
         currency: effectiveCurrency.value,
@@ -8756,6 +8769,7 @@ onBeforeUnmount(() => {
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .detection-success-title { background: #4CAF50; color: white; padding: 16px 24px; display: flex; align-items: center; }
 .detection-success-body { padding: 20px 24px; }
+.detection-hint { margin-bottom: 16px; padding: 8px 12px; background: #e3f2fd; border-radius: 6px; font-size: 12px; color: #1976D2; font-style: italic; }
 .currency-selection-section { margin-bottom: 20px; padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e8ecf1; }
 .currency-label { display: block; font-weight: 600; color: #0B2044; margin-bottom: 12px; font-size: 14px; }
 .currency-select-vuetify { margin-bottom: 12px; }
@@ -8788,6 +8802,15 @@ onBeforeUnmount(() => {
 .multi-detected-field-location { font-size: 10px; color: #999; font-style: italic; margin-left: 8px; }
 .multi-missing-fields { padding: 8px 12px; background: #FFF3E0; border-radius: 6px; border-left: 3px solid #FF9800; font-size: 12px; }
 .multi-missing-fields .missing-label { font-weight: 600; color: #E65100; margin-right: 6px; }
+.field-indicator { min-width: 30px; display: flex; align-items: center; justify-content: center; }
+.field-content { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.field-status { min-width: 80px; display: flex; align-items: center; justify-content: flex-end; }
+.status-badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.status-badge--included { background: #E8F5E9; color: #2E7D32; }
+.status-badge--excluded { background: #FFEBEE; color: #c62828; }
+.field-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: white; border-radius: 6px; border-left: 3px solid #4CAF50; }
+.field-row--required { border-left-color: #2E7D32; }
+.field-row--excluded { border-left-color: #c62828; opacity: 0.7; }
 .saved-mappings-popup-title { background: #0B2044; color: white; padding: 16px 24px; }
 .saved-mappings-popup-body { padding: 20px 24px; }
 .saved-mappings-list { display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto; }

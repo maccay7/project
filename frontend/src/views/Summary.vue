@@ -527,16 +527,17 @@ function openDetailModal(inst) {
       const sid = activeSession.value?.id
       if (!sid) return
       const wf = await sessionManager.getInstrumentWorkflow(sid, inst.id)
-      if (wf?.valuationExcelData && Array.isArray(wf.valuationExcelData)) {
+      if (wf?.valuationExcelData && Array.isArray(wf.valuationExcelData) && wf.valuationExcelData.length) {
         inst.details = wf.valuationExcelData
-        inst.detailHeaders = wf.valuationExcelData.length ? Object.keys(wf.valuationExcelData[0] || {}) : []
+        inst.detailHeaders = Object.keys(wf.valuationExcelData[0] || {})
       }
     } catch (e) {
       console.warn('Failed to load valuation Excel data:', e)
     }
   }
-  loadValuationExcel()
-  detailModalVisible.value = true
+  loadValuationExcel().then(() => {
+    detailModalVisible.value = true
+  })
 }
 
 function openCombinedModal() {
@@ -807,7 +808,8 @@ async function loadSummary() {
       // === Workflow is source of truth (same object the Calculations page reads) ===
       let wfType = null
       try {
-        wfType = await sessionManager.getInstrumentWorkflow(sid, template.id)
+        // Force refresh to get the latest calculation data
+        wfType = await sessionManager.getInstrumentWorkflow(sid, template.id, true)
       } catch (e) {
         console.warn(`Failed to read workflow for ${template.id}:`, e)
       }
@@ -824,14 +826,12 @@ async function loadSummary() {
       const aggCalc = buildAggregatesFromBackend(aggregatePayload, null, template.id)
 
       // === Details: individual instrument rows (what Calculations page shows) ===
-      // Use the same data source as Calculations page: instrumentSummary.rows
-      const details = Array.isArray(instSummary.rows) ? instSummary.rows : []
+      // Use the same data source as Calculations page: valuationExcelData from workflow
+      const details = (wfType?.valuationExcelData && Array.isArray(wfType.valuationExcelData))
+        ? wfType.valuationExcelData
+        : Array.isArray(instSummary.rows) ? instSummary.rows : []
 
       // Headers MUST come from the actual row keys so `row[header]` resolves.
-      // instSummary.columns holds raw backend keys (total_value, face_value, …)
-      // while rows hold display names (Total Value, Face Value, …) after
-      // mapBackendFieldsToDisplayNames — so using instSummary.columns directly
-      // produced blank cells. Deriving from row keys fixes the mismatch.
       const rowDerivedHeaders = details.length
         ? Array.from(new Set(details.flatMap(r => Object.keys(r || {}))))
         : []
@@ -901,9 +901,11 @@ async function loadSummary() {
     instruments.value = instrumentResults
 
     const total = instruments.value.reduce((sum, inst) => sum + (inst.value || 0), 0)
+    // If total is 0 but some instruments have values, use the first non-zero value as total
+    const effectiveTotal = total > 0 ? total : (instruments.value.find(inst => inst.value > 0)?.value || 0)
     instruments.value = instruments.value.map(inst => ({
       ...inst,
-      percent: total > 0 ? (((inst.value || 0) / total) * 100).toFixed(1) : 0
+      percent: effectiveTotal > 0 ? (((inst.value || 0) / effectiveTotal) * 100).toFixed(1) : 0
     }))
 
     const initSelections = {}

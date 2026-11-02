@@ -586,10 +586,21 @@ export function buildValuationExcelRows (cleanedRows, calcRows, instrumentType) 
       })
       if (hasValue) nonEmptyColumns.add(col)
     })
-    // Keep only non-empty columns
+    // Ensure Instrument Type and Instrument Name are the first columns
+    const priorityColumns = ['Instrument Type', 'Instrument Name']
+    const orderedColumns = []
+    priorityColumns.forEach(col => {
+      if (nonEmptyColumns.has(col)) {
+        orderedColumns.push(col)
+        nonEmptyColumns.delete(col)
+      }
+    })
+    // Add remaining columns in their original order
+    nonEmptyColumns.forEach(col => orderedColumns.push(col))
+    // Keep only non-empty columns in the correct order
     return rows.map(row => {
       const filtered = {}
-      nonEmptyColumns.forEach(col => {
+      orderedColumns.forEach(col => {
         filtered[col] = row[col]
       })
       return filtered
