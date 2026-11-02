@@ -418,7 +418,7 @@
                             >
                               <select
                                 v-model="value.selectedCurrency"
-                                @change="updateSelectedCurrency(field, value.selectedCurrency)"
+                                @change="updateSelectedCurrency(field, value.selectedCurrency, false)"
                                 class="currency-select"
                               >
                                 <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
@@ -448,6 +448,20 @@
                           <div class="field-content">
                             <span class="field-name">{{ autoDetectedFieldsWithMetadata[field]?.originalLabel || field }}</span>
                             <span class="field-value">{{ formatDetectedValue(field, typeof value === 'object' && value !== null ? value.value : value) }}</span>
+                            <div
+                              v-if="typeof value === 'object' && value?.currencyVariants && Object.keys(value.currencyVariants).length > 1"
+                              class="currency-variant-selector"
+                            >
+                              <select
+                                v-model="value.selectedCurrency"
+                                @change="updateSelectedCurrency(field, value.selectedCurrency, true)"
+                                class="currency-select"
+                              >
+                                <option v-for="(variantValue, currency) in value.currencyVariants" :key="currency" :value="currency">
+                                  {{ currency }}: {{ formatDetectedValue(field, variantValue) }}
+                                </option>
+                              </select>
+                            </div>
                           </div>
                         </label>
                       </div>
