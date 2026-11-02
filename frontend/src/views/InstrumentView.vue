@@ -8379,12 +8379,11 @@ watch([rawData, cleanedData], () => {
 }, { deep: true })
 
 //  cleanedData to trigger recalculation when values change on Cleaning page
-// Disabled for calculations tab to prevent re-render loop - recalculation is triggered by activeTab switch instead
+// Disabled deep watch to prevent performance issues - calculations are triggered by activeTab switch instead
 
 let cleanDataChangeTimeout = null
-watch(cleanedData, () => {
-  // Only trigger recalculation when NOT on calculations tab to prevent blinking
-  if (activeTab.value !== 'calculations' && hasCleanedData.value) {
+watch(() => cleanedData.value.length, () => {
+  if (hasCleanedData.value && activeTab.value !== 'calculations') {
     if (isCalculating.value) {
       _recalcQueued = true
       return
@@ -8397,13 +8396,12 @@ watch(cleanedData, () => {
       if (!calculationSignatureMatches()) {
         await calculateMetrics()
       }
-    }, 1000)
+    }, 300)
   }
-}, { deep: true })
+})
 
 watch(() => [...excludedDetectedFields.value], () => {
-  // Only trigger recalculation when NOT on calculations tab to prevent blinking
-  if (activeTab.value !== 'calculations' && hasCleanedData.value) {
+  if (hasCleanedData.value && activeTab.value !== 'calculations') {
     if (isCalculating.value) {
       _recalcQueued = true
       return
@@ -8413,7 +8411,7 @@ watch(() => [...excludedDetectedFields.value], () => {
     if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
     cleanDataChangeTimeout = setTimeout(async () => {
       if (!calculationSignatureMatches()) await calculateMetrics()
-    }, 500)
+    }, 200)
   }
 })
 
