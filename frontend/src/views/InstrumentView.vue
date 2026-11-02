@@ -820,6 +820,10 @@
                     <v-icon size="16" class="spin-animation">mdi-loading</v-icon>
                     <span>Calculating...</span>
                   </div>
+                  <div v-else-if="!initialCalculationCompleted && uniqueInstrumentCount < 2" class="calculating-animation">
+                    <v-icon size="16" class="spin-animation">mdi-loading</v-icon>
+                    <span>Loading calculations...</span>
+                  </div>
                   <div v-else-if="allCalculations.status === 'error' && allCalculations.message" class="calc-error-banner">
                     {{ allCalculations.message }}
                   </div>
@@ -1923,6 +1927,8 @@ const portfolioSummary = ref({ columns: [], rows: [] })
 const completedInstrumentSummary = ref({ columns: [], rows: [] })
 const completedPortfolioSummary = ref({ columns: [], rows: [] })
 const isCalculating = ref(false)
+const initialCalculationCompleted = ref(false)
+const _isSavingWorkflow = ref(false)
 const fileLoading = ref(false)
 const uploadError = ref('')
 const uploadProgress = ref(0)
@@ -5638,7 +5644,9 @@ async function calculateMetrics() {
           }
           // Save workflow with latest calculation data for report generation
           if (activeSession.value?.id) {
-            await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
+            _isSavingWorkflow.value = true
+            try {
+              await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
               rawData: rawData.value,
               cleanedData: cleanedData.value,
               cleanedSourceData: cleanedSourceData.value,
@@ -5666,6 +5674,9 @@ async function calculateMetrics() {
               originalDatasetId: originalDatasetId.value,
               lastCalculationTimestamp: Date.now()
             })
+            } finally {
+              _isSavingWorkflow.value = false
+            }
           }
         } else if (calcArray.length) {
           const rows = calcArray.map((calc, idx) => {
@@ -5774,7 +5785,9 @@ async function calculateMetrics() {
           await sessionManager.saveWorksheetData(activeSession.value?.id, '__portfolio_summary__', existingSnapshot)
         }
         if (activeSession.value?.id) {
-          await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
+          _isSavingWorkflow.value = true
+          try {
+            await sessionManager.saveInstrumentWorkflow(activeSession.value.id, instrumentType.value, {
             rawData: rawData.value,
             cleanedData: cleanedData.value,
             cleanedSourceData: cleanedSourceData.value,
@@ -5848,6 +5861,9 @@ async function calculateMetrics() {
               lastCalculationTimestamp: Date.now()
             })
           }
+          } finally {
+            _isSavingWorkflow.value = false
+          }
         }
         // Reconcile Excel view with the exact inputs that were valued and
         // the per-instrument calculation outputs (multi: one row per instrument).
@@ -5875,7 +5891,7 @@ async function calculateMetrics() {
       isUsingDetectedFields.value = false
       try { await enrichCalculationsWithFred() } catch (fredError) { /* non-fatal */ }
       try { await saveSessionData(true) } catch (e) { console.warn('Post-calc save failed:', e) }
-      // Removed forceUpdate to prevent re-render loop on calculations page
+      forceUpdate.value++
     }
   } catch (err) {
     const errorMsg = err.message || 'Unknown error'
@@ -5888,6 +5904,7 @@ async function calculateMetrics() {
     isUsingDetectedFields.value = false
   } finally {
     isCalculating.value = false
+    initialCalculationCompleted.value = true
     _lastCalcSignature.value = calculationInputSignature
     if (!calculationSignatureMatches()) _recalcQueued = true
     if (_recalcQueued) {
@@ -8379,45 +8396,40 @@ watch([rawData, cleanedData], () => {
 }, { deep: true })
 
 //  cleanedData to trigger recalculation when values change on Cleaning page
-// Disabled deep watch to prevent performance issues - calculations are triggered by activeTab switch instead
 
 let cleanDataChangeTimeout = null
-watch(() => cleanedData.value.length, () => {
-  if (hasCleanedData.value && activeTab.value !== 'calculations') {
+watch(cleanedData, () => {
+  // Prevent recursive triggers from save operations
+  if (_isSavingWorkflow.value) return
+  
+  if (activeTab.value === 'calculations' && hasCleanedData.value) {
     if (isCalculating.value) {
       _recalcQueued = true
       return
     }
-    // Check signature before setting timeout to avoid unnecessary recalculations
-    if (calculationSignatureMatches()) return
     if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
     cleanDataChangeTimeout = setTimeout(async () => {
       // Only recalculate if the data actually changed (signature mismatch)
       if (!calculationSignatureMatches()) {
         await calculateMetrics()
       }
-    }, 300)
+    }, 500)
   }
-})
+}, { deep: true })
 
 watch(() => [...excludedDetectedFields.value], () => {
-  if (hasCleanedData.value && activeTab.value !== 'calculations') {
-    if (isCalculating.value) {
-      _recalcQueued = true
-      return
-    }
-    // Check signature before setting timeout to avoid unnecessary recalculations
-    if (calculationSignatureMatches()) return
-    if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
-    cleanDataChangeTimeout = setTimeout(async () => {
-      if (!calculationSignatureMatches()) await calculateMetrics()
-    }, 200)
+  if (activeTab.value !== 'calculations' || !hasCleanedData.value) return
+  if (isCalculating.value) {
+    _recalcQueued = true
+    return
   }
+  if (cleanDataChangeTimeout) clearTimeout(cleanDataChangeTimeout)
+  cleanDataChangeTimeout = setTimeout(async () => {
+    if (!calculationSignatureMatches()) await calculateMetrics()
+  }, 0)
 })
 
 watch(() => activeTab.value, async (newTab) => {
-  // Add guard to prevent recalculation if already calculating
-  if (isCalculating.value) return
 
   if (newTab === 'calculations' && hasCleanedData.value && !isCalculating.value) {
     const lastStatus = allCalculations.value?.status
