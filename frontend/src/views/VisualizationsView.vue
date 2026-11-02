@@ -119,7 +119,7 @@
             </v-row>
 
             <v-row class="mb-3" v-else>
-              <v-col cols="12" md="4">
+              <v-col cols="12" md="6">
                 <v-text-field
                   v-model="fredFilters.fromDate"
                   type="date"
@@ -128,7 +128,7 @@
                   @update:model-value="onFilterChange"
                 />
               </v-col>
-              <v-col cols="12" md="4">
+              <v-col cols="12" md="6">
                 <v-text-field
                   v-model="fredFilters.toDate"
                   type="date"
