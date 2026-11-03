@@ -493,7 +493,9 @@ async function refreshSession(sessionId) {
         }
       }
     } catch (e) {
-      console.warn('Failed to fetch versions for session:', sessionId, e)
+      // Don't show error - just treat as no versions
+      versions = []
+      totalCount = 0
     }
 
     const versionInstrumentCount = getUniqueInstrumentCount(versions)
@@ -646,13 +648,60 @@ async function deleteSession(sessionId) {
 // ---- Version modal ----
 async function openVersionModal(sessionId) {
   try {
-    // Ensure we have the latest versions
-    const enriched = await refreshSession(sessionId)
-    if (enriched) {
-      selectedSessionForVersions.value = enriched
-      versionSearchQuery.value = ''
-      versionDialogVisible.value = true
+    // Force refresh to get the latest versions from the API
+    const session = await sessionManager.getSession(sessionId, true)
+    
+    if (!session) {
+      showSnackbar('Session not found', 'error')
+      return
     }
+
+    // Fetch versions from API
+    let versions = []
+    let totalCount = 0
+    try {
+      const res = await api.versionAPI.getVersions(sessionId)
+      
+      if (res && res.success) {
+        totalCount = res.total || 0
+        
+        if (res.data && res.data.length > 0) {
+          const sortedData = [...res.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
+          versions = sortedData.map(v => ({
+            id: v.id,
+            versionNumber: v.versionNumber,
+            timestamp: v.timestamp || v.created_at,
+            changeSummary: v.changeSummary || v.change_summary || 'No description',
+            instrumentType: v.instrumentType || v.instrument_type || 'General',
+            changeType: v.changeType || 'Saved',
+            changeTypeClass: v.changeTypeClass || 'badge-saved',
+            modifiedInstruments: v.modifiedInstruments || [],
+            fieldsChanged: v.fieldsChanged || []
+          }))
+        }
+      }
+    } catch (e) {
+      // Don't show error - just treat as no versions
+      versions = []
+      totalCount = 0
+    }
+
+    // Update the session with the fetched versions
+    const enriched = {
+      ...session,
+      versions: versions,
+      version_count: totalCount || session.version_count || 0
+    }
+
+    // Update local sessions array
+    const idx = sessions.value.findIndex(s => s.id === sessionId)
+    if (idx !== -1) {
+      sessions.value[idx] = enriched
+    }
+
+    selectedSessionForVersions.value = enriched
+    versionSearchQuery.value = ''
+    versionDialogVisible.value = true
   } catch (err) {
     showSnackbar('Error loading versions: ' + err.message, 'error')
   }
@@ -717,25 +766,68 @@ async function deleteVersion(sessionId, versionId, index) {
 // ---- Session instruments modal ----
 async function openInstrumentModal(sessionId) {
   try {
-    // Ensure we have latest versions
+    // Ensure we have latest session data
     const enriched = await refreshSession(sessionId)
     if (!enriched) return
 
-    // Build instrument list from versions (unique instrument types)
+    // Build instrument list from the session's instrument workflow
     const instrumentMap = new Map()
-    const versions = enriched.versions || []
-    for (const v of versions) {
-      const type = v.instrumentType || 'Unknown'
-      if (!instrumentMap.has(type)) {
-        instrumentMap.set(type, {
-          instrument_type: type,
-          instrument_name: type.charAt(0).toUpperCase() + type.slice(1).replace('-', ' '),
+    
+    // Try to get instruments from the session's workflow data
+    try {
+      const workflow = await sessionManager.getInstrumentWorkflow(sessionId, 'money-market')
+      if (workflow && (workflow.calculations || workflow.allCalculations)) {
+        instrumentMap.set('money-market', {
+          instrument_type: 'money-market',
+          instrument_name: 'Money Market',
+          status: 'Worked on',
+          saved_at: workflow.last_tab ? new Date().toISOString() : enriched.date
+        })
+      }
+    } catch (e) { /* ignore */ }
+    
+    try {
+      const workflow = await sessionManager.getInstrumentWorkflow(sessionId, 'bonds')
+      if (workflow && (workflow.calculations || workflow.allCalculations)) {
+        instrumentMap.set('bonds', {
+          instrument_type: 'bonds',
+          instrument_name: 'Bonds',
+          status: 'Worked on',
+          saved_at: workflow.last_tab ? new Date().toISOString() : enriched.date
+        })
+      }
+    } catch (e) { /* ignore */ }
+    
+    try {
+      const workflow = await sessionManager.getInstrumentWorkflow(sessionId, 'tbills')
+      if (workflow && (workflow.calculations || workflow.allCalculations)) {
+        instrumentMap.set('tbills', {
+          instrument_type: 'tbills',
+          instrument_name: 'T-Bills',
+          status: 'Worked on',
+          saved_at: workflow.last_tab ? new Date().toISOString() : enriched.date
+        })
+      }
+    } catch (e) { /* ignore */ }
+    
+    // If no instruments found from workflow, show based on instrument_count
+    if (instrumentMap.size === 0 && enriched.instrument_count > 0) {
+      const instruments = [
+        { id: 'money-market', name: 'Money Market' },
+        { id: 'bonds', name: 'Bonds' },
+        { id: 'tbills', name: 'T-Bills' }
+      ]
+      for (let i = 0; i < Math.min(enriched.instrument_count, 3); i++) {
+        const inst = instruments[i]
+        instrumentMap.set(inst.id, {
+          instrument_type: inst.id,
+          instrument_name: inst.name,
           status: 'Saved',
-          saved_at: v.timestamp,
-          version_count: enriched.version_count
+          saved_at: enriched.date
         })
       }
     }
+    
     sessionInstruments.value = Array.from(instrumentMap.values())
     selectedSessionForInstruments.value = enriched
     instrumentDialogVisible.value = true

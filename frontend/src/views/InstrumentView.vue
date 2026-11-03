@@ -1962,6 +1962,8 @@ const isCalculating = ref(false)
 const initialCalculationCompleted = ref(false)
 const _isSavingWorkflow = ref(false)
 const _isProgrammaticUpdate = ref(false)
+const _isTabSwitching = ref(false)
+const _isPageLoading = ref(false)
 const fileLoading = ref(false)
 const uploadError = ref('')
 const uploadProgress = ref(0)
@@ -5113,6 +5115,9 @@ async function continueAfterCleaning() {
 }
 
 async function calculateMetrics() {
+  // Prevent flickering by setting page loading flag
+  _isPageLoading.value = true
+  
   // FIX: validate that cleanedData actually contains the required input
   // fields for THIS instrument type. If the user cleaned but then excluded
   // every required field, we must NOT send an empty row to the backend and
@@ -5124,6 +5129,7 @@ async function calculateMetrics() {
     calculations.value = {}
     instrumentSummary.value = { columns: [], rows: [] }
     showSnackbar('No cleaned data available. Please go through the Cleaning step first.', 'error', 6000)
+    _isPageLoading.value = false
     return
   }
   if (isCalculating.value) {
@@ -5131,6 +5137,7 @@ async function calculateMetrics() {
     // never display results for a stale state, without letting parallel
     // backend requests stack up (which is what made the page feel slow).
     _recalcQueued = true
+    _isPageLoading.value = false
     return
   }
   isCalculating.value = true
@@ -5205,6 +5212,7 @@ async function calculateMetrics() {
       'error', 7000
     )
     isCalculating.value = false
+    _isPageLoading.value = false
     return
   }
   const calculationInputSignature = getCalculationSignature(
@@ -5930,6 +5938,7 @@ async function calculateMetrics() {
     isUsingDetectedFields.value = false
   } finally {
     isCalculating.value = false
+    _isPageLoading.value = false
     initialCalculationCompleted.value = true
     _lastCalcSignature.value = calculationInputSignature
     if (!calculationSignatureMatches()) _recalcQueued = true
@@ -8428,8 +8437,8 @@ watch([rawData, cleanedData], () => {
 
 let cleanDataChangeTimeout = null
 watch(cleanedData, () => {
-  // Prevent recursive triggers from save operations
-  if (_isSavingWorkflow.value) return
+  // Prevent recursive triggers from save operations, tab switching, and page loading
+  if (_isSavingWorkflow.value || _isTabSwitching.value || _isPageLoading.value) return
   
   if (activeTab.value === 'calculations' && hasCleanedData.value) {
     if (isCalculating.value) {
@@ -8447,6 +8456,9 @@ watch(cleanedData, () => {
 }, { deep: true })
 
 watch(() => [...excludedDetectedFields.value], () => {
+  // Prevent flickering by blocking during tab switching and page loading
+  if (_isTabSwitching.value || _isPageLoading.value) return
+  
   if (activeTab.value !== 'calculations' || !hasCleanedData.value) return
   if (isCalculating.value) {
     _recalcQueued = true
@@ -8459,26 +8471,36 @@ watch(() => [...excludedDetectedFields.value], () => {
 })
 
 watch(() => activeTab.value, async (newTab) => {
+  // Prevent flickering by not triggering recalculation if we're already calculating
+  if (isCalculating.value) return
 
-  if (newTab === 'calculations' && hasCleanedData.value && !isCalculating.value) {
-    const lastStatus = allCalculations.value?.status
-    const needsRecalc =
-      !allCalculations.value ||
-      Object.keys(allCalculations.value).length === 0 ||
-      lastStatus === 'error' ||
-      lastStatus === 'partial' ||
-      !calculationSignatureMatches()
-    if (needsRecalc) await calculateMetrics()
-  }
-  if (newTab === 'visualizations' && hasCleanedData.value) {
-    await nextTick()
-    if (yieldCurveData.value.length) {
-      await renderYieldCurveChart()
-    } else if (!yieldCurveLoading.value) {
-      if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
-      if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
-      await fetchYieldCurve()
+  // Set tab switching flag to prevent other watchers from triggering
+  _isTabSwitching.value = true
+
+  try {
+    if (newTab === 'calculations' && hasCleanedData.value && !isCalculating.value) {
+      const lastStatus = allCalculations.value?.status
+      const needsRecalc =
+        !allCalculations.value ||
+        Object.keys(allCalculations.value).length === 0 ||
+        lastStatus === 'error' ||
+        lastStatus === 'partial' ||
+        !calculationSignatureMatches()
+      if (needsRecalc) await calculateMetrics()
     }
+    if (newTab === 'visualizations' && hasCleanedData.value) {
+      await nextTick()
+      if (yieldCurveData.value.length) {
+        await renderYieldCurveChart()
+      } else if (!yieldCurveLoading.value) {
+        if (!effectiveCountry.value) { selectedCountryOption.value = 'USA'; fredFilters.value.country = 'USA' }
+        if (!effectiveMaturity.value) { const def = config.value.defaultMaturity; selectedMaturityOption.value = def; fredFilters.value.maturity = def }
+        await fetchYieldCurve()
+      }
+    }
+  } finally {
+    // Reset the flag after tab switch is complete
+    _isTabSwitching.value = false
   }
 }, { deep: true })
 
