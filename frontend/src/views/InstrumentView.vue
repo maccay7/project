@@ -2006,7 +2006,8 @@ let isSavingVersion = false
 let lastInstrument = ''
 let lastSessionId = ''
 let lastSaveTime = 0
-const SAVE_DEBOUNCE_MS = 2000
+let lastCalcTime = 0
+const SAVE_DEBOUNCE_MS = 400
 
 /** Excel view on Calculations: cleaned inputs merged with calc outputs. */
 const valuationExcelData = ref([])
@@ -4697,6 +4698,7 @@ function formatForExcel(value, type = 'number', key = '') {
 
 // ─────────────────────────────────────────────────────────────
 // FIX 5 — downloadCalculatedInstrumentsExcel dedupes columns.
+// Updated to match calculations page export format with Summary and Appendix sheets
 // ─────────────────────────────────────────────────────────────
 function downloadCalculatedInstrumentsExcel() {
   const summaryRows = calculatedValuesExcelData.value
@@ -4705,6 +4707,59 @@ function downloadCalculatedInstrumentsExcel() {
     return
   }
   const workbook = XLSX.utils.book_new()
+  const valuationDate = activeValuationDate.value || ''
+  const sessionName = activeSession.value?.name || 'N/A'
+  
+  // Summary sheet
+  const summaryData = [
+    ['', '', ''],
+    ['DuraCapital', '', ''],
+    ['Valuation Assessment Report', '', ''],
+    [`Session: ${sessionName}`, '', ''],
+    [`Valuation Date: ${valuationDate}`, '', ''],
+    ['', '', ''],
+    ['Report Generated', new Date().toLocaleString(), ''],
+    ['', '', ''],
+    ['Instrument', 'Metric', 'Value']
+  ]
+  
+  // Add summary metrics from allCalculations
+  if (allCalculations.value) {
+    const metrics = allCalculations.value
+    for (const [key, val] of Object.entries(metrics)) {
+      if (key === 'completed' || key === 'timestamp' || key === 'fred') continue
+      const metricName = formatMetricName(key)
+      const metricValue = formatMetricValue(key, val)
+      summaryData.push([instrumentLabel.value, metricName, metricValue])
+    }
+  }
+  
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryData)
+  XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
+  
+  // Appendix sheet
+  const appendixData = [
+    ['APPENDIX – Detailed Instrument Data'],
+    ['Valuation Date:', valuationDate],
+    ['Session:', sessionName],
+    [],
+    ['Asset Class', 'Instrument Name', 'BB Ticker', 'Face Value', 'Rate (%)', 'Term (Yrs)', 'Valuation Date']
+  ]
+  
+  summaryRows.forEach((item, idx) => {
+    const name = item['Instrument Name'] || item.Instrument || item.BondName || item.TBillName || `${instrumentLabel.value} ${idx + 1}`
+    const ticker = item['BB Ticker'] || item.BBTicker || item.Ticker || item.Security || ''
+    const faceValue = formatForExcel(parseFloat(item['Face Value'] || item.FaceValue || item.Amount || item.Principal || 0), 'money', 'FaceValue')
+    const rate = formatForExcel(parseFloat(item['Avg Rate'] || item.Rate || item['Interest Rate'] || item['Coupon Rate'] || item['Discount Rate'] || 0), 'percentage', 'Rate')
+    const term = formatForExcel(parseFloat(item['Days to Maturity'] || item.Term || item['Years to Maturity'] || 0), 'number', 'Term')
+    appendixData.push([instrumentLabel.value, name, ticker, faceValue, rate, term, valuationDate])
+  })
+  
+  const appendixSheet = XLSX.utils.aoa_to_sheet(appendixData)
+  appendixSheet['!cols'] = [{ wch: 18 }, { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 18 }]
+  XLSX.utils.book_append_sheet(workbook, appendixSheet, 'Appendix')
+  
+  // Detailed instrument sheet
   const allColumns = new Set()
   summaryRows.forEach(row => {
     Object.keys(row).forEach(key => allColumns.add(key))
@@ -4722,7 +4777,10 @@ function downloadCalculatedInstrumentsExcel() {
   summaryRows.forEach(row => {
     const dataRow = columns.map(col => {
       const value = row[col]
-      return value !== undefined && value !== null ? value : ''
+      const val = value !== undefined && value !== null ? value : ''
+      if (isPercentageField(col)) return formatForExcel(val, 'percentage', col)
+      if (/value|price|amount|principal|interest/i.test(col)) return formatForExcel(val, 'money', col)
+      return formatForExcel(val, 'number', col)
     })
     data.push(dataRow)
   })
@@ -4755,16 +4813,15 @@ function downloadCalculatedInstrumentsExcel() {
       const isNumeric = colName.toLowerCase().includes('value') || colName.toLowerCase().includes('amount') || colName.toLowerCase().includes('rate') || colName.toLowerCase().includes('yield') || colName.toLowerCase().includes('price') || colName.toLowerCase().includes('percentage')
       worksheet[cellAddress].s = {
         alignment: {
-          horizontal: isNumeric ? "right" : "left",
-          vertical: "center"
+          horizontal: isNumeric ? 'right' : 'left',
+          vertical: 'center'
         }
       }
     }
   }
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Calculated Instruments')
-  const suffix = activeValuationDate.value ? `_${activeValuationDate.value}` : ''
-  const fileName = `Calculated_Instruments_${activeSession.value?.name || 'Session'}${suffix}.xlsx`
-  XLSX.writeFile(workbook, fileName)
+  XLSX.utils.book_append_sheet(workbook, worksheet, instrumentLabel.value.substring(0, 31))
+  
+  XLSX.writeFile(workbook, `calculated_instruments_${Date.now()}.xlsx`)
 }
 
 function closeExcelDialog() {
@@ -5115,9 +5172,12 @@ async function continueAfterCleaning() {
 }
 
 async function calculateMetrics() {
+  // In-flight guard: prevent concurrent calculations
+  if (isCalculating.value) return
+
   // Prevent flickering by setting page loading flag
   _isPageLoading.value = true
-  
+
   // FIX: validate that cleanedData actually contains the required input
   // fields for THIS instrument type. If the user cleaned but then excluded
   // every required field, we must NOT send an empty row to the backend and
@@ -5378,6 +5438,14 @@ async function calculateMetrics() {
   valuationExcelData.value = buildValuationExcelRows(
     lastCalcInputData.value, [], instrumentType.value
   )
+
+  // Input-signature guard: skip calculation if inputs identical to last run (<800ms)
+  const currentSignature = getCalculationSignature(dataForCalculation, excluded)
+  if (calculationSignatureMatches(currentSignature) && (Date.now() - lastCalcTime < 800)) {
+    _isPageLoading.value = false
+    return
+  }
+  lastCalcTime = Date.now()
 
   try {
     const response = await api.calculationsAPI.executeByType(
@@ -8159,7 +8227,7 @@ let _previewHtmlCachedAt = 0
 const PREVIEW_HTML_CACHE_MS = 5000
 
 // ─────────────────────────────────────────────────────────────
-// FIX 10 — previewReport invalidates the cache on every explicit request.
+//  previewReport invalidates the cache on every explicit request.
 // ─────────────────────────────────────────────────────────────
 async function previewReport() {
   // Force a fresh read of the session BEFORE generating the report
@@ -8247,7 +8315,7 @@ async function downloadFromPreview(format) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// FIX 12 — exportToRealExcel dedupes columns per sheet.
+//  exportToRealExcel dedupes columns per sheet.
 // ─────────────────────────────────────────────────────────────
 async function exportToRealExcel() {
   await loadSavedData()
@@ -8429,7 +8497,7 @@ function downloadBlob(content, filename, mimeType) {
 const autoSaveEnabled = ref(false)
 
 watch([rawData, cleanedData], () => {
-  if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion || _isSavingWorkflow.value || _isProgrammaticUpdate.value) return
+  if (!autoSaveEnabled.value || skipAutoSave.value || isSaving.value || isSavingVersion || _isSavingWorkflow.value || _isProgrammaticUpdate.value || _isPageLoading.value) return
   debouncedSave()
 }, { deep: true })
 
@@ -8478,16 +8546,7 @@ watch(() => activeTab.value, async (newTab) => {
   _isTabSwitching.value = true
 
   try {
-    if (newTab === 'calculations' && hasCleanedData.value && !isCalculating.value) {
-      const lastStatus = allCalculations.value?.status
-      const needsRecalc =
-        !allCalculations.value ||
-        Object.keys(allCalculations.value).length === 0 ||
-        lastStatus === 'error' ||
-        lastStatus === 'partial' ||
-        !calculationSignatureMatches()
-      if (needsRecalc) await calculateMetrics()
-    }
+    // Continue button already triggers calculation - do not call calculateMetrics here
     if (newTab === 'visualizations' && hasCleanedData.value) {
       await nextTick()
       if (yieldCurveData.value.length) {
@@ -9159,7 +9218,7 @@ onBeforeUnmount(() => {
 .no-calcs-message { grid-column: 1 / -1; padding: 40px 20px; text-align: center; color: #999; font-size: 14px; background: #f9fafc; border-radius: 12px; border: 1px dashed #ccc; }
 .no-calcs-message p { margin: 12px 0 0 0; }
 
-/* ── Detection popup additions ─────────────────────────── */
+/* Detection popup additions */
 .detection-count {
   background: rgba(255, 255, 255, 0.22);
   color: white;

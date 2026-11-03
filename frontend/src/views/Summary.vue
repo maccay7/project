@@ -577,37 +577,77 @@ function exportCombinedExcel() {
   const valuationDate = activeValuationDate.value || ''
   const sessionName = activeSession.value?.name || 'N/A'
 
-  const summaryRows = []
-  summaryRows.push(['', '', '', ''])
-  summaryRows.push(['DuraCapital', '', '', ''])
-  summaryRows.push(['Portfolio Summary', '', '', ''])
-  summaryRows.push(['', '', '', ''])
-  summaryRows.push(['Instrument Name','Face Value ($)','Calculated Value ($)','Difference ($)','Count','Avg Rate (%)','FRED Benchmark (%)','Status'])
+  // Summary sheet
+  const summaryData = [
+    ['', '', ''],
+    ['DuraCapital', '', ''],
+    ['Valuation Assessment Report', '', ''],
+    [`Session: ${sessionName}`, '', ''],
+    [`Valuation Date: ${valuationDate}`, '', ''],
+    ['', '', ''],
+    ['Report Generated', new Date().toLocaleString(), ''],
+    ['', '', ''],
+    ['Instrument', 'Metric', 'Value']
+  ]
+  
+  // Add portfolio summary metrics
   filteredInstruments.value.forEach(inst => {
-    summaryRows.push([
-      inst.name,
-      formatForExcel(inst.faceValue, 'money'),
-      formatForExcel(inst.value, 'money'),
-      formatForExcel(inst.difference, 'money'),
-      inst.count,
-      inst.avgRate !== null ? formatForExcel(inst.avgRate, 'percentage') : '—',
-      inst.fredBench !== null ? formatForExcel(inst.fredBench, 'percentage') : '—',
-      inst.statusText
-    ])
+    summaryData.push([inst.name, 'Face Value', inst.faceValue !== null ? '$' + formatNumber(inst.faceValue) : '—'])
+    summaryData.push([inst.name, 'Calculated Value', inst.value !== null ? '$' + formatNumber(inst.value) : '—'])
+    summaryData.push([inst.name, 'Difference', inst.difference !== null ? '$' + formatNumber(inst.difference) : '—'])
+    summaryData.push([inst.name, 'Count', inst.count])
+    summaryData.push([inst.name, 'Avg Rate', inst.avgRate !== null ? inst.avgRate + '%' : '—'])
+    summaryData.push([inst.name, 'FRED Benchmark', inst.fredBench !== null ? inst.fredBench + '%' : '—'])
   })
-  summaryRows.push(['TOTAL', formatForExcel(totalFaceValue.value, 'money'), formatForExcel(grandTotal.value, 'money'),
-    formatForExcel(portfolioDifference.value, 'money'), totalInstruments.value, '', '', ''])
-  const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows)
-  summarySheet['!cols'] = [{ wch: 20 },{ wch: 18 },{ wch: 20 },{ wch: 18 },{ wch: 10 },{ wch: 14 },{ wch: 18 },{ wch: 14 }]
+  
+  // Add totals
+  summaryData.push(['TOTAL', 'Total Face Value', totalFaceValue.value !== null ? '$' + formatNumber(totalFaceValue.value) : '—'])
+  summaryData.push(['TOTAL', 'Total Calculated', grandTotal.value !== null ? '$' + formatNumber(grandTotal.value) : '—'])
+  summaryData.push(['TOTAL', 'Difference', portfolioDifference.value !== null ? '$' + formatNumber(portfolioDifference.value) : '—'])
+  summaryData.push(['TOTAL', 'Total Instruments', totalInstruments.value])
+  
+  const summarySheet = XLSX.utils.aoa_to_sheet(summaryData)
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
 
+  // Appendix sheet
+  const appendixData = [
+    ['APPENDIX – Detailed Instrument Data'],
+    ['Valuation Date:', valuationDate],
+    ['Session:', sessionName],
+    [],
+    ['Asset Class', 'Instrument Name', 'BB Ticker', 'Face Value', 'Rate (%)', 'Term (Yrs)', 'Valuation Date']
+  ]
+  
+  for (const inst of filteredDetails.value) {
+    if (inst.details && inst.details.length) {
+      inst.details.forEach((item, idx) => {
+        const name = item['Instrument Name'] || item.Instrument || item.BondName || item.TBillName || `${inst.name} ${idx + 1}`
+        const ticker = item['BB Ticker'] || item.BBTicker || item.Ticker || item.Security || ''
+        const faceValue = formatForExcel(parseFloat(item['Face Value'] || item.FaceValue || item.Amount || item.Principal || 0), 'money', 'FaceValue')
+        const rate = formatForExcel(parseFloat(item['Avg Rate'] || item.Rate || item['Interest Rate'] || item['Coupon Rate'] || item['Discount Rate'] || 0), 'percentage', 'Rate')
+        const term = formatForExcel(parseFloat(item['Days to Maturity'] || item.Term || item['Years to Maturity'] || 0), 'number', 'Term')
+        appendixData.push([inst.name, name, ticker, faceValue, rate, term, valuationDate])
+      })
+    }
+  }
+  
+  const appendixSheet = XLSX.utils.aoa_to_sheet(appendixData)
+  appendixSheet['!cols'] = [{ wch: 18 }, { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 18 }]
+  XLSX.utils.book_append_sheet(workbook, appendixSheet, 'Appendix')
+
+  // Detailed instrument sheets
   for (const inst of filteredDetails.value) {
     if (inst.details && inst.details.length) {
       const headers = getUniqueHeaders(inst.detailHeaders)
       const headerRows = [[`${inst.name} – Detailed Instruments`], [`Session: ${sessionName}`]]
       if (valuationDate) headerRows.push([`Valuation Date: ${valuationDate}`])
       headerRows.push([])
-      const detailData = [...headerRows, headers.map(formatColumnHeader), ...inst.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))]
+      const detailData = [...headerRows, headers.map(formatColumnHeader), ...inst.details.map(row => headers.map(h => {
+        const val = row[h] !== undefined ? row[h] : ''
+        if (isPercentageField(h)) return formatForExcel(val, 'percentage', h)
+        if (/value|price|amount|principal|interest/i.test(h)) return formatForExcel(val, 'money', h)
+        return formatForExcel(val, 'number', h)
+      }))]
       const sheet = XLSX.utils.aoa_to_sheet(detailData)
       sheet['!cols'] = headers.map(() => ({ wch: 16 }))
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
