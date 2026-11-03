@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS ui_sessions (
 CREATE TABLE IF NOT EXISTS version_history (
     id INT AUTO_INCREMENT PRIMARY KEY,
     version_id VARCHAR(64),
+    version_number INT DEFAULT 1,
     session_id VARCHAR(255),
     instrument_type VARCHAR(64),
     change_summary TEXT,
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS version_history (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX (session_id),
     INDEX (version_id),
+    INDEX (version_number),
     INDEX (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
