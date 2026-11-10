@@ -8,16 +8,24 @@ const STATIC_CONFIGS = {
   'money-market': {
     required_columns: [
       'Instrument', 'Amount', 'Rate', 'Principal',
-      'Trade Date', 'Maturity Date', 'Days to Maturity'
+      'Trade Date', 'Issue Date', 'Settlement Date', 'Valuation Date',
+      'Maturity Date', 'Days to Maturity', 'Currency',
+      'Day Count Convention', 'Instrument Type', 'Status'
     ],
     column_variations: {
       'Instrument': ['Instrument', 'Security', 'Name', 'Description', 'Issuer', 'Bank', 'Counterparty', 'Company', 'Entity'],
       'Amount': ['Amount', 'FaceValue', 'Value', 'Notional', 'Investment', 'Investment Amount'],
       'Rate': ['Rate', 'InterestRate', 'Yield', 'CouponRate', 'DiscountRate', 'Annual Rate', 'Nominal Rate'],
       'Principal': ['Principal', 'FaceValue', 'Par Value', 'Nominal Value', 'Notional Amount'],
+      'Issue Date': ['Issue Date', 'Issuance Date', 'Start Date', 'Effective Date'],
+      'Settlement Date': ['Settlement Date', 'Trade Date', 'Settlement', 'TradeDate'],
+      'Valuation Date': ['Valuation Date', 'Valuation', 'As Of Date', 'AsOfDate', 'Date'],
       'DaysToMaturity': ['DaysToMaturity', 'Term', 'Maturity', 'Tenor', 'Period', 'Days'],
-      'Trade Date': ['Trade Date', 'Settlement Date', 'Date', 'Start Date', 'Issue Date'],
-      'Maturity Date': ['Maturity Date', 'End Date', 'Maturity', 'Redemption Date', 'Due Date']
+      'Maturity Date': ['Maturity Date', 'End Date', 'Maturity', 'Redemption Date', 'Due Date'],
+      'Currency': ['Currency', 'Ccy', 'Currency Code', 'CurrencyCode'],
+      'Day Count Convention': ['Day Count Convention', 'DayCount', 'Day Count', 'Accrual Basis', 'Basis'],
+      'Instrument Type': ['Instrument Type', 'Type', 'Asset Type', 'Security Type'],
+      'Status': ['Status', 'State']
     },
     workflow_steps: [
       { tab: 'upload', name: 'Upload', order: 1 },
@@ -31,16 +39,26 @@ const STATIC_CONFIGS = {
   'bonds': {
     required_columns: [
       'BondName', 'FaceValue', 'CouponRate', 'Yield',
-      'Maturity Date', 'Issue Date', 'Coupon Frequency'
+      'Years to Maturity', 'Maturity Date', 'Issue Date', 'Settlement Date',
+      'Valuation Date', 'Last Coupon Date', 'Coupon Frequency',
+      'Currency', 'Day Count Convention', 'Instrument Type', 'Status'
     ],
     column_variations: {
       'BondName': ['BondName', 'Bond', 'Name', 'Security', 'Description', 'Issuer', 'Counterparty'],
       'FaceValue': ['FaceValue', 'Amount', 'Principal', 'Value', 'Notional', 'Nominal', 'Par Value'],
       'CouponRate': ['CouponRate', 'Rate', 'InterestRate', 'Coupon'],
       'Yield': ['Yield', 'YTM', 'YieldToMaturity', 'Rate'],
+      'Years to Maturity': ['Years to Maturity', 'YearsToMaturity', 'Term Years', 'Tenor Years', 'Maturity Years'],
       'Maturity Date': ['Maturity Date', 'End Date', 'Redemption Date', 'Maturity'],
-      'Issue Date': ['Issue Date', 'Issuance Date', 'Settlement Date'],
-      'Coupon Frequency': ['Coupon Frequency', 'Frequency', 'Coupon Period']
+      'Issue Date': ['Issue Date', 'Issuance Date', 'Start Date', 'Effective Date'],
+      'Settlement Date': ['Settlement Date', 'Trade Date', 'Settlement', 'TradeDate'],
+      'Valuation Date': ['Valuation Date', 'Valuation', 'As Of Date', 'AsOfDate', 'Date'],
+      'Last Coupon Date': ['Last Coupon Date', 'LastCouponDate', 'Previous Coupon Date', 'Last Interest Date'],
+      'Coupon Frequency': ['Coupon Frequency', 'Frequency', 'Coupon Period', 'Payment Frequency'],
+      'Currency': ['Currency', 'Ccy', 'Currency Code', 'CurrencyCode'],
+      'Day Count Convention': ['Day Count Convention', 'DayCount', 'Day Count', 'Accrual Basis', 'Basis'],
+      'Instrument Type': ['Instrument Type', 'Type', 'Asset Type', 'Security Type'],
+      'Status': ['Status', 'State']
     },
     workflow_steps: [
       { tab: 'upload', name: 'Upload', order: 1 },
@@ -54,14 +72,24 @@ const STATIC_CONFIGS = {
   'tbills': {
     required_columns: [
       'TBillName', 'FaceValue', 'DiscountRate',
-      'Valuation Date', 'Maturity Date'
+      'Valuation Date', 'Issue Date', 'Settlement Date', 'Auction Date',
+      'Maturity Date', 'Days to Maturity',
+      'Currency', 'Day Count Convention', 'Instrument Type', 'Status'
     ],
     column_variations: {
       'TBillName': ['TBillName', 'T-Bill', 'Security', 'Name', 'Description', 'Issuer', 'Counterparty'],
       'FaceValue': ['FaceValue', 'Amount', 'Principal', 'Value', 'Notional', 'Nominal', 'Par Value'],
       'DiscountRate': ['DiscountRate', 'Rate', 'Discount', 'Yield', 'Discount rate'],
-      'Valuation Date': ['Valuation Date', 'Auction Date', 'Trade Date', 'Settlement Date', 'Issue Date'],
-      'Maturity Date': ['Maturity Date', 'End Date', 'Redemption Date', 'Due Date']
+      'Valuation Date': ['Valuation Date', 'Auction Date', 'Trade Date', 'Settlement Date', 'Issue Date', 'As Of Date'],
+      'Issue Date': ['Issue Date', 'Issuance Date', 'Start Date', 'Effective Date'],
+      'Settlement Date': ['Settlement Date', 'Trade Date', 'Settlement', 'TradeDate'],
+      'Auction Date': ['Auction Date', 'AuctionDate', 'Bid Date', 'Offer Date'],
+      'Maturity Date': ['Maturity Date', 'End Date', 'Redemption Date', 'Due Date'],
+      'DaysToMaturity': ['DaysToMaturity', 'Term', 'Maturity', 'Tenor', 'Period', 'Days'],
+      'Currency': ['Currency', 'Ccy', 'Currency Code', 'CurrencyCode'],
+      'Day Count Convention': ['Day Count Convention', 'DayCount', 'Day Count', 'Accrual Basis', 'Basis'],
+      'Instrument Type': ['Instrument Type', 'Type', 'Asset Type', 'Security Type'],
+      'Status': ['Status', 'State']
     },
     workflow_steps: [
       { tab: 'upload', name: 'Upload', order: 1 },

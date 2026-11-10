@@ -1,7 +1,7 @@
 // [FINAL] autoDetectInstrument.js
 import * as XLSX from 'xlsx'
 
-const MAX_DETECT_ROWS = 50
+const MAX_DETECT_ROWS = 2000
 const MAX_LOOKAHEAD = 6
 
 const CURRENCY_SYMBOLS = {

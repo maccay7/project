@@ -264,33 +264,8 @@
                       Required fields are automatically included. Additional fields can be toggled.
                     </div>
 
-                    <div class="currency-selection-section">
-                      <label class="currency-label">Currency to include in auto-detected values:</label>
-                      <v-select
-                        v-model="selectedCurrency"
-                        @update:modelValue="handleCurrencyChange"
-                        :items="currencyOptions"
-                        label="Currency"
-                        variant="outlined"
-                        density="compact"
-                        hide-details
-                        class="currency-select-vuetify"
-                      ></v-select>
-                      <div v-if="selectedCurrency === 'custom'" class="custom-currency-input-wrapper">
-                        <v-text-field
-                          v-model="customCurrency"
-                          label="Custom Currency Code"
-                          placeholder="e.g., ZWG"
-                          variant="outlined"
-                          density="compact"
-                          maxlength="3"
-                          hide-details
-                          @update:modelValue="handleCustomCurrencyInput"
-                        ></v-text-field>
-                      </div>
-                      <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
-                        <strong>Detected currencies:</strong> {{ detectedCurrencies.join(', ') }}
-                      </div>
+                    <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
+                      <strong>Detected currencies:</strong> {{ detectedCurrencies.join(', ') }}
                     </div>
 
                     <div class="multi-instruments-list">
@@ -540,8 +515,8 @@
                    END dialogs
                    ============================================================ -->
 
-              <div class="required-columns" v-if="sheetType === 'multi'">
-                <h4>Required Columns</h4>
+              <div class="required-columns" v-if="requiredColumns.length && rawData.length">
+                <h4>{{ sheetType === 'multi' ? 'Required Columns' : 'Required Fields' }}</h4>
                 
                 <div class="columns-list">
                   <span v-for="col in requiredColumns" :key="col" class="column-badge" :class="{ 'missing-column': !hasRequiredColumn(col), 'mapped-column': hasRequiredColumn(col) }">
@@ -2252,8 +2227,22 @@ const mappingContext = computed(() => ({
   rawData: rawData.value
 }))
 
-const hasRequiredColumn = (col) => isColumnMapped(col, mappingContext.value)
-const missingColumns = computed(() => getMissingColumns(requiredColumns.value, mappingContext.value))
+// Columns the uploaded file actually satisfies, via the same auto-match
+// logic used on upload — used to tick badges even before mapping is applied.
+const autoSatisfiedColumns = computed(() => {
+  const cols = fileColumns.value?.length ? fileColumns.value : originalFileColumns.value
+  if (!cols?.length || !requiredColumns.value?.length) return {}
+  return autoMatchColumns(cols, requiredColumns.value, columnVariations.value)
+})
+
+const hasRequiredColumn = (col) => {
+  if (isColumnMapped(col, mappingContext.value)) return true
+  const auto = autoSatisfiedColumns.value[col]
+  return !!(auto && auto !== '__na__')
+}
+const missingColumns = computed(() =>
+  requiredColumns.value.filter(col => !hasRequiredColumn(col))
+)
 const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
@@ -3734,14 +3723,7 @@ async function autoDetectSingleInstrument() {
       await loadConfig()
     }
     detectionStatus.value = 'analyzing'
-    let currencyFilter = null
-    if (selectedCurrency.value) {
-      if (selectedCurrency.value === 'custom') {
-        currencyFilter = customCurrency.value?.toUpperCase() || null
-      } else {
-        currencyFilter = selectedCurrency.value.toUpperCase()
-      }
-    }
+    const currencyFilter = null // scan all currencies; per-field selectors handle choice
     detectionStatus.value = 'detecting'
     const detectionPromise = autoDetectInstrumentFields(
       originalFileBuffer.value,
@@ -3751,10 +3733,7 @@ async function autoDetectSingleInstrument() {
       null, null, currencyFilter,
       (status) => { detectionStatus.value = status }
     )
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Detection timeout - scan took too long')), 5000)
-    )
-    const detectionResult = await Promise.race([detectionPromise, timeoutPromise])
+    const detectionResult = await detectionPromise
     detectionStatus.value = 'complete'
     const normalized = normalizeDetectedFields(
       detectionResult?.fields,
@@ -3839,14 +3818,7 @@ async function handleMultiTableDetect(event) {
   multiTableDetectionResults.value = []
   try {
     const detectedInstruments = []
-    let currencyFilter = null
-    if (selectedCurrency.value) {
-      if (selectedCurrency.value === 'custom') {
-        currencyFilter = customCurrency.value?.toUpperCase() || null
-      } else {
-        currencyFilter = selectedCurrency.value.toUpperCase()
-      }
-    }
+    const currencyFilter = null // scan all currencies; per-field selectors handle choice
     const totalTables = event.tables.length
     let processedTables = 0
     for (const table of event.tables) {
@@ -4111,14 +4083,7 @@ async function handleCurrencyChange() {
   if (isDetecting.value) return
   isDetecting.value = true
   try {
-    let currencyFilter = null
-    if (selectedCurrency.value) {
-      if (selectedCurrency.value === 'custom') {
-        currencyFilter = customCurrency.value?.toUpperCase() || null
-      } else {
-        currencyFilter = selectedCurrency.value.toUpperCase()
-      }
-    }
+    const currencyFilter = null // scan all currencies; per-field selectors handle choice
     const detectionResult = await autoDetectInstrumentFields(
       originalFileBuffer.value,
       currentSheetName.value,

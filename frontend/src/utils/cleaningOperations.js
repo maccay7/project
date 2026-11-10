@@ -114,6 +114,24 @@ export function applyCleaningOperations(rawData, cleanedSourceData, cleaningOpti
     data = data.map(row => { Object.keys(row).forEach(k => { if (row[k] === undefined || row[k] === null || row[k] === '') { row[k] = cleaningOptions.customFillValue; filled++ } }); return row })
     if (filled > 0) operations.push(`Filled ${filled} missing values with custom value`)
   }
-  
+
+  if (cleaningOptions.standardizeCurrency) {
+    let normalized = 0
+    data = data.map(row => {
+      Object.keys(row).forEach(k => {
+        const v = row[k]
+        if (typeof v === 'string' && /[$€£¥]|\b(ZWG|USD|ZAR|BWP|EUR|GBP|ZMW|KES)\b/i.test(v)) {
+          const cleaned = v.replace(/[^\d.\-]/g, '')
+          if (cleaned !== '' && !isNaN(Number(cleaned))) {
+            row[k] = Number(cleaned)
+            normalized++
+          }
+        }
+      })
+      return row
+    })
+    if (normalized > 0) operations.push(`Normalized ${normalized} currency values`)
+  }
+
   return { data, operations }
 }

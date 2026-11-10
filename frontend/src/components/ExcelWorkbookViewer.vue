@@ -177,6 +177,13 @@
           {{ table.name }} (Row {{ table.startRow + 1 }} - {{ table.endRow + 1 }})
         </button>
       </div>
+      <div v-if="!isMultiTableMode" class="custom-range-row">
+        <span class="custom-range-label">Work from row</span>
+        <input v-model.number="customStartRow" type="number" min="1" class="custom-range-input" placeholder="Start" />
+        <span class="custom-range-label">to row</span>
+        <input v-model.number="customEndRow" type="number" min="1" class="custom-range-input" placeholder="End" />
+        <button class="custom-range-apply" @click="applyCustomRange" :disabled="!isCustomRangeValid">Apply</button>
+      </div>
       <div v-if="isMultiTableMode && selectedTables.size > 0" class="multi-table-actions">
         <button class="btn-auto-detect-multi" @click="autoDetectSelectedTables" :disabled="isDetecting">
           <v-icon v-if="!isDetecting" size="16">mdi-magnify</v-icon>
@@ -323,6 +330,29 @@ const rowsContainer = ref(null)
 const detectedTables = ref([])
 const selectedTable = ref(null)
 const isTableIsolationMode = ref(false)
+const customStartRow = ref(null)
+const customEndRow = ref(null)
+const isCustomRangeValid = computed(() =>
+  Number.isInteger(customStartRow.value) && Number.isInteger(customEndRow.value) &&
+  customStartRow.value >= 1 && customEndRow.value >= customStartRow.value &&
+  customEndRow.value <= (activeSheet.value?.fullData?.length || 0)
+)
+function applyCustomRange() {
+  if (!isCustomRangeValid.value || !activeSheet.value?.fullData) return
+  const data = activeSheet.value.fullData
+  const startRow = customStartRow.value - 1
+  const endRow = Math.min(customEndRow.value - 1, data.length - 1)
+  let maxCol = 0
+  for (let r = startRow; r <= endRow; r++) {
+    if ((data[r]?.length || 0) > maxCol) maxCol = data[r].length
+  }
+  if (maxCol === 0) return
+  selectTable({
+    startRow, endRow, startCol: 0, endCol: maxCol - 1,
+    headerRow: startRow, headerRowEnd: startRow, headerRows: [startRow],
+    type: 'table', name: `Rows ${customStartRow.value}-${customEndRow.value}`, fields: null
+  })
+}
 const isSingleInstrumentSheet = ref(false)
 const extractedPreviewValues = ref({})
 const selectedTables = ref(new Set())
@@ -752,7 +782,15 @@ function detectTables() {
 
   const structures = analyzeWorksheetStructure(data)
 
-  structures.forEach(structure => {
+  // Drop degenerate single-row "sections"/"values" (e.g. "Row 12 - Row 12")
+  // when the sheet also produced real multi-row structures — those rows are
+  // almost always fragments of an actual table, not workable sections.
+  const hasMultiRow = structures.some(s => s.endRow > s.startRow)
+  const usable = hasMultiRow
+    ? structures.filter(s => s.endRow > s.startRow || s.type === 'values' && s.endRow === s.startRow && s.startCol !== s.endCol)
+    : structures
+
+  usable.forEach(structure => {
     detectedTables.value.push({
       startRow: structure.startRow,
       endRow: structure.endRow,
@@ -1729,27 +1767,34 @@ async function loadWorkbookFromFileBuffer(fileBuffer) {
 .sheet-row-count { color: #999; font-size: 10px; margin-left: 4px; }
 .sheet-status-badge { margin-left: 6px; padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; }
 .sheet-status-badge.saved { background-color: #4CAF50; color: white; }
-.table-detection-panel { display: flex; flex-direction: column; padding: 8px 12px; background: #f8f9fa; border-top: 1px solid #e0e0e0; gap: 8px; flex-shrink: 0; }
-.table-detection-header { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #0B2044; font-size: 12px; }
-.table-icon { color: #0B2044; }
-.table-mode-toggle { display: flex; gap: 4px; }
-.mode-toggle-btn { flex: 1; padding: 6px 12px; background: #e0e0e0; border: 1px solid #c0c0c0; border-radius: 4px; cursor: pointer; font-size: 11px; color: #333; transition: all 0.2s; }
-.mode-toggle-btn:hover { background: #d0d0d0; }
-.mode-toggle-btn.active { background: #0B2044; color: white; border-color: #0B2044; }
-.table-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
-.table-select-btn { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: white; border: 1px solid #c0c0c0; border-radius: 4px; cursor: pointer; font-size: 11px; color: #333; transition: all 0.2s; }
-.table-select-btn:hover { background: #f0f0f0; border-color: #0B2044; }
-.table-select-btn.table-selected { background: #e8f0fe; border-color: #0B2044; color: #0B2044; font-weight: 500; }
-.table-select-btn.table-isolated { background: #d4edda; border-color: #28a745; color: #155724; }
+.table-detection-panel { display: flex; flex-direction: column; padding: 12px 14px; background: #f8f9ff; border-top: 1px solid #e8ecf1; border-radius: 12px 12px 0 0; gap: 10px; flex-shrink: 0; }
+.table-detection-header { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #0B2044; font-size: 13px; }
+.table-detection-header .table-icon { color: #1E88E5; }
+.table-mode-toggle { display: flex; gap: 4px; background: #eef2f7; border-radius: 10px; padding: 3px; }
+.mode-toggle-btn { flex: 1; padding: 7px 12px; background: transparent; border: none; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 500; color: #5a6b80; transition: all 0.2s; }
+.mode-toggle-btn:hover { color: #0B2044; }
+.mode-toggle-btn.active { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; box-shadow: 0 2px 6px rgba(11,32,68,0.25); }
+.table-buttons { display: flex; flex-wrap: nowrap; gap: 8px; overflow-x: auto; }
+.table-select-btn { flex: 1 0 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; padding: 7px 12px; background: white; border: 1px solid #e8ecf1; border-radius: 10px; cursor: pointer; font-size: 12px; color: #333; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+.table-select-btn:hover { border-color: #0B2044; transform: translateY(-1px); box-shadow: 0 3px 8px rgba(0,0,0,0.08); }
+.table-select-btn.table-selected { background: #eef2ff; border-color: #0B2044; color: #0B2044; font-weight: 600; }
+.table-select-btn.table-isolated { background: #e8f5e9; border-color: #4CAF50; color: #2e7d32; font-weight: 600; }
 .table-checkbox { font-weight: bold; color: #0B2044; }
+.custom-range-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.custom-range-label { font-size: 12px; font-weight: 500; color: #5a6b80; }
+.custom-range-input { width: 70px; padding: 6px 10px; font-size: 12px; border: 1px solid #e8ecf1; border-radius: 8px; background: white; color: #0B2044; transition: border-color 0.2s, box-shadow 0.2s; }
+.custom-range-input:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.12); }
+.custom-range-apply { padding: 6px 16px; background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; box-shadow: 0 2px 6px rgba(11,32,68,0.2); }
+.custom-range-apply:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(11,32,68,0.3); }
+.custom-range-apply:disabled { opacity: 0.5; cursor: not-allowed; }
 .multi-table-actions { display: flex; gap: 8px; margin-top: 4px; }
-.btn-auto-detect-multi { display: flex; align-items: center; gap: 6px; padding: 8px 16px; background: #0B2044; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; transition: background 0.2s; }
-.btn-auto-detect-multi:hover:not(:disabled) { background: #1a3a6e; }
+.btn-auto-detect-multi { display: flex; align-items: center; gap: 6px; padding: 9px 18px; background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; box-shadow: 0 3px 10px rgba(11,32,68,0.25); }
+.btn-auto-detect-multi:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 5px 14px rgba(11,32,68,0.3); }
 .btn-auto-detect-multi:disabled { opacity: 0.6; cursor: not-allowed; }
 .spin-animation { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.btn-clear-selection { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: #f0f0f0; color: #666; border: 1px solid #c0c0c0; border-radius: 4px; cursor: pointer; font-size: 12px; transition: background 0.2s; }
-.btn-clear-selection:hover { background: #e0e0e0; }
+.btn-clear-selection { display: flex; align-items: center; gap: 6px; padding: 9px 14px; background: white; color: #666; border: 1px solid #e8ecf1; border-radius: 10px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
+.btn-clear-selection:hover { border-color: #0B2044; color: #0B2044; }
 .table-isolation-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #e3f2fd; border-top: 1px solid #0B2044; flex-shrink: 0; }
 .isolation-info { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #0d47a1; font-size: 12px; }
 .header-row-selector { display: flex; align-items: center; gap: 8px; }

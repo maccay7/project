@@ -128,7 +128,7 @@
                     </template>
                   </v-checkbox>
 
-                  <div v-if="cleaningOptions.find(o => o.key === 'formatDates')?.value" class="date-format-section">
+                  <div v-if="cleaningOptions.find(o => o.key === 'standardizeDates')?.value" class="date-format-section">
                     <label class="date-format-label">Select Date Format:</label>
                     <v-select
                       v-model="selectedDateFormat"
@@ -140,6 +140,32 @@
                       color="#0B2A44"
                       class="date-format-select"
                     ></v-select>
+                  </div>
+
+                  <div v-if="cleaningOptions.find(o => o.key === 'changeCase')?.value" class="date-format-section">
+                    <label class="date-format-label">Text Case:</label>
+                    <v-select
+                      v-model="selectedCaseType"
+                      :items="caseTypeOptions"
+                      item-title="label"
+                      item-value="value"
+                      density="compact"
+                      variant="outlined"
+                      color="#0B2A44"
+                      class="date-format-select"
+                    ></v-select>
+                  </div>
+
+                  <div v-if="cleaningOptions.find(o => o.key === 'fillWithCustom')?.value" class="date-format-section">
+                    <label class="date-format-label">Custom Fill Value:</label>
+                    <v-text-field
+                      v-model="customFillValue"
+                      placeholder="e.g., Unknown"
+                      density="compact"
+                      variant="outlined"
+                      color="#0B2A44"
+                      hide-details
+                    ></v-text-field>
                   </div>
                 </div>
                 <v-progress-linear v-if="isCleaning" indeterminate color="#0B2A44" class="mt-3" />
@@ -233,6 +259,7 @@ import ExcelViewer from '../components/ExcelViewer.vue'
 import { dataAPI, datasetAPI } from '../services/api'
 import sessionManager from '@/services/sessionManager.js'
 import { markStepCompleted } from '@/utils/workflowProgress.js'
+import { applyCleaningOperations } from '@/utils/cleaningOperations.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -252,13 +279,26 @@ const excludedFields = ref(new Set())
 
 const cleaningOptions = ref([
   { key: 'removeDuplicates', label: 'Remove Duplicates', desc: 'Delete duplicate rows', value: true },
-  { key: 'fillMissingValues', label: 'Fill Missing Values', desc: 'Replace empty values', value: true },
   { key: 'removeEmptyRows', label: 'Remove Empty Rows', desc: 'Delete rows with no data', value: true },
   { key: 'trimWhitespace', label: 'Trim Whitespace', desc: 'Remove extra spaces', value: true },
-  { key: 'standardizeText', label: 'Standardize Text', desc: 'Fix text case', value: false },
-  { key: 'formatDates', label: 'Format Dates', desc: 'Convert dates to selected format', value: false },
-  { key: 'standardizeCurrency', label: 'Standardize Currency', desc: 'Format currency values', value: false }
+  { key: 'fillMissingText', label: 'Fill Missing Values', desc: "Replace empty values with 'N/A'", value: true },
+  { key: 'convertToNumbers', label: 'Convert Text to Numbers', desc: 'Turn numeric text into numbers', value: false },
+  { key: 'dropRowsWithMissing', label: 'Drop Rows with Missing Values', desc: 'Delete rows that have empty cells', value: false },
+  { key: 'removeOutliers', label: 'Remove Outlier Rows', desc: 'Drop rows beyond 3 standard deviations', value: false },
+  { key: 'standardizeDates', label: 'Format Dates', desc: 'Convert dates to selected format', value: false },
+  { key: 'changeCase', label: 'Standardize Text Case', desc: 'Upper, lower or title case', value: false },
+  { key: 'removeSpecialChars', label: 'Remove Special Characters', desc: 'Strip symbols from text fields', value: false },
+  { key: 'standardizeCurrency', label: 'Standardize Currency', desc: 'Normalize currency symbols and codes', value: false },
+  { key: 'fillWithCustom', label: 'Fill Missing with Custom Value', desc: 'Use your own fill value', value: false }
 ])
+
+const caseTypeOptions = ref([
+  { value: 'upper', label: 'UPPERCASE' },
+  { value: 'lower', label: 'lowercase' },
+  { value: 'title', label: 'Title Case' }
+])
+const selectedCaseType = ref('title')
+const customFillValue = ref('')
 
 const dateFormatOptions = ref([
   { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
@@ -517,37 +557,35 @@ async function startCleaning() {
   try {
     const options = {}
     cleaningOptions.value.forEach(opt => { if (opt.value) options[opt.key] = true })
-    if (options.formatDates) options.dateFormat = selectedDateFormat.value
+    options.dateFormat = selectedDateFormat.value
+    options.caseType = selectedCaseType.value
+    options.customFillValue = customFillValue.value
 
-    const inputData = results.value && cleanedSourceData.value.length
-      ? cleanedSourceData.value
-      : dataset.value.data
-    const response = await dataAPI.clean(inputData, options)
-    if (response.success) {
-      cleanedSourceData.value = response.data
-      let cleaned = cleanedSourceData.value
-      if (excludedFields.value.size > 0) {
-        cleaned = cleaned.map(row => Object.fromEntries(
-          Object.entries(row).filter(([key]) => {
-            const normalizedKey = String(key).toLowerCase().replace(/[-_\s().]+/g, '')
-            return ![...excludedFields.value].some(excluded =>
-              normalizedKey === String(excluded).toLowerCase().replace(/[-_\s().]+/g, '')
-            )
-          })
-        ))
-      }
-      results.value = {
-        originalRows: dataset.value.data.length,
-        cleanedRows: cleaned.length,
-        duplicatesRemoved: response.stats?.duplicates_removed || 0,
-        missingValuesFilled: response.stats?.missing_values_filled || 0,
-        cleanedData: cleaned
-      }
-      dataset.value.data = cleaned
-      alert(`Cleaning completed! ${results.value.cleanedRows} rows remaining`)
-    } else {
-      alert('Cleaning failed')
+    const { data: cleanedRows, operations } = applyCleaningOperations(
+      dataset.value.data, cleanedSourceData.value, options, selectedDateFormat.value
+    )
+    cleanedSourceData.value = cleanedRows
+    let cleaned = cleanedRows
+    if (excludedFields.value.size > 0) {
+      cleaned = cleaned.map(row => Object.fromEntries(
+        Object.entries(row).filter(([key]) => {
+          const normalizedKey = String(key).toLowerCase().replace(/[-_\s().]+/g, '')
+          return ![...excludedFields.value].some(excluded =>
+            normalizedKey === String(excluded).toLowerCase().replace(/[-_\s().]+/g, '')
+          )
+        })
+      ))
     }
+    results.value = {
+      originalRows: dataset.value.data.length,
+      cleanedRows: cleaned.length,
+      duplicatesRemoved: 0,
+      missingValuesFilled: 0,
+      cleanedData: cleaned,
+      operations
+    }
+    dataset.value.data = cleaned
+    alert(`Cleaning completed! ${results.value.cleanedRows} rows remaining`)
   } catch (err) {
     console.error(err)
     alert('Cleaning failed')
