@@ -7,6 +7,10 @@ from utils.fred_config import (
     get_market_benchmark,
     series_for_country,
     get_yield_curve,
+    _fred_cache_key,
+    _fred_cache_ensure,
+    _fred_cache_get,
+    _fred_cache_set,
     logger
 )
 
@@ -24,12 +28,20 @@ def fred_routes(app):
             return '', 200
         if not FRED_API_KEY:
             return jsonify({'success': False, 'error': 'FRED_API_KEY not set'}), 500
+        limit = request.args.get('limit', 200)
+        sort_order = request.args.get('sort_order', 'desc')
+        cache_key = _fred_cache_key('series', series_id, limit, sort_order)
+        _fred_cache_ensure()
+        cached = _fred_cache_get(cache_key)
+        if cached is not None:
+            return jsonify({'success': True, 'series_id': series_id,
+                            'data': cached.get('data', []), 'cached': True})
         params = {
             'series_id': series_id,
             'api_key': FRED_API_KEY,
             'file_type': 'json',
-            'sort_order': 'desc',
-            'limit': request.args.get('limit', 200)
+            'sort_order': sort_order,
+            'limit': limit
         }
         try:
             resp = requests.get(f'{FRED_BASE_URL}/series/observations', params=params, timeout=10)
@@ -40,6 +52,7 @@ def fred_routes(app):
             observations = data.get('observations', [])
             result = [{'date': obs['date'], 'value': float(obs['value'])}
                       for obs in observations if obs.get('value') and obs['value'] != '.']
+            _fred_cache_set(cache_key, {'data': result})
             return jsonify({'success': True, 'series_id': series_id, 'data': result})
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)}), 500

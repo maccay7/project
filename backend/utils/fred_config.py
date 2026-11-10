@@ -1,4 +1,6 @@
 import os
+import json
+import hashlib
 import requests
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +13,70 @@ load_dotenv()
 
 FRED_API_KEY = os.environ.get('FRED_API_KEY')
 FRED_BASE_URL = 'https://api.stlouisfed.org/fred'
+FRED_CACHE_TTL_HOURS = 6
+
+
+def _fred_cache_key(*parts):
+    raw = '|'.join(str(p) for p in parts)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+def _fred_cache_ensure():
+    try:
+        from utils.db import get_db_connection
+        conn = get_db_connection()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS fred_cache (
+                    cache_key CHAR(64) PRIMARY KEY,
+                    payload LONGTEXT NOT NULL,
+                    fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_fetched_at (fetched_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+        return True
+    except Exception as e:
+        logger.warning(f"fred_cache ensure failed: {e}")
+        return False
+
+
+def _fred_cache_get(key):
+    try:
+        from utils.db import execute_query
+        row = execute_query(
+            """SELECT payload FROM fred_cache
+               WHERE cache_key = %s
+                 AND fetched_at > DATE_SUB(NOW(), INTERVAL %s HOUR)
+               LIMIT 1""",
+            (key, FRED_CACHE_TTL_HOURS),
+            fetch_one=True,
+        )
+        if row and row.get('payload'):
+            return json.loads(row['payload'])
+    except Exception as e:
+        logger.warning(f"fred_cache read failed: {e}")
+    return None
+
+
+def _fred_cache_set(key, payload):
+    try:
+        from utils.db import execute_query
+        execute_query(
+            """INSERT INTO fred_cache (cache_key, payload, fetched_at)
+               VALUES (%s, %s, NOW())
+               ON DUPLICATE KEY UPDATE payload = VALUES(payload),
+                   fetched_at = NOW()""",
+            (key, json.dumps(payload)),
+        )
+    except Exception as e:
+        logger.warning(f"fred_cache write failed: {e}")
 
 COUNTRY_ALIASES = {
     'USA': 'US', 'US': 'US',
@@ -189,6 +255,12 @@ def fetch_fred_observation(series_id, from_date=None, to_date=None, max_retries=
         logger.error("FRED_API_KEY not set — cannot fetch real data")
         return None, None
 
+    cache_key = _fred_cache_key('obs', series_id, from_date, to_date)
+    _fred_cache_ensure()
+    cached = _fred_cache_get(cache_key)
+    if cached is not None:
+        return cached.get('value'), cached.get('date')
+
     params = {
         'series_id': series_id,
         'api_key': FRED_API_KEY,
@@ -215,7 +287,11 @@ def fetch_fred_observation(series_id, from_date=None, to_date=None, max_retries=
             for obs in data.get('observations', []):
                 if obs.get('value') and obs.get('value') != '.':
                     try:
-                        return float(obs['value']), obs.get('date')
+                        value = float(obs['value'])
+                        obs_date = obs.get('date')
+                        _fred_cache_set(cache_key,
+                                        {'value': value, 'date': obs_date})
+                        return value, obs_date
                     except (ValueError, TypeError):
                         continue
             logger.warning(f"No valid observation for {series_id}")
@@ -238,6 +314,16 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None,
     When ``from_date`` / ``to_date`` are omitted, this returns a single
     cross-sectional curve across ``maturities``.
     """
+    yc_key = _fred_cache_key(
+        'yc', country, instrument_type, maturity,
+        tuple(sorted(maturities)) if maturities else None,
+        from_date, to_date,
+    )
+    _fred_cache_ensure()
+    yc_cached = _fred_cache_get(yc_key)
+    if yc_cached is not None:
+        return yc_cached.get('points', [])
+
     if maturities is None:
         maturities = ['1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y', '30Y']
 
@@ -385,7 +471,9 @@ def get_yield_curve(country='US', maturities=None, from_date=None, to_date=None,
     if use_fallback:
         for point in points:
             point['note'] = f'Fallback: US data used (no data for {country_upper})'
-    
+
+    if points:
+        _fred_cache_set(yc_key, {'points': points})
     return points
 
 
