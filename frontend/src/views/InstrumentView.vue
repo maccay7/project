@@ -1457,7 +1457,7 @@ import ExcelModalViewer from '@/components/ExcelModalViewer.vue'
 import ExcelWorkbookViewer from '@/components/ExcelWorkbookViewer.vue'
 import WorksheetSelector from '@/components/WorksheetSelector.vue'
 import { markStepCompleted, isStepPersistedCompleted } from '@/utils/workflowProgress.js'
-import { autoMatchColumns, applyMappingToRows, isColumnMapped, getMissingColumns } from '@/utils/instrumentMapping'
+import { autoMatchColumns, applyMappingToRows, isColumnMapped } from '@/utils/instrumentMapping'
 import { detectSheetType, extractSingleInstrumentValues, getRequiredFieldMappings } from '@/utils/sheetTypeDetector'
 import { autoDetectInstrumentFields } from '@/utils/autoDetectInstrument.js'
 import Chart from 'chart.js/auto'
@@ -2371,14 +2371,6 @@ function getDisplayColumns() {
 }
 
 const instrumentSummaryColumnsForDisplay = computed(() => getDisplayColumns())
-
-const currencyOptions = computed(() => [
-  { title: '-- All Currencies --', value: '' },
-  { title: 'USD', value: 'USD' },
-  { title: 'EUR', value: 'EUR' },
-  { title: 'ZWG', value: 'ZWG' },
-  { title: '-- Custom (type below) --', value: 'custom' }
-])
 
 const instrumentSearchQuery = ref('')
 
@@ -4048,86 +4040,6 @@ function updateMultiTableCurrency(instrument, fieldName, currency) {
   fieldData.value = fieldData.currencyVariants[currency]
   fieldData.currency = currency
   multiTableDetectionResults.value = [...multiTableDetectionResults.value]
-}
-
-async function handleCustomCurrencyInput() {
-  if (customCurrency.value) customCurrency.value = customCurrency.value.toUpperCase()
-  if (customCurrency.value && customCurrency.value.length === 3) {
-    try {
-      const detectionResult = await autoDetectInstrumentFields(
-        originalFileBuffer.value,
-        currentSheetName.value,
-        requiredColumns.value,
-        instrumentType.value,
-        null, null,
-        customCurrency.value,
-        (status) => { detectionStatus.value = status }
-      )
-      const normalized = normalizeDetectedFields(
-        detectionResult?.fields,
-        detectionResult?.fieldsWithMetadata,
-        instrumentType.value,
-        requiredColumns.value
-      )
-      if (Object.keys(normalized.fields).length > 0) {
-        autoDetectedFields.value = normalized.fields
-        autoDetectedFieldsWithMetadata.value = normalized.fieldsWithMetadata
-        detectedCurrencies.value = detectionResult?.currencies || []
-      }
-    } catch (error) { /* non-fatal */ }
-  }
-}
-
-async function handleCurrencyChange() {
-  if (!currentSheetName.value || !originalFileBuffer.value) return
-  if (isDetecting.value) return
-  isDetecting.value = true
-  try {
-    const currencyFilter = null // scan all currencies; per-field selectors handle choice
-    const detectionResult = await autoDetectInstrumentFields(
-      originalFileBuffer.value,
-      currentSheetName.value,
-      requiredColumns.value,
-      instrumentType.value,
-      null, null, currencyFilter,
-      (status) => { detectionStatus.value = status }
-    )
-    const normalized = normalizeDetectedFields(
-      detectionResult?.fields,
-      detectionResult?.fieldsWithMetadata,
-      instrumentType.value,
-      requiredColumns.value
-    )
-    const mergedFields = { ...normalized.fields }
-    const mergedFieldsWithMetadata = { ...normalized.fieldsWithMetadata }
-    if (Object.keys(mergedFields).length > 0) {
-      const deriveUnion = { ...mergedFields, ...(detectionResult?.additionalFields || {}) }
-      const deriveUnionMeta = { ...mergedFieldsWithMetadata }
-      for (const [key, value] of Object.entries(detectionResult?.additionalFields || {})) {
-        if (!(key in deriveUnionMeta)) {
-          deriveUnionMeta[key] = {
-            ...(value && typeof value === 'object' ? value : {}),
-            originalLabel: key,
-          }
-        }
-      }
-      deriveDaysToMaturity(deriveUnion, deriveUnionMeta)
-      for (const [key, value] of Object.entries(deriveUnion)) {
-        if (!(key in mergedFields) && deriveUnionMeta[key]?.source === 'auto-calculation') {
-          mergedFields[key] = value
-          mergedFieldsWithMetadata[key] = deriveUnionMeta[key]
-        }
-      }
-      autoDetectedFields.value = mergedFields
-      autoDetectedFieldsWithMetadata.value = mergedFieldsWithMetadata
-      autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
-      detectedCurrencies.value = detectionResult?.currencies || []
-      detectedInstrumentType.value = instrumentType.value
-    }
-    showDetectionSuccess.value = true
-  } catch (error) { /* non-fatal */ } finally {
-    isDetecting.value = false
-  }
 }
 
 async function useDetectedFields() {
