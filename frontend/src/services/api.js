@@ -153,28 +153,6 @@ export const systemAPI = {
   getHealth: () => callAPI('/api/health')
 }
 
-// ===== DATA API =====
-export const dataAPI = {
-  upload: async (file, type) => {
-    console.log('Uploading:', file.name)
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('instrument_type', type)
-    return await callAPI('/api/dataset/upload', 'POST', formData, true)
-  },
-  clean: (data, options) => callAPI('/api/clean', 'POST', { data, options }),
-  calculate: (data, type, params, datasetId = null) =>
-    callAPI('/api/calculate', 'POST', {
-      data,
-      instrument_type: type,
-      params,
-      dataset_id: datasetId
-    }),
-  // Backend /api/delete-dataset reads `dataset_id`, not `upload_id`.
-  deleteDataset: (id) => callAPI('/api/delete-dataset', 'POST', { dataset_id: id }),
-  parseExcel: (formData) => callAPI('/api/data/parse-excel', 'POST', formData, true)
-}
-
 // ===== DATASET API =====
 export const datasetAPI = {
   save: (name, file_base64, sheet_names, upload_id, data = null, headers = null, instrument_type = null) =>
@@ -257,7 +235,6 @@ export default {
   calculationsAPI,
   userAPI,
   systemAPI,
-  dataAPI,
   datasetAPI,
   fredAPI,
   instrumentConfigAPI,
