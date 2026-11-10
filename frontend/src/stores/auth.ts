@@ -192,40 +192,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  const forgotPassword = async (email: string) => {
-    try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
-      const response = await fetch(`${apiUrl}/api/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      })
-
-      const data = await response.json()
-      return data?.success === true
-    } catch (error) {
-      console.error('Forgot password error:', error)
-      return false
-    }
-  }
-
-  const resetPassword = async (token: string, newPassword: string) => {
-    try {
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
-      const response = await fetch(`${apiUrl}/api/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, new_password: newPassword })
-      })
-
-      const data = await response.json()
-      return data?.success === true
-    } catch (error) {
-      console.error('Reset password error:', error)
-      return false
-    }
-  }
-
   const changePassword = async (oldPassword: string, newPassword: string) => {
     try {
       const apiUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
@@ -256,8 +222,6 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     register,
     checkSession,
-    forgotPassword,
-    resetPassword,
     changePassword
   }
 })
