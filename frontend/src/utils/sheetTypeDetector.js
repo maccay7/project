@@ -164,40 +164,6 @@ export function extractInstrumentNames(data, columnName) {
   return Array.from(names)
 }
 
-export function looksLikeNumber(value) {
-  if (typeof value === 'number') return true
-  if (typeof value !== 'string') return false
-  return /^[\d,.$\-]+$/.test(value.trim())
-}
-
-export function parseNumberValue(value) {
-  if (typeof value === 'number') return value
-  if (typeof value !== 'string') return NaN
-  return parseFloat(value.replace(/[$,]/g, '').trim())
-}
-
-export function looksLikeDate(value) {
-  if (value instanceof Date) return true
-  if (typeof value !== 'string') return false
-  return /^\d{4}-\d{2}-\d{2}/.test(value) ||
-         /^\d{2}\/\d{2}\/\d{4}/.test(value) ||
-         /^\d{2}-\d{2}-\d{4}/.test(value) ||
-         /^\d{1,2}\s+[A-Za-z]+\s+\d{4}/.test(value)
-}
-
-export function parseDateValue(value) {
-  if (value instanceof Date) return value.toISOString().split('T')[0]
-  if (typeof value !== 'string') return value
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.substring(0, 10)
-  return value
-}
-
-export function cleanValue(value) {
-  if (value === null || value === undefined || value === '') return ''
-  if (typeof value === 'string') return value.trim()
-  return value
-}
-
 export function getSingleInstrumentConfidence(data, instrumentType) {
   return detectSheetType(data, instrumentType).confidence || 0
 }

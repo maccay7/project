@@ -153,9 +153,3 @@ export function farthestAllowedIndex(steps, state, sessionId) {
 export function resetWorkflowProgress(sessionId) {
   clearWorkflowProgress(sessionId)
 }
-
-export function autoMarkStepIfCompleted(tab, state, sessionId) {
-  if (checkStepCriteria(tab, state) && !isStepPersistedCompleted(sessionId, tab)) {
-    markStepCompleted(sessionId, tab)
-  }
-}
