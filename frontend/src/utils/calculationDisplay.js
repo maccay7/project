@@ -434,7 +434,7 @@ export function parseMaturityToYears (maturity) {
   return Number.isFinite(value) && value > 0 ? value : null
 }
 
-export function calculatedValuesOnlyRows (rows, inputFields = [], instrumentType = '') {
+export function calculatedValuesOnlyRows (rows, inputFields = [], instrumentType = '', instrumentNames = []) {
   if (!Array.isArray(rows)) return []
   const normalize = key => String(key).replace(/[^a-z0-9]/gi, '').toLowerCase()
   const excluded = new Set([
@@ -499,8 +499,11 @@ export function calculatedValuesOnlyRows (rows, inputFields = [], instrumentType
       }
     }
     if (!valuesByKey.size && !name && !type) return
+    const resolvedName = instrumentNames[index] !== undefined && instrumentNames[index] !== null
+      ? String(instrumentNames[index]).trim()
+      : ''
     resultRows.push({
-      name: name || `Instrument ${index + 1}`,
+      name: resolvedName || name || `Instrument ${index + 1}`,
       type: type || instrumentType || '',
       currency,
       valuesByKey
@@ -519,6 +522,26 @@ export function calculatedValuesOnlyRows (rows, inputFields = [], instrumentType
   return resultRows.map(row => Object.fromEntries(
     columns.map(([label, getValue]) => [label, getValue(row)])
   ))
+}
+
+// Calculated-values-only rows with display columns — drops columns that are
+// empty across every row (keeps 'Instrument Name'). This is the single
+// pipeline used by the Calculations page and mirrored by Summary views.
+export function calculatedValuesDisplayRows (rows, inputFields = [], instrumentType = '', instrumentNames = []) {
+  const result = calculatedValuesOnlyRows(rows, inputFields, instrumentType, instrumentNames)
+  if (!result.length) return result
+  const keys = Object.keys(result[0])
+  const nonEmpty = new Set()
+  result.forEach(row => {
+    keys.forEach(key => {
+      const value = row[key]
+      if (value !== '' && value !== null && value !== undefined) nonEmpty.add(key)
+    })
+  })
+  const keep = keys.filter(key => nonEmpty.has(key) || key === 'Instrument Name')
+  return result.map(row =>
+    Object.fromEntries(keep.map(key => [key, row[key] ?? '']))
+  )
 }
 
 /**

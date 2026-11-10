@@ -83,7 +83,7 @@ def save_mapping_template(name, instrument_type, column_mapping,
         try:
             cursor.execute(
                 "SELECT id FROM mapping_templates WHERE name = %s "
-                "AND instrument_type = %s AND user_id = %s",
+                "AND instrument_type = %s AND (user_id = %s OR user_id IS NULL)",
                 (name, instrument_type, user_id)
             )
             existing = cursor.fetchone()
@@ -93,7 +93,7 @@ def save_mapping_template(name, instrument_type, column_mapping,
                 cursor.execute(
                     """UPDATE mapping_templates
                        SET column_mapping = %s, required_columns = %s, file_columns = %s
-                       WHERE id = %s AND user_id = %s""",
+                       WHERE id = %s AND (user_id = %s OR user_id IS NULL)""",
                     (json.dumps(column_mapping),
                      json.dumps(required_columns) if required_columns else None,
                      json.dumps(file_columns) if file_columns else None,
@@ -182,7 +182,8 @@ def update_mapping_template(template_id, user_id, column_mapping=None,
                 return False
 
             params.append(template_id)
-            query = f"UPDATE mapping_templates SET {', '.join(updates)} WHERE id = %s AND user_id = %s"
+            query = (f"UPDATE mapping_templates SET {', '.join(updates)} "
+                     "WHERE id = %s AND (user_id = %s OR user_id IS NULL)")
 
             cursor.execute(query, [*params, user_id])
             conn.commit()
@@ -198,7 +199,8 @@ def delete_mapping_template(template_id, user_id):
             return False
         try:
             cursor.execute(
-                "DELETE FROM mapping_templates WHERE id = %s AND user_id = %s",
+                "DELETE FROM mapping_templates WHERE id = %s "
+                "AND (user_id = %s OR user_id IS NULL)",
                 (template_id, user_id))
             conn.commit()
             return cursor.rowcount > 0

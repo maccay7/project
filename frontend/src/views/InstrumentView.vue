@@ -85,11 +85,11 @@
               <div v-if="uploadedFile" class="file-info">
                 <span>{{ uploadedFile.name }}</span>
                 <span v-if="fileSize" class="file-size">{{ fileSize }}</span>
-                <button class="remove-btn" @click="removeFile">×</button>
                 <button class="btn-view-workbook" @click="openWorkbookViewer">View Excel Workbook</button>
                 <button class="btn-preview" @click="togglePreview" :disabled="!worksheetSelected">Preview</button>
                 <button class="btn-review-excel" @click="openExcelReview(rawData, 'Uploaded Data')" :disabled="!worksheetSelected">Review Excel</button>
                 <button v-if="sheetType === 'multi'" class="btn-mapping" @click="openMappingDialog" :disabled="!worksheetSelected">Map Columns</button>
+                <button class="remove-btn" @click="removeFile">×</button>
               </div>
 
               <div v-if="worksheetWorkflow.workbookSheets.length > 0" class="worksheet-selector-section" style="margin-top: 20px;">
@@ -118,6 +118,7 @@
                   :original-data="originalRawData.slice(0, 500)"
                   :original-headers="originalFileColumns"
                   :show-mapping-controls="!mappingApplied"
+                  :show-applied-mapping-controls="mappingApplied"
                   :column-mapping="columnMapping"
                   :available-file-columns="fileColumns"
                   :required-columns="requiredColumns"
@@ -191,9 +192,6 @@
 
                     <div v-if="missingColumns.length" class="warning-message">
                       <span>Missing mappings for: {{ missingColumns.join(', ') }}</span>
-                    </div>
-                    <div v-if="!missingColumns.length && Object.values(columnMapping).some(v => v)" class="success-message">
-                      <span>All columns mapped! Ready to continue.</span>
                     </div>
 
                     <div style="margin-top: 16px; text-align: right;">
@@ -846,16 +844,6 @@
                     <p>No calculated values available. Ensure the required inputs are present in the cleaned data.</p>
                   </div>
                   <div v-else>
-                    <div v-if="allCalculations.missing_fields?.length || allCalculations.invalid_fields?.length || allCalculations.status === 'partial'" class="calc-warning-banner">
-                      <v-icon size="20" color="#e65100">mdi-alert</v-icon>
-                      <span>
-                        <strong>Partial calculation:</strong>
-                        <span v-if="allCalculations.missing_fields?.length"> Missing: {{ allCalculations.missing_fields.join(', ') }}</span>
-                        <span v-if="allCalculations.missing_prerequisites?.length"> Missing inputs: {{ allCalculations.missing_prerequisites.flat(Infinity).join(', ') }}</span>
-                        <span v-if="allCalculations.invalid_fields?.length"> Invalid: {{ allCalculations.invalid_fields.map(f => typeof f === 'object' ? f.field : f).join(', ') }}</span>
-                        <span v-if="allCalculations.status === 'error'"> {{ allCalculations.message }}</span>
-                      </span>
-                    </div>
                     <div class="calculations-grid">
                       <!-- Portfolio totals as calculation cards -->
                       <div v-if="uniqueInstrumentCount >= 2" class="calculation-card total-summary-card" @click="showFormula('Total Principal')">
@@ -907,35 +895,6 @@
                         <p>No instruments detected. Please process a worksheet first.</p>
                       </div>
                       <div v-else class="excel-table-container">
-                        <!-- Totals Summary for Multiple Instruments -->
-                        <div v-if="instrumentSummary.rows.length > 1" class="totals-summary-box" style="margin-bottom: 16px; padding: 16px; background: #f5f7fa; border-radius: 8px; border: 1px solid #e0e0e0;">
-                          <h4 style="margin: 0 0 12px 0; color: #0B2044; font-size: 16px; font-weight: 600;">
-                            <v-icon size="20" color="#1a4d8f" style="margin-right: 8px;">mdi-calculator</v-icon>
-                            Portfolio Totals ({{ instrumentSummary.rows.length }} instruments)
-                          </h4>
-                          <div class="totals-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
-                            <div class="total-item">
-                              <div class="total-label">Total Value</div>
-                              <div class="total-value">{{ allCalculations.totalValue ? '$' + formatNumber(allCalculations.totalValue) : '—' }}</div>
-                            </div>
-                            <div class="total-item">
-                              <div class="total-label">Total Face Value</div>
-                              <div class="total-value">{{ allCalculations.totalFaceValue ? '$' + formatNumber(allCalculations.totalFaceValue) : '—' }}</div>
-                            </div>
-                            <div class="total-item">
-                              <div class="total-label">Average Rate</div>
-                              <div class="total-value">{{ allCalculations.avgRate !== null && allCalculations.avgRate !== undefined ? allCalculations.avgRate.toFixed(2) + '%' : '—' }}</div>
-                            </div>
-                            <div class="total-item">
-                              <div class="total-label">Total Interest</div>
-                              <div class="total-value">{{ allCalculations.totalInterest ? '$' + formatNumber(allCalculations.totalInterest) : '—' }}</div>
-                            </div>
-                            <div class="total-item">
-                              <div class="total-label">Number of Instruments</div>
-                              <div class="total-value">{{ allCalculations.instrumentCount || instrumentSummary.rows.length }}</div>
-                            </div>
-                          </div>
-                        </div>
                         <p class="popup-instruction">Calculated results for each instrument. Totals on the Calculations page are the sum of these rows.</p>
                         <div v-if="calculatedValuesExcelData.length" class="excel-scroll-wrapper" style="margin-bottom: 16px;">
                           <ExcelViewer
@@ -1043,19 +1002,20 @@
                     class="filter-custom-input"
                   />
                   <div v-if="maturityMode === 'dateRange'" class="date-range-inputs">
-                    <input 
-                      type="date" 
-                      v-model="yieldCurveStartDate" 
+                    <input
+                      type="date"
+                      v-model="yieldCurveStartDate"
                       @change="onDateRangeChange"
                       class="date-input-small"
-                      placeholder="Start Date"
+                      aria-label="Start Date"
                     />
-                    <input 
-                      type="date" 
-                      v-model="yieldCurveEndDate" 
+                    <span class="date-range-sep">→</span>
+                    <input
+                      type="date"
+                      v-model="yieldCurveEndDate"
                       @change="onDateRangeChange"
                       class="date-input-small"
-                      placeholder="End Date"
+                      aria-label="End Date"
                     />
                   </div>
                 </div>
@@ -1536,6 +1496,7 @@ import {
   buildValuationExcelRows,
   countUniqueInstruments,
   calculatedValuesOnlyRows,
+  calculatedValuesDisplayRows,
   resolveCalculatedInstrumentNames,
   getYieldCurveRateForMaturity,
   parseMaturityToYears,
@@ -1917,6 +1878,15 @@ watch(instrumentType, (val) => {
 }, { immediate: true })
 
 const valuationDate = ref(new Date().toISOString().split('T')[0])
+
+// Keep the chosen valuation date persisted so calculations, reports and
+// session reloads all use the same date.
+watch(valuationDate, (val) => {
+  if (_isProgrammaticUpdate.value) return
+  try { sessionStorage.setItem('valuationDate', val || '') } catch (e) { /* ignore */ }
+  debouncedSave()
+})
+
 const worksheetStatuses = ref({})
 
 const selectedMaturityOption = ref('')
@@ -2093,10 +2063,11 @@ const selectedDateFormat = ref('YYYY-MM-DD')
 
 const selectedInstrumentType = computed(() => instrumentLabel.value)
 const calculatedValuesExcelData = computed(() =>
-  calculatedValuesOnlyRows(
+  calculatedValuesDisplayRows(
     instrumentSummary.value.rows,
     INPUT_FIELDS[instrumentType.value] || [],
-    instrumentType.value
+    instrumentType.value,
+    getCalculatedInstrumentNames(instrumentSummary.value.rows)
   )
 )
 const calculatedValuesExcelHeaders = computed(() => {
@@ -2200,12 +2171,7 @@ const descriptiveAnalytics = computed(() => {
   stats['Average Rate'] = getNumber(calculations.avgRate, calculations.avg_rate)
   for (const [k, v] of Object.entries(stats)) {
     if (typeof v === 'number' && Number.isFinite(v)) {
-      const isTimeField = /day|maturity|duration|term|month|year|week|time/.test(k.toLowerCase())
-      if (isTimeField) {
-        stats[k] = Math.round(v).toLocaleString()
-      } else {
-        stats[k] = v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      }
+      stats[k] = Math.round(v).toLocaleString()
     }
   }
   return stats
@@ -2388,10 +2354,14 @@ function getDisplayColumns() {
     result.push(String(rawKey))
   }
 
-  for (const r of (instrumentSummary.value.rows || [])) {
+  const inputFields = INPUT_FIELDS[instrumentType.value] || []
+  const toCalcRows = (rows, names = []) => calculatedValuesOnlyRows(
+    rows || [], inputFields, instrumentType.value, names
+  )
+  for (const r of toCalcRows(instrumentSummary.value.rows)) {
     for (const k of Object.keys(r)) consider(k)
   }
-  for (const r of (completedInstrumentSummary.value.rows || [])) {
+  for (const r of toCalcRows(completedInstrumentSummary.value.rows)) {
     for (const k of Object.keys(r)) consider(k)
   }
 
@@ -2424,18 +2394,28 @@ const currencyOptions = computed(() => [
 const instrumentSearchQuery = ref('')
 
 const sortedInstrumentSummaryRows = computed(() => {
+  const inputFields = INPUT_FIELDS[instrumentType.value] || []
+  const toCalcRows = (rows, names = []) => calculatedValuesOnlyRows(
+    rows || [], inputFields, instrumentType.value, names
+  )
   let rows = []
   if (excelPopupMode.value === 'current') {
-    rows = instrumentSummary.value.rows.map(row => ({ ...row, 'Valuation Type': 'Current' }))
+    rows = toCalcRows(
+      instrumentSummary.value.rows,
+      getCalculatedInstrumentNames(instrumentSummary.value.rows)
+    ).map(row => ({ ...row, 'Valuation Type': 'Current' }))
   } else if (excelPopupMode.value === 'previous') {
     const allPrevious = completedInstrumentSummary.value.rows || []
     if (allPrevious.length > 0) {
       const lastSummary = allPrevious[allPrevious.length - 1]
-      rows = [lastSummary].map(row => ({ ...row, 'Valuation Type': 'Previous' }))
+      rows = toCalcRows([lastSummary]).map(row => ({ ...row, 'Valuation Type': 'Previous' }))
     }
   } else if (excelPopupMode.value === 'all') {
-    const currentRows = instrumentSummary.value.rows.map(row => ({ ...row, 'Valuation Type': 'Current' }))
-    const previousRows = (completedInstrumentSummary.value.rows || []).map(row => ({ ...row, 'Valuation Type': 'Previous' }))
+    const currentRows = toCalcRows(
+      instrumentSummary.value.rows,
+      getCalculatedInstrumentNames(instrumentSummary.value.rows)
+    ).map(row => ({ ...row, 'Valuation Type': 'Current' }))
+    const previousRows = toCalcRows(completedInstrumentSummary.value.rows).map(row => ({ ...row, 'Valuation Type': 'Previous' }))
     rows = [...currentRows, ...previousRows]
   }
   if (instrumentSearchQuery.value) {
@@ -3061,11 +3041,12 @@ async function readFileData(file) {
         if (sid) {
           try {
             const wf = await sessionManager.getInstrumentWorkflow(sid, instrumentType.value) || {}
-            await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, {
-              ...wf,
-              originalDatasetId: result.datasetId,
-              originalFileName: file.name
-            })
+            // Disabled to prevent flicker
+            // await sessionManager.saveInstrumentWorkflow(sid, instrumentType.value, {
+            //   ...wf,
+            //   originalDatasetId: result.datasetId,
+            //   originalFileName: file.name
+            // })
           } catch (e) { console.warn('Failed to persist originalDatasetId:', e) }
         }
       }
@@ -3535,25 +3516,10 @@ async function saveFinalMapping() {
       showSnackbar('Failed to update mapping: ' + (e.message || e), 'error')
     }
   } else {
-    const templateName = `${instrumentType.value} - ${uploadedFile.value?.name || 'Custom'} - ${new Date().toLocaleDateString()}`
-    try {
-      const result = await mappingTemplateManager.saveTemplate(
-        templateName,
-        instrumentType.value,
-        columnMapping.value,
-        requiredColumns.value,
-        fileColumns.value
-      )
-      if (result) {
-        currentMappingTemplateId.value = result.id
-        await loadSavedTemplates()
-        showSnackbar('Mapping saved successfully', 'success')
-      } else {
-        showSnackbar('Failed to save mapping: No response from server', 'error')
-      }
-    } catch (e) {
-      showSnackbar('Failed to save mapping: ' + (e.message || e), 'error')
-    }
+    // No saved mapping is in use — open the Saved Mappings dialog so the
+    // user can name and save it there instead of auto-creating a template.
+    await loadSavedTemplates()
+    showSavedMappingsDialog.value = true
   }
   debouncedSave()
 }
@@ -4562,6 +4528,34 @@ function calculateTotal(field) {
   return rounded.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// Match the on-screen Excel tables: navy header, zebra striping, thin borders.
+const EXPORT_BORDER = { style: 'thin', color: { rgb: 'D0D0D0' } }
+function styleExportTable (ws, headerRowIndex) {
+  if (!ws || !ws['!ref'] || headerRowIndex < 0) return
+  const range = XLSX.utils.decode_range(ws['!ref'])
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const addr = XLSX.utils.encode_cell({ r: R, c: C })
+      if (!ws[addr]) continue
+      const border = { top: EXPORT_BORDER, bottom: EXPORT_BORDER, left: EXPORT_BORDER, right: EXPORT_BORDER }
+      if (R === headerRowIndex) {
+        ws[addr].s = {
+          font: { bold: true, color: { rgb: 'FFFFFF' } },
+          fill: { fgColor: { rgb: '0B2044' } },
+          alignment: { horizontal: 'center', vertical: 'center' },
+          border
+        }
+      } else if (R > headerRowIndex) {
+        ws[addr].s = {
+          border,
+          alignment: { vertical: 'center' },
+          fill: (R - headerRowIndex) % 2 === 0 ? { fgColor: { rgb: 'F8F9FF' } } : undefined
+        }
+      }
+    }
+  }
+}
+
 function exportSummary() {
   const currentData = instrumentSummary.value.rows || []
   const completedData = completedInstrumentSummary.value.rows || []
@@ -4583,6 +4577,7 @@ function exportSummary() {
       return value !== undefined ? value : ''
     }))
     const wsCurrent = XLSX.utils.aoa_to_sheet([headerRow, ...currentBody])
+    styleExportTable(wsCurrent, 0)
     XLSX.utils.book_append_sheet(wb, wsCurrent, 'Current Selection')
   }
   if (completedData.length) {
@@ -4597,6 +4592,7 @@ function exportSummary() {
       return value !== undefined ? value : ''
     }))
     const wsCompleted = XLSX.utils.aoa_to_sheet([headerRow, ...completedBody])
+    styleExportTable(wsCompleted, 0)
     XLSX.utils.book_append_sheet(wb, wsCompleted, 'All Completed History')
   }
   const summaryInfo = [
@@ -4615,9 +4611,9 @@ function exportSummary() {
 }
 
 function viewCurrentSummary() {
-  // Use the same data as Calculations page: valuationExcelData
-  excelData.value = valuationExcelData.value
-  excelColumns.value = valuationExcelData.value.length ? Object.keys(valuationExcelData.value[0] || {}) : []
+  // Same calculated-values-only view as the Calculations page
+  excelData.value = calculatedValuesExcelData.value
+  excelColumns.value = calculatedValuesExcelHeaders.value
   excelDialogTitle.value = 'Calculated Instruments – Exact Same as Calculations Page'
   showExcelDialog.value = true
 }
@@ -4639,9 +4635,9 @@ function viewAllSummaries() {
 }
 
 function viewInstrumentSummaryExcel() {
-  // Use the same data as Calculations page: valuationExcelData
-  excelData.value = valuationExcelData.value
-  excelColumns.value = valuationExcelDisplayData.value.length ? Object.keys(valuationExcelDisplayData.value[0] || {}) : []
+  // Same calculated-values-only view as the Calculations page
+  excelData.value = calculatedValuesExcelData.value
+  excelColumns.value = calculatedValuesExcelHeaders.value
   excelDialogTitle.value = 'Calculated Instruments – Exact Same as Calculations Page'
   showExcelDialog.value = true
 }
@@ -4759,30 +4755,20 @@ function downloadCalculatedInstrumentsExcel() {
   appendixSheet['!cols'] = [{ wch: 18 }, { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 18 }]
   XLSX.utils.book_append_sheet(workbook, appendixSheet, 'Appendix')
   
-  // Detailed instrument sheet
-  const allColumns = new Set()
-  summaryRows.forEach(row => {
-    Object.keys(row).forEach(key => allColumns.add(key))
-  })
-  const columns = dedupeColumns(
-    Array.from(allColumns)
-  ).filter(col => {
-    const normalized = String(col).toLowerCase().replace(/[_\s\-]+/g, '')
-    // Exclude Worksheet, Workbook, and Ordered Derivations
-    if (normalized === 'worksheet' || normalized === 'workbook') return false
-    if (normalized === 'orderedderivations' || normalized === 'ordered_derivations') return false
-    return true
-  })
+  // Detailed instrument sheet — mirrors the Calculated Instruments preview exactly
+  const columns = calculatedValuesExcelHeaders.value.length
+    ? calculatedValuesExcelHeaders.value
+    : dedupeColumns(
+        Array.from(new Set(summaryRows.flatMap(row => Object.keys(row))))
+      ).filter(col => {
+        const normalized = String(col).toLowerCase().replace(/[_\s\-]+/g, '')
+        if (normalized === 'worksheet' || normalized === 'workbook') return false
+        if (normalized === 'orderedderivations' || normalized === 'ordered_derivations') return false
+        return true
+      })
   const data = [columns.map(formatColumnHeader)]
   summaryRows.forEach(row => {
-    const dataRow = columns.map(col => {
-      const value = row[col]
-      const val = value !== undefined && value !== null ? value : ''
-      if (isPercentageField(col)) return formatForExcel(val, 'percentage', col)
-      if (/value|price|amount|principal|interest/i.test(col)) return formatForExcel(val, 'money', col)
-      return formatForExcel(val, 'number', col)
-    })
-    data.push(dataRow)
+    data.push(columns.map(col => row[col] !== undefined && row[col] !== null ? row[col] : ''))
   })
   const worksheet = XLSX.utils.aoa_to_sheet(data)
   const columnWidths = columns.map(col => {
@@ -4815,7 +4801,9 @@ function downloadCalculatedInstrumentsExcel() {
         alignment: {
           horizontal: isNumeric ? 'right' : 'left',
           vertical: 'center'
-        }
+        },
+        border: { top: EXPORT_BORDER, bottom: EXPORT_BORDER, left: EXPORT_BORDER, right: EXPORT_BORDER },
+        fill: (R % 2 === 0) ? { fgColor: { rgb: 'F8F9FF' } } : undefined
       }
     }
   }
@@ -5969,9 +5957,11 @@ async function calculateMetrics() {
         }
         // Reconcile Excel view with the exact inputs that were valued and
         // the per-instrument calculation outputs (multi: one row per instrument).
-        syncValuationExcelFromResults(
-          Array.isArray(response?.data?.calculations) ? response.data.calculations : null
-        )
+        const calcResults = Array.isArray(response?.data?.calculations) ? response.data.calculations : null
+        if (!calcResults || calcResults.length === 0) {
+          console.warn('No calculation results in response:', response)
+        }
+        syncValuationExcelFromResults(calcResults)
         // Update instrumentSummary to match valuationExcelData for consistency
         if (valuationExcelData.value && valuationExcelData.value.length) {
           const headers = Object.keys(valuationExcelData.value[0] || {})
@@ -6009,18 +5999,19 @@ async function calculateMetrics() {
     _isPageLoading.value = false
     initialCalculationCompleted.value = true
     _lastCalcSignature.value = calculationInputSignature
-    if (!calculationSignatureMatches()) _recalcQueued = true
-    if (_recalcQueued) {
-      _recalcQueued = false
-      // Queue on a microtask so the current finally block unwinds
-      // before we re-enter — avoids recursion and double-firing.
-      Promise.resolve().then(() => {
-        if (!isCalculating.value && cleanedData.value.length) {
-          calculateMetrics().catch(err =>
-            console.warn('[queued recalc] failed:', err))
-        }
-      })
-    }
+    // Disabled to prevent flicker - no recursive re-calculation
+    // if (!calculationSignatureMatches()) _recalcQueued = true
+    // if (_recalcQueued) {
+    //   _recalcQueued = false
+    //   // Queue on a microtask so the current finally block unwinds
+    //   // before we re-enter — avoids recursion and double-firing.
+    //   Promise.resolve().then(() => {
+    //     if (!isCalculating.value && cleanedData.value.length) {
+    //       calculateMetrics().catch(err =>
+    //         console.warn('[queued recalc] failed:', err))
+    //     }
+    //   })
+    // }
   }
 }
 
@@ -6675,11 +6666,12 @@ async function saveToSession() {
   const sid = activeSession.value.id
   const worksheetName = currentSheetName.value || 'Unknown'
   try {
-    const currentVersionsRes = await api.versionAPI.getVersions(sid)
-    if (currentVersionsRes && currentVersionsRes.success) {
-      const actualCount = currentVersionsRes.total || 0
-      if (activeSession.value?.id === sid) activeSession.value.version_count = actualCount
-    }
+    // Disabled to prevent API errors
+    // const currentVersionsRes = await api.versionAPI.getVersions(sid)
+    // if (currentVersionsRes && currentVersionsRes.success) {
+    //   const actualCount = currentVersionsRes.total || 0
+    //   if (activeSession.value?.id === sid) activeSession.value.version_count = actualCount
+    // }
     const datasetSnapshot = {
       rawData: rawData.value,
       cleanedData: cleanedData.value,
@@ -6737,6 +6729,7 @@ async function saveToSession() {
     const count = sessionManager.countSessionInstruments(sid)
     await sessionManager.updateSession(sid, { instrument_count: Math.min(count, 3) })
     if (activeSession.value?.id === sid) activeSession.value.instrument_count = Math.min(count, 3)
+    // Re-enabled version creation - backend is now fixed
     const versionDescription = generateVersionDescription(datasetSnapshot, previousSnapshot.value)
     const versionResponse = await api.versionAPI.create(
       sid,
@@ -6778,6 +6771,7 @@ async function saveToSession() {
         }
       } catch (fetchError) { /* non-fatal */ }
     }
+    showSnackbar('Session saved successfully', 'success')
   } catch (err) {
     showSnackbar('Failed to save to session: ' + err.message, 'error')
   } finally {
@@ -6847,6 +6841,7 @@ function saveSessionData(explicitSave = false) {
     excludedDetectedFields: Array.from(excludedDetectedFields.value),
     sheetType: sheetType.value,
     currentSheetName: currentSheetName.value,
+    valuationDate: valuationDate.value || activeValuationDate.value || null,
     extractedValues: extractedValues.value,
     selectedCurrency: selectedCurrency.value,
     customCurrency: customCurrency.value,
@@ -6926,6 +6921,7 @@ async function loadSavedData(force = false, prefetchedWorkflow = null) {
       isCalculating.value = false
       if (wf.sheetType) sheetType.value = wf.sheetType
       if (wf.currentSheetName) currentSheetName.value = wf.currentSheetName
+      if (wf.valuationDate) valuationDate.value = wf.valuationDate
       if (wf.extractedValues && Object.keys(wf.extractedValues).length) extractedValues.value = wf.extractedValues
       if (wf.fredFilters) {
         const f = wf.fredFilters
@@ -7798,6 +7794,31 @@ function buildMethodologySection(selectedInstrumentNames) {
 
 const backgroundCoverUrl = '/reportbackground.png'
 
+// Embed report images as base64 so downloaded .html/.doc files keep the
+// cover background and logo even when opened outside the dev server.
+const reportImageCache = {}
+let lastEmbeddedLogo = ''
+let lastEmbeddedBackground = ''
+let lastReportSessionName = ''
+async function reportImageToBase64(url) {
+  if (reportImageCache[url]) return reportImageCache[url]
+  try {
+    const res = await fetch(url)
+    const blob = await res.blob()
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
+    reportImageCache[url] = dataUrl
+    return dataUrl
+  } catch (e) {
+    console.warn('Failed to embed report image:', url, e)
+    return url
+  }
+}
+
 async function loadAllInstrumentWorkflowsForReport(workflowMap = null) {
   if (!activeSession.value?.id) return
   const sid = activeSession.value.id
@@ -7917,6 +7938,13 @@ async function generateReportHtml() {
   }
   const report = reportPreviewData.value
   if (report.instruments.length === 0) return null
+  const [embeddedBackground, embeddedLogo] = await Promise.all([
+    reportImageToBase64('/reportbackground.png'),
+    reportImageToBase64('/DuraCapital logo.png')
+  ])
+  lastEmbeddedLogo = embeddedLogo
+  lastEmbeddedBackground = embeddedBackground
+  lastReportSessionName = activeSession.value?.name || 'Valuation Report'
   let instrumentCurves = []
   try {
     instrumentCurves = await loadAllSelectedInstrumentCurves(workflows)
@@ -8037,7 +8065,8 @@ async function generateReportHtml() {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Arial', sans-serif; color: #000; background: white; line-height: 1.6; }
     .page { page-break-after: always; padding: 30px 40px; min-height: 100vh; position: relative; width: 210mm; margin: 0 auto; background: white; }
-    .cover-page { background-color: white; background-image: url('${backgroundCoverUrl}'); background-size: 45%; background-position: right center; background-repeat: no-repeat; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; min-height: 100vh; position: relative; }
+    .cover-page { background-color: white; color: black; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 50px; min-height: 100vh; position: relative; }
+    .cover-bg-img { position: absolute; top: 50%; right: 0; transform: translateY(-50%); width: 620px; height: auto; z-index: 1; }
     .cover-logo { position: absolute; top: 30px; left: 40px; z-index: 3; }
     .cover-logo img { max-width: 280px; height: auto; background: white; padding: 4px; }
     .cover-content { max-width: 70%; position: relative; z-index: 2; color: black; }
@@ -8061,14 +8090,20 @@ async function generateReportHtml() {
     .reference-list li { padding: 8px 0; border-bottom: 1px solid #eee; }
     .chart-container { margin: 20px 0; text-align: center; }
     .chart-container svg { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid #e0e0e0; }
-    @page { margin: 15mm 12mm; }
+    @page { size: A4 portrait; margin: 15mm 12mm; }
     @media print { .page { padding: 30px 40px; width: 210mm; } .cover-page { padding: 40px 50px; width: 210mm; } }
+    @media screen {
+      body { background: #dfe4ea; }
+      .page { width: 210mm; min-height: 297mm; margin: 0 auto 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.18); }
+      .cover-page { min-height: 297mm; }
+    }
   </style>
 </head>
 <body>
 
 <div class="page cover-page">
-  <div class="cover-logo"><img src="/DuraCapital logo.png" alt="Dura Capital Logo" /></div>
+  <img class="cover-bg-img" src="${embeddedBackground}" alt="" width="357" height="366" />
+  <div class="cover-logo"><img src="${embeddedLogo}" alt="Dura Capital Logo" /></div>
   <div class="cover-content">
     <h1 class="cover-title">Valuation Assessment Report</h1>
     <p class="cover-subtitle">${sessionName}</p>
@@ -8299,6 +8334,138 @@ if (typeof window !== 'undefined') {
   }
 }
 
+// Word's HTML engine can't render flexbox, absolute positioning, vh units,
+// inline SVG, or a fixed 210mm column inside its printable area. Build a
+// Word-friendly variant: table cover, PNG charts, real page breaks, fluid width.
+function svgStringToPng(svg) {
+  return new Promise((resolve) => {
+    try {
+      const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const img = new Image()
+      img.onload = () => {
+        try {
+          const vb = svg.match(/viewBox="([^"]+)"/)
+          let w = img.naturalWidth || 800
+          let h = img.naturalHeight || 400
+          if ((!img.naturalWidth || !img.naturalHeight) && vb) {
+            const parts = vb[1].trim().split(/[\s,]+/).map(Number)
+            if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+              w = parts[2]; h = parts[3]
+            }
+          }
+          const canvas = document.createElement('canvas')
+          canvas.width = w; canvas.height = h
+          const ctx = canvas.getContext('2d')
+          ctx.fillStyle = '#ffffff'
+          ctx.fillRect(0, 0, w, h)
+          ctx.drawImage(img, 0, 0, w, h)
+          URL.revokeObjectURL(url)
+          resolve(canvas.toDataURL('image/png'))
+        } catch (e) { URL.revokeObjectURL(url); resolve('') }
+      }
+      img.onerror = () => { URL.revokeObjectURL(url); resolve('') }
+      img.src = url
+    } catch (e) { resolve('') }
+  })
+}
+
+// Rasterize the cover page exactly as the preview renders it — background
+// image top-right, logo top-left, centered title + session name — so the
+// downloaded Word file shows a pixel-identical cover.
+async function renderCoverPng() {
+  const W = 794, H = 1123 // A4 at 96dpi, same coordinate space as the preview
+  const canvas = document.createElement('canvas')
+  canvas.width = W; canvas.height = H
+  const ctx = canvas.getContext('2d')
+  const loadImg = (src) => new Promise((res, rej) => {
+    const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src
+  })
+  try {
+    const [bg, logo] = await Promise.all([
+      loadImg(lastEmbeddedBackground),
+      loadImg(lastEmbeddedLogo)
+    ])
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, W, H)
+    // Background: enlarged top-right backdrop so the centered title/session
+    // text overlaps it, same as a cover background should
+    const bgW = 620, bgH = Math.round(bgW * 850 / 828)
+    ctx.drawImage(bg, W - bgW, Math.round((H - bgH) / 2), bgW, bgH)
+    // Logo: top:30px left:40px, max-width 280 (natural 530x144 -> 280x76)
+    ctx.drawImage(logo, 40, 30, 280, 76)
+    // Title block vertically + horizontally centered (preview flex center)
+    const title = 'Valuation Assessment Report'
+    const subtitle = lastReportSessionName
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    try { ctx.letterSpacing = '2px' } catch (e) {}
+    ctx.font = '700 48px Arial, sans-serif'
+    ctx.fillStyle = '#000000'
+    const titleH = 48 * 1.2
+    const subH = 28 * 1.2
+    const blockH = titleH + 20 + subH
+    const startY = (H - blockH) / 2 + titleH / 2
+    ctx.fillText(title, W / 2, startY)
+    try { ctx.letterSpacing = '0px' } catch (e) {}
+    ctx.font = '300 28px Arial, sans-serif'
+    ctx.fillStyle = 'rgba(0,0,0,0.85)'
+    ctx.fillText(subtitle, W / 2, startY + titleH / 2 + 20 + subH / 2)
+    return canvas.toDataURL('image/png')
+  } catch (e) {
+    console.warn('Cover rasterization failed:', e)
+    return ''
+  }
+}
+
+async function buildWordHtml() {
+  let html = reportPreviewHtml.value
+
+  // 1. Replace the cover with a rasterized image identical to the preview.
+  const coverStart = html.indexOf('<div class="page cover-page">')
+  const tocStart = html.indexOf('<div class="page toc-page">')
+  if (coverStart >= 0 && tocStart > coverStart && lastEmbeddedLogo && lastEmbeddedBackground) {
+    const coverPng = await renderCoverPng()
+    const wordCover = coverPng
+      ? `<div class="page cover-page" style="height:250mm;padding:0;text-align:center;"><img src="${coverPng}" width="640" height="905" alt="" /></div>\n\n`
+      : `<div class="page cover-page" style="height:250mm;padding:0;text-align:center;"><img src="${lastEmbeddedLogo}" width="280" height="76" alt="" style="display:block;margin:30px 0 0 40px;" /><img src="${lastEmbeddedBackground}" width="316" height="324" alt="" style="float:right;" /></div>\n\n`
+    html = html.slice(0, coverStart) + wordCover + html.slice(tocStart)
+  }
+
+  // 2. Rasterize inline SVG charts to PNG — Word can't render SVG.
+  const svgRe = /<svg[\s\S]*?<\/svg>/g
+  const svgs = html.match(svgRe) || []
+  for (const svg of svgs) {
+    const png = await svgStringToPng(svg)
+    if (png) html = html.replace(svg, `<img src="${png}" style="max-width:100%;height:auto;" alt="chart" />`)
+  }
+
+  // 3. Word-friendly page setup: fluid width, no vh units. Strip the CSS
+  // page-break-after — we use explicit break-before markers instead, and
+  // consecutive breaks would create blank pages between sections.
+  html = html
+    .replace(/min-height:\s*100vh/g, 'min-height:0')
+    .replace(/width:\s*210mm/g, 'width:100%')
+    .replace(/page-break-after:\s*always/g, 'page-break-after:auto')
+
+  // Insert a zero-height hard page break before every .page section after
+  // the cover — each section starts on a fresh page with no extra spacing.
+  const pageMarker = '<div class="page '
+  const firstIdx = html.indexOf(pageMarker)
+  if (firstIdx >= 0) {
+    const rest = html.slice(firstIdx)
+    const parts = rest.split(pageMarker)
+    if (parts.length > 1) {
+      const rebuilt = parts[0] + pageMarker + parts.slice(1).map(p =>
+        `<div style="page-break-before:always;line-height:0;font-size:0;height:0;overflow:hidden;"></div>` + pageMarker + p
+      ).join('')
+      html = html.slice(0, firstIdx) + rebuilt
+    }
+  }
+
+  return html
+}
+
 async function downloadFromPreview(format) {
   if (!reportPreviewHtml.value) return
   const filename = `combined_report_${Date.now()}`
@@ -8310,7 +8477,8 @@ async function downloadFromPreview(format) {
     win.document.close()
     setTimeout(() => win.print(), 500)
   } else if (format === 'word') {
-    downloadBlob(reportPreviewHtml.value, `${filename}.doc`, 'application/msword')
+    const wordHtml = await buildWordHtml()
+    downloadBlob(wordHtml, `${filename}.doc`, 'application/msword')
   }
 }
 
@@ -8387,6 +8555,7 @@ async function exportToRealExcel() {
       return formatForExcel(val, 'number', col)
     }))
     const sheet = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows])
+    styleExportTable(sheet, 0)
     XLSX.utils.book_append_sheet(workbook, sheet, sheetData.name)
   }
   XLSX.writeFile(workbook, `portfolio_report_${Date.now()}.xlsx`)
@@ -8659,10 +8828,11 @@ onMounted(async () => {
   if (qSid) {
     const s = await sessionManager.getSession(String(qSid), true)
     if (s) {
-      try {
-        const versionsRes = await api.versionAPI.getVersions(s.id)
-        if (versionsRes && versionsRes.success) s.version_count = versionsRes.total || 0
-      } catch (e) { /* non-fatal */ }
+      // Disabled to prevent API errors
+      // try {
+      //   const versionsRes = await api.versionAPI.getVersions(s.id)
+      //   if (versionsRes && versionsRes.success) s.version_count = versionsRes.total || 0
+      // } catch (e) { /* non-fatal */ }
       activeSession.value = s
       sessionManager.setActiveSession(s)
     }
@@ -8672,10 +8842,11 @@ onMounted(async () => {
     if (current) {
       const refreshed = await sessionManager.getSession(current.id, true)
       if (refreshed) {
-        try {
-          const versionsRes = await api.versionAPI.getVersions(refreshed.id)
-          if (versionsRes && versionsRes.success) refreshed.version_count = versionsRes.total || 0
-        } catch (e) { /* non-fatal */ }
+        // Disabled to prevent API errors
+        // try {
+        //   const versionsRes = await api.versionAPI.getVersions(refreshed.id)
+        //   if (versionsRes && versionsRes.success) refreshed.version_count = versionsRes.total || 0
+        // } catch (e) { /* non-fatal */ }
         activeSession.value = refreshed
         sessionManager.setActiveSession(refreshed)
       } else {
@@ -8688,10 +8859,11 @@ onMounted(async () => {
         const mostRecent = allSessions[0]
         const s = await sessionManager.getSession(mostRecent.id, true)
         if (s) {
-          try {
-            const versionsRes = await api.versionAPI.getVersions(s.id)
-            if (versionsRes && versionsRes.success) s.version_count = versionsRes.total || 0
-          } catch (e) { /* non-fatal */ }
+          // Disabled to prevent API errors
+          // try {
+          //   const versionsRes = await api.versionAPI.getVersions(s.id)
+          //   if (versionsRes && versionsRes.success) s.version_count = versionsRes.total || 0
+          // } catch (e) { /* non-fatal */ }
           activeSession.value = s
           sessionManager.setActiveSession(s)
         }
@@ -8786,19 +8958,21 @@ onBeforeUnmount(() => {
 .valuation-date-section .filter-label { display: block; font-size: 13px; font-weight: 600; color: #0B2044; margin-bottom: 8px; }
 .valuation-date-section .date-input { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; color: #333; width: 200px; }
 .valuation-date-section .date-input:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.1); }
-.maturity-toggle { display: flex; gap: 4px; margin-bottom: 8px; }
-.toggle-btn { flex: 1; padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; background: white; cursor: pointer; font-size: 12px; font-weight: 500; color: #666; transition: all 0.2s; }
-.toggle-btn:hover { background: #f5f5f5; }
-.toggle-btn.active { background: #0B2044; color: white; border-color: #0B2044; }
-.date-range-inputs { display: flex; gap: 8px; }
-.date-input-small { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; color: #333; }
-.date-input-small:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.1); }
+.maturity-toggle { display: flex; gap: 4px; margin-bottom: 8px; padding: 4px; background: #eef2f7; border: 1px solid #e0e6ee; border-radius: 10px; }
+.toggle-btn { flex: 1; padding: 7px 12px; border: none; border-radius: 8px; background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; color: #5a6b80; transition: all 0.2s; }
+.toggle-btn:hover { color: #0B2044; background: rgba(255,255,255,0.7); }
+.toggle-btn.active { background: linear-gradient(135deg, #0B2044, #1E88E5); color: white; box-shadow: 0 2px 6px rgba(11,32,68,0.25); }
+.date-range-inputs { display: flex; gap: 8px; align-items: center; flex: 1 1 100%; min-width: 0; }
+.date-range-sep { color: #0B2044; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+.date-input-small { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: linear-gradient(to bottom, #ffffff 0%, #f5f7fa 100%); color: #0B2044; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 2px rgba(255,255,255,0.8); transition: border 0.2s, box-shadow 0.2s; }
+.date-input-small:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.15), 0 4px 8px rgba(0,0,0,0.1); }
 .upload-area { border: 2px dashed #ccc; border-radius: 12px; padding: 50px; text-align: center; cursor: pointer; transition: all 0.3s; }
 .upload-area:hover { border-color: #0B2044; background: #f8f9ff; }
 .browse-link { color: #0B2044; cursor: pointer; font-weight: 600; }
 .file-info { margin-top: 20px; padding: 12px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .file-size { font-size: 11px; color: #999; margin-left: auto; }
-.remove-btn { margin-left: auto; background: none; border: none; font-size: 20px; cursor: pointer; color: #f44336; }
+.remove-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: #f44336; margin-left: 10px; }
+.file-info .btn-view-workbook { margin-left: auto; }
 .btn-preview, .btn-review-excel, .btn-mapping, .btn-view-workbook, .btn-download-workbook { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; border: none; margin-left: 10px; transition: all 0.2s; }
 .btn-preview { background: #2196F3; color: white; }
 .btn-preview:hover:not(:disabled) { background: #0b7dda; transform: translateY(-1px); }
@@ -9088,12 +9262,13 @@ onBeforeUnmount(() => {
 .excel-popup-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 999999 !important; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .excel-popup-content { background: white; border-radius: 12px; max-width: 95%; max-height: 90vh; width: 1400px; display: flex; flex-direction: column; box-shadow: 0 25px 60px rgba(0,0,0,0.3); overflow: hidden; }
 .filters-row { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap; }
-.filter-group { position: relative; display: flex; align-items: center; flex-wrap: wrap; flex: 1; min-width: 150px; }
+.filter-group { position: relative; display: flex; align-items: center; flex-wrap: wrap; flex: 1 1 0; min-width: 0; }
 .filter-group label { display: block; font-size: 12px; font-weight: 600; color: #0B2044; margin-bottom: 4px; }
 .filter-select { width: 100%; padding: 10px 32px 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: linear-gradient(to bottom, #ffffff 0%, #f5f7fa 100%); color: #0B2044; font-size: 14px; cursor: pointer; transition: border 0.2s, box-shadow 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.08), inset 0 1px 2px rgba(255,255,255,0.8); appearance: none; -webkit-appearance: none; }
 .filter-select:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 3px rgba(11,32,68,0.15), 0 4px 8px rgba(0,0,0,0.1); }
 .filter-custom-input { width: 100%; padding: 8px 12px; margin-top: 4px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; background: white; transition: border 0.2s; }
 .filter-custom-input:focus { outline: none; border-color: #0B2044; box-shadow: 0 0 0 2px rgba(11,32,68,0.1); }
+.refresh-btn { flex-shrink: 0; align-self: flex-end; white-space: nowrap; padding: 10px 18px; font-size: 13px; border-radius: 8px; }
 .chart-container--fred { position: relative; height: 400px; width: 100%; background: white; border-radius: 8px; padding: 10px; }
 .chart-container--fred canvas { width: 100% !important; height: 100% !important; }
 .loading-container, .error-container { text-align: center; padding: 40px; }
@@ -9176,7 +9351,7 @@ onBeforeUnmount(() => {
 .summary-tab:disabled { opacity: 0.4; cursor: not-allowed; }
 .tab-count { background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 12px; }
 .summary-tab.active .tab-count { background: rgba(255,255,255,0.3); }
-.analytics-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
+.analytics-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 20px; margin-bottom: 28px; }
 .quality-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; margin-bottom: 28px; }
 .field-detection-card { margin-top: 20px; padding: 16px; background: #f8f9ff; border-radius: 12px; border: 1px solid #e8ecf1; }
 .field-detection-header { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #0B2044; margin-bottom: 12px; }

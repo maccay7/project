@@ -327,7 +327,8 @@ import { useRouter } from 'vue-router'
 import FixedLayout from '@/components/FixedLayout.vue'
 import sessionManager from '@/services/sessionManager.js'
 import * as XLSX from 'xlsx'
-import { buildAggregatesFromBackend, countUniqueInstruments } from '@/utils/calculationDisplay.js'
+import { buildAggregatesFromBackend, countUniqueInstruments, calculatedValuesOnlyRows, calculatedValuesDisplayRows, resolveCalculatedInstrumentNames } from '@/utils/calculationDisplay.js'
+import { INPUT_FIELDS } from '@/utils/instrumentFieldMappings.js'
 
 const router = useRouter()
 const activeSession = ref(null)
@@ -519,24 +520,52 @@ function goToReport() {
   router.push({ path: `/instrument/${lastInstrument}`, query: { session: activeSession.value.id, tab: 'reports' } })
 }
 
+// Calculated-values-only detail rows for one instrument — identical to what
+// the Calculations page / Calculated Instruments preview shows.
+function calculatedDetailRows(instId, wf) {
+  const instSummary = wf?.instrumentSummary || { rows: [], columns: [] }
+  const calcSourceRows = (Array.isArray(instSummary.rows) && instSummary.rows.length)
+    ? instSummary.rows
+    : (Array.isArray(wf?.valuationExcelData) ? wf.valuationExcelData : [])
+  const srcRows = Array.isArray(wf?.cleanedSourceData) ? wf.cleanedSourceData : []
+  const clRows = Array.isArray(wf?.cleanedData) ? wf.cleanedData : []
+  const nameRowCount = Math.max(srcRows.length, clRows.length)
+  const cleanedRows = Array.from({ length: nameRowCount }, (_, i) => ({
+    ...(srcRows[i] || {}),
+    ...(clRows[i] || {})
+  }))
+  const calcNames = resolveCalculatedInstrumentNames(cleanedRows, calcSourceRows, [], '')
+  // Identical pipeline to the instrument's Calculations/Summary page:
+  // calculatedValuesDisplayRows = calculatedValuesOnlyRows + resolved
+  // cleaning-page names + empty-column drop.
+  return calculatedValuesDisplayRows(
+    calcSourceRows,
+    INPUT_FIELDS[instId] || [],
+    instId,
+    calcNames
+  )
+}
+
 function openDetailModal(inst) {
   if (!inst.details || !inst.details.length) return
   selectedInst.value = inst
-  // Load the valuation Excel data from the workflow to show exact same data as Calculations page
-  const loadValuationExcel = async () => {
+  // Show the exact calculated-values detail from the instrument's Calculations page
+  const loadCalculatedDetails = async () => {
     try {
       const sid = activeSession.value?.id
       if (!sid) return
       const wf = await sessionManager.getInstrumentWorkflow(sid, inst.id)
-      if (wf?.valuationExcelData && Array.isArray(wf.valuationExcelData) && wf.valuationExcelData.length) {
-        inst.details = wf.valuationExcelData
-        inst.detailHeaders = Object.keys(wf.valuationExcelData[0] || {})
+      if (!wf) return
+      const details = calculatedDetailRows(inst.id, wf)
+      if (details.length) {
+        inst.details = details
+        inst.detailHeaders = Array.from(new Set(details.flatMap(r => Object.keys(r || {}))))
       }
     } catch (e) {
-      console.warn('Failed to load valuation Excel data:', e)
+      console.warn('Failed to load calculated detail data:', e)
     }
   }
-  loadValuationExcel().then(() => {
+  loadCalculatedDetails().then(() => {
     detailModalVisible.value = true
   })
 }
@@ -572,6 +601,44 @@ function formatForExcel(value, type = 'number', key = '') {
   return num
 }
 
+// Match the on-screen Excel tables: navy header, white bold titles,
+// zebra striping and thin borders.
+const EXPORT_BORDER = { style: 'thin', color: { rgb: 'D0D0D0' } }
+function styleExportTable (ws, headerRowIndex) {
+  if (!ws || !ws['!ref'] || headerRowIndex < 0) return
+  const range = XLSX.utils.decode_range(ws['!ref'])
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const addr = XLSX.utils.encode_cell({ r: R, c: C })
+      if (!ws[addr]) continue
+      const border = { top: EXPORT_BORDER, bottom: EXPORT_BORDER, left: EXPORT_BORDER, right: EXPORT_BORDER }
+      if (R === headerRowIndex) {
+        ws[addr].s = {
+          font: { bold: true, color: { rgb: 'FFFFFF' } },
+          fill: { fgColor: { rgb: '0B2044' } },
+          alignment: { horizontal: 'center', vertical: 'center' },
+          border
+        }
+      } else if (R > headerRowIndex) {
+        ws[addr].s = {
+          border,
+          alignment: { vertical: 'center' },
+          fill: (R - headerRowIndex) % 2 === 0 ? { fgColor: { rgb: 'F8F9FF' } } : undefined
+        }
+      }
+    }
+  }
+}
+function findHeaderRowIndex (ws, marker) {
+  if (!ws || !ws['!ref']) return -1
+  const range = XLSX.utils.decode_range(ws['!ref'])
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: R, c: 0 })]
+    if (cell && String(cell.v ?? '') === marker) return R
+  }
+  return -1
+}
+
 function exportCombinedExcel() {
   const workbook = XLSX.utils.book_new()
   const valuationDate = activeValuationDate.value || ''
@@ -586,27 +653,31 @@ function exportCombinedExcel() {
     [`Valuation Date: ${valuationDate}`, '', ''],
     ['', '', ''],
     ['Report Generated', new Date().toLocaleString(), ''],
-    ['', '', ''],
-    ['Instrument', 'Metric', 'Value']
+    ['', '', '']
   ]
-  
-  // Add portfolio summary metrics
+
+  // Summary sheet — same columns as the Portfolio preview table
+  summaryData.push(['Instrument Name', 'Face Value ($)', 'Calculated Value ($)', 'Difference ($)', 'Count', 'Avg Rate (%)', 'FRED Benchmark (%)', 'Status'])
   filteredInstruments.value.forEach(inst => {
-    summaryData.push([inst.name, 'Face Value', inst.faceValue !== null ? '$' + formatNumber(inst.faceValue) : '—'])
-    summaryData.push([inst.name, 'Calculated Value', inst.value !== null ? '$' + formatNumber(inst.value) : '—'])
-    summaryData.push([inst.name, 'Difference', inst.difference !== null ? '$' + formatNumber(inst.difference) : '—'])
-    summaryData.push([inst.name, 'Count', inst.count])
-    summaryData.push([inst.name, 'Avg Rate', inst.avgRate !== null ? inst.avgRate + '%' : '—'])
-    summaryData.push([inst.name, 'FRED Benchmark', inst.fredBench !== null ? inst.fredBench + '%' : '—'])
+    summaryData.push([
+      inst.name,
+      inst.faceValue !== null ? '$' + formatNumber(inst.faceValue) : '—',
+      inst.value !== null ? '$' + formatNumber(inst.value) : '—',
+      inst.difference !== null ? '$' + formatNumber(inst.difference) : '—',
+      inst.count,
+      inst.avgRate !== null && inst.avgRate !== undefined ? inst.avgRate : '—',
+      inst.fredBench !== null && inst.fredBench !== undefined ? inst.fredBench : '—',
+      inst.statusText
+    ])
   })
-  
-  // Add totals
-  summaryData.push(['TOTAL', 'Total Face Value', totalFaceValue.value !== null ? '$' + formatNumber(totalFaceValue.value) : '—'])
-  summaryData.push(['TOTAL', 'Total Calculated', grandTotal.value !== null ? '$' + formatNumber(grandTotal.value) : '—'])
-  summaryData.push(['TOTAL', 'Difference', portfolioDifference.value !== null ? '$' + formatNumber(portfolioDifference.value) : '—'])
-  summaryData.push(['TOTAL', 'Total Instruments', totalInstruments.value])
+  summaryData.push(['TOTAL',
+    totalFaceValue.value !== null ? '$' + formatNumber(totalFaceValue.value) : '—',
+    grandTotal.value !== null ? '$' + formatNumber(grandTotal.value) : '—',
+    portfolioDifference.value !== null ? '$' + formatNumber(portfolioDifference.value) : '—',
+    totalInstruments.value, '', '', ''])
   
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryData)
+  styleExportTable(summarySheet, findHeaderRowIndex(summarySheet, 'Instrument Name'))
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
 
   // Appendix sheet
@@ -650,6 +721,7 @@ function exportCombinedExcel() {
       }))]
       const sheet = XLSX.utils.aoa_to_sheet(detailData)
       sheet['!cols'] = headers.map(() => ({ wch: 16 }))
+      styleExportTable(sheet, headerRows.length)
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
@@ -701,6 +773,7 @@ function exportToExcel() {
     formatForExcel(portfolioDifference.value, 'money'), totalInstruments.value, '', '', ''])
   const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows)
   summarySheet['!cols'] = [{ wch: 20 },{ wch: 18 },{ wch: 20 },{ wch: 18 },{ wch: 10 },{ wch: 14 },{ wch: 18 },{ wch: 14 }]
+  styleExportTable(summarySheet, findHeaderRowIndex(summarySheet, 'Instrument Name'))
   XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
 
   for (const inst of toExport) {
@@ -713,6 +786,7 @@ function exportToExcel() {
       const detailData = [...headerRows, headers.map(formatColumnHeader), ...instDetails.details.map(row => headers.map(h => row[h] !== undefined ? row[h] : ''))]
       const sheet = XLSX.utils.aoa_to_sheet(detailData)
       sheet['!cols'] = headers.map(() => ({ wch: 16 }))
+      styleExportTable(sheet, headerRows.length)
       XLSX.utils.book_append_sheet(workbook, sheet, inst.name.substring(0, 31))
     }
   }
@@ -732,12 +806,16 @@ async function publishPortfolioSnapshot(sid) {
       const wf = await sessionManager.getInstrumentWorkflow(sid, inst.id)
       const instSummary = wf?.instrumentSummary || { rows: [], columns: [] }
       const aggCalc = wf?.allCalculations || wf?.calculations || {}
+      const details = calculatedDetailRows(inst.id, wf)
+      const detailHeaders = details.length
+        ? Array.from(new Set(details.flatMap(r => Object.keys(r || {}))))
+        : (instSummary.columns || [])
 
       instrumentsWithDetailsList.push({
         id: inst.id,
         name: inst.name,
-        details: instSummary.rows || [],
-        detailHeaders: instSummary.columns || [],
+        details,
+        detailHeaders,
         aggregate: aggCalc,
         completed: inst.completed,
         count: inst.count,
@@ -865,12 +943,10 @@ async function loadSummary() {
             || calculationPayload
             || {})
       const aggCalc = buildAggregatesFromBackend(aggregatePayload, null, template.id)
+      console.log(`Summary: ${template.id} aggCalc.totalValue =`, aggCalc.totalValue, 'from aggregatePayload:', aggregatePayload)
 
-      // === Details: individual instrument rows (what Calculations page shows) ===
-      // Use the same data source as Calculations page: valuationExcelData from workflow
-      const details = (wfType?.valuationExcelData && Array.isArray(wfType.valuationExcelData))
-        ? wfType.valuationExcelData
-        : Array.isArray(instSummary.rows) ? instSummary.rows : []
+      // === Details: calculated-values-only rows, same as the Calculations page ===
+      const details = calculatedDetailRows(template.id, wfType)
 
       // Headers MUST come from the actual row keys so `row[header]` resolves.
       const rowDerivedHeaders = details.length

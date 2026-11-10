@@ -77,18 +77,19 @@ class SessionManager {
       instrumentWorkflow: s.instrumentWorkflow || {},
       versions: s.versions || []
     }))
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(metadata))
-    } catch (e) {
-      console.error('LocalStorage quota exceeded, clearing old sessions:', e)
-      const recent = metadata.slice(0, 20)
-      localStorage.setItem(storageKey, JSON.stringify(recent))
-    }
-    if (this.activeSessionId) {
-      localStorage.setItem(activeSession, this.activeSessionId)
-    } else {
-      localStorage.removeItem(activeSession)
-    }
+    // Disabled to prevent LocalStorage quota errors
+    // try {
+    //   localStorage.setItem(storageKey, JSON.stringify(metadata))
+    // } catch (e) {
+    //   console.error('LocalStorage quota exceeded, clearing old sessions:', e)
+    //   const recent = metadata.slice(0, 20)
+    //   localStorage.setItem(storageKey, JSON.stringify(recent))
+    // }
+    // if (this.activeSessionId) {
+    //   localStorage.setItem(activeSession, this.activeSessionId)
+    // } else {
+    //   localStorage.removeItem(activeSession)
+    // }
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -116,11 +117,10 @@ class SessionManager {
         total_value: bs.total_value || 0
       })).filter(s => s.id)
 
-      // Keep locally created sessions that the list endpoint has not yet returned
-      // (replication lag, list query error after a successful save, etc.).
-      const backendIds = new Set(backendSessions.map(s => s.id))
-      const pendingLocal = cached.filter(s => s?.id && !backendIds.has(String(s.id)))
-      this.sessions = [...pendingLocal, ...backendSessions]
+      // The backend list is authoritative: sessions absent from it (e.g.
+      // deleted server-side) must not be resurrected from the local cache.
+      // List failures are handled by the catch fallback below.
+      this.sessions = backendSessions
       this.saveCache()
       return this.sessions
     } catch (err) {
@@ -297,6 +297,16 @@ class SessionManager {
     }
     this.sessions = this.sessions.filter(s => s.id !== id)
     this.saveCache()
+    // saveCache() does not write to localStorage, so purge the deleted id from
+    // the stored array explicitly — otherwise loadCache() resurrects it.
+    try {
+      const { sessions: storageKey } = getStorageKeys()
+      const stored = JSON.parse(localStorage.getItem(storageKey) || '[]')
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify(stored.filter(s => String(s?.id) !== String(id)))
+      )
+    } catch { /* ignore */ }
     if (this.activeSessionId === id) {
       this.activeSessionId = null
       localStorage.removeItem(getStorageKeys().activeSession)

@@ -339,17 +339,34 @@ def sessions_routes(app):
             if not conn:
                 return jsonify({'success': False, 'message': 'DB error'}), 500
             try:
+                # First, try to check if version_history table exists
                 cursor.execute('''
-                    SELECT session_id AS id, name, status, versions, instrument_workflows,
-                           payload, instrument_count, version_count, total_value,
-                           created_at, updated_at,
-                           (SELECT COUNT(*) FROM version_history vh
-                            WHERE vh.session_id = ui_sessions.session_id)
-                            AS version_count_from_history
-                    FROM ui_sessions
-                    WHERE session_id = %s AND user_id = %s
-                    LIMIT 1
-                ''', (session_id, user_id))
+                    SELECT COUNT(*) FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = 'version_history'
+                ''')
+                version_history_exists = cursor.fetchone()
+                has_version_table = version_history_exists and version_history_exists.get('COUNT(*)', 0) > 0
+
+                if has_version_table:
+                    cursor.execute('''
+                        SELECT session_id AS id, name, status, versions, instrument_workflows,
+                               payload, instrument_count, version_count, total_value,
+                               created_at, updated_at,
+                               (SELECT COUNT(*) FROM version_history vh
+                                WHERE vh.session_id = ui_sessions.session_id)
+                                AS version_count_from_history
+                        FROM ui_sessions
+                        WHERE session_id = %s AND user_id = %s
+                    ''', (session_id, user_id))
+                else:
+                    # Fallback query without version_history subquery
+                    cursor.execute('''
+                        SELECT session_id AS id, name, status, versions, instrument_workflows,
+                               payload, instrument_count, version_count, total_value,
+                               created_at, updated_at
+                        FROM ui_sessions
+                        WHERE session_id = %s AND user_id = %s
+                    ''', (session_id, user_id))
                 row = cursor.fetchone()
             except Exception as e:
                 print(f"Get session error: {e}")
@@ -359,7 +376,8 @@ def sessions_routes(app):
             if not row:
                 return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
 
-            row['version_count'] = row.get('version_count_from_history') or 0
+            # Use version_count_from_history if available, otherwise fall back to version_count column
+            row['version_count'] = row.get('version_count_from_history') or row.get('version_count') or 0
 
         versions = _decode_json(row.get('versions'), [])
         instrument_workflows = _decode_json(row.get('instrument_workflows'), {})
@@ -402,31 +420,69 @@ def sessions_routes(app):
             if not conn:
                 return jsonify({'success': False, 'message': 'DB error'}), 500
             try:
+                # First, try to check if version_history table exists
                 cursor.execute('''
-                    SELECT s.session_id, s.name, s.status, s.instrument_workflows,
-                           s.created_at, s.updated_at, s.instrument_count, s.version_count,
-                           (SELECT COUNT(*) FROM version_history v
-                            WHERE v.session_id = s.session_id) AS version_count_from_history
-                    FROM ui_sessions s
-                    WHERE s.user_id = %s
-                    ORDER BY created_at DESC
-                    LIMIT 200
-                ''', (user_id,))
+                    SELECT COUNT(*) FROM information_schema.tables
+                    WHERE table_schema = DATABASE() AND table_name = 'version_history'
+                ''')
+                version_history_exists = cursor.fetchone()
+                has_version_table = version_history_exists and version_history_exists.get('COUNT(*)', 0) > 0
+
+                if has_version_table:
+                    cursor.execute('''
+                        SELECT s.session_id, s.name, s.status,
+                               s.created_at, s.updated_at, s.instrument_count, s.version_count,
+                               (SELECT COUNT(*) FROM version_history v
+                                WHERE v.session_id = s.session_id) AS version_count_from_history
+                        FROM ui_sessions s
+                        WHERE s.user_id = %s
+                        ORDER BY s.session_id DESC
+                        LIMIT 200
+                    ''', (user_id,))
+                else:
+                    # Fallback query without version_history subquery
+                    cursor.execute('''
+                        SELECT s.session_id, s.name, s.status,
+                               s.created_at, s.updated_at, s.instrument_count, s.version_count
+                        FROM ui_sessions s
+                        WHERE s.user_id = %s
+                        ORDER BY s.session_id DESC
+                        LIMIT 200
+                    ''', (user_id,))
                 rows = cursor.fetchall()
+
+                # instrument_workflows holds multi-MB JSON blobs; selecting it for
+                # every session blows the filesort buffer (error 1038). Fetch it
+                # only for sessions whose stored count is 0, where it is needed
+                # for the _count_from_workflows fallback.
+                zero_count_ids = [
+                    row['session_id'] for row in rows
+                    if not row.get('instrument_count')
+                ]
+                workflow_counts = {}
+                if zero_count_ids:
+                    placeholders = ','.join(['%s'] * len(zero_count_ids))
+                    cursor.execute(
+                        'SELECT session_id, instrument_workflows FROM ui_sessions '
+                        f'WHERE user_id = %s AND session_id IN ({placeholders})',
+                        (user_id, *zero_count_ids)
+                    )
+                    for wf_row in cursor.fetchall():
+                        workflows = _decode_json(wf_row.get('instrument_workflows'), {})
+                        workflow_counts[wf_row['session_id']] = _count_from_workflows(workflows)
             except Exception as e:
                 print(f"List sessions error: {e}")
                 traceback.print_exc()
-                return jsonify({'success': False, 'message': 'Query failed'}), 500
+                return jsonify({'success': False, 'message': f'Query failed: {str(e)}'}), 500
 
         sessions_list = []
         for row in rows:
-            instrument_workflows = _decode_json(row.get('instrument_workflows'), {})
-
             instrument_count = row.get('instrument_count', 0)
-            if instrument_count == 0 and instrument_workflows:
-                instrument_count = _count_from_workflows(instrument_workflows)
+            if instrument_count == 0:
+                instrument_count = workflow_counts.get(row['session_id'], 0)
 
-            version_count = row.get('version_count_from_history', 0) or 0
+            # Use version_count_from_history if available, otherwise fall back to version_count column
+            version_count = row.get('version_count_from_history') or row.get('version_count') or 0
 
             sessions_list.append({
                 'id': row['session_id'],

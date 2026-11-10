@@ -70,6 +70,20 @@
                   </select>
                   <span class="header-label">{{ header }}</span>
                 </div>
+                <div v-else-if="showAppliedMappingControls" class="header-dropdown">
+                  <select
+                    :value="getAppliedMappingForHeader(header)"
+                    @change="onAppliedMappingChange(header, $event.target.value)"
+                    class="mapping-dropdown"
+                    @click.stop
+                  >
+                    <option value="__na__">— Select column —</option>
+                    <option v-for="fileCol in availableFileColumns" :key="fileCol" :value="fileCol">
+                      {{ fileCol }}
+                    </option>
+                  </select>
+                  <span class="header-label">{{ header }}</span>
+                </div>
                 <span v-else class="header-text">{{ header }}</span>
                 <div
                   class="column-resizer"
@@ -158,6 +172,7 @@ export default {
     originalHeaders: { type: Array, default: () => [] },
     readOnly: { type: Boolean, default: false },
     showMappingControls: { type: Boolean, default: false },
+    showAppliedMappingControls: { type: Boolean, default: false },
     columnMapping: { type: Object, default: () => ({}) },
     availableFileColumns: { type: Array, default: () => [] },
     requiredColumns: { type: Array, default: () => [] },
@@ -655,6 +670,30 @@ export default {
       emit('mapping-update', newMapping)
     }
 
+    const normalizeMappingKey = value =>
+      String(value).toLowerCase().replace(/[_\-\s:]+/g, '')
+
+    function findMappingKey(header) {
+      const mapping = props.columnMapping || {}
+      if (Object.prototype.hasOwnProperty.call(mapping, header)) return header
+      return Object.keys(mapping).find(
+        key => normalizeMappingKey(key) === normalizeMappingKey(header)
+      ) || header
+    }
+
+    function getAppliedMappingForHeader(header) {
+      const key = findMappingKey(header)
+      const mapped = props.columnMapping?.[key]
+      return mapped && mapped !== '__na__' ? mapped : '__na__'
+    }
+
+    function onAppliedMappingChange(header, newSourceCol) {
+      const newMapping = { ...(props.columnMapping || {}) }
+      const key = findMappingKey(header)
+      newMapping[key] = (!newSourceCol || newSourceCol === '__na__') ? null : newSourceCol
+      emit('mapping-update', newMapping)
+    }
+
     async function initializeLuckysheet() {
       if (!props.useLuckysheet || !luckysheetContainer.value ||
           luckysheetInitialized.value || luckysheetInitializing) return
@@ -798,6 +837,8 @@ export default {
       setCellValue,
       isRequiredColumn,
       getMappingForHeader,
+      getAppliedMappingForHeader,
+      onAppliedMappingChange,
       mappingTargetColumns,
       isCellSelected,
       isRowSelected,

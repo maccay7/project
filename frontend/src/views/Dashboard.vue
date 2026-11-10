@@ -635,11 +635,13 @@ async function deleteSession(sessionId) {
   if (!confirm('Delete this session permanently?')) return
   try {
     await sessionManager.deleteSession(sessionId)
-    await refreshDashboard()
+    // Clear the active session BEFORE refreshing — refreshDashboard re-adds
+    // the active session to the list if the backend omits it.
     if (activeSession.value?.id === sessionId) {
       activeSession.value = null
       localStorage.removeItem(ACTIVE_KEY)
     }
+    await refreshDashboard()
   } catch (err) {
     showSnackbar('Delete failed: ' + err.message, 'error')
   }
@@ -661,10 +663,8 @@ async function openVersionModal(sessionId) {
     let totalCount = 0
     try {
       const res = await api.versionAPI.getVersions(sessionId)
-      
       if (res && res.success) {
         totalCount = res.total || 0
-        
         if (res.data && res.data.length > 0) {
           const sortedData = [...res.data].sort((a, b) => (b.versionNumber || 0) - (a.versionNumber || 0))
           versions = sortedData.map(v => ({

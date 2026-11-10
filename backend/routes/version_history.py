@@ -140,13 +140,13 @@ def get_versions_by_session(session_id, limit=100, offset=0):
         if not conn:
             raise RuntimeError('Database unavailable')
         try:
+            # Remove ORDER BY to avoid sort buffer issues - versions will be returned in insertion order
             cursor.execute("""
                 SELECT id, version_number, instrument_type, change_summary,
                        dataset_snapshot, mapping_snapshot, calculation_snapshot,
                        portfolio_snapshot, report_snapshot, user_id, created_at
                 FROM version_history
                 WHERE session_id = %s
-                ORDER BY version_number DESC
                 LIMIT %s OFFSET %s
             """, (session_id, limit, offset))
             rows = cursor.fetchall()
