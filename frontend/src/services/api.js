@@ -108,14 +108,6 @@ export const authAPI = {
   register: (userData) => callAPI('/api/register', 'POST', userData)
 }
 
-// ===== DASHBOARD API =====
-export const dashboardAPI = {
-  getKPI: () => callAPI('/api/dashboard/kpi'),
-  getRecentActivity: () => callAPI('/api/dashboard/recent-activity'),
-  getYieldCurve: (type = 'all') => callAPI(`/api/fred-yield-curve?instrument_type=${type}`),
-  getCharts: () => callAPI('/api/dashboard/charts')
-}
-
 // ===== CALCULATIONS API =====
 export const calculationsAPI = {
   execute: (type, data = [], params = {}, datasetId = null, sessionId = null) =>
@@ -228,12 +220,6 @@ export const portfolioAPI = {
   getSummaries: (session_id) => callAPI(`/api/portfolio/summary/${session_id}`, 'GET')
 }
 
-// ===== REPORT CONFIGURATION API =====
-export const reportConfigAPI = {
-  saveConfiguration: (payload) => callAPI('/api/report/configuration', 'POST', payload),
-  getConfiguration: (session_id) => callAPI(`/api/report/configuration/${session_id}`, 'GET')
-}
-
 // ===== VERSION API =====
 export const versionAPI = {
   create: (session_id, instrument_type, change_summary, dataset_snapshot = null, mapping_snapshot = null, calculation_snapshot = null, portfolio_snapshot = null, report_snapshot = null, user_id = null) =>
@@ -255,15 +241,6 @@ export const versionAPI = {
   getTotalCount: () => callAPI('/api/version/count', 'GET')
 }
 
-// ===== VISUALIZATION API =====
-export const visualizationAPI = {
-  getYieldCurve: (payload, fetchOptions = {}) =>
-    callAPI('/api/visualization/yield-curve', 'POST', payload, false, fetchOptions),
-  getChartData: (data, instrumentType) =>
-    callAPI('/api/visualization/chart-data', 'POST', { data, instrument_type: instrumentType }),
-  clearCache: () => callAPI('/api/visualization/cache/clear', 'DELETE')
-}
-
 // ===== MAPPING TEMPLATES API =====
 export const mappingTemplatesAPI = {
   getAll: () => callAPI('/api/mapping-templates', 'GET'),
@@ -274,25 +251,9 @@ export const mappingTemplatesAPI = {
   delete: (id) => callAPI(`/api/mapping-templates/${id}`, 'DELETE')
 }
 
-// ===== REPORT API =====
-// Backend uses singular "/api/report/*", not "/api/reports/*".
-// Download routes return binary — routed through callAPIDownload.
-export const reportAPI = {
-  generate: (params) => callAPI('/api/report/generate', 'POST', params),
-  generateWord: (params) => callAPI('/api/report/generate-word', 'POST', params),
-  download: (reportId) => callAPIDownload(`/api/report/${reportId}/download`, 'GET'),
-  downloadWord: (sessionId, name = null) =>
-    callAPIDownload(
-      `/api/report/download-word/${sessionId}${name ? `?name=${encodeURIComponent(name)}` : ''}`,
-      'GET'
-    ),
-  getBySession: (sessionId) => callAPI(`/api/report/session/${sessionId}`, 'GET')
-}
-
 // ===== EXPORT =====
 export default {
   authAPI,
-  dashboardAPI,
   calculationsAPI,
   userAPI,
   systemAPI,
@@ -302,9 +263,6 @@ export default {
   instrumentConfigAPI,
   sessionsAPI,
   portfolioAPI,
-  reportConfigAPI,
   versionAPI,
-  visualizationAPI,
-  mappingTemplatesAPI,
-  reportAPI
+  mappingTemplatesAPI
 }
