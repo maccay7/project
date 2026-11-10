@@ -368,51 +368,9 @@ class SessionManager {
     return session.worksheets
   }
 
-  async getWorksheetStatus(sessionId, worksheetName) {
-    const data = await this.getWorksheetData(sessionId, worksheetName)
-    return data ? data.status : null
-  }
-
   async getInstrumentWorkflow(sessionId, instrumentKey) {
     const session = await this.getSession(sessionId)
     return session?.instrumentWorkflow?.[instrumentKey] || null
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // VERSIONS
-  // ─────────────────────────────────────────────────────────────
-  async addVersion(sessionId, version) {
-    const session = await this.getSession(sessionId)
-    if (!session) return null
-
-    const versions = session.versions || []
-    const versionNumber = versions.length + 1
-    const record = {
-      versionNumber,
-      timestamp: Date.now(),
-      ...version
-    }
-    const savedVersion = await api.versionAPI.create(
-      sessionId,
-      version.instrument || 'General',
-      version.shortDescription || version.changeType || 'Saved',
-      version.datasetSnapshot || null,
-      version.mappingSnapshot || null,
-      version.calculationSnapshot || null,
-      version.portfolioSnapshot || null,
-      version.reportSnapshot || null,
-      null
-    )
-    if (!savedVersion?.success) {
-      throw new Error(savedVersion?.message || 'Version save was not confirmed by the server')
-    }
-    record.versionNumber = savedVersion.version_number
-    versions.unshift(record)
-    await this.updateSession(sessionId, {
-      versions,
-      version_count: versions.length
-    })
-    return record
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -449,26 +407,6 @@ class SessionManager {
     return session.instrument_count || 0
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // MISC
-  // ─────────────────────────────────────────────────────────────
-  clearAllSessions() {
-    this.sessions = []
-    localStorage.setItem(getStorageKeys().sessions, JSON.stringify([]))
-    localStorage.removeItem(ACTIVE_KEY)
-    this.activeSessionId = null
-  }
-
-  getInstrumentName(type) {
-    const names = {
-      treasury_bills: 'Treasury Bills',
-      tbills: 'T-Bills',
-      bonds: 'Bonds',
-      money_market: 'Money Market',
-      'money-market': 'Money Market'
-    }
-    return names[type] || type
-  }
 }
 
 export default new SessionManager()
