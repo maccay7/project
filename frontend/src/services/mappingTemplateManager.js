@@ -143,18 +143,6 @@ export const mappingTemplateManager = {
   async clearAllTemplates() {
     console.warn('clearAllTemplates not implemented for backend storage')
     return false
-  },
-
-  // Export templates to JSON
-  async exportTemplates() {
-    const templates = await this.getAllTemplates()
-    return JSON.stringify(templates, null, 2)
-  },
-
-  // Import templates from JSON - not implemented for backend
-  async importTemplates(jsonString) {
-    console.warn('importTemplates not implemented for backend storage')
-    return []
   }
 }
 
