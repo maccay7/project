@@ -404,7 +404,7 @@
 
                         <!-- Additional fields - selectable -->
                         <label
-                          v-for="(value, field) in autoDetectedAdditionalFields"
+                          v-for="(value, field) in additionalDetectedFieldsForDisplay"
                           :key="'add-' + field"
                           class="field-row field-row--additional"
                           :class="{ 'field-row--excluded': excludedDetectedFields.value?.has(field) }"
@@ -458,7 +458,7 @@
 
                   <v-card-actions class="detection-footer">
                     <span class="footer-selection-summary">
-                      {{ Object.keys(autoDetectedAdditionalFields).length - (excludedDetectedFields.value?.size || 0) }} additional field(s) will be included
+                      {{ Object.keys(additionalDetectedFieldsForDisplay).length - (excludedDetectedFields.value?.size || 0) }} additional field(s) will be included
                     </span>
                     <v-spacer></v-spacer>
                     <button class="btn-secondary" @click="showDetectionSuccess = false">Cancel</button>
@@ -2274,6 +2274,19 @@ const REQUIRED_TO_DETECTED_ALIASES = {
   auctiondate: ['auctiondate', 'biddate', 'offerdate']
 }
 
+// Additional fields already satisfied by a required field are hidden
+// so the same value never appears twice in the popup.
+const additionalDetectedFieldsForDisplay = computed(() => {
+  const requiredNorms = new Set(
+    Object.keys(autoDetectedFields.value || {}).map(k => normalizeKeyForMatch(k))
+  )
+  const out = {}
+  for (const [k, v] of Object.entries(autoDetectedAdditionalFields.value || {})) {
+    if (!requiredNorms.has(normalizeKeyForMatch(k))) out[k] = v
+  }
+  return out
+})
+
 const missingDetectedRequiredFields = computed(() => {
   const detectedNorms = new Set()
   for (const source of [autoDetectedFields.value, autoDetectedAdditionalFields.value]) {
@@ -4002,18 +4015,18 @@ function formatDetectedValue(field, value) {
   if (lc.includes('payment') && lc.includes('frequency')) return String(value)
   if (lc.includes('date') || lc.includes('maturity')) {
     try {
-      const date = new Date(value)
+      const date = value instanceof Date ? value : new Date(value)
       if (!isNaN(date.getTime())) {
-        return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+        return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
       }
     } catch {}
   }
   if (lc.includes('rate') || lc.includes('yield') || lc.includes('coupon') || lc.includes('discount')) {
-    const num = parseFloat(value)
+    const num = parseFloat(String(value).replace(/,/g, ''))
     if (!isNaN(num)) return num.toFixed(2) + '%'
   }
   if (lc.includes('value') || lc.includes('amount') || lc.includes('price') || lc.includes('principal')) {
-    const num = parseFloat(value)
+    const num = parseFloat(String(value).replace(/,/g, ''))
     if (!isNaN(num)) return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
   return String(value)
