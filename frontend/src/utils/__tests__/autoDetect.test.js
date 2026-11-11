@@ -111,3 +111,44 @@ describe('tabular layout detection', () => {
     }
   })
 })
+
+describe('absolute cell coordinates', () => {
+  it('tableData path resolves refs through sheet !ref origin + table offset', async () => {
+    // Sheet used-range starts at B4; table occupies fullData rows 0-3, cols 0-4.
+    // First data row must reference real cells (e.g. C6), not table-relative A2.
+    const rows = [
+      [], [], [], [],
+      [null, 'Fund Name', 'Short Name', 'Maturity Date', 'Rate', 'Nominal'],
+      [null, 'F1', 'INST-A', '2/3/25', '5%', '100.00'],
+      [null, 'F2', 'INST-B', '3/4/25', '7%', '200.00'],
+      [null, 'F3', 'INST-C', '4/5/25', '9%', '300.00'],
+    ]
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Off')
+    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+    const u8 = out instanceof Uint8Array ? out : new Uint8Array(out)
+    const ab = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
+
+    // Rebuild fullData exactly like ExcelWorkbookViewer (from !ref.s).
+    const ref = XLSX.utils.decode_range(ws['!ref'])
+    const fullData = []
+    for (let R = ref.s.r; R <= ref.e.r; R++) {
+      const row = []
+      for (let C = ref.s.c; C <= ref.e.c; C++) {
+        const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })]
+        row.push(cell ? (cell.w ?? cell.v ?? '') : '')
+      }
+      fullData.push(row)
+    }
+    const tableData = fullData.map(r => r.slice(0, 5))
+    const tableRange = { startRow: 0, endRow: 3, startCol: 0, endCol: 4, headerRow: 0 }
+    const r = await autoDetectInstrumentFields(ab, 'Off', ['Instrument', 'Amount', 'Rate'], 'money-market', tableRange, tableData)
+    expect(r.tabularRecords.length).toBe(3)
+    const loc = r.tabularRecords[0].fieldsWithMetadata.instrument_name.location
+    // !ref.s = {r:4? , c:1}; first instrument row must be a real cell, col >= B.
+    expect(loc).toMatch(/^[A-Z]+\d+$/)
+    expect(loc).not.toBe('A2') // would indicate table-relative coords
+    expect(r.tabularRecords[0].fieldsWithMetadata.instrument_name.originalLabel).toBe('Short Name')
+  })
+})

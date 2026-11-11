@@ -786,8 +786,20 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   CELL_ORIGIN = { r: 0, c: 0 }
   if (tableData && Array.isArray(tableData) && tableData.length > 0) {
     data = tableData
-    // tableData is table-relative; absolute sheet offset isn't provided,
-    // so refs stay table-relative for this path.
+    // tableData rows are sliced from the sheet grid at tableRange's
+    // offset, and that grid itself starts at the worksheet's !ref.s.
+    // Absolute cell = !ref.s + tableRange.start + index within tableData.
+    try {
+      const wb = XLSX.read(fileBuffer, { type: 'array' })
+      const ws = wb.Sheets[sheetName]
+      if (ws && ws['!ref']) {
+        const sr = XLSX.utils.decode_range(ws['!ref']).s
+        CELL_ORIGIN = {
+          r: sr.r + (tableRange?.startRow || 0),
+          c: sr.c + (tableRange?.startCol || 0),
+        }
+      }
+    } catch { /* keep 0,0 — refs stay table-relative */ }
   } else {
     const workbook = XLSX.read(fileBuffer, {
       type: 'array', cellDates: true, cellNF: true
