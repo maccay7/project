@@ -309,14 +309,9 @@ const selectedSheet = ref('')
 const detectedValues = ref({})
 const excludedFields = ref(new Set())
 
-// Required calculation inputs per instrument type (generic aliases accepted).
-const REQUIRED_BY_TYPE = {
-  'money-market': ['principal|amount|facevalue|notional', 'rate|interestrate|yield|couponrate|discountrate', 'valuationdate|issuedate|startdate', 'maturitydate'],
-  'money market': ['principal|amount|facevalue|notional', 'rate|interestrate|yield|couponrate|discountrate', 'valuationdate|issuedate|startdate', 'maturitydate'],
-  'tbills': ['facevalue|principal|amount|notional', 'purchaseprice|discountrate|rate|yield', 'issuedate|auctiondate', 'maturitydate|daystomaturity|term'],
-  'treasury bills': ['facevalue|principal|amount|notional', 'purchaseprice|discountrate|rate|yield', 'issuedate|auctiondate', 'maturitydate|daystomaturity|term'],
-  'bonds': ['facevalue|principal|amount|notional', 'couponrate|interestrate|rate', 'maturitydate', 'issuedate|valuationdate'],
-}
+// Required calculation inputs come from the shared backend-mirror registry
+// (calcFieldRegistry.js) — same groups the calculation engine validates.
+import { CALC_REQUIRED_GROUPS, registryType, normCalcKey } from '@/utils/calcFieldRegistry.js'
 const normKey = k => String(k).toLowerCase().replace(/[\s_\-]/g, '')
 const dismissedIssues = ref(new Set())
 const editingIssueKey = ref(null)
@@ -441,14 +436,15 @@ const validationReport = computed(() => {
       push('warning', col, '', 'Column is completely empty')
     }
   }
-  // Missing required calculation inputs for this instrument type.
-  const instType = normalizeInstrumentType(dataset.value?.instrumentType)
-  const reqGroups = REQUIRED_BY_TYPE[instType] || REQUIRED_BY_TYPE['bonds']
+  // Missing required calculation inputs — same groups the backend validates.
+  const instType = registryType(dataset.value?.instrumentType)
+  const reqGroups = CALC_REQUIRED_GROUPS[instType] || []
+  const normCols = cols.map(c => normCalcKey(c))
   for (const group of reqGroups) {
-    const alts = group.split('|')
-    const found = cols.some(c => alts.includes(norm(c)))
+    if (group.conditional) continue // backend decides conditionally
+    const found = group.anyOf.some(a => normCols.includes(a))
     if (!found) {
-      push('error', '(missing)', '', `Required input missing: ${alts[0].replace(/([A-Z])/g, ' $1').trim()} (accepts: ${alts.join(', ')})`)
+      push('error', '(missing)', '', `Required input missing: ${group.label} (accepts: ${group.anyOf.join(', ')})`)
     }
   }
   const visible = issues.filter(i => !dismissedIssues.value.has(issueKey(i)))

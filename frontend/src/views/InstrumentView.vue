@@ -1460,6 +1460,7 @@ import { markStepCompleted, isStepPersistedCompleted } from '@/utils/workflowPro
 import { autoMatchColumns, applyMappingToRows, isColumnMapped } from '@/utils/instrumentMapping'
 import { detectSheetType, extractSingleInstrumentValues, getRequiredFieldMappings } from '@/utils/sheetTypeDetector'
 import { autoDetectInstrumentFields } from '@/utils/autoDetectInstrument.js'
+import { validateCalcRows } from '@/utils/calcFieldRegistry.js'
 import Chart from 'chart.js/auto'
 import 'chartjs-adapter-date-fns'
 import { useInstrumentConfig } from '@/composables/useInstrumentConfig'
@@ -5469,40 +5470,22 @@ async function calculateMetrics() {
     return false
   }
 
-  const firstRow = dataForCalculation[0] || {}
-  const missingRequired = requiredForType.filter(col => {
-    const norm = normKey(col)
-    // 1. exact name match (any case / separator style)
-    for (const k of Object.keys(firstRow)) {
-      if (normKey(k) === norm) return false
-    }
-    // 2. semantic group / backend-alias match with plausible value
-    if (rowHasPlausibleValue(firstRow, col)) return false
-    return true
-  })
-
-  // Dates are auto-derivable by the backend from term_days, and term_days
-  // is auto-derivable from valuation+maturity. 
-  const blockingMissing = missingRequired.filter(col => {
-    const n = normKey(col)
-    if (n.includes('date')) return false
-    if (n.includes('day') || n.includes('term') || n.includes('tenor')) return false
-    return true
-  })
-
-  if (blockingMissing.length) {
-    const rowKeys = Object.keys(firstRow)
-    console.warn(
-      '[calculateMetrics] Proceeding despite nominally-missing fields:', blockingMissing,
-      '| Present keys:', rowKeys,
-      '| The backend will attempt alias resolution (Balance/Principal/Par/Notional etc.).'
-    )
+  // Validate EVERY row against the canonical backend-required groups
+  // (calcFieldRegistry mirrors validate_row_for_instrument). Unresolved
+  // instruments are named explicitly — never silently alias-mapped.
+  const rowReadiness = validateCalcRows(dataForCalculation, instrumentType.value)
+  const unresolved = rowReadiness.filter(r => r.missing.length > 0)
+  if (unresolved.length) {
+    const detail = unresolved.map(r =>
+      `${r.name}: ${r.missing.map(m => m.label).join('; ')}`
+    ).join(' | ')
+    console.warn('[calculateMetrics] Unresolved required inputs:', detail)
     showSnackbar(
-      `Proceeding with calculation — some expected fields (${blockingMissing.join(', ')}) were not found by name, but the backend will attempt to map any aliases it recognises. ` +
-      `Present columns: ${rowKeys.slice(0, 12).join(', ')}${rowKeys.length > 12 ? '…' : ''}.`,
-      'warning', 8000
+      `${unresolved.length} instrument(s) have unresolved required inputs and will be marked incomplete, not silently calculated — ${detail}`,
+      'error', 10000
     )
-    // Intentionally do NOT return — fall through to the backend call.
+    // Proceed: the backend independently validates each row and reports
+    // missing_fields/status per instrument; valid rows still calculate.
   }
 
   // Persist the exact payload that will be valued — this is the source of
