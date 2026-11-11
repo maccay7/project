@@ -507,7 +507,14 @@ function isCurrency(value) {
   const str = String(value).trim()
   for (const symbols of Object.values(CURRENCY_SYMBOLS)) {
     for (const sym of symbols) {
-      if (str.includes(sym)) return true
+      if (sym.length === 1) {
+        // Single-letter symbols (P, R) must be standalone tokens —
+        // otherwise "Principal"/"Rate" match as currency.
+        const esc = sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        if (new RegExp(`(^|[^A-Za-z])${esc}([^A-Za-z]|$)`).test(str)) return true
+      } else if (str.includes(sym)) {
+        return true
+      }
     }
   }
   if (isNumeric(str)) {
@@ -726,6 +733,8 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       if (/^\d+(?:\.\d+)?\s*%$/.test(labelStr)) continue
       if (/^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}$/.test(labelStr)) continue
       if (/^-?\d+(?:\.\d+)?$/.test(labelStr)) continue
+      // Value cells (currency amounts, dates, percentages) are never labels.
+      if (getValueType(labelStr) !== 'text') continue
       const context = getContextualClues(data, R, C, 2)
       let valueHit = null, valueLoc = null, direction = null
       for (let off = 1; off <= MAX_LOOKAHEAD && C + off <= boundaries.endCol; off++) {
@@ -792,6 +801,9 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       if (/^\d+(?:\.\d+)?\s*%$/.test(labelStr)) continue
       if (/^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}$/.test(labelStr)) continue
       if (/^-?\d+(?:\.\d+)?$/.test(labelStr)) continue
+      // Value cells (currency amounts, dates, percentages) are never labels —
+      // otherwise "$497,376.00" can "label" the neighbouring PVIF cell.
+      if (getValueType(labelStr) !== 'text') continue
       const context = getContextualClues(data, R, C, 2)
       let valueHit = null, valueLoc = null, direction = null
       for (let off = 1; off <= MAX_LOOKAHEAD && C + off <= boundaries.endCol; off++) {
@@ -865,6 +877,33 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
           }
         }
       }
+    }
+  }
+
+  // Fallback: standalone ISO currency-code cells (e.g. a bare "USD" in the
+  // valuation block). Only set when EXACTLY ONE distinct code appears —
+  // never guess between USD/ZWG/etc.
+  const hasCurrency = detectedFields.currency || additionalFields.currency
+  if (!hasCurrency) {
+    const codes = new Set()
+    for (let R = boundaries.startRow; R <= boundaries.endRow; R++) {
+      for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
+        const cell = data[R]?.[C]
+        if (typeof cell !== 'string') continue
+        const t = cell.trim()
+        if (/^[A-Z]{3}$/.test(t) && KNOWN_ISO_CODES.has(t) && !NON_CURRENCY_WORDS.has(t)) {
+          codes.add(t)
+        }
+      }
+    }
+    if (codes.size === 1) {
+      const code = [...codes][0]
+      additionalFields.currency = code
+      additionalMetadata.currency = {
+        location: 'sheet', confidence: 0.6,
+        originalLabel: 'currency code cell', detectedFrom: 'fallback',
+      }
+      console.log(`[Fallback] currency = "${code}" (single ISO code in sheet)`)
     }
   }
 
