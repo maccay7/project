@@ -2905,6 +2905,27 @@ def calc_single(row: Dict[str, Any], instrument_type: str,
     }
 
 
+def _resolve_row_instrument_type(row: Dict[str, Any], default: str) -> str:
+    """Per-row instrument type from the row's own instrument_type field.
+    Only explicit type names override the payload type — ambiguous values
+    (e.g. 'US$ CP', 'US$ MM' currency classes) fall back to `default`."""
+    if not isinstance(row, dict):
+        return default
+    raw = str(
+        row.get("instrument_type") or row.get("Instrument Type")
+        or row.get("type") or row.get("Type") or ""
+    ).lower()
+    if not raw:
+        return default
+    if "t-bill" in raw or "tbill" in raw or "treasury" in raw:
+        return "tbills"
+    if "money market" in raw or "money-market" in raw:
+        return "money-market"
+    if "bond" in raw:
+        return "bonds"
+    return default
+
+
 # ─────────────────────────────────────────────────────────────
 # 12. Multi-row dispatcher + aggregates
 # ─────────────────────────────────────────────────────────────
@@ -2930,9 +2951,10 @@ def calculate_data(data: List[Dict],
             if existing_date is None:
                 row = {**row, "valuation_date": valuation_date}
 
-        if instrument_type == "bonds":
+        row_type = _resolve_row_instrument_type(row, instrument_type)
+        if row_type == "bonds":
             calc = calculate_bond(row, benchmark_yield)
-        elif instrument_type == "money-market":
+        elif row_type == "money-market":
             calc = calculate_money_market(row, benchmark_yield)
         else:
             calc = calculate_treasury_bill(row, benchmark_yield)
