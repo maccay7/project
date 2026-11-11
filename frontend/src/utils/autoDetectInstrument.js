@@ -302,6 +302,14 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     rejectPatterns: ['^\\d+(?:\\.\\d+)?\\s*%$', '^-?\\d+(?:\\.\\d+)?$', '^[A-Z]{3}$'],
     contextPatterns: ['settlement date', 'effective date'],
   },
+  last_coupon_date: {
+    semanticConcept: 'last coupon payment date',
+    valueTypes: ['date'],
+    keywords: ['last coupon', 'lastcoupon', 'previous coupon', 'coupon date paid'],
+    rejectPatterns: ['^\\d+(?:\\.\\d+)?\\s*%$', '^-?\\d+(?:\\.\\d+)?$', '^[A-Z]{3}$'],
+    excludeKeywords: ['next', 'upcoming', 'future'],
+    contextPatterns: ['last coupon', 'previous coupon'],
+  },
   next_coupon_date: {
     semanticConcept: 'next coupon payment date',
     valueTypes: ['date'],
