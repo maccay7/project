@@ -7994,11 +7994,37 @@ async function generateReportHtml() {
     return { ...inst, calcRows, _agg: allCalcs }
   })
 
-  const totalPortfolioValue = resultsByInstrument.reduce((sum, inst) => {
-    const tv = resolveAggValue(inst._agg, 'totalValue')
-    const tvVal = typeof tv === 'number' ? tv : (parseFloat(tv) || 0)
-    return sum + tvVal
-  }, 0)
+  // Portfolio value must never mix currencies: sum only within each
+  // currency group (backend currency_groups when separated, else the
+  // instrument's own currency). Mixed/unspecified -> per-currency lines.
+  const totalsByCurrency = {}
+  const currencyWarnings = []
+  for (const inst of resultsByInstrument) {
+    const agg = inst._agg || {}
+    const groups = agg.currencyGroups || agg.currency_groups
+    if (groups && typeof groups === 'object') {
+      for (const [code, g] of Object.entries(groups)) {
+        const v = g?.total_value ?? g?.totalValue
+        const n = typeof v === 'number' ? v : parseFloat(v)
+        if (!isNaN(n)) totalsByCurrency[code] = (totalsByCurrency[code] || 0) + n
+      }
+      const w = agg.warning || agg.Warning
+      if (w) currencyWarnings.push(w)
+    } else {
+      const tv = resolveAggValue(agg, 'totalValue')
+      const tvVal = typeof tv === 'number' ? tv : parseFloat(tv)
+      const cur = agg.currency || agg.Currency || 'UNSPECIFIED'
+      if (!isNaN(tvVal)) totalsByCurrency[cur] = (totalsByCurrency[cur] || 0) + tvVal
+    }
+  }
+  const totalPortfolioValue = Object.keys(totalsByCurrency).length === 1
+    ? totalsByCurrency[Object.keys(totalsByCurrency)[0]]
+    : null
+  const portfolioValueHtml = Object.keys(totalsByCurrency).length
+    ? Object.entries(totalsByCurrency).map(([c, v]) =>
+        `<div>${c}: <span class="highlight">${v.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>`
+      ).join('')
+    : '<span class="highlight">Unavailable</span>'
   const totalInstrumentCount = resultsByInstrument.reduce((sum, inst) => {
     const cnt = resolveAggValue(inst._agg, 'instrumentCount')
     const cntVal = typeof cnt === 'number' ? cnt : (parseFloat(cnt) || 0)
@@ -8161,7 +8187,7 @@ async function generateReportHtml() {
     <br>
     <p><strong>Key Findings:</strong></p>
     <ul style="margin-left: 20px;">
-      <li>Total Portfolio Value: <span class="highlight">${totalPortfolioValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></li>
+      <li>Total Portfolio Value: ${portfolioValueHtml}${currencyWarnings.map(w => `<div class="warning">${w}</div>`).join('')}</li>
       <li>Number of Instruments: <span class="highlight">${totalInstrumentCount}</span></li>
       <li>Valuation Date: <span class="highlight">${valuationDate}</span></li>
     </ul>
@@ -8225,7 +8251,7 @@ async function generateReportHtml() {
       }).join('')}
       <tr style="font-weight:700;background:#f0f2f5;">
         <td><strong>Total Portfolio</strong></td>
-        <td><strong>${totalPortfolioValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong></td>
+        <td><strong>${portfolioValueHtml}</strong></td>
         <td><strong>${totalInstrumentCount}</strong></td>
       </tr>
     </tbody>
