@@ -5678,9 +5678,43 @@ async function calculateMetrics() {
             }
             const portfolioCols = new Set()
             Object.keys(portfolioRow).forEach(k => portfolioCols.add(k))
-            portfolioSummary.value = { columns: dedupeColumns(Array.from(portfolioCols)), rows: [portfolioRow] }
+            const portfolioRows = [portfolioRow]
+            // Mixed/unspecified currencies: backend nulls combined totals and
+            // returns currency_groups — surface each currency as its own row
+            // plus the backend warning. Never sum across currencies.
+            const groups = agg?.currencyGroups || agg?.currency_groups || null
+            if (groups && typeof groups === 'object') {
+              for (const [code, g] of Object.entries(groups)) {
+                const gr = {
+                  'Portfolio Name': currentSheetName.value || 'Current Portfolio',
+                  'Instrument Type': instrumentType.value,
+                  'Currency': code,
+                  'Number of Instruments': g?.instrument_count ?? g?.instrumentCount ?? null,
+                  'Total Face Value': g?.total_face_value ?? g?.totalFaceValue ?? null,
+                  'Total Purchase Price': g?.total_purchase_price ?? g?.totalPurchasePrice ?? null,
+                  'Total Principal': g?.total_principal ?? g?.totalPrincipal ?? null,
+                  'Total Value': g?.total_value ?? g?.totalValue ?? null,
+                  'Total Discount': g?.total_discount ?? g?.totalDiscount ?? null,
+                  'Total Market Value': g?.total_market_value ?? g?.totalMarketValue ?? null,
+                  'Total Interest': g?.total_interest ?? g?.totalInterest ?? null,
+                  'Total Coupon Income': g?.total_coupon_income ?? g?.totalCouponIncome ?? null,
+                }
+                Object.keys(gr).forEach(k => portfolioCols.add(k))
+                portfolioRows.push(gr)
+              }
+              if (agg?.warning || agg?.Warning) {
+                const warnRow = {
+                  'Portfolio Name': currentSheetName.value || 'Current Portfolio',
+                  'Instrument Type': instrumentType.value,
+                  'Note': agg.warning || agg.Warning,
+                }
+                Object.keys(warnRow).forEach(k => portfolioCols.add(k))
+                portfolioRows.push(warnRow)
+              }
+            }
+            portfolioSummary.value = { columns: dedupeColumns(Array.from(portfolioCols)), rows: portfolioRows }
             const existingPortfolioRows = completedPortfolioSummary.value.rows || []
-            const mergedPortfolioRows = [...existingPortfolioRows, portfolioRow]
+            const mergedPortfolioRows = [...existingPortfolioRows, ...portfolioRows]
             const allPortfolioCols = new Set()
             mergedPortfolioRows.forEach(r => Object.keys(r).forEach(k => allPortfolioCols.add(k)))
             completedPortfolioSummary.value = { columns: dedupeColumns(Array.from(allPortfolioCols)), rows: mergedPortfolioRows }
