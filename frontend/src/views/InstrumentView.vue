@@ -265,12 +265,20 @@
                     </div>
 
                     <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
-                      <strong>Detected currencies:</strong> {{ detectedCurrencies.join(', ') }}
+                      <strong>Detected currencies:</strong>
+                      <select
+                        v-model="detectionCurrencyFilter"
+                        @change="onDetectionCurrencyFilter(detectionCurrencyFilter)"
+                        class="currency-select"
+                      >
+                        <option value="">All currencies</option>
+                        <option v-for="c in detectedCurrencies" :key="c" :value="c">{{ c }}</option>
+                      </select>
                     </div>
 
                     <div class="multi-instruments-list">
                       <div
-                        v-for="(instrument, index) in multiTableDetectionResults"
+                        v-for="(instrument, index) in filteredDetectionResults"
                         :key="index"
                         class="multi-instrument-item"
                       >
@@ -2072,6 +2080,7 @@ const showAllCalculationsPopup = ref(false)
 const extractedValues = ref({})
 const worksheetStatus = ref({})
 const detectedCurrencies = ref([])
+const detectionCurrencyFilter = ref('')
 const detectedInstrumentType = ref('')
 const selectedCurrency = ref('')
 const isDetecting = ref(false)
@@ -3774,6 +3783,7 @@ async function autoDetectSingleInstrument() {
   autoDetectedFieldsWithMetadata.value = {}
   autoDetectedAdditionalFields.value = {}
   detectedCurrencies.value = []
+  detectionCurrencyFilter.value = ''
   detectedInstrumentType.value = ''
   ensureExcludedFieldsSet()
   excludedDetectedFields.value.clear()
@@ -3877,6 +3887,7 @@ async function handleMultiTableDetect(event) {
   autoDetectedFieldsWithMetadata.value = {}
   autoDetectedAdditionalFields.value = {}
   detectedCurrencies.value = []
+  detectionCurrencyFilter.value = ''
   detectedInstrumentType.value = ''
   selectedCurrency.value = ''
   ensureExcludedFieldsSet()
@@ -4263,6 +4274,31 @@ function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
     calculateMetrics().catch(() => { /* non-fatal */ })
   }
   forceUpdate.value++
+}
+
+// Currency filter for the detection popup: shows only instruments whose
+// currency matches the selection, and switches variant fields to it.
+function instrumentCurrencyOf(inst) {
+  const f = inst?.fields || {}
+  const c = f.currency ?? f.Currency ?? f.ccy
+  if (c && typeof c === 'object' && c.selectedCurrency) return String(c.selectedCurrency).toUpperCase()
+  return c ? String(c).toUpperCase() : ''
+}
+const filteredDetectionResults = computed(() => {
+  const list = multiTableDetectionResults.value || []
+  const f = detectionCurrencyFilter.value
+  if (!f) return list
+  return list.filter(inst => {
+    const cur = instrumentCurrencyOf(inst)
+    if (cur) return cur === f
+    return instrumentCurrencyOptions(inst).includes(f)
+  })
+})
+function onDetectionCurrencyFilter(c) {
+  if (!c) return
+  for (const inst of multiTableDetectionResults.value || []) {
+    if (instrumentCurrencyOptions(inst).includes(c)) setInstrumentCurrency(inst, c)
+  }
 }
 
 // [MULTICURRENCY] Per-instrument currency picker in the multi-table popup:
