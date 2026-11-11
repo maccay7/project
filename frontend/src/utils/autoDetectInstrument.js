@@ -381,7 +381,7 @@ const SEMANTIC_FIELD_DEFINITIONS = {
   present_value: {
     semanticConcept: 'present value', valueTypes: ['currency'],
     keywords: ['present', 'pv', 'current value'],
-    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$'],
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$', '^[A-Z]{2,6}$'],
     units: ['$', '€', '£', '¥', 'R'],
     contextPatterns: ['present value', 'pv', 'current value'],
     minValue: 0, typicalRange: [0, 1000000000],
@@ -389,7 +389,7 @@ const SEMANTIC_FIELD_DEFINITIONS = {
   carrying_value: {
     semanticConcept: 'carrying value', valueTypes: ['currency'],
     keywords: ['carrying', 'book'],
-    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$'],
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$', '^[A-Z]{2,6}$'],
     units: ['$', '€', '£', '¥', 'R'],
     contextPatterns: ['carrying value', 'book value'],
     minValue: 0, typicalRange: [0, 1000000000],
@@ -397,7 +397,7 @@ const SEMANTIC_FIELD_DEFINITIONS = {
   fair_value: {
     semanticConcept: 'fair value', valueTypes: ['currency'],
     keywords: ['fair'],
-    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$'],
+    rejectPatterns: ['^[A-Z]{3}$', '^\\d+(?:\\.\\d+)?\\s*%$', '^[A-Z]{2,6}$'],
     units: ['$', '€', '£', '¥', 'R'],
     contextPatterns: ['fair value', 'market value'],
     minValue: 0, typicalRange: [0, 1000000000],
@@ -467,6 +467,7 @@ function normalizeDetectedCellValue(v) {
 function isDateLike(value) {
   if (!value || value === '') return false
   const str = String(value).trim()
+  if (!str || str.includes('%')) return false
   const patterns = [
     /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/, /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/,
     /^[A-Za-z]{3}[-/]\d{1,2}[-/]\d{2,4}$/, /^\d{1,2}[-/][A-Za-z]{3}[-/]\d{2,4}$/,
@@ -826,6 +827,35 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     }
   }
   const missingFields = (requiredColumns || []).filter(c => !detectedFields[c])
+
+  // Fallback: counterparty/issuer labels are easy to miss in Phase2.
+  // If no instrument name was found anywhere, scan explicitly for them.
+  const hasName = detectedFields.instrument_name || detectedFields.bond_name ||
+    detectedFields.instrumentName || additionalFields.instrument_name ||
+    additionalFields.bond_name
+  if (!hasName) {
+    const NAME_LABEL = /counterparty|issuer|obligor|borrower|company name/i
+    outer:
+    for (let R = boundaries.startRow; R <= boundaries.endRow; R++) {
+      for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
+        const label = data[R]?.[C]
+        if (!label || !NAME_LABEL.test(String(label))) continue
+        for (const [dr, dc] of [[0, 1], [1, 0]]) {
+          const v = normalizeDetectedCellValue(data[R + dr]?.[C + dc])
+          if (v !== null && typeof v !== 'object' && !/^\d/.test(String(v))) {
+            additionalFields.instrument_name = v
+            additionalMetadata.instrument_name = {
+              location: rowColToCellRef(R + dr, C + dc), confidence: 0.6,
+              originalLabel: String(label).trim(), detectedFrom: 'fallback',
+            }
+            console.log(`[Fallback] instrument_name = "${v}" (counterparty label)`)
+            break outer
+          }
+        }
+      }
+    }
+  }
+
   console.log('=== Detection result ===')
   console.log('Required:', Object.keys(detectedFields))
   console.log('Additional:', Object.keys(additionalFields))

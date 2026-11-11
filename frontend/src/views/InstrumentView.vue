@@ -4044,14 +4044,16 @@ function deriveMissingCalcInputs(row) {
   }
 
   if (!hasField('currency', 'ccy')) {
+    // Only set when exactly ONE currency code appears — never guess
+    // between multiple currencies (USD vs ZWG etc.). Per-field
+    // currencyVariants preserve both for user selection instead.
+    const codes = new Set()
     for (const v of Object.values(row)) {
       if (typeof v !== 'string') continue
       const code = String(v).trim().toUpperCase()
-      if (/^(USD|ZWG|ZAR|BWP|EUR|GBP|ZMW|KES|ZWL)$/.test(code)) {
-        row['currency'] = code
-        break
-      }
+      if (/^(USD|ZWG|ZAR|BWP|EUR|GBP|ZMW|KES|ZWL)$/.test(code)) codes.add(code)
     }
+    if (codes.size === 1) row['currency'] = [...codes][0]
   }
 
   if (!hasField('status')) row['status'] = 'Active'
