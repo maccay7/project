@@ -694,6 +694,30 @@ const TABULAR_ALIASES = {
 }
 const TABULAR_NORM = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
 
+// Currency tags inside headers ("Nominal (US$)", "Value ZWG", "US$ MM").
+const TABULAR_CCY_RE = /(?:^|[\s(])(usd|us\$|zwg\$?|zig\$?|zwl\$?|bwp\$?|zar\$?|zmk\$?|zmw\$?|eur\$?|gbp\$?|kes\$?)(?=[\s)]|$)/i
+function tabularHeaderCurrency(header) {
+  const m = String(header || '').match(TABULAR_CCY_RE)
+  if (!m) return null
+  const t = m[1].toLowerCase().replace(/\$$/, '')
+  if (t === 'us' || t === 'usd') return 'USD'
+  if (t === 'zwg' || t === 'zig') return 'ZWG'
+  if (t === 'zwl') return 'ZWL'
+  if (t === 'bwp') return 'BWP'
+  if (t === 'zar') return 'ZAR'
+  if (t === 'zmw' || t === 'zmk') return 'ZMW'
+  if (t === 'eur') return 'EUR'
+  if (t === 'gbp') return 'GBP'
+  if (t === 'kes') return 'KES'
+  return null
+}
+// Alias lookup key: strip currency tags/parens so "Nominal (US$)" -> "nominal".
+const tabularLookupKey = s => TABULAR_NORM(s)
+  .replace(TABULAR_CCY_RE, ' ')
+  .replace(/[()]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+
 function detectTabularRecords(data, boundaries) {
   // Score each row by how many cells are recognised field headers.
   let bestRow = -1, bestScore = 0
@@ -703,7 +727,7 @@ function detectTabularRecords(data, boundaries) {
     for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
       const cell = data[R]?.[C]
       if (typeof cell !== 'string') continue
-      const t = TABULAR_NORM(cell)
+      const t = tabularLookupKey(cell)
       if (t && TABULAR_ALIASES[t]) score++
     }
     rowScores.push({ R, score })
@@ -714,17 +738,25 @@ function detectTabularRecords(data, boundaries) {
   // Principal/Balance) match aliases but are not instrument tables.
   if (bestRow < 0 || bestScore < 4) return []
 
-  // Map each column to a canonical field (first header wins on duplicates).
+  // Map each column to a canonical field. Currency-tagged headers may map
+  // several columns to the same field ("Nominal US$" / "Nominal ZWG") —
+  // kept as per-currency variants for user selection in the results popup.
   const colField = new Map()
+  const colCcy = new Map()
   const colHeader = new Map()
+  const fieldCols = new Map()
   for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
     const cell = data[bestRow]?.[C]
     if (typeof cell !== 'string') continue
-    const field = TABULAR_ALIASES[TABULAR_NORM(cell)]
-    if (field && ![...colField.values()].includes(field)) {
-      colField.set(C, field)
-      colHeader.set(C, cell.trim())
-    }
+    const field = TABULAR_ALIASES[tabularLookupKey(cell)]
+    if (!field) continue
+    const ccy = tabularHeaderCurrency(cell)
+    const seen = fieldCols.get(field) || []
+    if (seen.some(ec => (colCcy.get(ec) || null) === ccy)) continue
+    colField.set(C, field)
+    colCcy.set(C, ccy)
+    colHeader.set(C, cell.trim())
+    fieldCols.set(field, [...seen, C])
   }
   if (colField.size < 4) return []
   const NAME_FIELDS = new Set(['instrument_name', 'instrument_id', 'fund_name',
@@ -733,35 +765,69 @@ function detectTabularRecords(data, boundaries) {
 
   const records = []
   for (let R = bestRow + 1; R <= boundaries.endRow; R++) {
-    const fields = {}
+    // Collect raw values per field, grouped by column currency so
+    // "Nominal US$" and "Nominal ZWG" become selectable variants.
+    const perField = new Map()
     let filled = 0
     for (const [C, field] of colField) {
       const v = normalizeDetectedCellValue(data[R]?.[C])
       if (v === null || v === '') continue
-      fields[field] = v
-      filled++
+      const ccy = colCcy.get(C) || null
+      if (!perField.has(field)) perField.set(field, new Map())
+      const variants = perField.get(field)
+      if (!variants.has(ccy)) { variants.set(ccy, v); filled++ }
     }
     // A real instrument row needs >=2 mapped values and at least one
     // identity/value anchor; skip totals and blank continuations.
     if (filled < 2) continue
-    const anchor = fields.instrument_name || fields.principal ||
-      fields.face_value || fields.carrying_value || fields.maturity_date
+    const scalarOf = f => {
+      const vf = perField.get(f)
+      if (!vf) return undefined
+      const first = vf.values().next().value
+      return first && typeof first === 'object' && 'value' in first ? first.value : first
+    }
+    const anchor = scalarOf('instrument_name') || scalarOf('principal') ||
+      scalarOf('face_value') || scalarOf('carrying_value') || scalarOf('maturity_date')
     if (!anchor) continue
     const nameStr = String(anchor)
     if (/^(total|sum|wam|weighted|average|base information|client)/i.test(nameStr.trim())) continue
     // Per-record currency from classification-like columns (US$ MM, ZWG MM).
-    const typeStr = String(fields.instrument_type || '')
+    const typeStr = String(scalarOf('instrument_type') || '')
     const clsMatch = typeStr.match(/US\$|USD/i) ? 'USD'
       : typeStr.match(/ZWG|ZiG/i) ? 'ZWG'
       : typeStr.match(/ZWL/i) ? 'ZWL'
       : typeStr.match(/BWP/i) ? 'BWP'
       : typeStr.match(/ZAR|\bR\b/i) ? 'ZAR' : null
+    // Emit scalar or {value, currencyVariants, selectedCurrency} per field.
+    const fields = {}
+    for (const [field, variants] of perField) {
+      if (variants.size > 1) {
+        const variantsObj = {}
+        for (const [k, v] of variants) variantsObj[k || 'DEFAULT'] = v
+        const realKeys = Object.keys(variantsObj).filter(k => k !== 'DEFAULT')
+        const sel = (clsMatch && variantsObj[clsMatch] !== undefined) ? clsMatch
+          : (realKeys[0] || Object.keys(variantsObj)[0])
+        fields[field] = {
+          value: variantsObj[sel],
+          currencyVariants: variantsObj,
+          selectedCurrency: sel,
+          currency: sel,
+        }
+      } else {
+        fields[field] = [...variants.values()][0]
+      }
+    }
     if (clsMatch && !fields.currency) fields.currency = clsMatch
     // Per-field provenance: worksheet cell ref, original header, raw value.
+    // For variant fields prefer the column matching the selected currency.
     const meta = {}
     for (const [C, field] of colField) {
       const raw = data[R]?.[C]
       if (raw === null || raw === undefined || String(raw).trim() === '') continue
+      const fObj = fields[field]
+      const sel = (fObj && typeof fObj === 'object' && fObj.selectedCurrency) ? fObj.selectedCurrency : null
+      const prefer = sel && (colCcy.get(C) || null) === sel
+      if (meta[field] && !prefer) continue
       meta[field] = {
         location: rowColToCellRef(R, C),
         originalLabel: colHeader.get(C) || field,

@@ -277,6 +277,15 @@
                         <div class="multi-instrument-header">
                           <strong>Table {{ index + 1 }}: {{ instrument.tableName }}</strong>
                           <span class="field-count-badge">{{ Object.keys(instrument.fields).length }} fields</span>
+                          <select
+                            v-if="instrumentCurrencyOptions(instrument).length > 1"
+                            :value="instrumentSelectedCurrency(instrument)"
+                            @change="setInstrumentCurrency(instrument, $event.target.value)"
+                            class="currency-select"
+                            title="Choose which currency's values to use"
+                          >
+                            <option v-for="c in instrumentCurrencyOptions(instrument)" :key="c" :value="c">{{ c }}</option>
+                          </select>
                         </div>
 
                         <!-- UNIFIED field list -->
@@ -4243,6 +4252,35 @@ function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
     calculateMetrics().catch(() => { /* non-fatal */ })
   }
   forceUpdate.value++
+}
+
+// [MULTICURRENCY] Per-instrument currency picker in the multi-table popup:
+// sets selectedCurrency on every field that has currency variants, so the
+// user picks ONE currency and all values switch to that currency's column.
+function instrumentCurrencyOptions(instrument) {
+  const set = new Set()
+  for (const f of Object.values(instrument?.fields || {})) {
+    if (f && typeof f === 'object' && f.currencyVariants) {
+      Object.keys(f.currencyVariants).forEach(c => set.add(c))
+    }
+  }
+  return [...set]
+}
+function instrumentSelectedCurrency(instrument) {
+  for (const f of Object.values(instrument?.fields || {})) {
+    if (f && typeof f === 'object' && f.selectedCurrency) return f.selectedCurrency
+  }
+  return instrumentCurrencyOptions(instrument)[0] || ''
+}
+function setInstrumentCurrency(instrument, currency) {
+  for (const [k, f] of Object.entries(instrument?.fields || {})) {
+    if (f && typeof f === 'object' && f.currencyVariants && f.currencyVariants[currency] !== undefined) {
+      f.selectedCurrency = currency
+      f.value = f.currencyVariants[currency]
+      f.currency = currency
+    }
+  }
+  multiTableDetectionResults.value = [...multiTableDetectionResults.value]
 }
 
 // [FIX-MULTICURRENCY] Per-field currency change inside the multi-table popup.
