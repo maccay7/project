@@ -443,6 +443,24 @@ function isNumeric(value) {
   return !isNaN(parseFloat(str)) && isFinite(str)
 }
 
+// Normalize a raw cell into a backend-parseable value.
+// Dates -> ISO YYYY-MM-DD; rich-text objects -> inner primitive;
+// "[object Object]" and empties -> null (cell skipped).
+function normalizeDetectedCellValue(v) {
+  if (v === null || v === undefined) return null
+  if (v instanceof Date) {
+    return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10)
+  }
+  if (typeof v === 'object') {
+    const inner = v.value ?? v.result ?? v.text ?? v.w ?? null
+    if (inner === null || inner === undefined) return null
+    return normalizeDetectedCellValue(inner)
+  }
+  const s = String(v).trim()
+  if (!s || s === '[object Object]') return null
+  return v
+}
+
 function isDateLike(value) {
   if (!value || value === '') return false
   const str = String(value).trim()
@@ -696,8 +714,9 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       let valueHit = null, valueLoc = null, direction = null
       for (let off = 1; off <= MAX_LOOKAHEAD && C + off <= boundaries.endCol; off++) {
         const v = data[R]?.[C + off]
-        if (v && String(v).trim() !== '') {
-          valueHit = v
+        const nv = normalizeDetectedCellValue(v)
+        if (nv !== null) {
+          valueHit = nv
           valueLoc = { row: R, col: C + off }
           direction = 'horizontal'
           processedCells.add(`${R}_${C + off}`)
@@ -707,8 +726,9 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       if (!valueHit) {
         for (let off = 1; off <= MAX_LOOKAHEAD && R + off <= boundaries.endRow; off++) {
           const v = data[R + off]?.[C]
-          if (v && String(v).trim() !== '') {
-            valueHit = v
+          const nv = normalizeDetectedCellValue(v)
+          if (nv !== null) {
+            valueHit = nv
             valueLoc = { row: R + off, col: C }
             direction = 'vertical'
             processedCells.add(`${R + off}_${C}`)
@@ -760,8 +780,9 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       let valueHit = null, valueLoc = null, direction = null
       for (let off = 1; off <= MAX_LOOKAHEAD && C + off <= boundaries.endCol; off++) {
         const v = data[R]?.[C + off]
-        if (v && String(v).trim() !== '') {
-          valueHit = v; valueLoc = { row: R, col: C + off }
+        const nv = normalizeDetectedCellValue(v)
+        if (nv !== null) {
+          valueHit = nv; valueLoc = { row: R, col: C + off }
           direction = 'horizontal'; processedCells.add(`${R}_${C + off}`)
           break
         }
@@ -769,8 +790,9 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       if (!valueHit) {
         for (let off = 1; off <= MAX_LOOKAHEAD && R + off <= boundaries.endRow; off++) {
           const v = data[R + off]?.[C]
-          if (v && String(v).trim() !== '') {
-            valueHit = v; valueLoc = { row: R + off, col: C }
+          const nv = normalizeDetectedCellValue(v)
+          if (nv !== null) {
+            valueHit = nv; valueLoc = { row: R + off, col: C }
             direction = 'vertical'; processedCells.add(`${R + off}_${C}`)
             break
           }
