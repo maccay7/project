@@ -2413,11 +2413,22 @@ def calculate_bond(item: Dict[str, Any],
     ytm_input_pct = (ytm_input_frac * 100.0
                      if ytm_input_frac is not None else None)
 
+    days_to_maturity = None
+    if has_date_range and mat_d >= period_start:
+        days_to_maturity = (mat_d - period_start).days
+    if days_to_maturity is None:
+        d2m_in = _canonical(item, "days_to_maturity", "term_days", as_float=True)
+        if d2m_in is not None and d2m_in > 0:
+            days_to_maturity = int(d2m_in)
+        elif years is not None:
+            days_to_maturity = round(years * 365)
+
     result: Dict[str, Any] = {
         "instrument_type": "bonds",
         "face_value": round_money(face),
         "coupon_rate": _rate(coupon_rate_pct) if coupon_rate_pct is not None else None,
         "years_to_maturity": round(years, 4) if years is not None else None,
+        "days_to_maturity": days_to_maturity,
         "frequency": frequency,
         "coupon_frequency": frequency,
         "day_count_convention": day_count,
@@ -3139,6 +3150,9 @@ def calculate_data(data: List[Dict],
             aggregates["avg_ytm"] = round(m, 4) if m is not None else None
             m = _mean("duration")
             aggregates["avg_duration"] = round(m, 4) if m is not None else None
+            m = _mean("days_to_maturity")
+            aggregates["avg_days_to_maturity"] = round(m, 1) if m is not None else None
+            aggregates["days_to_maturity"] = aggregates["avg_days_to_maturity"]
             faces = [r["face_value"] for r in successful if r.get("face_value") is not None]
             coupon_rates = [r["coupon_rate"] for r in successful if r.get("coupon_rate") is not None]
             if faces and sum(faces) > 0 and len(faces) == len(coupon_rates):
