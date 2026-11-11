@@ -4007,6 +4007,54 @@ function useMultiTableDetectedFields() {
   activeTab.value = 'cleaning'
 }
 
+// Fill calculation inputs that exist in the row under other names or
+// can be derived from real values — never invents data.
+function deriveMissingCalcInputs(row) {
+  const keys = Object.keys(row)
+  const hasField = (...names) =>
+    keys.some(k => names.includes(normalizeKeyForMatch(k)))
+
+  if (!hasField('couponfrequency', 'frequency', 'paymentfrequency')) {
+    for (const v of Object.values(row)) {
+      if (typeof v !== 'string') continue
+      const fl = v.toLowerCase()
+      if (fl.includes('semi') || fl.includes('half')) { row['coupon_frequency'] = 2; break }
+      if (fl.includes('quarter')) { row['coupon_frequency'] = 4; break }
+      if (fl.includes('month')) { row['coupon_frequency'] = 12; break }
+      if (fl.includes('annual') || fl.includes('year')) { row['coupon_frequency'] = 1; break }
+      if (fl.includes('week')) { row['coupon_frequency'] = 52; break }
+    }
+  }
+
+  if (!hasField('currency', 'ccy')) {
+    for (const v of Object.values(row)) {
+      if (typeof v !== 'string') continue
+      const code = String(v).trim().toUpperCase()
+      if (/^(USD|ZWG|ZAR|BWP|EUR|GBP|ZMW|KES|ZWL)$/.test(code)) {
+        row['currency'] = code
+        break
+      }
+    }
+  }
+
+  if (!hasField('status')) row['status'] = 'Active'
+
+  if (!hasField('yearstomaturity')) {
+    const get = n => {
+      const k = keys.find(k => normalizeKeyForMatch(k) === n)
+      return k ? row[k] : null
+    }
+    const vd = get('valuationdate')
+    const md = get('maturitydate')
+    if (vd && md) {
+      const years = (new Date(md) - new Date(vd)) / (365.25 * 86400000)
+      if (years > 0) row['years_to_maturity'] = Math.round(years * 100) / 100
+    }
+  }
+
+  return row
+}
+
 function formatDetectedValue(field, value) {
   if (value === null || value === undefined) return '—'
   const lc = String(field).toLowerCase()
@@ -5179,6 +5227,7 @@ async function calculateMetrics() {
     })
     // Drop rows where every value is empty 
     .filter(row => Object.values(row).some(v => v !== null && v !== undefined && v !== ''))
+    .map(deriveMissingCalcInputs)
 
   // FIX: pre-flight validation. If the resulting rows lack the required
   // inputs for this instrument type, clear the stale results and show a
