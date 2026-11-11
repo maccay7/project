@@ -5548,6 +5548,18 @@ async function calculateMetrics() {
           } else if (isFailed && !displayable) {
             const fullErrorMsg = formatCalculationFailureMessage(singleCalc)
             showSnackbar(`Calculation failed: ${fullErrorMsg}`, 'error')
+            // Never leave the page blank: keep inputs visible.
+            if (!instrumentSummary.value?.rows?.length && lastCalcInputData.value?.length) {
+              const rows = lastCalcInputData.value.map((r, i) => ({
+                'Instrument Name': r['instrument_name'] || r['Instrument Name'] || r['BondName'] || r['TBillName'] || `Instrument ${i + 1}`,
+                'Instrument Type': instrumentType.value,
+                ...r
+              }))
+              instrumentSummary.value = {
+                columns: dedupeColumns(rows.flatMap(r => Object.keys(r))),
+                rows
+              }
+            }
             allCalculations.value = {
               ...agg,
               status: 'error',
@@ -5594,9 +5606,26 @@ async function calculateMetrics() {
           }
         } else if (calcArray.length === 0) {
           const errorMsg = 'The calculation service returned no instrument results for the cleaned inputs.'
-          allCalculations.value = { status: 'error', message: errorMsg }
+          const inputCount = Array.isArray(lastCalcInputData.value) ? lastCalcInputData.value.length : 0
+          allCalculations.value = {
+            status: 'incomplete',
+            message: errorMsg,
+            instrumentCount: inputCount || 1,
+            missing_fields: requiredColumns.value || [],
+            warning: errorMsg
+          }
           selectedCalculations.value = allCalculations.value
-          showSnackbar(errorMsg, 'error', 7000)
+          // Never leave the page blank: show the inputs we did have.
+          if (inputCount && !instrumentSummary.value?.rows?.length) {
+            const rows = lastCalcInputData.value.map((r, i) => ({
+              'Instrument Name': r['instrument_name'] || r['Instrument Name'] || r['BondName'] || r['TBillName'] || `Instrument ${i + 1}`,
+              'Instrument Type': instrumentType.value,
+              ...r
+            }))
+            const cols = dedupeColumns(rows.flatMap(r => Object.keys(r)))
+            instrumentSummary.value = { columns: cols, rows }
+          }
+          showSnackbar(errorMsg, 'warning', 7000)
         } else if (calcArray.length > 1) {
           // Multi-instrument: KPI boxes MUST show portfolio totals/averages,
           // never a single row's private fields. Pass rowCalc=null so the
