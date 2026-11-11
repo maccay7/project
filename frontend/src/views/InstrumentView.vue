@@ -448,10 +448,10 @@
                       <p>Try selecting a different sheet, section, or check the field names.</p>
                     </div>
 
-                    <div v-if="Object.keys(autoDetectedFields).length < requiredColumns.length" class="missing-fields-warning">
+                    <div v-if="missingDetectedRequiredFields.length" class="missing-fields-warning">
                       <p><strong>Missing required fields:</strong></p>
                       <ul>
-                        <li v-for="col in requiredColumns.filter(c => !Object.keys(autoDetectedFields).some(k => k.toLowerCase() === c.toLowerCase()))" :key="col">{{ col }}</li>
+                        <li v-for="col in missingDetectedRequiredFields" :key="col">{{ col }}</li>
                       </ul>
                     </div>
                   </v-card-text>
@@ -2243,6 +2243,50 @@ const hasRequiredColumn = (col) => {
 const missingColumns = computed(() =>
   requiredColumns.value.filter(col => !hasRequiredColumn(col))
 )
+
+// Required display names -> acceptable detected canonical keys.
+// Detection stores canonical snake_case keys (face_value, coupon_rate…)
+// while requiredColumns are display names (FaceValue, CouponRate…).
+const REQUIRED_TO_DETECTED_ALIASES = {
+  bondname: ['instrumentname', 'bondname', 'securityname', 'name', 'security'],
+  tbillname: ['instrumentname', 'tbillname', 'securityname', 'name', 'security'],
+  instrument: ['instrumentname', 'instrument', 'name', 'security', 'description'],
+  facevalue: ['facevalue', 'principal', 'amount', 'parvalue', 'nominal', 'notional'],
+  amount: ['amount', 'facevalue', 'principal', 'notional', 'investment', 'investmentamount'],
+  principal: ['principal', 'facevalue', 'parvalue', 'nominal', 'notional'],
+  couponrate: ['couponrate', 'interestrate', 'rate', 'coupon'],
+  rate: ['rate', 'interestrate', 'couponrate', 'yield', 'discountrate', 'annualrate'],
+  yield: ['yield', 'yieldtomaturity', 'ytm', 'couponrate', 'interestrate'],
+  yearstomaturity: ['yearstomaturity', 'daystomaturity', 'term', 'tenor'],
+  maturitydate: ['maturitydate'],
+  issuedate: ['issuedate', 'issuancedate', 'startdate', 'effectivedate'],
+  settlementdate: ['settlementdate', 'tradedate', 'settlement', 'tradedate'],
+  valuationdate: ['valuationdate', 'asofdate', 'valuation', 'date'],
+  lastcoupondate: ['lastcoupondate', 'previouscoupondate', 'lastinterestdate'],
+  couponfrequency: ['couponfrequency', 'frequency', 'couponperiod', 'paymentfrequency'],
+  currency: ['currency', 'ccy', 'currencycode'],
+  daycountconvention: ['daycountconvention', 'daycount', 'accrualbasis', 'basis'],
+  instrumenttype: ['instrumenttype', 'type', 'assettype', 'securitytype'],
+  status: ['status', 'state'],
+  daystomaturity: ['daystomaturity', 'term', 'tenor', 'days', 'period', 'maturity'],
+  tradedate: ['tradedate', 'settlementdate', 'issuedate', 'date', 'startdate'],
+  discountrate: ['discountrate', 'rate', 'discount', 'yield', 'discountrate'],
+  auctiondate: ['auctiondate', 'biddate', 'offerdate']
+}
+
+const missingDetectedRequiredFields = computed(() => {
+  const detectedNorms = new Set()
+  for (const source of [autoDetectedFields.value, autoDetectedAdditionalFields.value]) {
+    for (const k of Object.keys(source || {})) {
+      detectedNorms.add(normalizeKeyForMatch(k))
+    }
+  }
+  return requiredColumns.value.filter(col => {
+    const norm = normalizeKeyForMatch(col)
+    const aliases = REQUIRED_TO_DETECTED_ALIASES[norm] || [norm]
+    return !aliases.some(a => detectedNorms.has(a))
+  })
+})
 const hasData = computed(() => rawData.value.length > 0)
 const hasCleanedData = computed(() => cleanedData.value.length > 0)
 
