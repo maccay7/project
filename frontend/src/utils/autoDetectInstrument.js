@@ -166,7 +166,9 @@ const SPECIFIC_ALIASES = {
   coupon_frequency: [
     'coupon frequency', 'couponfrequency', 'coupon_frequency',
     'payment frequency', 'paymentfrequency', 'frequency', 'coupon period',
-    'payments per year',
+    'payments per year', 'pmt frequency', 'pmt fequency',
+    'interest pmt frequency', 'interest pmt fequency',
+    'interest payment frequency', 'coupon fequency',
   ],
   years_to_maturity: [
     'years to maturity', 'yearstomaturity', 'years_to_maturity',
@@ -321,7 +323,8 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     valueTypes: ['text'],
     keywords: SPECIFIC_ALIASES.coupon_frequency,
     contextPatterns: ['coupon frequency', 'payment frequency',
-      'interest frequency', 'interest pmt frequency'],
+      'interest frequency', 'interest pmt frequency',
+      'pmt fequency', 'pmt frequency'],
     allowedValues: ['annually', 'semi-annually', 'quarterly', 'monthly',
       'annual', 'semiannual', '1', '2', '4', '12', 'bullet'],
   },

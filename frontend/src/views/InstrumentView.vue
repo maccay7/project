@@ -4039,6 +4039,18 @@ function deriveMissingCalcInputs(row) {
 
   if (!hasField('status')) row['status'] = 'Active'
 
+  // Bonds need a price or yield to be valued; use the sheet's own
+  // valuation fields when no explicit price/yield input exists.
+  if (!hasField('currentprice', 'price', 'purchaseprice', 'ytm',
+                'yieldtomaturity', 'yield')) {
+    for (const n of ['fairvalue', 'presentvalue', 'marketvalue', 'carryingvalue']) {
+      const k = keys.find(k => normalizeKeyForMatch(k) === n)
+      if (!k) continue
+      const num = parseFloat(String(row[k]).replace(/[$,\s]/g, ''))
+      if (!isNaN(num) && num > 0) { row['current_price'] = num; break }
+    }
+  }
+
   if (!hasField('yearstomaturity')) {
     const get = n => {
       const k = keys.find(k => normalizeKeyForMatch(k) === n)
@@ -5198,7 +5210,11 @@ async function calculateMetrics() {
         if (typeof val === 'string') {
           const t = val.trim()
           if (t === '') { out[rawKey] = t; continue }
-          if (freqFieldRe.test(rawKey)) {
+          if (dateFieldRe.test(rawKey)) {
+            // Dates must win over rate/coupon keys ("Last Coupon Date"
+            // contains "coupon" but is a date, not a rate).
+            val = t
+          } else if (freqFieldRe.test(rawKey)) {
             const fl = t.toLowerCase()
             if (fl.includes('semi') || fl.includes('half')) val = 2
             else if (fl.includes('quarter')) val = 4
@@ -5213,10 +5229,6 @@ async function calculateMetrics() {
           } else if (moneyFieldRe.test(rawKey)) {
             const n = parseFloat(t.replace(/[$,]/g, ''))
             val = isNaN(n) ? t : n
-          } else if (dateFieldRe.test(rawKey)) {
-            // Preserve date strings as-is for backend parsing
-            // The backend will handle date format detection and parsing
-            val = t
           } else {
             val = t
           }
