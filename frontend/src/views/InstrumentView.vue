@@ -4058,6 +4058,12 @@ function deriveMissingCalcInputs(row) {
 
   if (!hasField('status')) row['status'] = 'Active'
 
+  // Backend defaults to ACT/360 but still requires the field explicitly
+  // for accrued interest; supply the same default, never a different one.
+  if (!hasField('daycountconvention', 'daycount', 'accrualbasis')) {
+    row['day_count_convention'] = 'ACT/360'
+  }
+
   // Bonds need a price or yield to be valued; use the sheet's own
   // valuation fields when no explicit price/yield input exists.
   if (!hasField('currentprice', 'price', 'purchaseprice', 'ytm',
