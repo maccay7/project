@@ -460,7 +460,11 @@ function isNumeric(value) {
 function normalizeDetectedCellValue(v) {
   if (v === null || v === undefined) return null
   if (v instanceof Date) {
-    return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10)
+    if (isNaN(v.getTime())) return null
+    // Local calendar date — toISOString() would shift back a day for
+    // timezones ahead of UTC (Excel stores local-midnight serials).
+    const p = n => String(n).padStart(2, '0')
+    return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}`
   }
   if (typeof v === 'object') {
     const inner = v.value ?? v.result ?? v.text ?? v.w ?? null

@@ -34,7 +34,7 @@ export function applyCleaningOperations(rawData, cleanedSourceData, cleaningOpti
   
   if (cleaningOptions.convertToNumbers) {
     let converted = 0
-    data = data.map(row => { const newRow = { ...row }; Object.keys(newRow).forEach(k => { if (typeof newRow[k] === 'string' && !isNaN(newRow[k]) && newRow[k].trim() !== '') { newRow[k] = parseFloat(newRow[k]); converted++ } }); return newRow })
+    data = data.map(row => { const newRow = { ...row }; Object.keys(newRow).forEach(k => { if (typeof newRow[k] === 'string' && newRow[k].trim() !== '') { const s = newRow[k].trim(); const numStr = /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s) ? s.replace(/,/g, '') : s; const n = parseFloat(numStr); if (!isNaN(n) && numStr !== '') { newRow[k] = n; converted++ } } }); return newRow })
     if (converted > 0) operations.push(`Converted ${converted} text values to numbers`)
   }
   
