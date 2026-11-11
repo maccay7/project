@@ -230,7 +230,8 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     valueTypes: ['percentage'],
     keywords: SPECIFIC_ALIASES.interest_rate,
     rejectPatterns: ['^[A-Z]{3}$'],
-    excludeKeywords: ['risk', 'premium', 'specific', 'collateral', 'pmt', 'payment frequency'],
+    excludeKeywords: ['risk', 'premium', 'specific', 'collateral', 'pmt',
+      'payment frequency', 'spread', 'exch', 'exchange'],
     units: ['%', 'percent', 'bps'],
     contextPatterns: ['interest rate', 'annual rate'],
     typicalRange: [0, 100]
@@ -240,7 +241,8 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     valueTypes: ['percentage'],
     keywords: SPECIFIC_ALIASES.coupon_rate,
     rejectPatterns: ['^[A-Z]{3}$'],
-    excludeKeywords: ['risk', 'premium', 'specific', 'collateral', 'discount'],
+    excludeKeywords: ['risk', 'premium', 'specific', 'collateral',
+      'discount', 'spread', 'exch', 'exchange'],
     units: ['%', 'percent', 'bps'],
     contextPatterns: ['coupon rate', 'coupon'],
     typicalRange: [0, 100]
@@ -250,7 +252,8 @@ const SEMANTIC_FIELD_DEFINITIONS = {
     valueTypes: ['percentage'],
     keywords: SPECIFIC_ALIASES.yield,
     rejectPatterns: ['^[A-Z]{3}$'],
-    excludeKeywords: ['risk', 'premium', 'specific', 'collateral', 'discount'],
+    excludeKeywords: ['risk', 'premium', 'specific', 'collateral',
+      'discount', 'spread', 'exch', 'exchange'],
     units: ['%', 'percent', 'bps'],
     contextPatterns: ['yield to maturity', 'ytm'],
     typicalRange: [0, 100]
