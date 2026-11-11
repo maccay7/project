@@ -3976,48 +3976,46 @@ function useMultiTableDetectedFields() {
   showMultiTableDetectionSuccess.value = false
   showWorkbookViewer.value = false
 
+  // One row per detected instrument — never merge values across tables.
   const fullFields = {}
-  const displayFields = {}
+  const tabularData = []
 
   for (const instrument of multiTableDetectionResults.value) {
+    const row = {}
     for (const [key, fieldObj] of Object.entries(instrument.fields)) {
-      if (key in fullFields) continue
       if (excludedDetectedFields.value.has(key)) continue
 
       const isMulti =
         typeof fieldObj === 'object' && fieldObj !== null &&
         fieldObj.currencyVariants &&
         Object.keys(fieldObj.currencyVariants).length > 1
-      if (isMulti) {
-        fullFields[key] = { ...fieldObj }
-        const cur = fieldObj.selectedCurrency || Object.keys(fieldObj.currencyVariants)[0]
-        displayFields[key] = fieldObj.currencyVariants[cur]
-      } else {
-        const scalar = typeof fieldObj === 'object' && fieldObj !== null ? fieldObj.value : fieldObj
-        fullFields[key] = scalar
-        displayFields[key] = scalar
+      const scalar = isMulti
+        ? fieldObj.currencyVariants[fieldObj.selectedCurrency || Object.keys(fieldObj.currencyVariants)[0]]
+        : (typeof fieldObj === 'object' && fieldObj !== null ? fieldObj.value : fieldObj)
+
+      row[key] = scalar
+      if (!(key in fullFields)) {
+        fullFields[key] = isMulti ? { ...fieldObj } : scalar
       }
     }
+    if (!row.InstrumentName && !row.instrument_name && instrument.instrumentName) {
+      row.InstrumentName = instrument.instrumentName
+      if (!fullFields.InstrumentName) fullFields.InstrumentName = instrument.instrumentName
+    }
+    tabularData.push(row)
   }
 
-  if (!displayFields.InstrumentName && multiTableDetectionResults.value.length > 0) {
-    const fallback = multiTableDetectionResults.value[0].instrumentName || ''
-    displayFields.InstrumentName = fallback
-    fullFields.InstrumentName = fullFields.InstrumentName || fallback
-  }
-
-  const tabularData = [displayFields]
+  const headers = [...new Set(tabularData.flatMap(r => Object.keys(r)))]
   rawData.value = tabularData
   originalRawData.value = JSON.parse(JSON.stringify(tabularData))
   cleanedData.value = JSON.parse(JSON.stringify(tabularData))
-  const headers = Object.keys(displayFields)
   fileColumns.value = headers
   originalFileColumns.value = [...headers]
   worksheetSelected.value = true
   showPreview.value = true
-  sheetType.value = 'single'
+  sheetType.value = 'multi'
   mappingApplied.value = true
-  extractedValues.value = { ...displayFields }
+  extractedValues.value = tabularData[0] ? { ...tabularData[0] } : {}
   const mergedUse = mergeDetectedResults(
     autoDetectedFields.value, autoDetectedFieldsWithMetadata.value,
     fullFields, {}
