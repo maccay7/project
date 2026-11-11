@@ -663,6 +663,8 @@ async function loadData() {
     }
     originalDataset.value = JSON.parse(JSON.stringify(dataset.value))
     cleanedSourceData.value = []
+    dismissedIssues.value = new Set()
+    editingIssueKey.value = null
     uploadId.value = last.id
     sheetNames.value = last.headers || ['Sheet1']
     selectedSheet.value = sheetNames.value[0]
@@ -682,6 +684,8 @@ function resetOptions() {
 function clearResults() {
   results.value = null
   cleanedSourceData.value = []
+  dismissedIssues.value = new Set()
+  editingIssueKey.value = null
   if (originalDataset.value) dataset.value = JSON.parse(JSON.stringify(originalDataset.value))
   alert('Results cleared')
 }
