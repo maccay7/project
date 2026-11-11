@@ -3912,7 +3912,25 @@ async function handleMultiTableDetect(event) {
             }
           }
         }
-        if (Object.keys(allFields).length > 0) {
+        // Tabular sheets (header row + instrument rows): emit one
+        // instrument record per data row instead of a single merged row.
+        const tabularRecords = detectionResult?.tabularRecords || []
+        if (tabularRecords.length > 0) {
+          tabularRecords.forEach((rec, idx) => {
+            const recFields = { ...(rec.fields || {}) }
+            const recName = recFields.instrument_name || recFields.instrument_id ||
+              recFields.short_name || `${table.tableName} #${idx + 1}`
+            detectedInstruments.push({
+              tableName: `${table.tableName} #${idx + 1}`,
+              instrumentName: recName,
+              fields: recFields,
+              fieldsWithMetadata: {},
+              currencies: detectionResult.currencies || [],
+              missingFields: [],
+              range: table.range
+            })
+          })
+        } else if (Object.keys(allFields).length > 0) {
           detectedInstruments.push({
             tableName: table.tableName,
             instrumentName: allFields.InstrumentName || table.tableName,

@@ -643,6 +643,117 @@ function calculateSemanticMatchScore(label, value, fieldDef, context) {
   return Math.min(score, 1.0)
 }
 
+// ---- Tabular layout detection -------------------------------------------
+// Sheets like "US$ Money Market" store instruments as ROWS under a header
+// row. The label->value scanner mistakes headers for values; this detects
+// the header row, maps columns to canonical fields and emits one record
+// per data row. Summary blocks above/below the table are ignored because
+// only rows below the chosen header with >=2 mapped values count.
+const TABULAR_ALIASES = {
+  'valuation date': 'valuation_date', 'valuation': 'valuation_date',
+  'as of date': 'valuation_date', 'asofdate': 'valuation_date',
+  'trade date': 'trade_date', 'settlement date': 'settlement_date',
+  'issue date': 'issue_date', 'auction date': 'auction_date',
+  'maturity date': 'maturity_date', 'redemption date': 'maturity_date',
+  'days to maturity': 'days_to_maturity', 'days': 'days_to_maturity',
+  'years to maturity': 'years_to_maturity', 'tenure': 'tenure_days',
+  'term': 'tenure_days', 'period': 'tenure_days',
+  'rate': 'interest_rate', 'rate %': 'interest_rate', 'interest rate': 'interest_rate',
+  'annual rate': 'interest_rate', 'coupon rate': 'coupon_rate', 'coupon': 'coupon_rate',
+  'discount rate': 'discount_rate', 'yield': 'yield_to_maturity',
+  'ytm': 'yield_to_maturity',
+  'instrument': 'instrument_name', 'security': 'instrument_id',
+  'isin': 'instrument_id', 'short name': 'instrument_name', 'name': 'instrument_name',
+  'fund name': 'fund_name', 'portfolio': 'portfolio_name', 'pfolio': 'portfolio_name',
+  'pfolio name': 'portfolio_name', 'counterparty': 'counterparty',
+  'parent company name': 'parent_company', 'issuer': 'issuer',
+  'amount': 'principal', 'principal': 'principal', 'nominal': 'principal',
+  'total cost': 'principal', 'total cost (base)': 'principal',
+  'face value': 'face_value', 'par value': 'face_value', 'notional': 'face_value',
+  'investment': 'face_value', 'total nominal': 'face_value',
+  'total value': 'carrying_value', 'carrying value': 'carrying_value',
+  'maturity value': 'maturity_value', 'present value': 'present_value',
+  'fair value': 'fair_value', 'market value': 'market_value',
+  'total present value': 'present_value', 'total carrying value': 'carrying_value',
+  'total maturity value': 'maturity_value', 'total cost base': 'principal',
+  'currency': 'currency', 'ccy': 'currency', 'currency code': 'currency',
+  'instrument type': 'instrument_type', 'type': 'instrument_type',
+  'classification': 'instrument_type', 'status': 'status',
+  'day count convention': 'day_count_convention', 'day count': 'day_count_convention',
+  'accrual basis': 'day_count_convention',
+  'impuirement': 'impaired_value', 'impairment': 'impaired_value',
+  'weighted rate': 'weighted_rate', 'wam': 'weighted_average_maturity',
+  'nss rates': 'nss_rate', 'discount rates': 'discount_rate_curve',
+  'time value': 'time_value', 'credit impairment': 'credit_impairment',
+}
+const TABULAR_NORM = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
+
+function detectTabularRecords(data, boundaries) {
+  // Score each row by how many cells are recognised field headers.
+  let bestRow = -1, bestScore = 0
+  const rowScores = []
+  for (let R = boundaries.startRow; R <= boundaries.endRow; R++) {
+    let score = 0
+    for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
+      const cell = data[R]?.[C]
+      if (typeof cell !== 'string') continue
+      const t = TABULAR_NORM(cell)
+      if (t && TABULAR_ALIASES[t]) score++
+    }
+    rowScores.push({ R, score })
+    if (score > bestScore) { bestScore = score; bestRow = R }
+  }
+  // Need a convincing header: >=4 recognised columns AND at least one
+  // name/identity column — cashflow schedules (Term/Discount rate/
+  // Principal/Balance) match aliases but are not instrument tables.
+  if (bestRow < 0 || bestScore < 4) return []
+
+  // Map each column to a canonical field (first header wins on duplicates).
+  const colField = new Map()
+  for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
+    const cell = data[bestRow]?.[C]
+    if (typeof cell !== 'string') continue
+    const field = TABULAR_ALIASES[TABULAR_NORM(cell)]
+    if (field && ![...colField.values()].includes(field)) colField.set(C, field)
+  }
+  if (colField.size < 4) return []
+  const NAME_FIELDS = new Set(['instrument_name', 'instrument_id', 'fund_name',
+    'portfolio_name', 'counterparty', 'issuer', 'parent_company'])
+  if (![...colField.values()].some(f => NAME_FIELDS.has(f))) return []
+
+  const records = []
+  for (let R = bestRow + 1; R <= boundaries.endRow; R++) {
+    const fields = {}
+    let filled = 0
+    for (const [C, field] of colField) {
+      const v = normalizeDetectedCellValue(data[R]?.[C])
+      if (v === null || v === '') continue
+      fields[field] = v
+      filled++
+    }
+    // A real instrument row needs >=2 mapped values and at least one
+    // identity/value anchor; skip totals and blank continuations.
+    if (filled < 2) continue
+    const anchor = fields.instrument_name || fields.principal ||
+      fields.face_value || fields.carrying_value || fields.maturity_date
+    if (!anchor) continue
+    const nameStr = String(anchor)
+    if (/^(total|sum|wam|weighted|average|base information|client)/i.test(nameStr.trim())) continue
+    // Per-record currency from classification-like columns (US$ MM, ZWG MM).
+    const typeStr = String(fields.instrument_type || '')
+    const clsMatch = typeStr.match(/US\$|USD/i) ? 'USD'
+      : typeStr.match(/ZWG|ZiG/i) ? 'ZWG'
+      : typeStr.match(/ZWL/i) ? 'ZWL'
+      : typeStr.match(/BWP/i) ? 'BWP'
+      : typeStr.match(/ZAR|\bR\b/i) ? 'ZAR' : null
+    if (clsMatch && !fields.currency) fields.currency = clsMatch
+    records.push({ rowIndex: R, fields })
+  }
+  // Require at least 2 instrument rows — single-row "tables" are more
+  // likely label/value layouts handled by the pair scanner.
+  return records.length >= 2 ? records : []
+}
+
 export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumns, instrumentType, tableRange = null, tableData = null, customCurrency = null, statusCallback = null) {
   const updateStatus = (s) => { if (statusCallback) statusCallback(s) }
   if (!fileBuffer || !sheetName) throw new Error('File buffer and sheet name are required')
@@ -911,6 +1022,10 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   console.log('Required:', Object.keys(detectedFields))
   console.log('Additional:', Object.keys(additionalFields))
   console.log('Missing:', missingFields)
+  const tabularRecords = detectTabularRecords(data, boundaries)
+  if (tabularRecords.length) {
+    console.log(`[Tabular] ${tabularRecords.length} instrument row(s) under header row`)
+  }
   return {
     fields: detectedFields,
     fieldsWithMetadata: detectedMetadata,
@@ -918,6 +1033,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
     missingFields,
     additionalFields,
     additionalFieldsWithMetadata: additionalMetadata,
+    tabularRecords,
     warnings: []
   }
 }
