@@ -3802,9 +3802,17 @@ async function autoDetectSingleInstrument() {
         }
       }
     }
-    autoDetectedFields.value = allFields
-    autoDetectedFieldsWithMetadata.value = allFieldsWithMetadata
-    autoDetectedAdditionalFields.value = detectionResult?.additionalFields || {}
+    const mergedSingle = mergeDetectedResults(
+      autoDetectedFields.value, autoDetectedFieldsWithMetadata.value,
+      allFields, allFieldsWithMetadata
+    )
+    autoDetectedFields.value = mergedSingle.fields
+    autoDetectedFieldsWithMetadata.value = mergedSingle.meta
+    const mergedAdditional = mergeDetectedResults(
+      autoDetectedAdditionalFields.value, {},
+      detectionResult?.additionalFields || {}, {}
+    )
+    autoDetectedAdditionalFields.value = mergedAdditional.fields
     detectedCurrencies.value = detectionResult?.currencies || []
     detectedInstrumentType.value = instrumentType.value
     detectionWarnings.value = detectionResult?.warnings || []
@@ -3940,9 +3948,16 @@ async function handleMultiTableDetect(event) {
           inst.currencies.forEach(c => allCurrencies.add(c))
         }
       }
-      autoDetectedFields.value = allFields
-      autoDetectedFieldsWithMetadata.value = allFieldsWithMetadata
-      autoDetectedAdditionalFields.value = allAdditionalFields
+      const mergedMulti = mergeDetectedResults(
+        autoDetectedFields.value, autoDetectedFieldsWithMetadata.value,
+        allFields, allFieldsWithMetadata
+      )
+      autoDetectedFields.value = mergedMulti.fields
+      autoDetectedFieldsWithMetadata.value = mergedMulti.meta
+      const mergedMultiAdd = mergeDetectedResults(
+        autoDetectedAdditionalFields.value, {}, allAdditionalFields, {}
+      )
+      autoDetectedAdditionalFields.value = mergedMultiAdd.fields
       detectedCurrencies.value = Array.from(allCurrencies)
     }
     showMultiTableDetectionSuccess.value = true
@@ -4003,7 +4018,11 @@ function useMultiTableDetectedFields() {
   sheetType.value = 'single'
   mappingApplied.value = true
   extractedValues.value = { ...displayFields }
-  autoDetectedFields.value = fullFields
+  const mergedUse = mergeDetectedResults(
+    autoDetectedFields.value, autoDetectedFieldsWithMetadata.value,
+    fullFields, {}
+  )
+  autoDetectedFields.value = mergedUse.fields
   activeTab.value = 'cleaning'
 }
 
@@ -4090,6 +4109,31 @@ function formatDetectedValue(field, value) {
     if (!isNaN(num)) return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
   return String(value)
+}
+
+// Union-merge detected fields across runs: keeps every uniquely found
+// field and the highest-confidence value per field. A sparse re-detect
+// can never delete or downgrade an earlier, fuller detection.
+function mergeDetectedResults(targetFields, targetMeta, sourceFields, sourceMeta) {
+  const fields = { ...(targetFields || {}) }
+  const meta = { ...(targetMeta || {}) }
+  for (const [key, val] of Object.entries(sourceFields || {})) {
+    const norm = normalizeKeyForMatch(key)
+    const existingKey = Object.keys(fields).find(k => normalizeKeyForMatch(k) === norm)
+    const newConf = sourceMeta?.[key]?.confidence
+    const oldConf = existingKey ? meta?.[existingKey]?.confidence : undefined
+    const newWins = existingKey == null
+      || (typeof newConf === 'number' && (typeof oldConf !== 'number' || newConf > oldConf))
+      || (typeof newConf !== 'number' && typeof oldConf !== 'number')
+    if (!newWins) continue
+    if (existingKey && existingKey !== key) {
+      delete fields[existingKey]
+      delete meta[existingKey]
+    }
+    fields[key] = val
+    if (sourceMeta?.[key]) meta[key] = sourceMeta[key]
+  }
+  return { fields, meta }
 }
 
 // Helper function for case-insensitive missing fields check in multi-table detection
