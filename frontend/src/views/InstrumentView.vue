@@ -4044,6 +4044,16 @@ function useMultiTableDetectedFields() {
 
 // Fill calculation inputs that exist in the row under other names or
 // can be derived from real values — never invents data.
+// Provenance for derived calc inputs: row object -> {field: {from, method}}.
+// Never sent to the backend; used for audit/verification only.
+const derivedProvenance = new WeakMap()
+function getDerivedProvenance(row) { return derivedProvenance.get(row) || null }
+function markDerived(row, field, from, method) {
+  const m = derivedProvenance.get(row) || {}
+  m[field] = { from, method }
+  derivedProvenance.set(row, m)
+}
+
 function deriveMissingCalcInputs(row) {
   const keys = Object.keys(row)
   const hasField = (...names) =>
@@ -4053,11 +4063,11 @@ function deriveMissingCalcInputs(row) {
     for (const v of Object.values(row)) {
       if (typeof v !== 'string') continue
       const fl = v.toLowerCase()
-      if (fl.includes('semi') || fl.includes('half')) { row['coupon_frequency'] = 2; break }
-      if (fl.includes('quarter')) { row['coupon_frequency'] = 4; break }
-      if (fl.includes('month')) { row['coupon_frequency'] = 12; break }
-      if (fl.includes('annual') || fl.includes('year')) { row['coupon_frequency'] = 1; break }
-      if (fl.includes('week')) { row['coupon_frequency'] = 52; break }
+      if (fl.includes('semi') || fl.includes('half')) { row['coupon_frequency'] = 2; markDerived(row, 'coupon_frequency', [String(v).slice(0,40)], 'text-match'); break }
+      if (fl.includes('quarter')) { row['coupon_frequency'] = 4; markDerived(row, 'coupon_frequency', [String(v).slice(0,40)], 'text-match'); break }
+      if (fl.includes('month')) { row['coupon_frequency'] = 12; markDerived(row, 'coupon_frequency', [String(v).slice(0,40)], 'text-match'); break }
+      if (fl.includes('annual') || fl.includes('year')) { row['coupon_frequency'] = 1; markDerived(row, 'coupon_frequency', [String(v).slice(0,40)], 'text-match'); break }
+      if (fl.includes('week')) { row['coupon_frequency'] = 52; markDerived(row, 'coupon_frequency', [String(v).slice(0,40)], 'text-match'); break }
     }
   }
 
@@ -4071,7 +4081,7 @@ function deriveMissingCalcInputs(row) {
       const code = String(v).trim().toUpperCase()
       if (/^(USD|ZWG|ZAR|BWP|EUR|GBP|ZMW|KES|ZWL)$/.test(code)) codes.add(code)
     }
-    if (codes.size === 1) row['currency'] = [...codes][0]
+    if (codes.size === 1) { row['currency'] = [...codes][0]; markDerived(row, 'currency', ['currency-code-cells'], 'single-iso-code') }
   }
 
   if (!hasField('status')) row['status'] = 'Active'
@@ -4082,19 +4092,31 @@ function deriveMissingCalcInputs(row) {
     row['day_count_convention'] = 'ACT/360'
   }
 
-  // Bonds need a price or yield to be valued; use the sheet's own
-  // valuation fields when no explicit price/yield input exists.
-  if (!hasField('currentprice', 'price', 'purchaseprice', 'ytm',
-                'yieldtomaturity', 'yield')) {
-    for (const n of ['fairvalue', 'presentvalue', 'marketvalue', 'carryingvalue']) {
+  // Bonds need a price or yield to be valued; T-Bills/MM need a purchase
+  // price. Use the sheet's own valuation fields when no explicit input
+  // exists — never an unrelated column.
+  const PRICE_SOURCES = ['fairvalue', 'presentvalue', 'marketvalue', 'carryingvalue']
+  const pickPrice = () => {
+    for (const n of PRICE_SOURCES) {
       const k = keys.find(k => normalizeKeyForMatch(k) === n)
       if (!k) continue
       const num = parseFloat(String(row[k]).replace(/[$,\s]/g, ''))
-      if (!isNaN(num) && num > 0) { row['current_price'] = num; break }
+      if (!isNaN(num) && num > 0) return { value: num, from: k }
     }
+    return null
+  }
+  if (!hasField('currentprice', 'price', 'purchaseprice', 'ytm',
+                'yieldtomaturity', 'yield')) {
+    const p = pickPrice()
+    if (p) { row['current_price'] = p.value; markDerived(row, 'current_price', [p.from], 'valuation-field') }
+  }
+  if (!hasField('purchaseprice', 'price', 'currentprice', 'ytm',
+                'yieldtomaturity', 'yield', 'discountrate')) {
+    const p = pickPrice()
+    if (p) { row['purchase_price'] = p.value; markDerived(row, 'purchase_price', [p.from], 'valuation-field') }
   }
 
-  if (!hasField('yearstomaturity')) {
+  if (!hasField('yearstomaturity', 'daystomaturity', 'term', 'days', 'tenor')) {
     const get = n => {
       const k = keys.find(k => normalizeKeyForMatch(k) === n)
       return k ? row[k] : null
@@ -4102,8 +4124,13 @@ function deriveMissingCalcInputs(row) {
     const vd = get('valuationdate')
     const md = get('maturitydate')
     if (vd && md) {
-      const years = (new Date(md) - new Date(vd)) / (365.25 * 86400000)
-      if (years > 0) row['years_to_maturity'] = Math.round(years * 100) / 100
+      const ms = new Date(md).getTime() - new Date(vd).getTime()
+      if (ms > 0) {
+        row['years_to_maturity'] = Math.round((ms / (365.25 * 86400000)) * 100) / 100
+        markDerived(row, 'years_to_maturity', ['valuation_date', 'maturity_date'], 'date-diff/365.25')
+        row['days_to_maturity'] = Math.round(ms / 86400000)
+        markDerived(row, 'days_to_maturity', ['valuation_date', 'maturity_date'], 'date-diff-days')
+      }
     }
   }
 
