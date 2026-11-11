@@ -534,14 +534,20 @@ function getValueType(value) {
   return 'text'
 }
 
+// Offset of data[0][0] within the worksheet's absolute grid. Set per
+// detection call so cell refs point to real Excel cells, not data indices.
+let CELL_ORIGIN = { r: 0, c: 0 }
+
 function rowColToCellRef(row, col) {
+  const R = row + CELL_ORIGIN.r
+  const C = col + CELL_ORIGIN.c
   const colLetters = []
-  let c = col
+  let c = C
   while (c >= 0) {
     colLetters.unshift(String.fromCharCode((c % 26) + 65))
     c = Math.floor(c / 26) - 1
   }
-  return colLetters.join('') + (row + 1)
+  return colLetters.join('') + (R + 1)
 }
 
 function getContextualClues(data, row, col, maxDistance = 3) {
@@ -777,8 +783,11 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
   console.log('Sheet:', sheetName, '| Type:', instrumentType, '| Required:', requiredColumns)
   updateStatus('scanning')
   let data = []
+  CELL_ORIGIN = { r: 0, c: 0 }
   if (tableData && Array.isArray(tableData) && tableData.length > 0) {
     data = tableData
+    // tableData is table-relative; absolute sheet offset isn't provided,
+    // so refs stay table-relative for this path.
   } else {
     const workbook = XLSX.read(fileBuffer, {
       type: 'array', cellDates: true, cellNF: true
@@ -811,6 +820,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
       }
       data.push(row)
     }
+    CELL_ORIGIN = { r: range.s.r, c: range.s.c }
   }
   updateStatus('analyzing')
   const boundaries = tableRange && !tableData
