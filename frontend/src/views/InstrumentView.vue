@@ -5340,7 +5340,6 @@ async function calculateMetrics() {
   // FIX: pre-flight validation. If the resulting rows lack the required
   // inputs for this instrument type, clear the stale results and show a
   // precise message instead of hitting the backend and rendering zeros.
-  const requiredForType = requiredColumns.value || []
   if (!dataForCalculation.length) {
     allCalculations.value = {}
     selectedCalculations.value = {}
@@ -5357,118 +5356,6 @@ async function calculateMetrics() {
   const calculationInputSignature = getCalculationSignature(
     dataForCalculation, excluded
   )
-
-  const normKey = (k) => String(k).toLowerCase().replace(/[-_\s().]+/g, '')
-
-  const BACKEND_ALIASES = {
-    facevalue: ['face value', 'facevalue', 'face_value', 'par value', 'parvalue',
-                'par_value', 'redemption value', 'redemptionvalue', 'redemption_value',
-                'maturity value', 'maturityvalue', 'maturity_value', 'nominal value',
-                'nominalvalue', 'nominal_value', 'principal', 'principle',
-                'principal amount', 'principal_amount', 'balance', 'balance amount',
-                'amount', 'notional', 'notional amount', 'notional_amount', 'principal_balance',
-                'outstanding principal', 'outstanding_principal', 'current principal',
-                'capital', 'value'],
-    discountrate: ['discount rate', 'discountrate', 'discount_rate', 'bank discount',
-                   'discount yield', 'discountyield', 'discount_yield', 't-bill rate',
-                   'tbill rate', 'tbillrate', 'auction rate', 'auctionrate', 'discount'],
-    valuationdate: ['valuation date', 'valuationdate', 'valuation_date', 'portfolio date',
-                    'portfolio_date', 'report date', 'reportdate', 'report_date',
-                    'as of date', 'asofdate', 'as_of_date', 'date pfolio', 'datepfolio',
-                    'valuation', 'settlement date', 'settlementdate', 'settlement_date'],
-    maturitydate: ['maturity date', 'maturitydate', 'maturity_date', 'end date', 'enddate',
-                   'due date', 'duedate', 'redemption date', 'redemptiondate',
-                   'redemption_date', 'expiry date', 'expirydate', 'expiry_date',
-                   'termination date'],
-    tbname: ['instrument name', 'instrumentname', 'instrument_name', 't-bill name',
-             'tbill name', 'tbillname', 'tbill_name', 'treasury bill name', 'security name',
-             'securityname', 'security_name', 'name', 'description', 'counterparty',
-             'issuer', 'instrument', 'bond name', 'bondname', 'bond_name'],
-    interestrate: ['interest rate', 'interestrate', 'interest_rate', 'annual rate',
-                   'annual interest rate', 'nominal rate', 'stated rate', 'effective rate',
-                   'apr', 'coupon', 'coupon rate', 'rate', 'rate %'],
-    daystomaturity: ['days to maturity', 'daystomaturity', 'days_to_maturity', 'term days',
-                     'term_days', 'termdays', 'maturity days', 'duration days', 'contract days',
-                     'term in days', 'tenor', 'term', 'days', 'period'],
-    purchaseprice: ['purchase price', 'purchaseprice', 'purchase_price', 'buy price',
-                    'buyprice', 'buy_price', 'acquisition price', 'entry price',
-                    'price paid', 'pricepaid', 'price_paid', 'issue price', 'issueprice',
-                    'issue_price', 'price'],
-    issuedate: ['issue date', 'issuedate', 'issue_date', 'start date', 'startdate',
-                'start_date', 'effective date', 'effectivedate', 'effective_date',
-                'origination date', 'value date', 'valuedate', 'value_date',
-                'trade date', 'tradedate', 'trade_date', 'settlement date'],
-    couponrate: ['coupon rate', 'couponrate', 'coupon_rate', 'coupon', 'annual coupon',
-                 'fixed rate', 'fixedrate', 'nominal rate', 'stated rate', 'interest rate'],
-    yieldtomaturity: ['yield to maturity', 'yieldtomaturity', 'yield_to_maturity', 'ytm',
-                      'market yield', 'marketyield', 'required return', 'requiredreturn',
-                      'redemption yield', 'redemptionyield', 'yield'],
-    couponfrequency: ['coupon frequency', 'couponfrequency', 'coupon_frequency',
-                      'payment frequency', 'paymentfrequency', 'frequency',
-                      'coupon period', 'payments per year'],
-    yearsToMaturity: ['years to maturity', 'yearstomaturity', 'years_to_maturity',
-                      'maturity years', 'maturityyears', 'term years', 'termyears',
-                      'duration years', 'durationyears', 'time to maturity', 'years'],
-  }
-
-  const rowHasPlausibleValue = (row, canonicalKey) => {
-    if (!row || typeof row !== 'object') return false
-    const ck = normKey(canonicalKey)
-    // Try to find an alias group that matches the canonical key
-    let aliasGroup = null
-    if (BACKEND_ALIASES[ck]) aliasGroup = BACKEND_ALIASES[ck]
-    else {
-      // Fall back to SEMANTIC_FIELD_GROUPS for anything not in the alias map
-      for (const [groupName, list] of Object.entries(SEMANTIC_FIELD_GROUPS)) {
-        if (groupName === 'generic') continue
-        const groupNorm = normKey(groupName)
-        if (groupNorm === ck || groupNorm.includes(ck) || ck.includes(groupNorm)) {
-          aliasGroup = list
-          break
-        }
-        // also check if any member of the group normalizes to the canonical key
-        for (const member of list) {
-          if (normKey(member) === ck) {
-            aliasGroup = list
-            break
-          }
-        }
-        if (aliasGroup) break
-      }
-    }
-    if (!aliasGroup) return false
-
-    // For each key in the row, see if it matches any alias AND the value is plausible
-    for (const [rowKey, rowVal] of Object.entries(row)) {
-      const rk = normKey(rowKey)
-      const isAlias = aliasGroup.some(a => {
-        const na = normKey(a)
-        return rk === na || rk.includes(na) || na.includes(rk)
-      })
-      if (!isAlias) continue
-      // Plausibility: non-empty, and (for numeric fields) parses to a number
-      if (rowVal === null || rowVal === undefined || rowVal === '') continue
-      const lc = ck
-      if (lc.includes('rate') || lc.includes('yield') || lc.includes('coupon') || lc.includes('discount')) {
-        const n = parseFloat(String(rowVal).replace(/[%,$\s]/g, ''))
-        if (!isNaN(n) && n >= 0 && n <= 100) return true
-      } else if (lc.includes('value') || lc.includes('amount') || lc.includes('price') || lc.includes('principal') || lc.includes('face') || lc.includes('balance') || lc.includes('notional')) {
-        const n = parseFloat(String(rowVal).replace(/[$,\s]/g, ''))
-        if (!isNaN(n) && n > 0) return true
-      } else if (lc.includes('date') || lc.includes('maturity') || lc.includes('issue')) {
-        if (rowVal instanceof Date) { if (!isNaN(rowVal.getTime())) return true }
-        const d = new Date(rowVal)
-        if (!isNaN(d.getTime())) return true
-      } else if (lc.includes('days') || lc.includes('term') || lc.includes('tenor')) {
-        const n = parseFloat(String(rowVal))
-        if (!isNaN(n) && n > 0) return true
-      } else {
-        const s = String(rowVal).trim()
-        if (s.length > 0 && s !== 'n/a' && s !== 'na' && s !== '-') return true
-      }
-    }
-    return false
-  }
 
   // Validate EVERY row against the canonical backend-required groups
   // (calcFieldRegistry mirrors validate_row_for_instrument). Unresolved
