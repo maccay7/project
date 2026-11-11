@@ -334,11 +334,12 @@
                           </div>
                         </div>
 
-                        <div v-if="getMissingFieldsForInstrument(instrument).length > 0" class="multi-missing-fields">
-                          <span class="missing-label">Missing required:</span>
-                          {{ getMissingFieldsForInstrument(instrument).join(', ') }}
-                        </div>
                       </div>
+                    </div>
+
+                    <div v-if="getAllMissingFields().length > 0" class="multi-missing-fields">
+                      <span class="missing-label">Missing required:</span>
+                      {{ getAllMissingFields().join(', ') }}
                     </div>
                   </v-card-text>
 
@@ -4202,6 +4203,16 @@ function getMissingFieldsForInstrument(instrument) {
   return requiredColumns.value.filter(c =>
     !Object.keys(instrument.fields).some(k => k.toLowerCase() === c.toLowerCase())
   )
+}
+
+// Union of missing required fields across ALL detected instruments —
+// shown once at the bottom of the detection popup.
+function getAllMissingFields() {
+  const missing = new Set()
+  for (const inst of multiTableDetectionResults.value || []) {
+    getMissingFieldsForInstrument(inst).forEach(f => missing.add(f))
+  }
+  return [...missing]
 }
 
 // Ensure excludedDetectedFields is always a Set
