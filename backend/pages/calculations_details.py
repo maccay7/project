@@ -2313,8 +2313,25 @@ def calculate_treasury_bill(item: Dict[str, Any],
     if validation["invalid_fields"]:
         result["invalid_fields"] = validation["invalid_fields"]
 
+    # T-Bills are discount instruments: price above face is invalid.
+    price_over_face = (
+        purchase_price_in is not None and face is not None
+        and face > 0 and purchase_price_in > face
+    )
+    if price_over_face:
+        result.setdefault("invalid_fields", []).append({
+            "field": "purchase_price",
+            "code": "price_exceeds_face_value",
+            "message": "Purchase price exceeds face value",
+        })
+        result["warning"] = (
+            f"purchase_price={purchase_price_in:.2f} exceeds "
+            f"face_value={face:.2f}; a discount instrument cannot be "
+            "priced above par."
+        )
+
     if (hard_failures or validation["missing_fields"]
-            or validation["invalid_fields"]):
+            or validation["invalid_fields"] or price_over_face):
         result["status"] = "partial"
         result["missing_prerequisites"] = [
             e.get("missing") for e in hard_failures if e.get("missing")
