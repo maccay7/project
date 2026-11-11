@@ -710,11 +710,15 @@ function detectTabularRecords(data, boundaries) {
 
   // Map each column to a canonical field (first header wins on duplicates).
   const colField = new Map()
+  const colHeader = new Map()
   for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
     const cell = data[bestRow]?.[C]
     if (typeof cell !== 'string') continue
     const field = TABULAR_ALIASES[TABULAR_NORM(cell)]
-    if (field && ![...colField.values()].includes(field)) colField.set(C, field)
+    if (field && ![...colField.values()].includes(field)) {
+      colField.set(C, field)
+      colHeader.set(C, cell.trim())
+    }
   }
   if (colField.size < 4) return []
   const NAME_FIELDS = new Set(['instrument_name', 'instrument_id', 'fund_name',
@@ -747,7 +751,19 @@ function detectTabularRecords(data, boundaries) {
       : typeStr.match(/BWP/i) ? 'BWP'
       : typeStr.match(/ZAR|\bR\b/i) ? 'ZAR' : null
     if (clsMatch && !fields.currency) fields.currency = clsMatch
-    records.push({ rowIndex: R, fields })
+    // Per-field provenance: worksheet cell ref, original header, raw value.
+    const meta = {}
+    for (const [C, field] of colField) {
+      const raw = data[R]?.[C]
+      if (raw === null || raw === undefined || String(raw).trim() === '') continue
+      meta[field] = {
+        location: rowColToCellRef(R, C),
+        originalLabel: colHeader.get(C) || field,
+        detectedFrom: 'tabular',
+        sourceValue: raw,
+      }
+    }
+    records.push({ rowIndex: R, fields, fieldsWithMetadata: meta })
   }
   // Require at least 2 instrument rows — single-row "tables" are more
   // likely label/value layouts handled by the pair scanner.

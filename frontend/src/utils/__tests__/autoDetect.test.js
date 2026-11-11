@@ -62,3 +62,52 @@ describe('autoDetectInstrumentFields regression', () => {
     expect(String(r.fields.issue_date ?? r.additionalFields.issue_date)).toMatch(/May-23|2023/)
   })
 })
+
+describe('tabular layout detection', () => {
+  function makeTabular() {
+    const rows = [
+      ['Fund Name', 'Portfolio', 'Short Name', 'Maturity Date', 'Issue Date', 'Rate', 'Nominal', 'Present Value', 'Counterparty'],
+      ['FUND1', 'Port A', 'INST-001', '2/3/25', '11/4/24', '5.0%', '192.84', '193.47', 'CABS Bank'],
+      ['FUND2', 'Port B', 'INST-002', '3/4/25', '12/5/24', '7.5%', '500.00', '510.25', 'OTHER BANK'],
+      ['FUND3', 'Port C', 'INST-003', '4/5/25', '1/6/25', '10.0%', '75.50', '76.10', 'THIRD BANK'],
+    ]
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'MM Sheet')
+    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+    const u8 = out instanceof Uint8Array ? out : new Uint8Array(out)
+    return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
+  }
+  const MMREQ = ['Instrument', 'Amount', 'Rate', 'Maturity Date', 'Currency']
+
+  it('emits one independent record per instrument row', async () => {
+    const r = await autoDetectInstrumentFields(makeTabular(), 'MM Sheet', MMREQ, 'money-market')
+    expect(r.tabularRecords.length).toBe(3)
+    expect(r.tabularRecords[0].fields.instrument_name).toContain('INST-001')
+    expect(r.tabularRecords[1].fields.instrument_name).toContain('INST-002')
+    expect(r.tabularRecords[2].fields.instrument_name).toContain('INST-003')
+    // Row isolation: mutating one record must not affect others
+    r.tabularRecords[0].fields.principal = 'HACKED'
+    expect(r.tabularRecords[1].fields.principal).toBe('500.00')
+    expect(r.tabularRecords[2].fields.principal).toBe('75.50')
+  })
+
+  it('records cell, header and source value provenance per field', async () => {
+    const r = await autoDetectInstrumentFields(makeTabular(), 'MM Sheet', MMREQ, 'money-market')
+    const meta = r.tabularRecords[0].fieldsWithMetadata
+    expect(meta.principal.location).toMatch(/^[A-Z]+\d+$/)
+    expect(meta.principal.originalLabel).toBe('Nominal')
+    expect(String(meta.principal.sourceValue)).toContain('192.84')
+    expect(meta.maturity_date.originalLabel).toBe('Maturity Date')
+    expect(meta.counterparty.originalLabel).toBe('Counterparty')
+  })
+
+  it('does not treat headers or summary rows as instruments', async () => {
+    const r = await autoDetectInstrumentFields(makeTabular(), 'MM Sheet', MMREQ, 'money-market')
+    for (const rec of r.tabularRecords) {
+      for (const v of Object.values(rec.fields)) {
+        expect(String(v)).not.toMatch(/Fund Name|Portfolio|Short Name|Maturity Date|Counterparty/)
+      }
+    }
+  })
+})

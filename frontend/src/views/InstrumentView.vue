@@ -3924,7 +3924,7 @@ async function handleMultiTableDetect(event) {
               tableName: `${table.tableName} #${idx + 1}`,
               instrumentName: recName,
               fields: recFields,
-              fieldsWithMetadata: {},
+              fieldsWithMetadata: rec.fieldsWithMetadata || {},
               currencies: detectionResult.currencies || [],
               missingFields: [],
               range: table.range
