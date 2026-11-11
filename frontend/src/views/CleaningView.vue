@@ -657,6 +657,19 @@ async function loadData() {
       instrumentType: last.instrument_type || 'Financial Instruments',
       sheetNames: last.headers || ['Sheet1']
     }
+    // The Upload page's finalized/mapped rows live in the instrument
+    // workflow (rawData) — prefer them over the raw dataset rows so
+    // Cleaning shows exactly what the user previewed and mapped.
+    try {
+      const sid = sessionManager.getActiveSessionId?.() || route.query.session
+      const type = normalizeInstrumentType(dataset.value.instrumentType)
+      if (sid && type) {
+        const wf = await sessionManager.getInstrumentWorkflow(sid, type)
+        if (Array.isArray(wf?.rawData) && wf.rawData.length) {
+          dataset.value.data = wf.rawData
+        }
+      }
+    } catch (e) { /* keep dataset.data */ }
     originalDataset.value = JSON.parse(JSON.stringify(dataset.value))
     cleanedSourceData.value = []
     dismissedIssues.value = new Set()
