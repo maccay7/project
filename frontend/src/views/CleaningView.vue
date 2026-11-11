@@ -125,11 +125,21 @@
               <v-chip :color="validationReport.errors ? 'error' : 'success'" variant="tonal" size="small">Errors: {{ validationReport.errors }}</v-chip>
             </div>
             <div v-if="validationReport.issues.length" class="validation-issues">
-              <div v-for="(issue, i) in validationReport.issues" :key="i" class="validation-issue" :class="'validation-issue--' + issue.level">
+              <div v-for="(issue, i) in validationReport.issues" :key="issueKey(issue) + i" class="validation-issue" :class="'validation-issue--' + issue.level">
                 <v-icon size="14">{{ issue.level === 'error' ? 'mdi-alert-circle' : 'mdi-alert-outline' }}</v-icon>
                 <span class="validation-issue-field">{{ issue.field }}</span>
                 <span v-if="issue.value" class="validation-issue-value">"{{ issue.value }}"</span>
                 <span class="validation-issue-msg">{{ issue.msg }}</span>
+                <span v-if="issue.suggestion !== undefined && issue.suggestion !== null" class="validation-issue-suggestion">→ suggest: "{{ issue.suggestion }}"</span>
+                <span class="validation-issue-actions">
+                  <v-btn v-if="issue.suggestion !== undefined && issue.suggestion !== null && issue.row !== undefined" size="x-small" variant="tonal" color="success" @click="acceptIssue(issue)">Accept</v-btn>
+                  <v-btn size="x-small" variant="text" @click="editingIssueKey === issueKey(issue) ? (editingIssueKey = null) : (editingIssueKey = issueKey(issue), editingIssueValue = issue.value)">Edit</v-btn>
+                  <v-btn size="x-small" variant="text" color="grey" @click="rejectIssue(issue)">Reject</v-btn>
+                </span>
+                <span v-if="editingIssueKey === issueKey(issue)" class="validation-issue-edit">
+                  <input v-model="editingIssueValue" class="validation-edit-input" @keyup.enter="applyManualEdit(issue)" />
+                  <v-btn size="x-small" color="primary" @click="applyManualEdit(issue)">Set</v-btn>
+                </span>
               </div>
             </div>
             <p v-else class="text-grey text-body-2">No data issues detected in the cleaned dataset.</p>
@@ -299,12 +309,54 @@ const selectedSheet = ref('')
 const detectedValues = ref({})
 const excludedFields = ref(new Set())
 
+// Required calculation inputs per instrument type (generic aliases accepted).
+const REQUIRED_BY_TYPE = {
+  'money-market': ['principal|amount|facevalue|notional', 'rate|interestrate|yield|couponrate|discountrate', 'valuationdate|issuedate|startdate', 'maturitydate'],
+  'money market': ['principal|amount|facevalue|notional', 'rate|interestrate|yield|couponrate|discountrate', 'valuationdate|issuedate|startdate', 'maturitydate'],
+  'tbills': ['facevalue|principal|amount|notional', 'purchaseprice|discountrate|rate|yield', 'issuedate|auctiondate', 'maturitydate|daystomaturity|term'],
+  'treasury bills': ['facevalue|principal|amount|notional', 'purchaseprice|discountrate|rate|yield', 'issuedate|auctiondate', 'maturitydate|daystomaturity|term'],
+  'bonds': ['facevalue|principal|amount|notional', 'couponrate|interestrate|rate', 'maturitydate', 'issuedate|valuationdate'],
+}
+const normKey = k => String(k).toLowerCase().replace(/[\s_\-]/g, '')
+const dismissedIssues = ref(new Set())
+const editingIssueKey = ref(null)
+const editingIssueValue = ref('')
+
+function validationRows() {
+  return results.value?.cleanedData || cleanedSourceData.value || []
+}
+
+// Apply a correction to the live cleaned dataset, then rebuild exclusions view.
+function applyCellCorrection(rowIdx, col, newValue) {
+  const target = cleanedSourceData.value
+  if (!target[rowIdx]) return
+  target[rowIdx] = { ...target[rowIdx], [col]: newValue }
+  cleanedSourceData.value = [...target]
+  rebuildCleanedFromExclusions()
+}
+
+function issueKey(i) { return `${i.field}|${i.row ?? ''}|${String(i.value ?? '').slice(0, 40)}` }
+
+function acceptIssue(issue) {
+  if (issue.suggestion === undefined || issue.suggestion === null) return
+  applyCellCorrection(issue.row, issue.field, issue.suggestion)
+  dismissedIssues.value = new Set([...dismissedIssues.value, issueKey(issue)])
+}
+function rejectIssue(issue) {
+  dismissedIssues.value = new Set([...dismissedIssues.value, issueKey(issue)])
+}
+function applyManualEdit(issue) {
+  applyCellCorrection(issue.row, issue.field, editingIssueValue.value)
+  editingIssueKey.value = null
+  dismissedIssues.value = new Set([...dismissedIssues.value, issueKey(issue)])
+}
+
 // Validation report over the actual cleaned dataset.
 const validationReport = computed(() => {
-  const rows = results.value?.cleanedData || cleanedSourceData.value || []
+  const rows = validationRows()
   if (!rows.length) return null
   const cols = Object.keys(rows[0] || {})
-  const norm = k => String(k).toLowerCase().replace(/[\s_-]/g, '')
+  const norm = normKey
   const seen = new Set()
   const dupCols = new Set()
   for (const c of cols) {
@@ -313,49 +365,96 @@ const validationReport = computed(() => {
     seen.add(n)
   }
   const issues = []
+  const push = (level, field, value, msg, extra = {}) =>
+    issues.push({ level, field, value, msg, row: extra.row, col: extra.col, suggestion: extra.suggestion })
   let validCols = 0
+  const NUMERIC_FIELDS = /principal|face|value|amount|price|cost|nominal|notional|balance|impuir|accrued|present|carrying|fair|market|maturityvalue/
+  const LABEL_LIKE = /^[A-Z][A-Za-z].*\b(Date|Value|Rate|Impairment|Total|Balance|Name|Type|Frequency|Convention|Currency|Status)\b/i
   for (const col of cols) {
     const lc = norm(col)
-    const isRate = /rate|yield|coupon|discount/.test(lc)
+    const isRate = /rate|yield|coupon|discount/.test(lc) && !/spread|exch|exchange/.test(lc)
     const isDate = /date|maturity|issue|settlement|valuation|auction/.test(lc)
+    const isNumeric = NUMERIC_FIELDS.test(lc)
+    const isCurrency = lc === 'currency' || lc === 'ccy'
     let hasValue = false, colIssues = 0
-    for (const row of rows.slice(0, 500)) {
+    for (let ri = 0; ri < Math.min(rows.length, 500); ri++) {
+      const row = rows[ri]
       const v = row[col]
       if (v === null || v === undefined || String(v).trim() === '') continue
       hasValue = true
       const s = String(v).trim()
       if (s.includes('[object')) {
-        issues.push({ level: 'error', field: col, value: s.slice(0, 30), msg: 'Corrupted object value — cannot be used' })
+        push('error', col, s.slice(0, 30), 'Corrupted object value — cannot be used', { row: ri, col })
         colIssues++
-      } else if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(s)) {
+      } else if (isDate || /\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}/.test(s)) {
+        const yr = s.match(/(19|20)\d{2}/)?.[0]
+        const mo = s.match(/\d{1,2}[/\-.]\d{1,2}/)?.[0]?.split(/[/\-.]/)[0]
         const d = new Date(s)
-        const yr = s.match(/\d{4}$/)?.[0]
-        if ((yr && +yr > 2100) || isNaN(d.getTime())) {
-          issues.push({ level: 'error', field: col, value: s, msg: 'Invalid or impossible date — correction required' })
+        if ((yr && +yr > 2100) || isNaN(d.getTime()) || (mo && +mo > 12)) {
+          push('error', col, s, 'Invalid or impossible date — correction required', { row: ri, col })
           colIssues++
+        }
+      } else if (isNumeric && !isRate) {
+        // Numeric fields must not contain label/header text.
+        if (/[A-Za-z]{3,}/.test(s) && !/^(usd|zwg|zwl|zar|bwp|eur|gbp|zmw|kes)\b/i.test(s)) {
+          const sug = LABEL_LIKE.test(s) ? '' : undefined
+          push('error', col, s.slice(0, 40), 'Non-numeric text in a financial field — likely a header/label captured as value', { row: ri, col, suggestion: sug })
+          colIssues++
+        } else {
+          const cleaned = s.replace(/[$,\s]/g, '')
+          if (cleaned !== '' && isNaN(parseFloat(cleaned))) {
+            push('warning', col, s.slice(0, 40), 'Value is not parseable as a number', { row: ri, col })
+            colIssues++
+          } else if (parseFloat(cleaned) < 0 && /principal|face|amount|notional/.test(lc)) {
+            push('error', col, s, 'Negative principal/face value — suspicious amount', { row: ri, col })
+            colIssues++
+          }
         }
       }
       if (isRate) {
         const n = parseFloat(s.replace(/[%\s,]/g, ''))
         if (!isNaN(n) && n > 0 && n < 1 && !s.includes('%')) {
-          issues.push({ level: 'warning', field: col, value: s, msg: `Rate stored as fraction (${n}) — confirm it means ${n * 100}%` })
+          push('warning', col, s, `Rate stored as fraction (${n}) — confirm it means ${n * 100}%`, { row: ri, col, suggestion: `${Math.round(n * 10000) / 100}%` })
+          colIssues++
+          break
+        }
+        if (!isNaN(n) && n > 100) {
+          push('error', col, s, `Rate ${n} exceeds 100% — likely a decimal or amount mis-mapping`, { row: ri, col })
+          colIssues++
+        }
+      }
+      if (isCurrency) {
+        const code = s.trim().toUpperCase()
+        if (!/^(USD|ZWG|ZWL|ZAR|BWP|EUR|GBP|ZMW|KES|ZWL)$/.test(code)) {
+          push('warning', col, s, 'Unrecognised currency code — verify against workbook', { row: ri, col })
           colIssues++
           break
         }
       }
     }
     if (dupCols.has(col)) {
-      issues.push({ level: 'warning', field: col, value: '', msg: 'Duplicate column name — may conflict with another field' })
+      push('warning', col, '', 'Duplicate column name — may conflict with another field')
       colIssues++
     }
     if (hasValue && !colIssues) validCols++
     else if (!hasValue) {
-      issues.push({ level: 'warning', field: col, value: '', msg: 'Column is completely empty' })
+      push('warning', col, '', 'Column is completely empty')
     }
   }
-  const errors = issues.filter(i => i.level === 'error').length
-  const warnings = issues.filter(i => i.level === 'warning').length
-  return { total: cols.length, valid: validCols, errors, warnings, issues: issues.slice(0, 25) }
+  // Missing required calculation inputs for this instrument type.
+  const instType = normalizeInstrumentType(dataset.value?.instrumentType)
+  const reqGroups = REQUIRED_BY_TYPE[instType] || REQUIRED_BY_TYPE['bonds']
+  for (const group of reqGroups) {
+    const alts = group.split('|')
+    const found = cols.some(c => alts.includes(norm(c)))
+    if (!found) {
+      push('error', '(missing)', '', `Required input missing: ${alts[0].replace(/([A-Z])/g, ' $1').trim()} (accepts: ${alts.join(', ')})`)
+    }
+  }
+  const visible = issues.filter(i => !dismissedIssues.value.has(issueKey(i)))
+  const errors = visible.filter(i => i.level === 'error').length
+  const warnings = visible.filter(i => i.level === 'warning').length
+  return { total: cols.length, valid: validCols, errors, warnings, issues: visible.slice(0, 40) }
 })
 
 const cleaningOptions = ref([
@@ -876,4 +975,8 @@ onMounted(async () => {
 .validation-issue-field { font-weight: 600; }
 .validation-issue-value { font-family: monospace; opacity: 0.8; }
 .validation-issue-msg { opacity: 0.85; }
+.validation-issue-suggestion { font-family: monospace; color: #2e7d32; font-weight: 600; }
+.validation-issue-actions { margin-left: auto; display: flex; gap: 2px; }
+.validation-issue-edit { display: flex; gap: 4px; align-items: center; }
+.validation-edit-input { border: 1px solid #ccc; border-radius: 4px; padding: 2px 6px; font-size: 12px; width: 140px; }
 </style>
