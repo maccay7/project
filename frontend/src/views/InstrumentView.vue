@@ -4993,8 +4993,19 @@ function closeExcelDialog() {
 }
 
 function onRawExcelUpdate(data, sourceData) {
+  const prevRaw = rawData.value
   if (sourceData?.length) originalRawData.value = sourceData
   rawData.value = data
+  // Keep the cleaning snapshot in sync when it still mirrors the raw
+  // upload (no cleaning operations applied yet). Once cleaning has
+  // transformed the data, the snapshot is preserved.
+  const mirrorsRaw = cleanedSourceData.value.length === 0 ||
+    (prevRaw.length > 0 &&
+     JSON.stringify(cleanedSourceData.value) === JSON.stringify(prevRaw))
+  if (mirrorsRaw && data.length) {
+    cleanedSourceData.value = JSON.parse(JSON.stringify(data))
+    cleanedData.value = filterExcludedFields(cleanedSourceData.value)
+  }
   debouncedSave()
 }
 
