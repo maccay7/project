@@ -2557,8 +2557,15 @@ const calculationFields = computed(() => {
     return { ...field, value, unavailableReason }
   })
   
+  // Portfolio summary cards already render these keys when there are
+  // multiple instruments — drop them here so no metric shows twice.
+  const SUMMARY_CARD_KEYS = new Set(['totalPrincipal', 'avgRate', 'weightedAvgRate'])
+  const deduped = uniqueInstrumentCount.value >= 2
+    ? result.filter(f => !SUMMARY_CARD_KEYS.has(f.key))
+    : result
+
   // Filter out boxes without values - only show calculated values
-  return result.filter(f => f.value !== null && f.value !== undefined && f.unavailableReason === null)
+  return deduped.filter(f => f.value !== null && f.value !== undefined && f.unavailableReason === null)
 })
 
 // FIX: lightweight content signature so the activeTab watch can detect
