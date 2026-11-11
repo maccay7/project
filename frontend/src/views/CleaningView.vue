@@ -114,6 +114,28 @@
           </v-card-text>
         </v-card>
 
+        <v-card v-if="validationReport" class="stats-card">
+          <v-card-title class="card-title">
+            <v-icon class="title-icon">mdi-clipboard-check-outline</v-icon> Data Validation
+          </v-card-title>
+          <v-card-text>
+            <div class="d-flex ga-4 mb-3">
+              <v-chip color="success" variant="tonal" size="small">Valid fields: {{ validationReport.valid }}</v-chip>
+              <v-chip color="warning" variant="tonal" size="small">Warnings: {{ validationReport.warnings }}</v-chip>
+              <v-chip :color="validationReport.errors ? 'error' : 'success'" variant="tonal" size="small">Errors: {{ validationReport.errors }}</v-chip>
+            </div>
+            <div v-if="validationReport.issues.length" class="validation-issues">
+              <div v-for="(issue, i) in validationReport.issues" :key="i" class="validation-issue" :class="'validation-issue--' + issue.level">
+                <v-icon size="14">{{ issue.level === 'error' ? 'mdi-alert-circle' : 'mdi-alert-outline' }}</v-icon>
+                <span class="validation-issue-field">{{ issue.field }}</span>
+                <span v-if="issue.value" class="validation-issue-value">"{{ issue.value }}"</span>
+                <span class="validation-issue-msg">{{ issue.msg }}</span>
+              </div>
+            </div>
+            <p v-else class="text-grey text-body-2">No data issues detected in the cleaned dataset.</p>
+          </v-card-text>
+        </v-card>
+
         <v-row>
           <v-col cols="12">
             <v-card class="stats-card">
@@ -276,6 +298,65 @@ const selectedSheet = ref('')
 
 const detectedValues = ref({})
 const excludedFields = ref(new Set())
+
+// Validation report over the actual cleaned dataset.
+const validationReport = computed(() => {
+  const rows = results.value?.cleanedData || cleanedSourceData.value || []
+  if (!rows.length) return null
+  const cols = Object.keys(rows[0] || {})
+  const norm = k => String(k).toLowerCase().replace(/[\s_-]/g, '')
+  const seen = new Set()
+  const dupCols = new Set()
+  for (const c of cols) {
+    const n = norm(c)
+    if (seen.has(n)) dupCols.add(c)
+    seen.add(n)
+  }
+  const issues = []
+  let validCols = 0
+  for (const col of cols) {
+    const lc = norm(col)
+    const isRate = /rate|yield|coupon|discount/.test(lc)
+    const isDate = /date|maturity|issue|settlement|valuation|auction/.test(lc)
+    let hasValue = false, colIssues = 0
+    for (const row of rows.slice(0, 500)) {
+      const v = row[col]
+      if (v === null || v === undefined || String(v).trim() === '') continue
+      hasValue = true
+      const s = String(v).trim()
+      if (s.includes('[object')) {
+        issues.push({ level: 'error', field: col, value: s.slice(0, 30), msg: 'Corrupted object value — cannot be used' })
+        colIssues++
+      } else if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(s)) {
+        const d = new Date(s)
+        const yr = s.match(/\d{4}$/)?.[0]
+        if ((yr && +yr > 2100) || isNaN(d.getTime())) {
+          issues.push({ level: 'error', field: col, value: s, msg: 'Invalid or impossible date — correction required' })
+          colIssues++
+        }
+      }
+      if (isRate) {
+        const n = parseFloat(s.replace(/[%\s,]/g, ''))
+        if (!isNaN(n) && n > 0 && n < 1 && !s.includes('%')) {
+          issues.push({ level: 'warning', field: col, value: s, msg: `Rate stored as fraction (${n}) — confirm it means ${n * 100}%` })
+          colIssues++
+          break
+        }
+      }
+    }
+    if (dupCols.has(col)) {
+      issues.push({ level: 'warning', field: col, value: '', msg: 'Duplicate column name — may conflict with another field' })
+      colIssues++
+    }
+    if (hasValue && !colIssues) validCols++
+    else if (!hasValue) {
+      issues.push({ level: 'warning', field: col, value: '', msg: 'Column is completely empty' })
+    }
+  }
+  const errors = issues.filter(i => i.level === 'error').length
+  const warnings = issues.filter(i => i.level === 'warning').length
+  return { total: cols.length, valid: validCols, errors, warnings, issues: issues.slice(0, 25) }
+})
 
 const cleaningOptions = ref([
   { key: 'removeDuplicates', label: 'Remove Duplicates', desc: 'Delete duplicate rows', value: true },
@@ -787,4 +868,12 @@ onMounted(async () => {
   .action-buttons { flex-direction: column; }
   .result-actions { flex-direction: column; }
 }
+
+.validation-issues { display: flex; flex-direction: column; gap: 4px; }
+.validation-issue { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 4px 8px; border-radius: 6px; }
+.validation-issue--error { background: #fdecea; color: #b71c1c; }
+.validation-issue--warning { background: #fff8e1; color: #8d6e00; }
+.validation-issue-field { font-weight: 600; }
+.validation-issue-value { font-family: monospace; opacity: 0.8; }
+.validation-issue-msg { opacity: 0.85; }
 </style>
