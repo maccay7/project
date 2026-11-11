@@ -8516,18 +8516,31 @@ async function buildWordHtml() {
 }
 
 async function downloadFromPreview(format) {
-  if (!reportPreviewHtml.value) return
+  if (!reportPreviewHtml.value) {
+    showSnackbar('No report preview to download — click Preview Report first.', 'warning', 5000)
+    return
+  }
   const filename = `combined_report_${Date.now()}`
-  if (format === 'html') {
-    downloadBlob(reportPreviewHtml.value, `${filename}.html`, 'text/html')
-  } else if (format === 'pdf') {
-    const win = window.open('', '_blank')
-    win.document.write(reportPreviewHtml.value)
-    win.document.close()
-    setTimeout(() => win.print(), 500)
-  } else if (format === 'word') {
-    const wordHtml = await buildWordHtml()
-    downloadBlob(wordHtml, `${filename}.doc`, 'application/msword')
+  try {
+    if (format === 'html') {
+      downloadBlob(reportPreviewHtml.value, `${filename}.html`, 'text/html')
+    } else if (format === 'pdf') {
+      const win = window.open('', '_blank')
+      if (!win) {
+        showSnackbar('Popup blocked — allow popups to download the PDF.', 'warning', 5000)
+        return
+      }
+      win.document.write(reportPreviewHtml.value)
+      win.document.close()
+      setTimeout(() => win.print(), 500)
+    } else if (format === 'word') {
+      const wordHtml = await buildWordHtml()
+      if (!wordHtml) throw new Error('empty document')
+      downloadBlob(wordHtml, `${filename}.doc`, 'application/msword')
+    }
+  } catch (e) {
+    console.error('downloadFromPreview failed:', e)
+    showSnackbar('Download failed: ' + (e?.message || e), 'error', 6000)
   }
 }
 
@@ -8708,8 +8721,12 @@ function downloadBlob(content, filename, mimeType) {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  a.remove()
+  // Revoke asynchronously — immediate revocation can cancel the download
+  // in Firefox/Edge before the browser has started reading the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 10000)
 }
 
 const autoSaveEnabled = ref(false)
