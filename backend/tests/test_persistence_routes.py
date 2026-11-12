@@ -20,10 +20,15 @@ class FakeCursor:
 
     def execute(self, query, params=None):
         self.statements.append((query, params))
+        self._last_query = query
         if self.failure and self.failure(query, params):
             raise RuntimeError('simulated database failure')
 
     def fetchone(self):
+        # information_schema existence probes must report the table as
+        # present, otherwise routes take their no-table fallback path.
+        if 'information_schema' in getattr(self, '_last_query', ''):
+            return {'COUNT(*)': 1}
         return self.row
 
     def fetchall(self):
@@ -221,8 +226,15 @@ def test_session_get_uses_actual_version_count(
 
     assert response.status_code == 200
     assert response.get_json()['data']['version_count'] == expected_count
-    assert 'WHERE vh.session_id = ui_sessions.session_id' in cursor.statements[0][0]
-    assert cursor.statements[0][1] == ('session-1', 7)
+    # The route first probes information_schema for the version_history
+    # table, so the version-count query is not necessarily statements[0].
+    version_stmt = next(
+        (st for st in cursor.statements
+         if 'WHERE vh.session_id = ui_sessions.session_id' in st[0]),
+        None,
+    )
+    assert version_stmt is not None, 'version-count query not issued'
+    assert version_stmt[1] == ('session-1', 7)
 
 
 def test_version_history_database_failure_is_not_reported_as_empty_success(monkeypatch):

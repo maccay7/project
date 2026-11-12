@@ -2654,6 +2654,10 @@ const valuationAssumptions = computed(() => {
     if (rs) rateSources.add(String(rs))
   })
   rateSources.forEach(rs => push(`Rate source: ${rs}`))
+  const bench = allCalculations.value?.fred?.benchmark_rate
+  if (bench != null) {
+    push(`Benchmark rate (${bench}%) shown for reference only — not used in pricing`)
+  }
   return out
 })
 const assumptionsPanelOpen = ref(false)

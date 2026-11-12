@@ -376,8 +376,11 @@ def sessions_routes(app):
             if not row:
                 return jsonify({'success': True, 'data': None, 'message': 'Session not found'}), 200
 
-            # Use version_count_from_history if available, otherwise fall back to version_count column
-            row['version_count'] = row.get('version_count_from_history') or row.get('version_count') or 0
+            # Use version_count_from_history if available, otherwise fall back
+            # to version_count column. `or` would treat a legitimate 0 history
+            # count as missing — check for None explicitly.
+            hist = row.get('version_count_from_history')
+            row['version_count'] = hist if hist is not None else (row.get('version_count') or 0)
 
         versions = _decode_json(row.get('versions'), [])
         instrument_workflows = _decode_json(row.get('instrument_workflows'), {})
