@@ -2647,8 +2647,13 @@ const valuationAssumptions = computed(() => {
     if (s && !seen.has(s)) { seen.add(s); out.push(s) }
   }
   ;(allCalculations.value?.assumptions_applied || []).forEach(push)
-  ;(instrumentSummary.value?.rows || []).forEach(r =>
-    (r?.assumptions_applied || r?.assumptionsApplied || []).forEach(push))
+  const rateSources = new Set()
+  ;(instrumentSummary.value?.rows || []).forEach(r => {
+    (r?.assumptions_applied || r?.assumptionsApplied || []).forEach(push)
+    const rs = r?.rate_source || r?.rateSource
+    if (rs) rateSources.add(String(rs))
+  })
+  rateSources.forEach(rs => push(`Rate source: ${rs}`))
   return out
 })
 const assumptionsPanelOpen = ref(false)

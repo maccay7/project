@@ -1689,8 +1689,14 @@ def calculate_money_market(item: Dict[str, Any],
     rate_pct = (rate_frac * 100.0) if rate_frac is not None else None
     discount_rate_pct = (discount_rate_frac * 100.0) if discount_rate_frac is not None else None
 
+    _rate_source = ("nss_interpolated" if _nss_pct is not None
+                    else ("sheet_provided" if (rate_frac is not None
+                           or discount_rate_frac is not None
+                           or purchase_price_in is not None)
+                          else "none"))
     result: Dict[str, Any] = {
         "instrument_type": "money-market",
+        "rate_source": _rate_source,
         "principal": round_money(principal),
         "interest_rate": _rate(rate_pct) if rate_pct is not None else None,
         "discount_rate": _rate(discount_rate_pct) if discount_rate_pct is not None else None,
@@ -2159,8 +2165,14 @@ def calculate_treasury_bill(item: Dict[str, Any],
     yield_rate_pct_in = (yield_rate_in_frac * 100.0
                          if yield_rate_in_frac is not None else None)
 
+    _rate_source = ("nss_interpolated" if _nss_pct is not None
+                    else ("sheet_provided" if (discount_rate_in_frac is not None
+                           or yield_rate_in_frac is not None
+                           or purchase_price_in is not None)
+                          else "none"))
     result: Dict[str, Any] = {
         "instrument_type": "tbills",
+        "rate_source": _rate_source,
         "face_value": round_money(face),
         "day_count_convention": day_count,
         "currency": currency,
@@ -2596,8 +2608,13 @@ def calculate_bond(item: Dict[str, Any],
         elif years is not None:
             days_to_maturity = round(years * 365)
 
+    _rate_source = ("nss_interpolated" if _nss_pct is not None
+                    else ("sheet_provided" if (ytm_input_frac is not None
+                           or price_in is not None)
+                          else "none"))
     result: Dict[str, Any] = {
         "instrument_type": "bonds",
+        "rate_source": _rate_source,
         "face_value": round_money(face),
         "coupon_rate": _rate(coupon_rate_pct) if coupon_rate_pct is not None else None,
         "years_to_maturity": round(years, 4) if years is not None else None,
