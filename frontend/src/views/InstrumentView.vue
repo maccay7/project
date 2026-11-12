@@ -3895,23 +3895,23 @@ async function handleMultiTableDetect(event) {
             }
           }
         }
-        // Tabular sheets (header row + instrument rows): emit one
-        // instrument record per data row instead of a single merged row.
+        // Autodetect always yields ONE instrument per table/sheet — the
+        // instrument name is the sheet name. Tabular rows are the
+        // instrument's data rows, not separate instruments; the explicit
+        // column-mapping path is what produces many instruments.
         const tabularRecords = detectionResult?.tabularRecords || []
         if (tabularRecords.length > 0) {
-          tabularRecords.forEach((rec, idx) => {
-            const recFields = { ...(rec.fields || {}) }
-            const recName = recFields.instrument_name || recFields.instrument_id ||
-              recFields.short_name || `${table.tableName} #${idx + 1}`
-            detectedInstruments.push({
-              tableName: `${table.tableName} #${idx + 1}`,
-              instrumentName: recName,
-              fields: recFields,
-              fieldsWithMetadata: rec.fieldsWithMetadata || {},
-              currencies: detectionResult.currencies || [],
-              missingFields: [],
-              range: table.range
-            })
+          const first = tabularRecords[0] || {}
+          const recFields = { ...(first.fields || {}) }
+          detectedInstruments.push({
+            tableName: table.tableName,
+            instrumentName: event.sheetName || table.tableName,
+            fields: recFields,
+            fieldsWithMetadata: first.fieldsWithMetadata || {},
+            tabularRows: tabularRecords,
+            currencies: detectionResult.currencies || [],
+            missingFields: [],
+            range: table.range
           })
         } else if (Object.keys(allFields).length > 0) {
           detectedInstruments.push({
