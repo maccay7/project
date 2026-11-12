@@ -237,9 +237,14 @@
                   </v-col>
                 </v-row>
 
+                <div class="validation-filter-bar">
+                  <button :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'">Show All</button>
+                  <button :class="{ active: statusFilter === 'warning' }" @click="statusFilter = 'warning'">Warnings Only</button>
+                  <button :class="{ active: statusFilter === 'error' }" @click="statusFilter = 'error'">Errors Only</button>
+                </div>
                 <ExcelViewer
-                  :data="results.cleanedData"
-                  :headers="Object.keys(results.cleanedData[0] || {})"
+                  :data="filteredPreviewRows"
+                  :headers="previewHeaders"
                   @data-update="handleCleanedUpdate"
                 />
               </v-card-text>
@@ -311,7 +316,7 @@ const excludedFields = ref(new Set())
 
 // Required calculation inputs come from the shared backend-mirror registry
 // (calcFieldRegistry.js) — same groups the calculation engine validates.
-import { CALC_REQUIRED_GROUPS, registryType, normCalcKey } from '@/utils/calcFieldRegistry.js'
+import { CALC_REQUIRED_GROUPS, registryType, normCalcKey, validateCalcRow } from '@/utils/calcFieldRegistry.js'
 const normKey = k => String(k).toLowerCase().replace(/[\s_\-]/g, '')
 const dismissedIssues = ref(new Set())
 const editingIssueKey = ref(null)
@@ -713,12 +718,49 @@ async function deleteData() {
   } catch (err) { console.error(err); alert('Error deleting dataset') }
 }
 
+const statusFilter = ref('all')
+const previewRows = computed(() => {
+  const rows = results.value?.cleanedData || []
+  const type = registryType(dataset.value?.instrumentType)
+  const dateRe = /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/
+  const numericColRe = /(principal|face|price|value|rate|amount|discount|coupon|yield|nominal|notional)/i
+  return rows.map(row => {
+    const v = validateCalcRow(row, type)
+    let level = 'valid', status = '✅ Valid', msg = ''
+    if (v.missing.length) {
+      level = 'error'
+      status = '❌ Error'
+      msg = 'Missing: ' + v.missing.map(m => m.label).join(', ')
+    } else {
+      for (const [k, val] of Object.entries(row || {})) {
+        if (typeof val === 'string' && dateRe.test(val.trim()) && numericColRe.test(k)) {
+          level = 'warning'; status = '⚠️ Warning'
+          msg = `${k} value '${val}' appears to be a date — please verify`
+          break
+        }
+      }
+    }
+    return { ...row, __validation: status, __validationMsg: msg, __level: level }
+  })
+})
+const filteredPreviewRows = computed(() =>
+  statusFilter.value === 'all'
+    ? previewRows.value
+    : previewRows.value.filter(r => r.__level === statusFilter.value)
+)
+const previewHeaders = computed(() => [
+  ...Object.keys(results.value?.cleanedData?.[0] || {}),
+  '__validation', '__validationMsg'
+])
+
 function handleCleanedUpdate(newData) {
   if (results.value) {
-    cleanedSourceData.value = newData.map((row, index) => ({
-      ...(cleanedSourceData.value[index] || {}),
-      ...row
-    }))
+    cleanedSourceData.value = newData.map((row, index) => {
+      const clean = Object.fromEntries(
+        Object.entries(row || {}).filter(([k]) => !k.startsWith('__'))
+      )
+      return { ...(cleanedSourceData.value[index] || {}), ...clean }
+    })
     const excludedNow = new Set(excludedFields.value)
     const originalCols = Object.keys(cleanedSourceData.value[0] || {})
     const currentCols = new Set(Object.keys(newData[0] || {}))
@@ -992,4 +1034,10 @@ onMounted(async () => {
 .validation-issue-actions { margin-left: auto; display: flex; gap: 2px; }
 .validation-issue-edit { display: flex; gap: 4px; align-items: center; }
 .validation-edit-input { border: 1px solid #ccc; border-radius: 4px; padding: 2px 6px; font-size: 12px; width: 140px; }
+.validation-filter-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+.validation-filter-bar button {
+  padding: 5px 12px; border: 1px solid #c5cbe0; border-radius: 6px;
+  background: #fff; font-size: 12px; cursor: pointer; color: #33415c;
+}
+.validation-filter-bar button.active { background: #0B2A44; color: #fff; border-color: #0B2A44; }
 </style>

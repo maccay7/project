@@ -773,6 +773,20 @@
                   </div>
                 </div>
 
+                <div v-if="valuationAssumptions.length" class="assumptions-panel">
+                  <button class="assumptions-panel__toggle" @click="assumptionsPanelOpen = !assumptionsPanelOpen">
+                    <span>{{ assumptionsPanelOpen ? '▾' : '▸' }} Valuation Assumptions ({{ valuationAssumptions.length }})</span>
+                  </button>
+                  <ul v-if="assumptionsPanelOpen" class="assumptions-panel__list">
+                    <li v-for="(a, i) in valuationAssumptions" :key="i">
+                      <span :class="a.toLowerCase().includes('overridden') || a.toLowerCase().includes('ignored') ? 'assumption--warn' : 'assumption--ok'">
+                        {{ a.toLowerCase().includes('overridden') || a.toLowerCase().includes('ignored') ? '⚠️' : '✅' }}
+                      </span>
+                      {{ a }}
+                    </li>
+                  </ul>
+                </div>
+
                 <div v-if="allCalculations.fred?.benchmark_rate" class="comparison-card fred-calc-card">
                   <div class="comparison-item">
                     <span class="comparison-label">FRED market benchmark ({{ allCalculations.fred.series_label }}):</span>
@@ -2621,6 +2635,20 @@ function normalizeFieldName(fieldName) {
     .replace(/_+/g, '_')
     .toLowerCase()
 }
+
+const valuationAssumptions = computed(() => {
+  const seen = new Set()
+  const out = []
+  const push = a => {
+    const s = String(a || '').trim()
+    if (s && !seen.has(s)) { seen.add(s); out.push(s) }
+  }
+  ;(allCalculations.value?.assumptions_applied || []).forEach(push)
+  ;(instrumentSummary.value?.rows || []).forEach(r =>
+    (r?.assumptions_applied || r?.assumptionsApplied || []).forEach(push))
+  return out
+})
+const assumptionsPanelOpen = ref(false)
 
 const overallStatusDismissed = ref(false)
 const overallStatusBanner = computed(() => {
@@ -9703,4 +9731,13 @@ onBeforeUnmount(() => {
   color: inherit; opacity: 0.7; padding: 0 4px;
 }
 .overall-status-banner__close:hover { opacity: 1; }
+.assumptions-panel { margin: 0 0 12px; }
+.assumptions-panel__toggle {
+  background: #f5f7ff; border: 1px solid #d0d7f0; border-radius: 6px;
+  padding: 6px 12px; font-size: 13px; cursor: pointer; color: #33415c;
+}
+.assumptions-panel__list { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: #444; }
+.assumptions-panel__list li { margin-bottom: 4px; }
+.assumption--warn { color: #b26a00; }
+.assumption--ok { color: #1b7f3b; }
 </style>
