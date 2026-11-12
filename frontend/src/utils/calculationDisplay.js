@@ -443,7 +443,12 @@ export function calculatedValuesOnlyRows (rows, inputFields = [], instrumentType
     'warning', 'warnings', 'calculationerrors', 'derivations',
     'displayderivations', 'missingfields', 'missingprerequisites',
     'invalidfields', 'parvalue', 'notional', 'daycountconvention',
-    'country', 'valuationcurrency'
+    'country', 'valuationcurrency',
+    // Input fields echoed by backend calculation rows — never calculated
+    // outputs, so they must not appear in the Calculated Values view.
+    'valuationdate', 'maturitydate', 'issuedate', 'maturitydates',
+    'currency', 'ccy', 'currencycode', 'instrumentid', 'isin',
+    'counterparty', 'portfolio', 'portfolioname', 'source', 'sourcecell'
   ])
   const displayName = key => {
     const normalized = normalize(key)
