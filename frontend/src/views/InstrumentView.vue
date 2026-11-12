@@ -773,7 +773,10 @@
                   </div>
                 </div>
 
-                <div v-if="valuationAssumptions.length" class="assumptions-panel">
+                <div v-if="initialCalculationCompleted && !valuationAssumptions.length" class="assumptions-panel assumptions-panel--empty">
+                  No assumptions applied — all inputs provided explicitly.
+                </div>
+                <div v-else-if="valuationAssumptions.length" class="assumptions-panel">
                   <button class="assumptions-panel__toggle" @click="assumptionsPanelOpen = !assumptionsPanelOpen">
                     <span>{{ assumptionsPanelOpen ? '▾' : '▸' }} Valuation Assumptions ({{ valuationAssumptions.length }})</span>
                   </button>
@@ -9740,4 +9743,8 @@ onBeforeUnmount(() => {
 .assumptions-panel__list li { margin-bottom: 4px; }
 .assumption--warn { color: #b26a00; }
 .assumption--ok { color: #1b7f3b; }
+.assumptions-panel--empty {
+  padding: 8px 14px; font-size: 13px; color: #666;
+  background: #fafafa; border: 1px dashed #ddd; border-radius: 6px;
+}
 </style>

@@ -289,7 +289,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import FixedLayout from '../components/FixedLayout.vue'
 import ExcelViewer from '../components/ExcelViewer.vue'
@@ -718,7 +718,10 @@ async function deleteData() {
   } catch (err) { console.error(err); alert('Error deleting dataset') }
 }
 
-const statusFilter = ref('all')
+const statusFilter = ref(
+  (() => { try { return sessionStorage.getItem('cleaning_status_filter') || 'all' } catch (e) { return 'all' } })()
+)
+watch(statusFilter, v => { try { sessionStorage.setItem('cleaning_status_filter', v) } catch (e) {} })
 const previewRows = computed(() => {
   const rows = results.value?.cleanedData || []
   const type = registryType(dataset.value?.instrumentType)
@@ -740,7 +743,7 @@ const previewRows = computed(() => {
         }
       }
     }
-    return { ...row, __validation: status, __validationMsg: msg, __level: level }
+    return { ...row, __validation: status, __validationMsg: msg.length > 40 ? msg.slice(0, 40) + '…' : msg, __level: level }
   })
 })
 const filteredPreviewRows = computed(() =>
