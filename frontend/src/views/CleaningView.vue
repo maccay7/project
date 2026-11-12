@@ -237,6 +237,22 @@
                   </v-col>
                 </v-row>
 
+                <div v-if="isSingleInstrument" class="single-instrument-panel">
+                  <div class="single-instrument-panel__title">Single Instrument — choose the value used for each field</div>
+                  <div class="field-choices">
+                    <div v-for="(vals, col) in fieldChoices" :key="col" class="field-choice">
+                      <label>{{ col }}</label>
+                      <select :value="chosenValueFor(col)" @change="setChosenValue(col, $event.target.value)">
+                        <option v-for="v in vals" :key="v" :value="v">{{ v }}</option>
+                      </select>
+                      <button class="field-choice__delete" @click="deleteField(col)" title="Delete field">×</button>
+                    </div>
+                  </div>
+                  <div class="add-field-row">
+                    <input v-model="newFieldName" placeholder="New field name" @keyup.enter="addField" />
+                    <button class="btn-secondary" @click="addField">Add Field</button>
+                  </div>
+                </div>
                 <div class="validation-filter-bar">
                   <button :class="{ active: statusFilter === 'all' }" @click="statusFilter = 'all'">Show All</button>
                   <button :class="{ active: statusFilter === 'warning' }" @click="statusFilter = 'warning'">Warnings Only</button>
@@ -756,6 +772,90 @@ const previewHeaders = computed(() => [
   ...Object.keys(results.value?.cleanedData?.[0] || {})
 ])
 
+// ── Single-instrument mode ──────────────────────────────────────────
+// One sheet = one instrument. Fields may have multiple candidate values
+// (one per source row); the user picks the value used for the instrument.
+const isSingleInstrument = computed(() => {
+  const rows = cleanedSourceData.value.length ? cleanedSourceData.value : (results.value?.cleanedData || [])
+  if (!rows.length) return false
+  const names = new Set(rows.map(r => String(r?.InstrumentName ?? r?.instrument_name ?? r?.name ?? '')).filter(Boolean))
+  return names.size <= 1
+})
+const fieldChoices = computed(() => {
+  const rows = cleanedSourceData.value.length ? cleanedSourceData.value : (results.value?.cleanedData || [])
+  if (!rows.length) return {}
+  const cols = [...new Set(rows.flatMap(r => Object.keys(r || {})))].filter(k => !k.startsWith('__') && k !== 'Status' && k !== 'StatusMessage')
+  const out = {}
+  for (const col of cols) {
+    const seen = new Map()
+    rows.forEach((r, i) => {
+      const v = r?.[col]
+      if (v === null || v === undefined || v === '') return
+      const key = String(v)
+      if (!seen.has(key)) seen.set(key, i)
+    })
+    if (seen.size > 1) out[col] = [...seen.keys()]
+  }
+  return out
+})
+const chosenValues = ref({})
+const newFieldName = ref('')
+
+function chosenValueFor(col) {
+  if (chosenValues.value[col] !== undefined) return chosenValues.value[col]
+  const rows = cleanedSourceData.value.length ? cleanedSourceData.value : (results.value?.cleanedData || [])
+  for (const r of rows) { const v = r?.[col]; if (v !== null && v !== undefined && v !== '') return v }
+  return ''
+}
+function setChosenValue(col, val) {
+  chosenValues.value = { ...chosenValues.value, [col]: val }
+  rebuildSingleInstrumentRow()
+}
+function rebuildSingleInstrumentRow() {
+  if (!isSingleInstrument.value) return
+  const rows = cleanedSourceData.value.length ? cleanedSourceData.value : (results.value?.cleanedData || [])
+  const cols = [...new Set(rows.flatMap(r => Object.keys(r || {})))].filter(k => !k.startsWith('__') && k !== 'Status' && k !== 'StatusMessage' && k !== '__level')
+  const single = {}
+  for (const col of cols) single[col] = chosenValueFor(col)
+  // Preserve the chosen row as the instrument's single data row.
+  const target = results.value?.cleanedData ? results.value.cleanedData : null
+  if (target) {
+    results.value.cleanedData = [single]
+    dataset.value.data = [single]
+  } else if (cleanedSourceData.value.length) {
+    cleanedSourceData.value = [single]
+  }
+  persistSingleRow(single)
+}
+function persistSingleRow(single) {
+  try {
+    const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
+    const type = normalizeInstrumentType(dataset.value?.instrumentType)
+    if (!sid) return
+    sessionManager.getInstrumentWorkflow(sid, type).then(wf => {
+      if (wf) sessionManager.saveInstrumentWorkflow(sid, type, {
+        ...wf, cleanedData: [single], cleanedSourceData: cleanedSourceData.value
+      })
+    }).catch(() => {})
+  } catch (e) {}
+}
+function addField() {
+  const name = (newFieldName.value || '').trim()
+  if (!name) return
+  const rows = cleanedSourceData.value.length ? cleanedSourceData.value : (results.value?.cleanedData || [])
+  for (const r of rows) if (!(name in r)) r[name] = ''
+  cleanedSourceData.value = [...cleanedSourceData.value]
+  newFieldName.value = ''
+  rebuildSingleInstrumentRow()
+}
+function deleteField(col) {
+  const rows = cleanedSourceData.value.length ? cleanedSourceData.value : (results.value?.cleanedData || [])
+  for (const r of rows) delete r[col]
+  delete chosenValues.value[col]
+  cleanedSourceData.value = [...cleanedSourceData.value]
+  rebuildSingleInstrumentRow()
+}
+
 function handleCleanedUpdate(newData) {
   if (results.value) {
     cleanedSourceData.value = newData.map((row, index) => {
@@ -1043,4 +1143,16 @@ onMounted(async () => {
   background: #fff; font-size: 12px; cursor: pointer; color: #33415c;
 }
 .validation-filter-bar button.active { background: #0B2A44; color: #fff; border-color: #0B2A44; }
+.single-instrument-panel {
+  border: 1px solid #d0d7f0; border-radius: 8px; padding: 10px 14px;
+  margin-bottom: 12px; background: #f7f9ff;
+}
+.single-instrument-panel__title { font-size: 13px; font-weight: 600; color: #33415c; margin-bottom: 8px; }
+.field-choices { display: flex; flex-wrap: wrap; gap: 10px; }
+.field-choice { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.field-choice label { font-weight: 600; color: #445; }
+.field-choice select { max-width: 180px; padding: 3px 6px; font-size: 12px; }
+.field-choice__delete { background: none; border: none; color: #c00; cursor: pointer; font-size: 14px; }
+.add-field-row { display: flex; gap: 8px; margin-top: 8px; }
+.add-field-row input { padding: 4px 8px; font-size: 12px; border: 1px solid #c5cbe0; border-radius: 6px; }
 </style>
