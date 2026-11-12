@@ -743,7 +743,7 @@ const previewRows = computed(() => {
         }
       }
     }
-    return { ...row, __validation: status, __validationMsg: msg.length > 40 ? msg.slice(0, 40) + '…' : msg, __level: level }
+    return { ...row, 'Status': status, 'StatusMessage': msg.length > 40 ? msg.slice(0, 40) + '…' : msg, __level: level }
   })
 })
 const filteredPreviewRows = computed(() =>
@@ -752,15 +752,15 @@ const filteredPreviewRows = computed(() =>
     : previewRows.value.filter(r => r.__level === statusFilter.value)
 )
 const previewHeaders = computed(() => [
-  ...Object.keys(results.value?.cleanedData?.[0] || {}),
-  '__validation', '__validationMsg'
+  'Status', 'StatusMessage',
+  ...Object.keys(results.value?.cleanedData?.[0] || {})
 ])
 
 function handleCleanedUpdate(newData) {
   if (results.value) {
     cleanedSourceData.value = newData.map((row, index) => {
       const clean = Object.fromEntries(
-        Object.entries(row || {}).filter(([k]) => !k.startsWith('__'))
+        Object.entries(row || {}).filter(([k]) => !k.startsWith('__') && k !== 'Status' && k !== 'StatusMessage')
       )
       return { ...(cleanedSourceData.value[index] || {}), ...clean }
     })
