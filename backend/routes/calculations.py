@@ -991,6 +991,134 @@ def calculations_routes(app):
 
         return jsonify({'success': True, 'data': result})
 
+    @app.route('/api/aggregate/results', methods=['POST', 'OPTIONS'])
+    def aggregate_results():
+        """Aggregate already-calculated per-instrument result rows from
+        multiple worksheets/workbooks. Mirrors the frontend computeAggregate
+        contract: totals, averages, weighted averages, counts, and
+        per-currency grouping (mixed currencies are never combined)."""
+        if request.method == 'OPTIONS':
+            return '', 200
+        payload = request.get_json() or {}
+        rows = payload.get('rows', [])
+        if not isinstance(rows, list):
+            return jsonify({'success': False, 'message': 'rows must be a list'}), 400
+
+        def norm(k):
+            return ''.join(ch for ch in str(k).lower() if ch.isalnum())
+
+        def num(row, *aliases):
+            idx = {norm(k): v for k, v in (row or {}).items()}
+            for a in aliases:
+                v = idx.get(norm(a))
+                if v is None or v == '':
+                    continue
+                try:
+                    return float(str(v).replace('%', '').replace(',', '').replace('$', '').strip())
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        VALUE_KEYS = ('Total Value', 'total_value', 'Calculated Value',
+                      'calculated_value', 'Value', 'value', 'total_value_calc')
+        RATE_KEYS = ('Avg Rate', 'avg_rate', 'Rate', 'rate', 'Interest Rate',
+                     'interest_rate', 'Coupon Rate', 'coupon_rate',
+                     'Discount Rate', 'discount_rate', 'Yield', 'yield')
+        DAYS_KEYS = ('Days to Maturity', 'days_to_maturity', 'Avg Days to Maturity',
+                     'avg_days_to_maturity', 'Term', 'term', 'Term Days', 'term_days')
+        COUPON_KEYS = ('Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate')
+        DISC_KEYS = ('Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate')
+
+        def ccy(row):
+            for k in ('Currency', 'currency', 'Currency Code', 'ccy'):
+                v = row.get(k)
+                if v not in (None, ''):
+                    return str(v).strip().upper() or 'UNSPECIFIED'
+            return 'UNSPECIFIED'
+
+        groups = {}
+        for r in rows:
+            groups.setdefault(ccy(r), []).append(r)
+
+        def aggregate_group(group_rows):
+            total = 0.0
+            rate_sum = 0.0
+            weighted = 0.0
+            n = 0
+            day_vals = []
+            coupon_vals = []
+            disc_vals = []
+            for r in group_rows:
+                v = num(r, *VALUE_KEYS)
+                rate = num(r, *RATE_KEYS)
+                if v is not None:
+                    total += v
+                if rate is not None:
+                    rate_sum += rate
+                if v is not None and rate is not None:
+                    weighted += v * rate
+                d = num(r, *DAYS_KEYS)
+                if d is not None and d > 0:
+                    day_vals.append(d)
+                c = num(r, *COUPON_KEYS)
+                if c is not None:
+                    coupon_vals.append(c)
+                dc = num(r, *DISC_KEYS)
+                if dc is not None:
+                    disc_vals.append(dc)
+                n += 1
+            count = len(group_rows)
+            return {
+                'totalValue': round(total, 2),
+                'totalPrincipal': round(total, 2),
+                'instrumentCount': count,
+                'avgRate': round(rate_sum / count, 4) if count else None,
+                'weightedAvgRate': round(weighted / total, 4) if total > 0 else None,
+                'avgDaysToMaturity': round(sum(day_vals) / len(day_vals), 2) if day_vals else None,
+                'avgCouponRate': round(sum(coupon_vals) / len(coupon_vals), 4) if coupon_vals else None,
+                'weightedAvgCoupon': round(weighted / total, 4) if total > 0 else None,
+                'avgDiscountRate': round(sum(disc_vals) / len(disc_vals), 4) if disc_vals else None,
+                'weightedAvgDiscount': round(weighted / total, 4) if total > 0 else None,
+                'avgInvestment': round(total / count, 2) if count else None,
+                'avgYTM': round(rate_sum / count, 4) if count else None,
+            }
+
+        requires_sep = len(groups) > 1
+        result = {'success': True, 'rows': len(rows)}
+        if requires_sep:
+            result['warning'] = (
+                'Portfolio totals are not combined because instruments have '
+                f"different currencies: {', '.join(sorted(groups))}."
+            )
+            result['currency_groups'] = {
+                c: {**aggregate_group(g), 'currency': c, 'instrument_count': len(g)}
+                for c, g in groups.items()
+            }
+            # Combined monetary totals stay null — never sum across currencies.
+            for k in ('totalValue', 'totalPrincipal', 'totalInterest',
+                      'interestEarned', 'totalPurchasePrice', 'totalDiscount'):
+                result[k] = None
+            # Unitless averages may still be reported.
+            all_rows = rows
+            count = len(all_rows)
+            rate_sum = sum(v for v in (num(r, *RATE_KEYS) for r in all_rows) if v is not None)
+            result.update({
+                'instrumentCount': count,
+                'avgRate': round(rate_sum / count, 4) if count else None,
+                'avgDaysToMaturity': None,
+                'avgCouponRate': None,
+                'avgDiscountRate': None,
+            })
+        else:
+            only = next(iter(groups.values()), [])
+            currency = next(iter(groups.keys()), 'UNSPECIFIED') if groups else 'UNSPECIFIED'
+            agg = aggregate_group(only)
+            result.update(agg)
+            result['currency'] = currency
+            result['currency_groups'] = {currency: {**agg, 'currency': currency,
+                                                    'instrument_count': len(only)}}
+        return jsonify(result)
+
     @app.route('/api/calculate/comprehensive', methods=['POST', 'OPTIONS'])
     def calculate_comprehensive():
         if request.method == 'OPTIONS':

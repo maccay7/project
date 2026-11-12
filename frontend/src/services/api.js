@@ -125,6 +125,8 @@ export const calculationsAPI = {
       session_id: sessionId,
       ...params
     }),
+  aggregateResults: (rows = [], instrumentType = null) =>
+    callAPI('/api/aggregate/results', 'POST', { rows, instrument_type: instrumentType }),
   getHistory: () => callAPI('/api/calculations/history'),
   getLatest: (datasetId) => callAPI(`/api/calculations/latest?dataset_id=${encodeURIComponent(datasetId)}`),
   getBySession: (sessionId) => callAPI(`/api/calculations/session/${encodeURIComponent(sessionId)}`),

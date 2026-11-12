@@ -2793,57 +2793,6 @@ function computeAnalytics(rows) {
   return stats
 }
 
-function computeAggregate(rows) {
-  const agg = {
-    totalValue: 0, instrumentCount: 0, avgRate: 0, weightedAvgRate: 0,
-    totalInterest: null, interestEarned: null, annualYield: null,
-    effectiveAnnualRate: null, avgDaysToMaturity: null, totalPrincipal: 0,
-    avgCouponRate: 0, weightedAvgCoupon: 0, totalAnnualIncome: null, avgYTM: null, duration: null,
-    avgDiscountRate: 0, weightedAvgDiscount: 0, totalDiscount: null, effectiveYield: null,
-    bondEquivalentYield: null, totalPurchasePrice: null, avgInvestment: null,
-    holdingPeriodYield: null, annualizedYield: null, pricePer100: null
-  }
-  if (!rows || !rows.length) return agg
-  const getNumber = (row, ...keys) => {
-    for (const key of keys) {
-      const val = row[key]
-      if (val !== undefined && val !== null && val !== '') {
-        const num = parseFloat(val)
-        if (!isNaN(num)) return num
-      }
-    }
-    return 0
-  }
-  let total = 0, count = 0, rateSum = 0, weightedSum = 0
-  rows.forEach(row => {
-    const value = getNumber(row, 'Total Value', 'total_value', 'Calculated Value', 'calculated_value', 'Value', 'value')
-    const rate = getNumber(row, 'Avg Rate', 'avg_rate', 'Rate', 'rate', 'Interest Rate', 'interest_rate', 'Coupon Rate', 'coupon_rate', 'Discount Rate', 'discount_rate', 'Yield', 'yield')
-    total += value
-    count++
-    rateSum += rate
-    weightedSum += value * rate
-  })
-  const avgRate = count > 0 ? rateSum / count : 0
-  const weightedAvg = total > 0 ? weightedSum / total : 0
-  const daysValues = rows.map(r => parseFloat(r['Days to Maturity'] || r['days_to_maturity'] || r['Term'] || r['term'] || r['Avg Days to Maturity'] || r['avg_days_to_maturity'] || NaN)).filter(v => !isNaN(v) && v > 0)
-  const avgDays = daysValues.length ? daysValues.reduce((a, b) => a + b, 0) / daysValues.length : null
-  agg.totalValue = total
-  agg.instrumentCount = count
-  agg.avgRate = avgRate
-  agg.weightedAvgRate = weightedAvg
-  agg.avgDaysToMaturity = avgDays
-  agg.totalPrincipal = total
-  const couponSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Coupon Rate', 'avg_coupon_rate', 'Coupon Rate', 'coupon_rate'), 0)
-  agg.avgCouponRate = count > 0 ? couponSum / count : 0
-  agg.weightedAvgCoupon = weightedAvg
-  agg.avgYTM = avgRate || null
-  const discountSum = rows.reduce((sum, row) => sum + getNumber(row, 'Avg Discount Rate', 'avg_discount_rate', 'Discount Rate', 'discount_rate'), 0)
-  agg.avgDiscountRate = count > 0 ? discountSum / count : 0
-  agg.weightedAvgDiscount = weightedAvg
-  agg.avgInvestment = count > 0 ? total / count : null
-  return agg
-}
-
 // FIX: previous version read only camelCase/spaced keys
 // ('FaceValue', 'InterestRate', 'DaysToMaturity'), which never exist in
 // the cleanedData produced by ExcelViewer (those are the ORIGINAL Excel
@@ -2945,7 +2894,7 @@ function runInstrumentCalculations(row, instrumentType) {
 // ─────────────────────────────────────────────────────────────
 // FIX 4 — processInstrumentData dedupes columns.
 // ─────────────────────────────────────────────────────────────
-function processInstrumentData(sheetName, data, instrumentType) {
+async function processInstrumentData(sheetName, data, instrumentType) {
   if (!data || !data.length) return
   const rows = data.map((row, index) => {
     const nameCol = columnMapping.value['Instrument Name'] || 'Instrument'
@@ -2968,11 +2917,21 @@ function processInstrumentData(sheetName, data, instrumentType) {
   const allCols = new Set()
   mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
   instrumentSummary.value = { columns: dedupeColumns(Array.from(allCols)), rows: mergedRows }
-  const agg = computeAggregate(mergedRows)
-  agg.instrumentCount = mergedRows.length
-  allCalculations.value = agg
-  selectedCalculations.value = agg
-  calculations.value = agg
+  // Aggregation is performed by the backend — the frontend only displays
+  // backend-returned figures. No client-side summation.
+  try {
+    const aggRes = await api.calculationsAPI.aggregateResults(mergedRows, instrumentType)
+    const agg = (aggRes && aggRes.success && aggRes.data) ? aggRes.data
+      : (aggRes && aggRes.success) ? aggRes
+      : { instrumentCount: mergedRows.length }
+    allCalculations.value = { ...agg }
+    selectedCalculations.value = { ...agg }
+    calculations.value = { ...agg }
+  } catch (e) {
+    console.error('Backend aggregation failed:', e)
+    showSnackbar('Aggregation failed — backend returned no results.', 'error', 6000)
+    return { success: false, rows, aggregate: {} }
+  }
   saveSessionData()
   return { success: true, rows, aggregate: agg }
 }
