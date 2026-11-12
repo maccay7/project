@@ -4050,6 +4050,8 @@ function useMultiTableDetectedFields() {
   )
   autoDetectedFields.value = mergedUse.fields
   activeTab.value = 'cleaning'
+  // Persist detected rows so the Cleaning page shows them.
+  debouncedSave(true)
 }
 
 // Fill calculation inputs that exist in the row under other names or
@@ -4422,6 +4424,8 @@ async function useDetectedFields() {
   showWorkbookViewer.value = false
   await nextTick()
   activeTab.value = 'cleaning'
+  // Persist detected rows so the Cleaning page shows them.
+  debouncedSave(true)
   await nextTick()
 }
 
