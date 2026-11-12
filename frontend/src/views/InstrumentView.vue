@@ -3498,11 +3498,6 @@ function handleViewResults(sheetName) {
 
 function applyCurrentMapping() {
   if (!originalRawData.value.length) return
-  if (sheetType.value === 'single') {
-    rawData.value = originalRawData.value
-    mappingApplied.value = true
-    return
-  }
   const required = requiredColumns.value || []
   const hasAnyMapping = required.some(
     col => columnMapping.value[col] && columnMapping.value[col] !== '__na__'
@@ -3510,6 +3505,16 @@ function applyCurrentMapping() {
   if (!hasAnyMapping) {
     rawData.value = originalRawData.value
     mappingApplied.value = false
+    showPreview.value = true
+    return
+  }
+  // Label-value single sheets (2 keys per row) have no columns to map —
+  // keep raw data. Tabular single-instrument sheets map like multi.
+  const firstRowKeys = Object.keys(originalRawData.value[0] || {})
+  const isTabular = firstRowKeys.length > 2
+  if (sheetType.value === 'single' && !isTabular) {
+    rawData.value = originalRawData.value
+    mappingApplied.value = true
     showPreview.value = true
     return
   }
