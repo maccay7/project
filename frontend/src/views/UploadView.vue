@@ -210,6 +210,7 @@ import { datasetAPI } from '../services/api'
 import { API_BASE_URL } from '../config.js'
 import sessionManager from '@/services/sessionManager.js'
 import { markStepCompleted } from '@/utils/workflowProgress.js'
+import { applyMappingToRows } from '@/utils/instrumentMapping.js'
 import * as XLSX from 'xlsx'
 
 const router = useRouter()
@@ -284,6 +285,7 @@ function humanSize(bytes) {
 
 function resetDataState() {
   rawData.value = []
+  originalRawRows.value = []
   headers.value = []
   fileColumns.value = []
   uploadedFile.value = null
@@ -396,6 +398,7 @@ async function uploadFile(file) {
 
 function applyParsedData(data) {
   rawData.value = data
+  originalRawRows.value = JSON.parse(JSON.stringify(data))
   headers.value = data.length ? Object.keys(data[0] || {}) : []
   fileColumns.value = headers.value
   showPreview.value = true
@@ -530,6 +533,26 @@ async function validateDependencies() {
   }
 }
 
+// Original (unmapped) rows — mapping is applied on top so the File
+// Preview / saved dataset carries the final mapped columns.
+const originalRawRows = ref([])
+function applyMappingToPreview() {
+  const req = requiredFieldNames.value || []
+  const hasMapping = req.some(f => columnMapping.value[f] && columnMapping.value[f] !== '__na__')
+  if (!originalRawRows.value.length && rawData.value.length) {
+    originalRawRows.value = JSON.parse(JSON.stringify(rawData.value))
+  }
+  if (!hasMapping) {
+    if (originalRawRows.value.length) {
+      rawData.value = JSON.parse(JSON.stringify(originalRawRows.value))
+      headers.value = rawData.value.length ? Object.keys(rawData.value[0] || {}) : []
+    }
+    return
+  }
+  rawData.value = applyMappingToRows(originalRawRows.value, req, columnMapping.value)
+  headers.value = rawData.value.length ? [...new Set(rawData.value.flatMap(r => Object.keys(r)))] : []
+}
+
 async function persistColumnMapping() {
   try {
     const sid = sessionManager.getActiveSession()?.id || sessionManager.getActiveSessionId()
@@ -550,6 +573,7 @@ async function persistColumnMapping() {
 
 async function updateColumnMapping(mapping) {
   columnMapping.value = { ...mapping }
+  applyMappingToPreview()
   await persistColumnMapping()
 }
 
@@ -558,6 +582,7 @@ function closeMappingDialog() {
 }
 
 async function applyMappingAndClose() {
+  applyMappingToPreview()
   await persistColumnMapping()
   showMappingDialog.value = false
   showPreview.value = true
@@ -642,6 +667,7 @@ async function loadDataset(idx) {
       }
 
       rawData.value = data.data
+      originalRawRows.value = JSON.parse(JSON.stringify(data.data))
       headers.value = data.headers || Object.keys(data.data[0] || {})
       fileColumns.value = headers.value
       uploadedFile.value = { name: data.name }

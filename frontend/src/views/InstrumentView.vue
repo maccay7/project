@@ -3641,6 +3641,9 @@ async function applyColumnMappingAndClose() {
     cleanedData.value = JSON.parse(JSON.stringify(rawData.value))
     cleanedSourceData.value = JSON.parse(JSON.stringify(rawData.value))
   }
+  // Persist the mapped rows so the Cleaning page (which prefers
+  // wf.rawData) shows exactly the final mapped Excel from this preview.
+  debouncedSave(true)
 }
 
 function resetMapping() {
