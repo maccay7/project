@@ -3982,28 +3982,37 @@ function useMultiTableDetectedFields() {
   const tabularData = []
 
   for (const instrument of multiTableDetectionResults.value) {
-    const row = {}
-    for (const [key, fieldObj] of Object.entries(instrument.fields)) {
-      if (excludedDetectedFields.value.has(key)) continue
+    // One instrument per sheet: tabular rows are the instrument's data
+    // rows (cashflows/positions/tranches), all preserved — never merged
+    // or dropped. Multi-instrument portfolios use explicit mapping.
+    const sources = (instrument.tabularRows && instrument.tabularRows.length)
+      ? instrument.tabularRows
+      : [instrument]
+    for (const src of sources) {
+      const row = {}
+      const fieldMap = src.fields || instrument.fields || {}
+      for (const [key, fieldObj] of Object.entries(fieldMap)) {
+        if (excludedDetectedFields.value.has(key)) continue
 
-      const isMulti =
-        typeof fieldObj === 'object' && fieldObj !== null &&
-        fieldObj.currencyVariants &&
-        Object.keys(fieldObj.currencyVariants).length > 1
-      const scalar = isMulti
-        ? fieldObj.currencyVariants[fieldObj.selectedCurrency || Object.keys(fieldObj.currencyVariants)[0]]
-        : (typeof fieldObj === 'object' && fieldObj !== null ? fieldObj.value : fieldObj)
+        const isMulti =
+          typeof fieldObj === 'object' && fieldObj !== null &&
+          fieldObj.currencyVariants &&
+          Object.keys(fieldObj.currencyVariants).length > 1
+        const scalar = isMulti
+          ? fieldObj.currencyVariants[fieldObj.selectedCurrency || Object.keys(fieldObj.currencyVariants)[0]]
+          : (typeof fieldObj === 'object' && fieldObj !== null ? fieldObj.value : fieldObj)
 
-      row[key] = scalar
-      if (!(key in fullFields)) {
-        fullFields[key] = isMulti ? { ...fieldObj } : scalar
+        row[key] = scalar
+        if (!(key in fullFields)) {
+          fullFields[key] = isMulti ? { ...fieldObj } : scalar
+        }
       }
+      if (!row.InstrumentName && !row.instrument_name && instrument.instrumentName) {
+        row.InstrumentName = instrument.instrumentName
+        if (!fullFields.InstrumentName) fullFields.InstrumentName = instrument.instrumentName
+      }
+      tabularData.push(row)
     }
-    if (!row.InstrumentName && !row.instrument_name && instrument.instrumentName) {
-      row.InstrumentName = instrument.instrumentName
-      if (!fullFields.InstrumentName) fullFields.InstrumentName = instrument.instrumentName
-    }
-    tabularData.push(row)
   }
 
   const headers = [...new Set(tabularData.flatMap(r => Object.keys(r)))]
