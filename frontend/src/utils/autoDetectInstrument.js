@@ -549,8 +549,12 @@ function isDateLike(value) {
     /^[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/, /^\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4}$/,
   ]
   if (patterns.some(p => p.test(str))) return true
-  const d = new Date(str)
-  if (!isNaN(d.getTime()) && !/^\d{4}$/.test(str)) return true
+  // Date() fallback only when the string has a non-digit (separator or
+  // month name) — bare numbers like "90" must not parse as years.
+  if (/\D/.test(str)) {
+    const d = new Date(str)
+    if (!isNaN(d.getTime()) && !/^\d{4}$/.test(str)) return true
+  }
   return false
 }
 
@@ -731,7 +735,7 @@ const TABULAR_ALIASES = {
   'annual rate': 'interest_rate', 'coupon rate': 'coupon_rate', 'coupon': 'coupon_rate',
   'discount rate': 'discount_rate', 'yield': 'yield_to_maturity',
   'ytm': 'yield_to_maturity',
-  'instrument': 'instrument_name', 'security': 'instrument_id',
+  'instrument name': 'instrument_name', 'instrument': 'instrument_name', 'security': 'instrument_id',
   'isin': 'instrument_id', 'short name': 'instrument_name', 'name': 'instrument_name',
   'fund name': 'fund_name', 'portfolio': 'portfolio_name', 'pfolio': 'portfolio_name',
   'pfolio name': 'portfolio_name', 'counterparty': 'counterparty',
@@ -785,6 +789,8 @@ function tabularHeaderCurrency(header) {
 }
 // Alias lookup key: strip currency tags/parens so "Nominal (US$)" -> "nominal".
 const tabularLookupKey = s => TABULAR_NORM(s)
+// Alias lookup strips currency tags first: "Principal US$" -> "principal".
+const tabularAliasKey = s => TABULAR_NORM(String(s || '').replace(TABULAR_CCY_RE, ' '))
   .replace(TABULAR_CCY_RE, ' ')
   .replace(/[()]/g, ' ')
   .replace(/\s+/g, ' ')
@@ -799,7 +805,7 @@ function detectTabularRecords(data, boundaries) {
     for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
       const cell = data[R]?.[C]
       if (typeof cell !== 'string') continue
-      const t = tabularLookupKey(cell)
+      const t = tabularAliasKey(cell)
       if (t && TABULAR_ALIASES[t]) score++
     }
     rowScores.push({ R, score })
@@ -820,7 +826,7 @@ function detectTabularRecords(data, boundaries) {
   for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
     const cell = data[bestRow]?.[C]
     if (typeof cell !== 'string') continue
-    const field = TABULAR_ALIASES[tabularLookupKey(cell)]
+    const field = TABULAR_ALIASES[tabularAliasKey(cell)]
     if (!field) continue
     const ccy = tabularHeaderCurrency(cell)
     const seen = fieldCols.get(field) || []
@@ -922,6 +928,16 @@ function detectTabularRecords(data, boundaries) {
       }
     }
     if (clsMatch && !fields.currency) fields.currency = clsMatch
+    // No classification column: take the currency of the selected variant
+    // on a currency-typed field so the row still carries its currency.
+    if (!fields.currency) {
+      for (const f of Object.values(fields)) {
+        if (f && typeof f === 'object' && f.selectedCurrency) {
+          fields.currency = f.selectedCurrency
+          break
+        }
+      }
+    }
     // Per-field provenance: worksheet cell ref, original header, raw value.
     // For variant fields prefer the column matching the selected currency.
     const meta = {}

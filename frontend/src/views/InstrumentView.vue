@@ -265,7 +265,9 @@
                     </div>
 
                     <div v-if="detectedCurrencies.length > 0" class="detected-currencies-info">
-                      <strong>Detected currencies:</strong>
+                      <div class="currency-summary" :class="{ 'currency-summary--mixed': currencySummary.mixed }">
+                        {{ currencySummary.text }}
+                      </div>
                       <select
                         v-model="detectionCurrencyFilter"
                         @change="onDetectionCurrencyFilter(detectionCurrencyFilter)"
@@ -4248,6 +4250,32 @@ function updateSelectedCurrency(fieldName, currency, isAdditional = false) {
 
 // Currency filter for the detection popup: shows only instruments whose
 // currency matches the selection, and switches variant fields to it.
+// Scoped currency summary: counts only currency-typed fields (fields with
+// currencyVariants or explicit currency values), never rates/dates/names.
+const currencySummary = computed(() => {
+  const counts = {}
+  let currencyFields = 0
+  for (const inst of multiTableDetectionResults.value || []) {
+    for (const f of Object.values(inst?.fields || {})) {
+      if (!f || typeof f !== 'object') continue
+      // Currency-typed = carries per-currency column variants.
+      if (!f.currencyVariants) continue
+      currencyFields++
+      const cur = String(f.selectedCurrency || f.currency || 'DEFAULT').toUpperCase()
+      counts[cur] = (counts[cur] || 0) + 1
+    }
+  }
+  const codes = Object.keys(counts).filter(c => c !== 'DEFAULT' && c !== 'UNSPECIFIED' && c !== 'OBJECT')
+  if (!currencyFields || !codes.length) {
+    return { mixed: false, text: 'No currency-typed fields detected.' }
+  }
+  if (codes.length === 1) {
+    return { mixed: false, text: `Detected Currency: ${codes[0]} (applies to ${counts[codes[0]]} currency field${counts[codes[0]] === 1 ? '' : 's'})` }
+  }
+  const detail = codes.map(c => `${c} (${counts[c]})`).join(', ')
+  return { mixed: true, text: `⚠️ Multiple currencies detected: ${detail}. Verify each row.` }
+})
+
 function instrumentCurrencyOf(inst) {
   const f = inst?.fields || {}
   const c = f.currency ?? f.Currency ?? f.ccy
@@ -9761,6 +9789,8 @@ onBeforeUnmount(() => {
 .assumptions-panel__list li { margin-bottom: 4px; }
 .assumption--warn { color: #b26a00; }
 .assumption--ok { color: #1b7f3b; }
+.currency-summary { font-size: 12px; color: #33415c; margin-bottom: 6px; }
+.currency-summary--mixed { color: #8d6e00; font-weight: 600; }
 .assumptions-panel--empty {
   padding: 8px 14px; font-size: 13px; color: #666;
   background: #fafafa; border: 1px dashed #ddd; border-radius: 6px;

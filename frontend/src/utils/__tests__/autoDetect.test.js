@@ -152,3 +152,38 @@ describe('absolute cell coordinates', () => {
     expect(r.tabularRecords[0].fieldsWithMetadata.instrument_name.originalLabel).toBe('Short Name')
   })
 })
+
+describe('multi-currency tabular detection', () => {
+  function makeMultiCurrencyWorkbook() {
+    const rows = [
+      ['Instrument Name', 'Principal US$', 'Principal ZWG', 'Days to Maturity', 'Discount Rate'],
+      ['Bill A', 1000, 5000, 90, '5%'],
+      ['Bill B', 2000, 7000, 180, '6%'],
+    ]
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Mixed Sheet')
+    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+    const u8 = out instanceof Uint8Array ? out : new Uint8Array(out)
+    return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
+  }
+
+  it('scopes currency variants to currency-typed fields per row', async () => {
+    const r = await autoDetectInstrumentFields(
+      makeMultiCurrencyWorkbook(), 'Mixed Sheet', REQUIRED, 'tbills')
+    const recs = r.tabularRecords || []
+    expect(recs.length).toBe(2)
+    for (const rec of recs) {
+      const p = rec.fields.principal
+      expect(p).toBeTruthy()
+      // principal carries per-currency variants; rates/days stay scalar
+      expect(p.currencyVariants).toBeTruthy()
+      expect(Object.keys(p.currencyVariants).sort()).toEqual(['USD', 'ZWG'])
+      expect(typeof rec.fields.days_to_maturity === 'number' ||
+             typeof rec.fields.days_to_maturity === 'string').toBe(true)
+      expect(rec.fields.days_to_maturity?.currencyVariants).toBeUndefined()
+    }
+    // Per-row currency classification is present for downstream payload
+    expect(recs[0].fields.currency || recs[1].fields.currency).toBeTruthy()
+  })
+})
