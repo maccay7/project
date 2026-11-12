@@ -450,8 +450,19 @@ function normalizeCurrencyToCode(input) {
 
 function isNumeric(value) {
   if (value === null || value === undefined || value === '') return false
-  const str = String(value).replace(/[%,\s]/g, '')
-  return !isNaN(parseFloat(str)) && isFinite(str)
+  const str = String(value).trim()
+  if (!str) return false
+  // Strict: reject anything containing date separators or letters —
+  // parseFloat('10/6/3261') returns 10, which is how dates were being
+  // hallucinated into Principal amounts.
+  if (/[/-]/.test(str) || /[A-Za-z]/.test(str)) return false
+  if (isDateLike(str)) return false
+  const cleaned = str.replace(/[%$,\s€£¥₹]/g, '')
+  // The entire remaining string must be a plain number (optional sign,
+  // digits, one decimal point, optional exponent).
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(cleaned)) return false
+  const n = Number(cleaned)
+  return Number.isFinite(n)
 }
 
 // Normalize a raw cell into a backend-parseable value.
@@ -765,6 +776,17 @@ function detectTabularRecords(data, boundaries) {
 
   const records = []
   for (let R = bestRow + 1; R <= boundaries.endRow; R++) {
+    // Section boundary: a row that itself looks like a header block
+    // (>=4 recognised field headers) starts a new section — stop here
+    // so summary blocks ("Time Value", "Fair Value", etc.) are never
+    // parsed as instrument rows.
+    let headerHits = 0
+    for (let C = boundaries.startCol; C <= boundaries.endCol; C++) {
+      const cell = data[R]?.[C]
+      if (typeof cell !== 'string') continue
+      if (TABULAR_ALIASES[tabularLookupKey(cell)]) headerHits++
+    }
+    if (headerHits >= 4) break
     // Collect raw values per field, grouped by column currency so
     // "Nominal US$" and "Nominal ZWG" become selectable variants.
     const perField = new Map()
@@ -799,8 +821,29 @@ function detectTabularRecords(data, boundaries) {
       : typeStr.match(/BWP/i) ? 'BWP'
       : typeStr.match(/ZAR|\bR\b/i) ? 'ZAR' : null
     // Emit scalar or {value, currencyVariants, selectedCurrency} per field.
+    // Strict typing: numeric fields reject date-like values — a string such
+    // as "10/6/3261" must never become a Principal/Rate amount.
+    const NUMERIC_FIELDS = new Set([
+      'principal', 'face_value', 'carrying_value', 'amount', 'nominal',
+      'impairment', 'interest_rate', 'discount_rate', 'coupon_rate',
+      'yield_to_maturity', 'investor_yield', 'money_market_yield',
+      'bond_equivalent_yield', 'price', 'purchase_price', 'current_price',
+      'present_value', 'fair_value', 'market_value', 'unit_price',
+      'days_to_maturity', 'years_to_maturity', 'tenure_days', 'term_days',
+      'coupon_frequency', 'face_value_per_unit', 'quantity', 'units'
+    ])
+    const warnings = []
     const fields = {}
     for (const [field, variants] of perField) {
+      if (NUMERIC_FIELDS.has(field)) {
+        for (const [k, v] of [...variants]) {
+          if (typeof v === 'string' && isDateLike(v)) {
+            variants.delete(k)
+            warnings.push(`${field}: rejected date-like value "${v}"`)
+          }
+        }
+        if (variants.size === 0) continue
+      }
       if (variants.size > 1) {
         const variantsObj = {}
         for (const [k, v] of variants) variantsObj[k || 'DEFAULT'] = v
@@ -835,7 +878,7 @@ function detectTabularRecords(data, boundaries) {
         sourceValue: raw,
       }
     }
-    records.push({ rowIndex: R, fields, fieldsWithMetadata: meta })
+    records.push({ rowIndex: R, fields, fieldsWithMetadata: meta, warnings })
   }
   // Require at least 2 instrument rows — single-row "tables" are more
   // likely label/value layouts handled by the pair scanner.
@@ -985,7 +1028,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
         if (score > bestScore) { bestScore = score; best = { colName, score } }
       }
       if (best) {
-        const pairKey = `${labelStr}|${valueHit}|${R}|${C}`
+        const pairKey = `${valueHit}|${R}|${C}`
         if (!usedPairs.has(pairKey)) {
           const loc = valueLoc ? rowColToCellRef(valueLoc.row, valueLoc.col) : rowColToCellRef(R, C + 1)
           detectedFields[best.colName] = valueHit
@@ -1050,7 +1093,7 @@ export function autoDetectInstrumentFields(fileBuffer, sheetName, requiredColumn
         if (score > bestScore) { bestScore = score; best = { colName, score } }
       }
       if (best) {
-        const pairKey = `${labelStr}|${valueHit}|${R}|${C}`
+        const pairKey = `${valueHit}|${R}|${C}`
         if (!usedPairs.has(pairKey)) {
           const loc = valueLoc ? rowColToCellRef(valueLoc.row, valueLoc.col) : rowColToCellRef(R, C + 1)
           additionalFields[best.colName] = valueHit
