@@ -214,6 +214,63 @@ def parse_day_count_convention(convention: Any) -> Dict[str, Any]:
     }
 
 
+def _next_business_day(d: date) -> date:
+    d = d + timedelta(days=1)
+    while d.weekday() >= 5:
+        d = d + timedelta(days=1)
+    return d
+
+
+def _prev_business_day(d: date) -> date:
+    while d.weekday() >= 5:
+        d = d - timedelta(days=1)
+    return d
+
+
+def _infer_settlement_t1(item: Dict[str, Any]) -> None:
+    """T+1 settlement inference: SettlementDate = ValuationDate + 1 business
+    day. Modified Following — if the roll crosses into the next month, fall
+    back to the last business day of the valuation month. Records the
+    assumption on the row so it is surfaced, never silent."""
+    if _canonical(item, "settlement_date") is not None:
+        return
+    val = parse_date(_canonical(item, "valuation_date"))
+    if val is None:
+        return
+    settle = _next_business_day(val)
+    if settle.month != val.month:
+        settle = _prev_business_day(val)
+    item["settlement_date"] = settle.isoformat()
+    assumptions = item.get("_assumptions_applied")
+    if not isinstance(assumptions, list):
+        assumptions = []
+        item["_assumptions_applied"] = assumptions
+    assumptions.append(
+        f"SettlementDate: {settle.isoformat()} (T+1 inferred from ValuationDate {val.isoformat()})"
+    )
+
+
+def _resolve_day_count(item: Dict[str, Any], instrument_type: str) -> Dict[str, Any]:
+    """Day-count convention with explicit, flagged defaults:
+    Actual/360 for Money Market and T-Bills, 30/360 for Bonds.
+    A missing convention is never applied silently — the inference is
+    recorded on the row's _assumptions_applied list."""
+    raw = _canonical(item, "day_count_convention", "day_count")
+    if raw is None or str(raw).strip() == "":
+        default = "30/360" if instrument_type == "bonds" else "Actual/360"
+        meta = parse_day_count_convention(default)
+        meta["is_inferred"] = True
+        assumptions = item.get("_assumptions_applied")
+        if not isinstance(assumptions, list):
+            assumptions = []
+            item["_assumptions_applied"] = assumptions
+        assumptions.append(
+            f"DayCountConvention: {default} (auto-inferred for {instrument_type})"
+        )
+        return meta
+    return parse_day_count_convention(raw)
+
+
 def calculate_days_30_360(start_date: date, end_date: date, european: bool = False) -> int:
     """
     Calculate days between two dates using 30/360 convention.
@@ -1458,6 +1515,7 @@ def _add_camel_aliases(result):
 def calculate_money_market(item: Dict[str, Any],
                            benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     item = normalize_row(item)
+    _infer_settlement_t1(item)
 
     principal = _canonical(item, "principal", "face_value", "amount", as_float=True)
     rate_frac = _canonical_pct(item, "interest_rate", "rate", "coupon_rate")
@@ -1467,7 +1525,7 @@ def calculate_money_market(item: Dict[str, Any],
         _canonical(item, "currency", "ccy", "currency_code")
     )
 
-    day_count_meta = parse_day_count_convention(_canonical(item, "day_count_convention", "day_count"))
+    day_count_meta = _resolve_day_count(item, "money-market")
     day_count = day_count_meta['convention']
     divisor = day_count_meta['basis']
     is_30_360 = day_count_meta['is_30_360']
@@ -1984,6 +2042,7 @@ def calculate_money_market(item: Dict[str, Any],
 def calculate_treasury_bill(item: Dict[str, Any],
                             benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     item = normalize_row(item)
+    _infer_settlement_t1(item)
 
     face = _canonical(item, "face_value", "principal", as_float=True)
     purchase_price_in = _canonical(item, "purchase_price", "current_price", "price", as_float=True)
@@ -1993,7 +2052,7 @@ def calculate_treasury_bill(item: Dict[str, Any],
     currency = _normalize_currency(
         _canonical(item, "currency", "ccy", "currency_code")
     )
-    day_count_meta = parse_day_count_convention(_canonical(item, "day_count_convention", "day_count"))
+    day_count_meta = _resolve_day_count(item, "tbills")
     day_count = day_count_meta['convention']
     discount_basis = day_count_meta['basis']
     is_30_360 = day_count_meta['is_30_360']
@@ -2355,6 +2414,7 @@ def calculate_bond(item: Dict[str, Any],
                    benchmark_yield: Optional[float] = None) -> Dict[str, Any]:
     raw_freq = _canonical(item, "Coupon Frequency", "coupon_frequency", "frequency")
     item = normalize_row(item)
+    _infer_settlement_t1(item)
 
     face = _canonical(item, "face_value", "principal", as_float=True)
     coupon_rate_frac = _canonical_pct(item, "coupon_rate", "interest_rate")
@@ -2365,7 +2425,7 @@ def calculate_bond(item: Dict[str, Any],
     price_in, price_basis = _parse_bond_price(item, face)
     ytm_input_frac = _canonical_pct(item, "yield", "yield_to_maturity")
 
-    day_count_meta = parse_day_count_convention(_canonical(item, "day_count_convention", "day_count"))
+    day_count_meta = _resolve_day_count(item, "bonds")
     day_count = day_count_meta['convention']
     basis = day_count_meta['basis']
     is_30_360 = day_count_meta['is_30_360']
@@ -2952,12 +3012,23 @@ def calculate_data(data: List[Dict],
                 row = {**row, "valuation_date": valuation_date}
 
         row_type = _resolve_row_instrument_type(row, instrument_type)
+        # Surface inferred inputs (T+1 settlement, day-count default) on
+        # the result metadata — never applied silently.
+        _infer_settlement_t1(row)
+        _resolve_day_count(row, row_type)
+        row_assumptions = list(row.get("_assumptions_applied") or [])
         if row_type == "bonds":
             calc = calculate_bond(row, benchmark_yield)
         elif row_type == "money-market":
             calc = calculate_money_market(row, benchmark_yield)
         else:
             calc = calculate_treasury_bill(row, benchmark_yield)
+        if row_assumptions:
+            calc["assumptions_applied"] = list(
+                dict.fromkeys(
+                    (calc.get("assumptions_applied") or []) + row_assumptions
+                )
+            )
 
         instrument_results.append(calc)
 
