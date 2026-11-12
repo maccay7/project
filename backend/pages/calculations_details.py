@@ -214,6 +214,74 @@ def parse_day_count_convention(convention: Any) -> Dict[str, Any]:
     }
 
 
+def interpolate_nss_curve(term_years: float, beta0: float, beta1: float,
+                          beta2: float, beta3: float,
+                          tau1: float, tau2: float) -> Optional[float]:
+    """Nelson-Siegel-Svensson zero-coupon spot rate at `term_years`.
+
+    Standard NSS form:
+      y(t) = b0 + b1*L1(t,tau1) + b2*(L1(t,tau1)-E1(t,tau1))
+             + b3*(L1(t,tau2)-E1(t,tau2))
+    where L1 = (1-exp(-t/tau))/(t/tau), E1 = exp(-t/tau).
+    Returns a decimal rate (e.g. 0.03 = 3%) or None if inputs invalid.
+    """
+    try:
+        t = float(term_years)
+        b0, b1, b2, b3 = float(beta0), float(beta1), float(beta2), float(beta3)
+        t1, t2 = float(tau1), float(tau2)
+    except (TypeError, ValueError):
+        return None
+    if t <= 0 or t1 <= 0 or t2 <= 0:
+        return None
+
+    def _loadings(tau):
+        x = t / tau
+        e = math.exp(-x)
+        l1 = (1.0 - e) / x
+        return l1, l1 - e
+
+    l1_a, l1_b = _loadings(t1)
+    l2_a, l2_b = _loadings(t2)
+    return b0 + b1 * l1_a + b2 * l1_b + b3 * l2_a
+
+
+def _nss_discount_percent(item: Dict[str, Any],
+                          term_years: Optional[float]):
+    """Resolve a discount rate from NSS curve inputs on the row.
+
+    Priority (returns (percent, source) or (None, None)):
+      1. Explicit nss_rate / interpolated NSS value on the row
+      2. Full NSS parameter set (beta0..3, tau1, tau2) interpolated at
+         term_years
+    country_risk_premium is ALWAYS added on top when present.
+    """
+    crp = _canonical_pct(item, "country_risk_premium", "crp")
+    crp = crp if crp is not None else 0.0  # fraction, e.g. 0.0765
+
+    direct = _canonical_pct(item, "nss_rate", "nss_interpolated_rate",
+                            "nelson_svensson_rate")
+    if direct is not None:
+        return (direct + crp) * 100.0, "nss_rate"
+
+    betas = [
+        _canonical(item, f"beta{i}", f"beta_{i}", f"beta {i}", f"b{i}",
+                   as_float=True)
+        for i in range(4)
+    ]
+    taus = [
+        _canonical(item, f"tau{i}", f"tau_{i}", f"tau {i}", f"t{i}",
+                   as_float=True)
+        for i in (1, 2)
+    ]
+    if (term_years and term_years > 0
+            and all(b is not None for b in betas)
+            and all(t_ is not None for t_ in taus)):
+        rate = interpolate_nss_curve(term_years, *betas, *taus)
+        if rate is not None:
+            return (rate + crp) * 100.0, "nss_curve"
+    return None, None
+
+
 def _next_business_day(d: date) -> date:
     d = d + timedelta(days=1)
     while d.weekday() >= 5:
@@ -1602,6 +1670,13 @@ def calculate_money_market(item: Dict[str, Any],
     elif not has_date_range:
         raw_days = _canonical(item, "term_days", "days_to_maturity", as_float=True)
 
+    # NSS curve override: explicit curve inputs take precedence over any
+    # sheet-level discount_rate cell. country_risk_premium is added inside
+    # _nss_discount_percent.
+    _nss_pct, _nss_src = _nss_discount_percent(item, (raw_days or 0) / 365.0)
+    if _nss_pct is not None:
+        discount_rate_frac = _nss_pct / 100.0
+
     # Calculate days from issue to settlement for accrued interest
     raw_days_accrued = None
     issue_d = parse_date(_canonical(item, "issue_date"))
@@ -2072,6 +2147,12 @@ def calculate_treasury_bill(item: Dict[str, Any],
             raw_days = float((mat_d - period_start).days)
     elif not has_date_range:
         raw_days = _canonical(item, "term_days", "days_to_maturity", as_float=True)
+
+    # NSS curve override: explicit curve inputs take precedence over any
+    # sheet-level discount_rate cell.
+    _nss_pct, _nss_src = _nss_discount_percent(item, (raw_days or 0) / 365.0)
+    if _nss_pct is not None:
+        discount_rate_in_frac = _nss_pct / 100.0
 
     discount_rate_pct_in = (discount_rate_in_frac * 100.0
                             if discount_rate_in_frac is not None else None)
@@ -3044,6 +3125,17 @@ def calculate_data(data: List[Dict],
         _infer_settlement_t1(row)
         _resolve_day_count(row, row_type)
         row_assumptions = list(row.get("_assumptions_applied") or [])
+        # NSS curve inputs present -> the interpolated curve rate overrides
+        # any sheet discount_rate; record it so the override is visible.
+        if any(_canonical(row, k) is not None for k in (
+                "nss_rate", "nss_interpolated_rate", "nelson_svensson_rate",
+                "beta0", "beta_0", "beta1", "beta_1",
+                "beta2", "beta_2", "beta3", "beta_3")):
+            row_assumptions.append(
+                "DiscountRate: NSS curve inputs present — interpolated "
+                "curve rate (+ country risk premium) overrides sheet "
+                "discount_rate"
+            )
         if row_type == "bonds":
             calc = calculate_bond(row, benchmark_yield)
         elif row_type == "money-market":

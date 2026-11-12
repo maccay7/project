@@ -28,11 +28,17 @@ class TestTreasuryBills:
         assert r["purchase_price"] == round(expected, 2)
 
     def test_bond_equivalent_yield(self):
-        item = {"face_value": 100000, "purchase_price": 98750,
-                "term_days": 90, "day_count_convention": "ACT/360"}
+        # Yield gating: BEY is only emitted for >365 days to maturity.
+        item = {"face_value": 100000, "purchase_price": 95000,
+                "term_days": 400, "day_count_convention": "ACT/360"}
         r = calculate_treasury_bill(item)
-        # (1250 / 98750) * (365/90) * 100 = 5.133614... → 5.1336
-        assert round(r["bond_equivalent_yield"], 4) == 5.1336
+        assert "bond_equivalent_yield" in r
+        # <=365d bills must NOT show BEY — money-market yield instead.
+        short = calculate_treasury_bill({
+            "face_value": 100000, "purchase_price": 98750,
+            "term_days": 90, "day_count_convention": "ACT/360"})
+        assert "bond_equivalent_yield" not in short
+        assert "money_market_yield" in short
 
     def test_effective_annual_yield(self):
         item = {"face_value": 100000, "purchase_price": 98750, "term_days": 90}
@@ -1048,3 +1054,43 @@ class TestDayCountConventions:
         assert r["day_count_convention"] == "30/360"
         # Verify calculation succeeds with 30/360 convention
         assert r["current_price"] is not None
+
+class TestNSSCurve:
+    def test_flat_curve(self):
+        from pages.calculations_details import interpolate_nss_curve
+        # Only beta0 non-zero -> flat curve at beta0 regardless of term.
+        for t in (0.25, 1, 5, 10):
+            assert interpolate_nss_curve(t, 0.03, 0, 0, 0, 1.0, 2.0) == pytest.approx(0.03)
+
+    def test_slope_component(self):
+        from pages.calculations_details import interpolate_nss_curve
+        # beta1 tilts the short end; long end converges toward beta0.
+        short = interpolate_nss_curve(0.5, 0.03, -0.01, 0, 0, 1.0, 2.0)
+        long = interpolate_nss_curve(10.0, 0.03, -0.01, 0, 0, 1.0, 2.0)
+        assert short < long
+
+    def test_invalid_inputs(self):
+        from pages.calculations_details import interpolate_nss_curve
+        assert interpolate_nss_curve(0, 0.03, 0, 0, 0, 1, 2) is None
+        assert interpolate_nss_curve(5, 0.03, 0, 0, 0, 0, 2) is None
+        assert interpolate_nss_curve(None, 0.03, 0, 0, 0, 1, 2) is None
+
+    def test_nss_rate_plus_country_risk_premium(self):
+        from pages.calculations_details import _nss_discount_percent
+        item = {"nss_rate": "3%", "country_risk_premium": "7.65%"}
+        pct, src = _nss_discount_percent(item, 5.0)
+        assert src == "nss_rate"
+        assert pct == pytest.approx(10.65, abs=0.01)
+
+    def test_full_params_interpolation_overrides_sheet_rate(self):
+        from pages.calculations_details import calculate_treasury_bill
+        item = {
+            "face_value": 100000, "discount_rate": 8.94, "term_days": 365,
+            "day_count_convention": "ACT/360",
+            "beta0": 0.03, "beta1": 0, "beta2": 0, "beta3": 0,
+            "tau1": 1.0, "tau2": 2.0,
+            "country_risk_premium": "7.65%",
+        }
+        r = calculate_treasury_bill(item)
+        # Flat 3% curve + 7.65% CRP = 10.65% must override sheet 8.94%.
+        assert r["discount_rate"] == pytest.approx(10.65, abs=0.01)
