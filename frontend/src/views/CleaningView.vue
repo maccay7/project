@@ -240,11 +240,22 @@
                 <div v-if="isSingleInstrument" class="single-instrument-panel">
                   <div class="single-instrument-panel__title">Single Instrument — choose the value used for each field</div>
                   <div class="field-choices">
-                    <div v-for="(vals, col) in fieldChoices" :key="col" class="field-choice">
-                      <label>{{ col }}</label>
-                      <select :value="chosenValueFor(col)" @change="setChosenValue(col, $event.target.value)">
-                        <option v-for="v in vals" :key="v" :value="v">{{ v }}</option>
+                    <div v-for="col in allInstrumentFields" :key="col" class="field-choice">
+                      <input
+                        type="checkbox"
+                        :checked="!excludedFields.value.has(col)"
+                        @change="toggleFieldExclude(col)"
+                        :title="excludedFields.value.has(col) ? 'Excluded from calculation' : 'Included in calculation'"
+                      />
+                      <label :class="{ 'field-choice__excluded': excludedFields.value.has(col) }">{{ col }}</label>
+                      <select
+                        v-if="fieldChoices[col]"
+                        :value="chosenValueFor(col)"
+                        @change="setChosenValue(col, $event.target.value)"
+                      >
+                        <option v-for="v in fieldChoices[col]" :key="v" :value="v">{{ v }}</option>
                       </select>
+                      <span v-else class="field-choice__single">{{ chosenValueFor(col) }}</span>
                       <button class="field-choice__delete" @click="deleteField(col)" title="Delete field">×</button>
                     </div>
                   </div>
@@ -798,6 +809,12 @@ const fieldChoices = computed(() => {
   }
   return out
 })
+const allInstrumentFields = computed(() => {
+  const rows = cleanedSourceData.value.length ? cleanedSourceData.value : (results.value?.cleanedData || [])
+  if (!rows.length) return []
+  return [...new Set(rows.flatMap(r => Object.keys(r || {})))]
+    .filter(k => !k.startsWith('__') && k !== 'Status' && k !== 'StatusMessage' && k !== '__level')
+})
 const chosenValues = ref({})
 const newFieldName = ref('')
 
@@ -806,6 +823,13 @@ function chosenValueFor(col) {
   const rows = cleanedSourceData.value.length ? cleanedSourceData.value : (results.value?.cleanedData || [])
   for (const r of rows) { const v = r?.[col]; if (v !== null && v !== undefined && v !== '') return v }
   return ''
+}
+function toggleFieldExclude(col) {
+  const next = new Set(excludedFields.value)
+  if (next.has(col)) next.delete(col); else next.add(col)
+  excludedFields.value = next
+  persistExclusions()
+  rebuildCleanedFromExclusions()
 }
 function setChosenValue(col, val) {
   chosenValues.value = { ...chosenValues.value, [col]: val }
@@ -816,7 +840,10 @@ function rebuildSingleInstrumentRow() {
   const rows = cleanedSourceData.value.length ? cleanedSourceData.value : (results.value?.cleanedData || [])
   const cols = [...new Set(rows.flatMap(r => Object.keys(r || {})))].filter(k => !k.startsWith('__') && k !== 'Status' && k !== 'StatusMessage' && k !== '__level')
   const single = {}
-  for (const col of cols) single[col] = chosenValueFor(col)
+  for (const col of cols) {
+    if (excludedFields.value.has(col)) continue
+    single[col] = chosenValueFor(col)
+  }
   // Preserve the chosen row as the instrument's single data row.
   const target = results.value?.cleanedData ? results.value.cleanedData : null
   if (target) {
@@ -1155,4 +1182,6 @@ onMounted(async () => {
 .field-choice__delete { background: none; border: none; color: #c00; cursor: pointer; font-size: 14px; }
 .add-field-row { display: flex; gap: 8px; margin-top: 8px; }
 .add-field-row input { padding: 4px 8px; font-size: 12px; border: 1px solid #c5cbe0; border-radius: 6px; }
+.field-choice__excluded { text-decoration: line-through; color: #999; }
+.field-choice__single { font-size: 12px; color: #2e7d32; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
