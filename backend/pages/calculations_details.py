@@ -2346,6 +2346,24 @@ def calculate_treasury_bill(item: Dict[str, Any],
               "effective_annual_yield"):
         if k in values:
             result[k] = _rate(values[k])
+
+    # Yield gating by days to maturity:
+    #   <=365d -> money-market yield only (suppress BEY)
+    #   >365d  -> bond-equivalent yield only (suppress MMY) + classification
+    #             warning: a bill beyond 1y is Note/Bond territory.
+    d_days = values.get("days_to_maturity")
+    if d_days is not None:
+        if d_days > 365:
+            result.pop("money_market_yield", None)
+            result["classification_warning"] = (
+                f"days_to_maturity={d_days:.0f} exceeds 365 — a T-Bill is a "
+                "discount instrument; consider Note/Bond classification."
+            )
+        else:
+            result.pop("bond_equivalent_yield", None)
+            # annualized_yield was aliased from BEY — drop the stale alias.
+            if result.get("annualized_yield") == values.get("bond_equivalent_yield"):
+                result.pop("annualized_yield", None)
     if face is not None:
         result["maturity_value"] = round_money(face)
     if "present_value" in result:
@@ -3012,6 +3030,15 @@ def calculate_data(data: List[Dict],
                 row = {**row, "valuation_date": valuation_date}
 
         row_type = _resolve_row_instrument_type(row, instrument_type)
+        # Rate-source trace: show exactly which discount/yield inputs the
+        # row carries and which benchmark the route supplied, so curve
+        # fallbacks (e.g. an unexpected 8.94%) can be diagnosed.
+        print(f"[RATE-TRACE] row={row.get('instrument_name') or row.get('name') or '?'} "
+              f"type={row_type} benchmark_yield={benchmark_yield} "
+              f"discount_rate={row.get('discount_rate') or row.get('Discount Rate')} "
+              f"yield={row.get('yield') or row.get('yield_to_maturity') or row.get('Yield')} "
+              f"coupon_rate={row.get('coupon_rate') or row.get('Coupon Rate')} "
+              f"price={row.get('price') or row.get('Price') or row.get('purchase_price')}")
         # Surface inferred inputs (T+1 settlement, day-count default) on
         # the result metadata — never applied silently.
         _infer_settlement_t1(row)
@@ -3092,6 +3119,22 @@ def calculate_data(data: List[Dict],
         "total_rows": len(data),
         "unique_names": list(unique_names),
     }
+
+    # Overall payload status for UI banners:
+    #   complete — every row calculated successfully
+    #   partial  — some rows calculated, some have missing_fields
+    #   failed   — no rows produced a calculation
+    status_counts = {"success": 0, "partial": 0, "failed": 0}
+    for r in instrument_results:
+        st = str(r.get("status") or "failed").lower()
+        status_counts[st if st in status_counts else "failed"] += 1
+    aggregates["status_counts"] = status_counts
+    if not instrument_results or status_counts["success"] + status_counts["partial"] == 0:
+        aggregates["overall_status"] = "failed"
+    elif status_counts["failed"] == 0 and status_counts["partial"] == 0:
+        aggregates["overall_status"] = "complete"
+    else:
+        aggregates["overall_status"] = "partial"
 
     if successful:
         # Check for currency consistency - only aggregate same-currency instruments
