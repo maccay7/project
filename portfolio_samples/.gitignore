@@ -1,0 +1,4 @@
+portfolio_samples/*.xlsx
+portfolio_samples/*.md
+portfolio_samples/*.csv
+!portfolio_samples/.gitkeep
