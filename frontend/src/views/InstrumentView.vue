@@ -5242,6 +5242,28 @@ async function calculateMetrics() {
   // Prevent flickering by setting page loading flag
   _isPageLoading.value = true
 
+  // The Cleaning page is the source of truth: refresh the exclusion set
+  // and cleaned rows from the saved workflow so manual unchecks/cell
+  // edits made there are honoured by this calculation. Non-fatal —
+  // falls back to in-memory state if the workflow is unavailable.
+  try {
+    const sid = activeSession.value?.id
+    if (sid) {
+      const wf = await sessionManager.getInstrumentWorkflow(sid, instrumentType.value)
+      if (wf) {
+        if (Array.isArray(wf.excludedDetectedFields)) {
+          excludedDetectedFields.value = new Set(wf.excludedDetectedFields)
+        }
+        if (Array.isArray(wf.cleanedData) && wf.cleanedData.length) {
+          cleanedData.value = wf.cleanedData
+          cleanedSourceData.value = Array.isArray(wf.cleanedSourceData)
+            ? wf.cleanedSourceData
+            : wf.cleanedData
+        }
+      }
+    }
+  } catch (e) { /* non-fatal */ }
+
   // FIX: validate that cleanedData actually contains the required input
   // fields for THIS instrument type. If the user cleaned but then excluded
   // every required field, we must NOT send an empty row to the backend and
