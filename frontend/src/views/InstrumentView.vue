@@ -3923,6 +3923,7 @@ async function handleMultiTableDetect(event) {
           const recFields = { ...(first.fields || {}) }
           detectedInstruments.push({
             tableName: table.tableName,
+            sheetName: event.sheetName,
             instrumentName: event.sheetName || table.tableName,
             fields: recFields,
             fieldsWithMetadata: first.fieldsWithMetadata || {},
@@ -3934,7 +3935,8 @@ async function handleMultiTableDetect(event) {
         } else if (Object.keys(allFields).length > 0) {
           detectedInstruments.push({
             tableName: table.tableName,
-            instrumentName: allFields.InstrumentName || table.tableName,
+            sheetName: event.sheetName,
+            instrumentName: event.sheetName || allFields.InstrumentName || table.tableName,
             fields: allFields,
             fieldsWithMetadata: allFieldsWithMetadata,
             currencies: detectionResult.currencies || [],
@@ -3947,7 +3949,40 @@ async function handleMultiTableDetect(event) {
       }
     }
     detectionStatus.value = 'complete'
-    multiTableDetectionResults.value = detectedInstruments
+    // One sheet = ONE instrument: section/table detections from the same
+    // sheet merge into a single instrument named after the sheet. Fields
+    // merge first-wins; tabular rows concatenate (they are the
+    // instrument's data rows). Different sheets stay separate.
+    const mergedBySheet = new Map()
+    for (const inst of detectedInstruments) {
+      const key = inst.sheetName || inst.instrumentName || inst.tableName
+      const existing = mergedBySheet.get(key)
+      if (!existing) {
+        mergedBySheet.set(key, {
+          ...inst,
+          tabularRows: inst.tabularRows ? [...inst.tabularRows] : undefined,
+          fields: { ...(inst.fields || {}) },
+          fieldsWithMetadata: { ...(inst.fieldsWithMetadata || {}) },
+          currencies: [...(inst.currencies || [])],
+        })
+        continue
+      }
+      for (const [k, v] of Object.entries(inst.fields || {})) {
+        if (!(k in existing.fields)) existing.fields[k] = v
+      }
+      for (const [k, v] of Object.entries(inst.fieldsWithMetadata || {})) {
+        if (!(k in existing.fieldsWithMetadata)) existing.fieldsWithMetadata[k] = v
+      }
+      if (inst.tabularRows) {
+        existing.tabularRows = [...(existing.tabularRows || []), ...inst.tabularRows]
+      }
+      for (const c of inst.currencies || []) {
+        if (!existing.currencies.includes(c)) existing.currencies.push(c)
+      }
+      existing.missingFields = [...new Set([...(existing.missingFields || []), ...(inst.missingFields || [])])]
+    }
+    const sheetInstruments = [...mergedBySheet.values()]
+    multiTableDetectionResults.value = sheetInstruments
     // Populate global detection structures for popup access
     if (detectedInstruments.length > 0) {
       const allFields = {}
