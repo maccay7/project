@@ -751,7 +751,11 @@
               :class="'overall-status-banner--' + overallStatusBanner.tone"
             >
               <span class="overall-status-banner__icon">{{ overallStatusBanner.icon }}</span>
-              <span class="overall-status-banner__text">{{ overallStatusBanner.text }}</span>
+              <span
+                class="overall-status-banner__text"
+                :class="{ 'overall-status-banner__text--link': overallStatusBanner.tone === 'warning' }"
+                @click="overallStatusBanner.tone === 'warning' && scrollToFailedRows()"
+              >{{ overallStatusBanner.text }}</span>
               <button class="overall-status-banner__close" @click="overallStatusDismissed = true" aria-label="Dismiss">×</button>
             </div>
             <v-card-text>
@@ -917,7 +921,11 @@
                       </div>
                       <div v-else class="excel-table-container">
                         <p class="popup-instruction">Calculated results for each instrument. Totals on the Calculations page are the sum of these rows.</p>
-                        <div v-if="calculatedValuesExcelData.length" class="excel-scroll-wrapper" style="margin-bottom: 16px;">
+                        <div v-if="failedResultRows.length" class="failed-rows-notice">
+                          ⚠️ {{ failedResultRows.length }} instrument(s) failed validation:
+                          {{ failedResultRows.map(r => r.instrument_name || r.InstrumentName || 'unnamed').join(', ') }}
+                        </div>
+                        <div v-if="calculatedValuesExcelData.length" ref="calcResultsScrollRef" class="excel-scroll-wrapper" :class="{ 'excel-scroll-wrapper--flash': calcResultsFlash }" style="margin-bottom: 16px;">
                           <ExcelViewer
                             :data="calculatedValuesExcelData"
                             :headers="calculatedValuesExcelHeaders"
@@ -6734,6 +6742,25 @@ function formatTableCell(value, column) {
   return typeof value === 'number' ? formatNumber(value) : value
 }
 
+const calcResultsScrollRef = ref(null)
+const calcResultsFlash = ref(false)
+const failedResultRows = computed(() =>
+  (instrumentSummary.value?.rows || []).filter(r =>
+    String(r?.status || '').toLowerCase() === 'failed' ||
+    String(r?.status || '').toLowerCase() === 'error'
+  )
+)
+async function scrollToFailedRows() {
+  showAllCalculationsPopup.value = true
+  await nextTick()
+  await new Promise(r => setTimeout(r, 150)) // let dialog render
+  const el = calcResultsScrollRef.value
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    calcResultsFlash.value = true
+    setTimeout(() => { calcResultsFlash.value = false }, 2000)
+  }
+}
 function openAllCalculationsPopup() { showAllCalculationsPopup.value = true }
 function closeAllCalculationsPopup() { showAllCalculationsPopup.value = false }
 
@@ -9794,5 +9821,15 @@ onBeforeUnmount(() => {
 .assumptions-panel--empty {
   padding: 8px 14px; font-size: 13px; color: #666;
   background: #fafafa; border: 1px dashed #ddd; border-radius: 6px;
+}
+.overall-status-banner__text--link { cursor: pointer; text-decoration: underline; }
+.excel-scroll-wrapper--flash { animation: calcFlash 2s ease-out; border-radius: 8px; }
+@keyframes calcFlash {
+  0% { box-shadow: 0 0 0 3px #f9a825; background: #fff8e1; }
+  100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+}
+.failed-rows-notice {
+  background: #ffebee; border: 1px solid #ef9a9a; color: #b71c1c;
+  border-radius: 6px; padding: 8px 12px; font-size: 13px; margin-bottom: 10px;
 }
 </style>
