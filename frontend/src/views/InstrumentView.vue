@@ -2800,113 +2800,38 @@ function computeAnalytics(rows) {
 // result was amount=rate=days=0 — the "misleading zeros" symptom. Now we
 // look up a value using every plausible alias via a case/space/underscore-
 // insensitive matcher, so it works with any cleaned column name.
-function runInstrumentCalculations(row, instrumentType) {
-  const results = {}
-  const norm = (k) => String(k).toLowerCase().replace(/[\s_\-]+/g, '')
-  const index = {}
-  for (const [k, v] of Object.entries(row || {})) {
-    index[norm(k)] = v
-  }
-  const pick = (...aliases) => {
-    for (const a of aliases) {
-      const key = norm(a)
-      if (index[key] !== undefined && index[key] !== null && index[key] !== '') return index[key]
-    }
-    return undefined
-  }
-  const getNumber = (val) => {
-    if (val === undefined || val === null || val === '') return 0
-    const n = parseFloat(String(val).replace(/[%,$\s]/g, ''))
-    return isNaN(n) ? 0 : n
-  }
-  const amount = getNumber(pick('Amount', 'Face Value', 'face_value', 'FaceValue', 'Principal', 'principal', 'Par Value', 'Notional', 'Value', 'value'))
-  const rate = getNumber(pick('Rate', 'Interest Rate', 'interest_rate', 'InterestRate', 'Coupon Rate', 'coupon_rate', 'CouponRate', 'Discount Rate', 'discount_rate', 'DiscountRate', 'Yield', 'yield', 'Yield to Maturity', 'yield_to_maturity'))
-  const days = getNumber(pick('Days to Maturity', 'days_to_maturity', 'DaysToMaturity', 'Term', 'term', 'Term Days', 'term_days', 'Tenor'))
-  if (instrumentType === 'money-market') {
-    const interest = amount * (rate / 100) * (days / 360)
-    results['Total Value'] = amount
-    results['total_value'] = amount
-    results['Instrument Count'] = 1
-    results['instrument_count'] = 1
-    results['Avg Rate'] = rate
-    results['avg_rate'] = rate
-    results['Weighted Avg Rate'] = rate
-    results['weighted_avg_rate'] = rate
-    results['Total Interest'] = interest
-    results['total_interest'] = interest
-    results['Interest Earned'] = interest
-    results['interest_earned'] = interest
-    results['Annual Yield'] = rate
-    results['annual_yield'] = rate
-    results['Effective Annual Rate'] = rate
-    results['effective_annual_rate'] = rate
-    results['Avg Days to Maturity'] = days
-    results['avg_days_to_maturity'] = days
-    results['Total Principal'] = amount
-    results['total_principal'] = amount
-  } else if (instrumentType === 'bonds') {
-    const coupon = amount * (rate / 100)
-    results['Total Value'] = amount
-    results['total_value'] = amount
-    results['Instrument Count'] = 1
-    results['instrument_count'] = 1
-    results['Avg Coupon Rate'] = rate
-    results['avg_coupon_rate'] = rate
-    results['Weighted Avg Coupon'] = rate
-    results['weighted_avg_coupon'] = rate
-    results['Total Annual Income'] = coupon
-    results['total_annual_income'] = coupon
-    results['Avg YTM'] = rate
-    results['avg_ytm'] = rate
-  } else {
-    const discount = amount * (rate / 100) * (days / 360)
-    const price = amount - discount
-    results['Total Value'] = amount
-    results['total_value'] = amount
-    results['Instrument Count'] = 1
-    results['instrument_count'] = 1
-    results['Avg Discount Rate'] = rate
-    results['avg_discount_rate'] = rate
-    results['Weighted Avg Discount'] = rate
-    results['weighted_avg_discount'] = rate
-    results['Total Discount'] = discount
-    results['total_discount'] = discount
-    results['Effective Yield'] = rate
-    results['effective_yield'] = rate
-    results['Bond Equivalent Yield'] = rate
-    results['bond_equivalent_yield'] = rate
-    results['Price per 100'] = 100 * (1 - (rate / 100) * (days / 360))
-    results['price_per_100'] = results['Price per 100']
-    results['Total Purchase Price'] = price
-    results['total_purchase_price'] = price
-    results['Avg Investment'] = price
-    results['avg_investment'] = price
-    results['Holding Period Yield'] = rate
-    results['holding_period_yield'] = rate
-    results['Annualized Yield'] = rate
-    results['annualized_yield'] = rate
-    results['Avg Days to Maturity'] = days
-    results['avg_days_to_maturity'] = days
-  }
-  return results
-}
 
 // ─────────────────────────────────────────────────────────────
 // FIX 4 — processInstrumentData dedupes columns.
 // ─────────────────────────────────────────────────────────────
 async function processInstrumentData(sheetName, data, instrumentType) {
   if (!data || !data.length) return
-  const rows = data.map((row, index) => {
-    const nameCol = columnMapping.value['Instrument Name'] || 'Instrument'
-    const instrumentName = row[nameCol] || row['Instrument'] || row['Name'] || `Instrument ${index + 1}`
-    const enrichedRow = { ...row, 'Instrument Name': instrumentName }
-    const result = runInstrumentCalculations(enrichedRow, instrumentType)
-    return {
-      'Instrument Type': instrumentType,
-      ...result,
-      'Worksheet': sheetName
-    }
-  })
+  // All valuation is performed by the backend — the frontend sends the
+  // cleaned rows and displays only backend-calculated results.
+  const nameCol = columnMapping.value['Instrument Name'] || 'Instrument'
+  const payloadRows = data.map((row, index) => ({
+    ...row,
+    'Instrument Name': row[nameCol] || row['Instrument'] || row['Name'] || `Instrument ${index + 1}`,
+    'Worksheet': sheetName
+  }))
+  let backend
+  try {
+    const res = await api.calculationsAPI.executeByType(
+      instrumentType, payloadRows, {}, null, activeSession.value?.id
+    )
+    backend = res?.data || res || {}
+  } catch (e) {
+    console.error('Backend calculation failed:', e)
+    showSnackbar('Calculation failed — backend returned no results.', 'error', 6000)
+    return { success: false, rows: [], aggregate: {} }
+  }
+  const calcRows = backend.calculations || backend.instrument_results || backend.results || []
+  const rows = calcRows.map((r, i) => ({
+    'Instrument Type': r.instrumentType || r.instrument_type || instrumentType,
+    'Instrument Name': r.instrument_name || r.instrumentName || r.name || payloadRows[i]?.['Instrument Name'],
+    'Worksheet': sheetName,
+    ...r
+  }))
   const existingRows = instrumentSummary.value.rows || []
   const mergedRows = [...existingRows]
   rows.forEach(newRow => {
@@ -2917,21 +2842,11 @@ async function processInstrumentData(sheetName, data, instrumentType) {
   const allCols = new Set()
   mergedRows.forEach(r => Object.keys(r).forEach(k => allCols.add(k)))
   instrumentSummary.value = { columns: dedupeColumns(Array.from(allCols)), rows: mergedRows }
-  // Aggregation is performed by the backend — the frontend only displays
-  // backend-returned figures. No client-side summation.
-  try {
-    const aggRes = await api.calculationsAPI.aggregateResults(mergedRows, instrumentType)
-    const agg = (aggRes && aggRes.success && aggRes.data) ? aggRes.data
-      : (aggRes && aggRes.success) ? aggRes
-      : { instrumentCount: mergedRows.length }
-    allCalculations.value = { ...agg }
-    selectedCalculations.value = { ...agg }
-    calculations.value = { ...agg }
-  } catch (e) {
-    console.error('Backend aggregation failed:', e)
-    showSnackbar('Aggregation failed — backend returned no results.', 'error', 6000)
-    return { success: false, rows, aggregate: {} }
-  }
+  const agg = { ...(backend.aggregates || {}) }
+  agg.instrumentCount = agg.instrument_count ?? agg.instrumentCount ?? mergedRows.length
+  allCalculations.value = agg
+  selectedCalculations.value = agg
+  calculations.value = agg
   saveSessionData()
   return { success: true, rows, aggregate: agg }
 }
