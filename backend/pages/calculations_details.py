@@ -3111,15 +3111,6 @@ def calculate_data(data: List[Dict],
                 row = {**row, "valuation_date": valuation_date}
 
         row_type = _resolve_row_instrument_type(row, instrument_type)
-        # Rate-source trace: show exactly which discount/yield inputs the
-        # row carries and which benchmark the route supplied, so curve
-        # fallbacks (e.g. an unexpected 8.94%) can be diagnosed.
-        print(f"[RATE-TRACE] row={row.get('instrument_name') or row.get('name') or '?'} "
-              f"type={row_type} benchmark_yield={benchmark_yield} "
-              f"discount_rate={row.get('discount_rate') or row.get('Discount Rate')} "
-              f"yield={row.get('yield') or row.get('yield_to_maturity') or row.get('Yield')} "
-              f"coupon_rate={row.get('coupon_rate') or row.get('Coupon Rate')} "
-              f"price={row.get('price') or row.get('Price') or row.get('purchase_price')}")
         # Surface inferred inputs (T+1 settlement, day-count default) on
         # the result metadata — never applied silently.
         _infer_settlement_t1(row)

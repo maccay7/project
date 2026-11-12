@@ -378,9 +378,6 @@ def _load_json(value):
 def _fetch_benchmark(inst_type, maturity, country, currency):
     try:
         benchmark = get_market_benchmark(inst_type, maturity, country, currency)
-        print(f"[BENCHMARK-TRACE] type={inst_type} maturity={maturity} "
-              f"country={country} currency={currency} -> "
-              f"benchmark_rate={benchmark.get('benchmark_rate')}")
         if benchmark.get('benchmark_rate') is not None:
             return benchmark['benchmark_rate']
     except Exception as e:
