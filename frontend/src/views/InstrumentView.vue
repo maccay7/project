@@ -2827,16 +2827,25 @@ async function processInstrumentData(sheetName, data, instrumentType) {
   }
   const calcRows = backend.calculations || backend.instrument_results || backend.results || []
   const rows = calcRows.map((r, i) => ({
-    'Instrument Type': r.instrumentType || r.instrument_type || instrumentType,
+    ...r,
+    'Instrument Type': instrumentType,
     'Instrument Name': r.instrument_name || r.instrumentName || r.name || payloadRows[i]?.['Instrument Name'],
-    'Worksheet': sheetName,
-    ...r
+    'Worksheet': sheetName
   }))
   const existingRows = instrumentSummary.value.rows || []
   const mergedRows = [...existingRows]
   rows.forEach(newRow => {
-    const id = (newRow['Worksheet'] || '')
-    const exists = mergedRows.some(r => (r['Worksheet'] || '') === id)
+    const ws = (newRow['Worksheet'] || '')
+    const name = String(newRow['Instrument Name'] || '').trim().toLowerCase()
+    const type = newRow['Instrument Type'] || ''
+    // Dedupe by worksheet AND by instrument identity — the calculate path
+    // and worksheet processing can both contribute rows for the same
+    // instrument; counting it twice inflates the instrument count.
+    const exists = mergedRows.some(r =>
+      (r['Worksheet'] || '') === ws ||
+      (name && String(r['Instrument Name'] || '').trim().toLowerCase() === name &&
+       (r['Instrument Type'] || '') === type)
+    )
     if (!exists) mergedRows.push(newRow)
   })
   const allCols = new Set()
