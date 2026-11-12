@@ -743,6 +743,15 @@
                 Calculated Instruments
               </button>
             </v-card-title>
+            <div
+              v-if="overallStatusBanner && !overallStatusDismissed"
+              class="overall-status-banner"
+              :class="'overall-status-banner--' + overallStatusBanner.tone"
+            >
+              <span class="overall-status-banner__icon">{{ overallStatusBanner.icon }}</span>
+              <span class="overall-status-banner__text">{{ overallStatusBanner.text }}</span>
+              <button class="overall-status-banner__close" @click="overallStatusDismissed = true" aria-label="Dismiss">×</button>
+            </div>
             <v-card-text>
               <div v-if="!hasCleanedData" class="empty-state">
                 <p>No cleaned data. Please clean first.</p>
@@ -2612,6 +2621,28 @@ function normalizeFieldName(fieldName) {
     .replace(/_+/g, '_')
     .toLowerCase()
 }
+
+const overallStatusDismissed = ref(false)
+const overallStatusBanner = computed(() => {
+  const agg = allCalculations.value || {}
+  const status = agg.overall_status || agg.overallStatus
+  if (!status) return null
+  const counts = agg.status_counts || agg.statusCounts || {}
+  if (status === 'complete') {
+    return { tone: 'success', icon: '🟢', text: 'All instruments calculated successfully.' }
+  }
+  if (status === 'failed') {
+    return { tone: 'error', icon: '🔴', text: 'Calculation failed. No instruments could be valued.' }
+  }
+  // partial
+  const ok = (counts.success ?? 0) + (counts.partial ?? 0)
+  const bad = counts.failed ?? 0
+  const denom = ok + bad || agg.total_rows || agg.instrumentCount || '?'
+  return {
+    tone: 'warning', icon: '🟡',
+    text: `${ok} of ${denom} instruments calculated. ${bad} instrument(s) have missing fields.`,
+  }
+})
 
 function formatCalcValue(key, value) {
   // Never render 0 when the value is genuinely null/undefined — the
@@ -9652,4 +9683,24 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   margin-bottom: 16px;
 }
+.overall-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  margin: 0 16px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.overall-status-banner--success { background: #e8f5e9; color: #1b5e20; border: 1px solid #a5d6a7; }
+.overall-status-banner--warning { background: #fff8e1; color: #8d6e00; border: 1px solid #ffe082; }
+.overall-status-banner--error   { background: #ffebee; color: #b71c1c; border: 1px solid #ef9a9a; }
+.overall-status-banner__icon { font-size: 16px; }
+.overall-status-banner__text { flex: 1; }
+.overall-status-banner__close {
+  background: none; border: none; font-size: 18px; cursor: pointer;
+  color: inherit; opacity: 0.7; padding: 0 4px;
+}
+.overall-status-banner__close:hover { opacity: 1; }
 </style>
