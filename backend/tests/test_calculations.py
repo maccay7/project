@@ -1094,3 +1094,19 @@ class TestNSSCurve:
         r = calculate_treasury_bill(item)
         # Flat 3% curve + 7.65% CRP = 10.65% must override sheet 8.94%.
         assert r["discount_rate"] == pytest.approx(10.65, abs=0.01)
+
+    def test_bond_nss_overrides_price_ytm_for_discounting(self):
+        from pages.calculations_details import calculate_bond
+        item = {
+            "face_value": 100000, "coupon_rate": 5, "price": 98,
+            "valuation_date": "2025-01-02", "maturity_date": "2030-01-02",
+            "currency": "USD", "instrument_name": "BondNSS",
+            "coupon_frequency": 2,
+            "beta0": 0.03, "beta1": 0, "beta2": 0, "beta3": 0,
+            "tau1": 1, "tau2": 2, "country_risk_premium": "7.65%",
+        }
+        r = calculate_bond(item)
+        # Flat 3% curve + 7.65% CRP = 10.65% discount rate.
+        assert r["yield_to_maturity"] == pytest.approx(10.65, abs=0.01)
+        assert any("NSS curve applied" in a
+                   for a in (r.get("assumptions_applied") or []))

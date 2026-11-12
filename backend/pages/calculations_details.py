@@ -2567,6 +2567,20 @@ def calculate_bond(item: Dict[str, Any],
     if next_coupon_d is None and last_coupon_d and frequency:
         next_coupon_d = _add_months(last_coupon_d, 12 // frequency)
 
+    # NSS curve override for bond discounting: explicit curve inputs take
+    # precedence over sheet discount_rate AND over price/YTM for the DCF
+    # discount rate. The override is recorded as an assumption.
+    nss_assumption = None
+    _nss_pct, _nss_src = _nss_discount_percent(item, years)
+    if _nss_pct is not None:
+        nss_assumption = (
+            f"NSS curve applied for discounting ({_nss_src}); "
+            + ("market price/YTM also present but overridden by curve instruction."
+               if (ytm_input_frac is not None or price_in is not None)
+               else "used as discount rate for cash flows.")
+        )
+        ytm_input_frac = _nss_pct / 100.0
+
     coupon_rate_pct = (coupon_rate_frac * 100.0
                        if coupon_rate_frac is not None else None)
     ytm_input_pct = (ytm_input_frac * 100.0
@@ -2596,6 +2610,8 @@ def calculate_bond(item: Dict[str, Any],
     name = _extract_instrument_name(item)
     if name:
         result["instrument_name"] = name
+    if nss_assumption:
+        result.setdefault("assumptions_applied", []).append(nss_assumption)
     _add_input_dates(result, val_d, mat_d, item)
     if next_coupon_d:
         result["next_coupon_date"] = next_coupon_d.isoformat()
