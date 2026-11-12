@@ -65,6 +65,13 @@ export function autoMatchColumns(fileColumns, requiredColumns, columnVariations)
 
 export function applyMappingToRows(sourceData, requiredColumns, mapping) {
   if (!sourceData || !sourceData.length) return []
+  // Columns claimed as mapping sources — everything else is preserved so
+  // non-required fields (NSS params, CRP, currency…) survive mapping.
+  const claimedSources = new Set(
+    Object.values(mapping || {})
+      .filter(s => s && s !== '__na__')
+      .map(s => normalizeField(s))
+  )
   return sourceData.map(row => {
     const newRow = {}
     requiredColumns.forEach(reqCol => {
@@ -85,6 +92,13 @@ export function applyMappingToRows(sourceData, requiredColumns, mapping) {
         newRow[reqCol] = sourceValue ?? ''
       }
     })
+    // Preserve columns not claimed by any mapping target.
+    for (const [key, value] of Object.entries(row)) {
+      if (key in newRow) continue
+      if (claimedSources.has(normalizeField(key))) continue
+      if (requiredColumns.includes(key)) continue
+      newRow[key] = value
+    }
     return newRow
   })
 }
